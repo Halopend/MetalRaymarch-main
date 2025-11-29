@@ -20,7 +20,31 @@ class AppModel {
     
     var immersiveSpaceState = ImmersiveSpaceState.closed
     
+    nonisolated let renderSettings = RenderSettings()
+    
     nonisolated let clock = AppClock()
+}
+
+class RenderSettings {
+    private let lock = NSLock()
+    private var _minDistance: Float = 0.25
+    private var _scale: Float = 1.0
+    private var _position: SIMD3<Float> = .zero
+
+    var minDistance: Float {
+        get { lock.withLock { _minDistance } }
+        set { lock.withLock { _minDistance = newValue } }
+    }
+    
+    var scale: Float {
+        get { lock.withLock { _scale } }
+        set { lock.withLock { _scale = newValue } }
+    }
+    
+    var position: SIMD3<Float> {
+        get { lock.withLock { _position } }
+        set { lock.withLock { _position = newValue } }
+    }
 }
 
 class AppClock {

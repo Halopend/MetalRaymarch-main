@@ -24,6 +24,7 @@ typedef struct
     float2 texCoord;
     float time;
     float3 modelPos;
+    float minDistance;
 } ColorInOut;
 
 vertex ColorInOut vertexShader(Vertex in [[stage_in]],
@@ -40,6 +41,7 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     out.texCoord = in.texCoord;
     out.time = uniforms.time;
     out.modelPos = in.position;
+    out.minDistance = uniforms.minDistance;
     
     return out;
 }
@@ -49,7 +51,6 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
 constant float3 sunDir = float3(0.3235, 0.0924, 0.2773); // normalized(0.35, 0.1, 0.3)
 constant float3 sunColour = float3(1.0, 0.95, 0.8);
 constant float SCALE = 2.8;
-constant float MINRAD2 = 0.25;
 
 float hash(float n) { return fract(sin(n) * 753.5453123); }
 
@@ -71,9 +72,9 @@ float GetSky(float3 pos)
     return t;
 }
 
-float Map(float3 pos) 
+float Map(float3 pos, float minRad2Val) 
 {
-    float minRad2 = clamp(MINRAD2, 1.0e-9, 1.0);
+    float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
     float4 scale = float4(SCALE, SCALE, SCALE, abs(SCALE)) / minRad2;
     float absScalem1 = abs(SCALE - 1.0);
     float AbsScaleRaisedTo1mIters = pow(abs(SCALE), float(1-10));
@@ -93,9 +94,9 @@ float Map(float3 pos)
     return ((length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters);
 }
 
-float3 Colour(float3 pos, float sphereR, float gTime, float quality) 
+float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val) 
 {
-    float minRad2 = clamp(MINRAD2, 1.0e-9, 1.0);
+    float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
     float4 scale = float4(SCALE, SCALE, SCALE, abs(SCALE)) / minRad2;
     
     float3 surfaceColour1 = float3(.8, .0, 0.);
@@ -125,33 +126,33 @@ float3 Colour(float3 pos, float sphereR, float gTime, float quality)
     return mix(mix(surfaceColour1, surfaceColour2, c.y), surfaceColour3, c.x);
 }
 
-float3 GetNormal(float3 pos, float distance)
+float3 GetNormal(float3 pos, float distance, float minRad2Val)
 {
     distance *= 0.001+.0001;
     float2 e = float2(1.0, -1.0) * distance;
     return normalize(
-        e.xyy * Map(pos + e.xyy) +
-        e.yyx * Map(pos + e.yyx) +
-        e.yxy * Map(pos + e.yxy) +
-        e.xxx * Map(pos + e.xxx)
+        e.xyy * Map(pos + e.xyy, minRad2Val) +
+        e.yyx * Map(pos + e.yyx, minRad2Val) +
+        e.yxy * Map(pos + e.yxy, minRad2Val) +
+        e.xxx * Map(pos + e.xxx, minRad2Val)
     );
 }
 
-float BinarySubdivision(float3 rO, float3 rD, float2 t)
+float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val)
 {
     float halfwayT;
   
     for (int i = 0; i < 6; i++)
     {
         halfwayT = dot(t, float2(.5));
-        float d = Map(rO + halfwayT*rD); 
+        float d = Map(rO + halfwayT*rD, minRad2Val); 
         t = mix(float2(t.x, halfwayT), float2(halfwayT, t.y), step(0.0005, d));
     }
 
     return halfwayT;
 }
 
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val)
 {
     // Dithering using hash instead of texture
     float t = .05 + 0.05 * hash(dot(fragCoord, float2(12.9898, 78.233)));
@@ -172,7 +173,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality)
         if (t > 12.0) break;
         p = rO + t*rD;
        
-        float h = Map(p);
+        float h = Map(p, minRad2Val);
         
         if(h < threshold)
         {
@@ -186,7 +187,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality)
     }
     if (!hit)
         t = 1000.0;
-    else       t = BinarySubdivision(rO, rD, dist);
+    else       t = BinarySubdivision(rO, rD, dist, minRad2Val);
     return float2(t, clamp(glow*.25, 0.0, 1.0));
 }
 
@@ -203,7 +204,7 @@ float3 PostEffects(float3 rgb, float2 xy)
     return rgb;
 }
 
-float Shadow(float3 ro, float3 rd, float quality)
+float Shadow(float3 ro, float3 rd, float quality, float minRad2Val)
 {
     float res = 1.0;
     float t = 0.05;
@@ -214,7 +215,7 @@ float Shadow(float3 ro, float3 rd, float quality)
     
     for (int i = 0; i < steps; i++)
     {
-        h = Map( ro + rd*t );
+        h = Map( ro + rd*t, minRad2Val );
         res = min(6.0*h / t, res);
         t += h;
     }
@@ -268,25 +269,25 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     float distFromCenter = length(in.texCoord - 0.5);
     float quality = 1.0 - smoothstep(0.1, 0.6, distFromCenter) * 0.5;
     
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance);
     
     if (ret.x < 900.0)
     {
         float3 p = cameraPos + ret.x*rd; 
-        float3 nor = GetNormal(p, ret.x);
+        float3 nor = GetNormal(p, ret.x, in.minDistance);
         
         float3 spot = spotLight - p;
         float atten = length(spot);
 
         spot /= atten;
         
-        float shaSpot = Shadow(p, spot, quality);
-        float shaSun = Shadow(p, sunDir, quality);
+        float shaSpot = Shadow(p, spot, quality, in.minDistance);
+        float shaSun = Shadow(p, sunDir, quality, in.minDistance);
         
         float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
         float briSun = max(dot(sunDir, nor), 0.0) * .2;
         
-       col = Colour(p, ret.x, gTime, quality);
+       col = Colour(p, ret.x, gTime, quality, in.minDistance);
        col = (col * bri * shaSpot) + (col * briSun* shaSun);
         
        float3 ref = reflect(rd, nor);

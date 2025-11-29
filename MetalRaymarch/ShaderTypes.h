@@ -41,6 +41,8 @@ typedef struct
     matrix_float4x4 projectionMatrix;
     matrix_float4x4 modelViewMatrix;
     float time;
+    float minDistance;
+    float padding[2];
 } Uniforms;
 
 typedef struct

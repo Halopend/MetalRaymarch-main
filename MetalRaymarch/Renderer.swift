@@ -63,7 +63,8 @@ actor Renderer {
     var memorylessTargetIndex: Int = 0
     var memorylessTargets: [(color: MTLTexture, depth: MTLTexture)?]
 
-//    var rotation: Float = 0
+    var smoothedPosition: SIMD3<Float> = .zero
+    var smoothedScale: Float = 1.0
 
     var mesh: MTKMesh
 
@@ -289,13 +290,19 @@ actor Renderer {
     private func updateGameState(drawable: LayerRenderer.Drawable, deviceAnchor: DeviceAnchor?) {
         /// Update any game state before rendering
 
-//        let rotationAxis = SIMD3<Float>(1, 1, 0)
-//        let modelRotationMatrix = matrix4x4_rotation(radians: rotation, axis: rotationAxis)
-//        let modelTranslationMatrix = matrix4x4_translation(0.0, 0.0, -8.0)
-//        let modelMatrix = modelTranslationMatrix * modelRotationMatrix
-//        let modelMatrix = matrix_identity_float4x4
+        let settings = appModel.renderSettings
         
-        let modelMatrix =  matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
+        // Smoothing
+        let t: Float = 0.1
+        smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
+        smoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
+        
+        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
+        let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
+        let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
+        
+        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        
         let simdDeviceAnchor = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
@@ -305,7 +312,9 @@ actor Renderer {
 
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: viewMatrix * modelMatrix,
-                            time: Float(appModel.clock.time))
+                            time: Float(appModel.clock.time),
+                            minDistance: settings.minDistance,
+                            padding: (0, 0))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -492,6 +501,13 @@ func matrix4x4_translation(_ translationX: Float, _ translationY: Float, _ trans
                                          vector_float4(0, 1, 0, 0),
                                          vector_float4(0, 0, 1, 0),
                                          vector_float4(translationX, translationY, translationZ, 1)))
+}
+
+func matrix4x4_scale(_ scaleX: Float, _ scaleY: Float, _ scaleZ: Float) -> matrix_float4x4 {
+    return matrix_float4x4.init(columns:(vector_float4(scaleX, 0, 0, 0),
+                                         vector_float4(0, scaleY, 0, 0),
+                                         vector_float4(0, 0, scaleZ, 0),
+                                         vector_float4(0, 0, 0, 1)))
 }
 
 func radians_from_degrees(_ degrees: Float) -> Float {
