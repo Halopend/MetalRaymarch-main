@@ -42,124 +42,248 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     return out;
 }
 
-#define ITERATIONS 128
-#define MIN_DIST 0.001
-#define THICKNESS 0.1
-#define SUPER_QUAD_POWER 8.0
+// --- Fractal Code Port ---
 
-float rand(float3 r)
-{
-    return fract(sin(dot(r.xy, float2(1.38984 * sin(r.z), 1.13233 * cos(r.z)))) * 653758.5453);
+constant float3 sunDir = float3(0.3235, 0.0924, 0.2773); // normalized(0.35, 0.1, 0.3)
+constant float3 sunColour = float3(1.0, 0.95, 0.8);
+constant float SCALE = 2.8;
+constant float MINRAD2 = 0.25;
+
+float hash(float n) { return fract(sin(n) * 753.5453123); }
+
+float noise(float3 x) {
+    float3 p = floor(x);
+    float3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    float n = p.x + p.y * 157.0 + 113.0 * p.z;
+    return mix(mix(mix(hash(n +   0.0), hash(n +   1.0), f.x),
+                   mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
+               mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
+                   mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
 }
 
-float truchetarc(float3 pos)
+float GetSky(float3 pos)
 {
-    float r = length(pos.xy);
-    return pow(pow(abs(r - 0.5), SUPER_QUAD_POWER) + pow(abs(pos.z - 0.5), SUPER_QUAD_POWER), 1.0/SUPER_QUAD_POWER) - THICKNESS;
+    pos *= 2.3;
+    float t = noise(pos);
+    t += noise(pos * 2.1) * .5;
+    t += noise(pos * 4.3) * .25;
+    t += noise(pos * 7.9) * .125;
+    return t;
 }
 
-float truchetcell(float3 pos)
+float Map(float3 pos) 
 {
-    return min(
-               min(
-                   truchetarc(pos),
-                   truchetarc(float3(pos.z, 1 - pos.x, pos.y))),
-               truchetarc(float3(1 - pos.y, 1 - pos.z, pos.x)));
-}
+    float minRad2 = clamp(MINRAD2, 1.0e-9, 1.0);
+    float4 scale = float4(SCALE, SCALE, SCALE, abs(SCALE)) / minRad2;
+    float absScalem1 = abs(SCALE - 1.0);
+    float AbsScaleRaisedTo1mIters = pow(abs(SCALE), float(1-10));
 
-float distfunc(float3 pos)
-{
-    float3 cellpos = fract(pos);
-    float3 gridpos = floor(pos);
+    float4 p = float4(pos,1);
+    float4 p0 = p;
 
-    float rnd = rand(gridpos);
-
-    if(rnd < 1.0 / 8) return truchetcell(float3(cellpos.x, cellpos.y, cellpos.z));
-    else if(rnd < 2.0 / 8) return truchetcell(float3(cellpos.x, 1 - cellpos.y, cellpos.z));
-    else if(rnd < 3.0 / 8) return truchetcell(float3(1 - cellpos.x, cellpos.y, cellpos.z));
-    else if(rnd < 4.0 / 8) return truchetcell(float3(1 - cellpos.x, 1 - cellpos.y, cellpos.z));
-    else if(rnd < 5.0 / 8) return truchetcell(float3(cellpos.y, cellpos.x, 1 - cellpos.z));
-    else if(rnd < 6.0 / 8) return truchetcell(float3(cellpos.y, 1 - cellpos.x, 1 - cellpos.z));
-    else if(rnd < 7.0 / 8) return truchetcell(float3(1 - cellpos.y, cellpos.x, 1 - cellpos.z));
-    else return truchetcell(float3(1 - cellpos.y, 1 - cellpos.x, 1 - cellpos.z));
-}
-
-float3 gradient(float3 pos)
-{
-    const float eps = 0.0001;
-    float mid = distfunc(pos);
-    return float3(
-        distfunc(pos + float3(eps, 0, 0)) - mid,
-        distfunc(pos + float3(0, eps, 0)) - mid,
-        distfunc(pos + float3(0, 0, eps)) - mid);
-}
-
-float4 rayMarch(thread float3 ro, thread float3 rd, thread float3 &normal)
-{
-    float3 rp = ro;
-    
-    float i = float(ITERATIONS);
-    for(int j = 0; j < ITERATIONS; j++)
+    for (int i = 0; i < 9; i++)
     {
-        float dist = distfunc(rp);
-        rp += dist * rd;
+        p.xyz = clamp(p.xyz, -1.0, 1.0) * 2.0 - p.xyz;
 
-        if(abs(dist) < MIN_DIST)
-        {
-            i = float(j);
-            break;
-        }
+        float r2 = dot(p.xyz, p.xyz);
+        p *= clamp(max(minRad2/r2, minRad2), 0.0, 1.0);
+
+        p = p*scale + p0;
+    }
+    return ((length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters);
+}
+
+float3 Colour(float3 pos, float sphereR, float gTime) 
+{
+    float minRad2 = clamp(MINRAD2, 1.0e-9, 1.0);
+    float4 scale = float4(SCALE, SCALE, SCALE, abs(SCALE)) / minRad2;
+    
+    float3 surfaceColour1 = float3(.8, .0, 0.);
+    float3 surfaceColour2 = float3(.4, .4, 0.5);
+    float3 surfaceColour3 = float3(.5, 0.3, 0.00);
+
+    float3 p = pos;
+    float3 p0 = p;
+    float trap = 1.0;
+    
+    for (int i = 0; i < 6; i++)
+    {
+        p = clamp(p, -1.0, 1.0) * 2.0 - p;
+        float r2 = dot(p, p);
+        p *= clamp(max(minRad2/r2, minRad2), 0.0, 1.0);
+
+        p = p*scale.xyz + p0;
+        trap = min(trap, r2);
+    }
+    
+    float2 c = clamp(float2( 0.3333*log(dot(p,p))-1.0, sqrt(trap) ), 0.0, 1.0);
+
+    float t = fmod(length(pos) - gTime*150., 16.0);
+    surfaceColour1 = mix( surfaceColour1, float3(.4, 3.0, 5.), pow(smoothstep(0.0, .3, t) * smoothstep(0.6, .3, t), 10.0));
+    return mix(mix(surfaceColour1, surfaceColour2, c.y), surfaceColour3, c.x);
+}
+
+float3 GetNormal(float3 pos, float distance)
+{
+    distance *= 0.001+.0001;
+    float2 eps = float2(distance, 0.0);
+    float3 nor = float3(
+        Map(pos+eps.xyy) - Map(pos-eps.xyy),
+        Map(pos+eps.yxy) - Map(pos-eps.yxy),
+        Map(pos+eps.yyx) - Map(pos-eps.yyx));
+    return normalize(nor);
+}
+
+float BinarySubdivision(float3 rO, float3 rD, float2 t)
+{
+    float halfwayT;
+  
+    for (int i = 0; i < 6; i++)
+    {
+        halfwayT = dot(t, float2(.5));
+        float d = Map(rO + halfwayT*rD); 
+        t = mix(float2(t.x, halfwayT), float2(halfwayT, t.y), step(0.0005, d));
     }
 
-    normal = normalize(gradient(rp));
-
-    float ao = 1 - i / float(ITERATIONS);
-    float what = pow(max(0.0, dot(normal, -rd)), 2);
-    float light = ao * what * 1.4;
-
-    float3 col = (cos(rp / 2) + 2) / 3;
-
-    return float4(col * light, 1);
+    return halfwayT;
 }
 
-float3 uvToDir(thread float2 uv) // uv: -1..1
+float2 Scene(float3 rO, float3 rD, float2 fragCoord)
+{
+    // Dithering using hash instead of texture
+    float t = .05 + 0.05 * hash(dot(fragCoord, float2(12.9898, 78.233)));
+    
+    float3 p = float3(0.0);
+    float oldT = 0.0;
+    bool hit = false;
+    float glow = 0.0;
+    float2 dist;
+    for( int j=0; j < 100; j++ )
+    {
+        if (t > 12.0) break;
+        p = rO + t*rD;
+       
+        float h = Map(p);
+        
+        if(h  <0.0005)
+        {
+            dist = float2(oldT, t);
+            hit = true;
+            break;
+        }
+        glow += clamp(.05-h, 0.0, .4);
+        oldT = t;
+        t +=  h + t*0.001;
+    }
+    if (!hit)
+        t = 1000.0;
+    else       t = BinarySubdivision(rO, rD, dist);
+    return float2(t, clamp(glow*.25, 0.0, 1.0));
+}
+
+float3 PostEffects(float3 rgb, float2 xy)
+{
+    #define CONTRAST 1.08
+    #define SATURATION 1.5
+    #define BRIGHTNESS 1.5
+    rgb = mix(float3(.5), mix(float3(dot(float3(.2125, .7154, .0721), rgb*BRIGHTNESS)), rgb*BRIGHTNESS, SATURATION), CONTRAST);
+    
+    rgb *= .5 + 0.5*pow(20.0*xy.x*xy.y*(1.0-xy.x)*(1.0-xy.y), 0.2);    
+
+    rgb = pow(rgb, float3(0.47 ));
+    return rgb;
+}
+
+float Shadow(float3 ro, float3 rd)
+{
+    float res = 1.0;
+    float t = 0.05;
+    float h;
+    
+    for (int i = 0; i < 8; i++)
+    {
+        h = Map( ro + rd*t );
+        res = min(6.0*h / t, res);
+        t += h;
+    }
+    return max(res, 0.0);
+}
+
+float3 CameraPath( float t )
+{
+    float3 p = float3(-.78 + 3. * sin(2.14*t),.05+2.5 * sin(.942*t+1.3),.05 + 3.5 * cos(3.594*t) );
+    return p;
+} 
+
+float3 LightSource(float3 spotLight, float3 dir, float dis)
+{
+    float g = 0.0;
+    if (length(spotLight) < dis)
+    {
+        float a = max(dot(normalize(spotLight), dir), 0.0);
+        g = pow(a, 500.0);
+        g +=  pow(a, 5000.0)*.2;
+    }
+   
+    return float3(.6) * g;
+}
+
+float3 uvToDir(float2 uv) // uv: -1..1
 {
     float2 uvRad = float2(uv.x * M_PI_F, uv.y * M_PI_F / 2); // -pi..pi, -pi/2..pi/2
     float2 xz = float2(sin(uvRad.x), cos(uvRad.x));
     return float3(xz.x * cos(uvRad.y), sin(uvRad.y), xz.y * cos(uvRad.y));
 }
 
-float2 dirToUv(thread float3 dir)
-{
-    float vert = atan2(dir.y, sqrt(dir.x * dir.x + dir.z * dir.z));
-    float hor = atan2(dir.z, dir.x);
-    return float2(hor / M_PI_F, vert / (M_PI_F / 2));
-}
-
 fragment float4 fragmentShader(ColorInOut in [[stage_in]],
                                texture2d<half> cubeMap [[texture(TextureIndexColor)]])
 {
-    float t = in.time / 3;
+    float gTime = in.time * 0.01 + 15.00; // Adjusted time scale
     
-    float3 ro = float3(2 * (sin(t + sin(2 * t) / 2) / 2 + 0.5),
-                       2 * (sin(t - sin(2 * t) / 2 - M_PI_F / 2) / 2 + 0.5),
-                       2 * ((-2.0 * (t - sin(4 * t) / 4) / M_PI_F) + 0.1));
-
+    float3 cameraPos = CameraPath(gTime);
     float3 rd = uvToDir(in.texCoord * 2 - 1);
+    
+    // We don't have fragCoord in pixels, but we have texCoord.
+    // Scene uses fragCoord for dithering. We can use texCoord * 1000 or something.
+    float2 fragCoord = in.texCoord * 1000.0; 
+    
+    float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53))*.2;
+    float3 col = float3(0.0);
+    float3 sky = float3(0.03, .04, .05) * GetSky(rd);
+    
+    float2 ret = Scene(cameraPos, rd, fragCoord);
+    
+    if (ret.x < 900.0)
+    {
+        float3 p = cameraPos + ret.x*rd; 
+        float3 nor = GetNormal(p, ret.x);
+        
+        float3 spot = spotLight - p;
+        float atten = length(spot);
 
-    matrix_float3x3 m = matrix_float3x3(0, 1, 0, -sin(t), 0, cos(t), cos(t), 0, sin(t));
-    rd = m * m * m * m * rd;
+        spot /= atten;
+        
+        float shaSpot = Shadow(p, spot);
+        float shaSun = Shadow(p, sunDir);
+        
+        float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
+        float briSun = max(dot(sunDir, nor), 0.0) * .2;
+        
+       col = Colour(p, ret.x, gTime);
+       col = (col * bri * shaSpot) + (col * briSun* shaSun);
+        
+       float3 ref = reflect(rd, nor);
+       col += pow(max(dot(spot,  ref), 0.0), 10.0) * 2.0 * shaSpot * bri;
+       col += pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0 * shaSun * briSun;
+    }
     
-    float3 normal;
-    float4 color = rayMarch(ro, rd, normal);
-    
-    float3 reflected = reflect(rd, normal);
-    float2 normUv = dirToUv(reflected);
-    constexpr sampler colorSampler(mip_filter::linear,
-                                   mag_filter::linear,
-                                   min_filter::linear);
-    
-    float4 reflection = float4(cubeMap.sample(colorSampler, normUv));
+    col = mix(sky, col, min(exp(-ret.x+1.5), 1.0));
+    col += float3(pow(abs(ret.y), 2.)) * float3(.02, .04, .1);
 
-    return color + reflection * 0.2;
+    col += LightSource(spotLight-cameraPos, rd, ret.x);
+    
+    col = PostEffects(col, in.texCoord);    
+
+    return float4(col, 1.0);
 }
