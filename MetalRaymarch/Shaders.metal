@@ -23,6 +23,7 @@ typedef struct
     float4 position [[position]];
     float2 texCoord;
     float time;
+    float3 modelPos;
 } ColorInOut;
 
 vertex ColorInOut vertexShader(Vertex in [[stage_in]],
@@ -38,6 +39,7 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     
     out.texCoord = in.texCoord;
     out.time = uniforms.time;
+    out.modelPos = in.position;
     
     return out;
 }
@@ -251,7 +253,8 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     float gTime = in.time * 0.01 + 15.00; // Adjusted time scale
     
     float3 cameraPos = CameraPath(gTime);
-    float3 rd = uvToDir(in.texCoord * 2 - 1);
+    // Optimization: Use interpolated model position for direction instead of expensive trig
+    float3 rd = normalize(in.modelPos);
     
     // We don't have fragCoord in pixels, but we have texCoord.
     // Scene uses fragCoord for dithering. We can use texCoord * 1000 or something.
