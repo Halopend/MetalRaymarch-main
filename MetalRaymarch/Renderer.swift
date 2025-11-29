@@ -80,7 +80,7 @@ actor Renderer {
 
         let device = self.device
         if device.supports32BitMSAA && device.supportsTextureSampleCount(4) {
-            rasterSampleCount = 4
+            rasterSampleCount = 1 // Optimized: Disable MSAA as it doesn't help with internal raymarching details
         } else {
             rasterSampleCount = 1
         }

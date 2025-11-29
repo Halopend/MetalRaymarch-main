@@ -66,9 +66,6 @@ float GetSky(float3 pos)
 {
     pos *= 2.3;
     float t = noise(pos);
-    t += noise(pos * 2.1) * .5;
-    t += noise(pos * 4.3) * .25;
-    t += noise(pos * 7.9) * .125;
     return t;
 }
 
@@ -82,7 +79,7 @@ float Map(float3 pos)
     float4 p = float4(pos,1);
     float4 p0 = p;
 
-    for (int i = 0; i < 9; i++)
+    for (int i = 0; i < 7; i++)
     {
         p.xyz = clamp(p.xyz, -1.0, 1.0) * 2.0 - p.xyz;
 
@@ -94,7 +91,7 @@ float Map(float3 pos)
     return ((length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters);
 }
 
-float3 Colour(float3 pos, float sphereR, float gTime) 
+float3 Colour(float3 pos, float sphereR, float gTime, float quality) 
 {
     float minRad2 = clamp(MINRAD2, 1.0e-9, 1.0);
     float4 scale = float4(SCALE, SCALE, SCALE, abs(SCALE)) / minRad2;
@@ -107,7 +104,9 @@ float3 Colour(float3 pos, float sphereR, float gTime)
     float3 p0 = p;
     float trap = 1.0;
     
-    for (int i = 0; i < 6; i++)
+    int steps = int(5.0 * quality);
+    if (steps < 3) steps = 3;
+    for (int i = 0; i < steps; i++)
     {
         p = clamp(p, -1.0, 1.0) * 2.0 - p;
         float r2 = dot(p, p);
@@ -127,12 +126,13 @@ float3 Colour(float3 pos, float sphereR, float gTime)
 float3 GetNormal(float3 pos, float distance)
 {
     distance *= 0.001+.0001;
-    float2 eps = float2(distance, 0.0);
-    float3 nor = float3(
-        Map(pos+eps.xyy) - Map(pos-eps.xyy),
-        Map(pos+eps.yxy) - Map(pos-eps.yxy),
-        Map(pos+eps.yyx) - Map(pos-eps.yyx));
-    return normalize(nor);
+    float2 e = float2(1.0, -1.0) * distance;
+    return normalize(
+        e.xyy * Map(pos + e.xyy) +
+        e.yyx * Map(pos + e.yyx) +
+        e.yxy * Map(pos + e.yxy) +
+        e.xxx * Map(pos + e.xxx)
+    );
 }
 
 float BinarySubdivision(float3 rO, float3 rD, float2 t)
@@ -149,7 +149,7 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t)
     return halfwayT;
 }
 
-float2 Scene(float3 rO, float3 rD, float2 fragCoord)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality)
 {
     // Dithering using hash instead of texture
     float t = .05 + 0.05 * hash(dot(fragCoord, float2(12.9898, 78.233)));
@@ -159,14 +159,20 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord)
     bool hit = false;
     float glow = 0.0;
     float2 dist;
-    for( int j=0; j < 100; j++ )
+    
+    int maxSteps = int(48.0 * quality);
+    if (maxSteps < 24) maxSteps = 24;
+    
+    float threshold = 0.0005 + (1.0 - quality) * 0.002;
+
+    for( int j=0; j < maxSteps; j++ )
     {
         if (t > 12.0) break;
         p = rO + t*rD;
        
         float h = Map(p);
         
-        if(h  <0.0005)
+        if(h < threshold)
         {
             dist = float2(oldT, t);
             hit = true;
@@ -195,13 +201,16 @@ float3 PostEffects(float3 rgb, float2 xy)
     return rgb;
 }
 
-float Shadow(float3 ro, float3 rd)
+float Shadow(float3 ro, float3 rd, float quality)
 {
     float res = 1.0;
     float t = 0.05;
     float h;
     
-    for (int i = 0; i < 8; i++)
+    int steps = int(4.0 * quality);
+    if (steps < 2) steps = 2;
+    
+    for (int i = 0; i < steps; i++)
     {
         h = Map( ro + rd*t );
         res = min(6.0*h / t, res);
@@ -250,9 +259,13 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     
     float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53))*.2;
     float3 col = float3(0.0);
-    float3 sky = float3(0.03, .04, .05) * GetSky(rd);
     
-    float2 ret = Scene(cameraPos, rd, fragCoord);
+    // Calculate quality based on distance from center (0.5, 0.5)
+    // Center: 1.0, Edge: ~0.5
+    float distFromCenter = length(in.texCoord - 0.5);
+    float quality = 1.0 - smoothstep(0.1, 0.6, distFromCenter) * 0.5;
+    
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality);
     
     if (ret.x < 900.0)
     {
@@ -264,13 +277,13 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
 
         spot /= atten;
         
-        float shaSpot = Shadow(p, spot);
-        float shaSun = Shadow(p, sunDir);
+        float shaSpot = Shadow(p, spot, quality);
+        float shaSun = Shadow(p, sunDir, quality);
         
         float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
         float briSun = max(dot(sunDir, nor), 0.0) * .2;
         
-       col = Colour(p, ret.x, gTime);
+       col = Colour(p, ret.x, gTime, quality);
        col = (col * bri * shaSpot) + (col * briSun* shaSun);
         
        float3 ref = reflect(rd, nor);
@@ -278,7 +291,13 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
        col += pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0 * shaSun * briSun;
     }
     
-    col = mix(sky, col, min(exp(-ret.x+1.5), 1.0));
+    float fogFactor = min(exp(-ret.x+1.5), 1.0);
+    float3 sky = float3(0.0);
+    if (fogFactor < 0.99) {
+        sky = float3(0.03, .04, .05) * GetSky(rd);
+    }
+    
+    col = mix(sky, col, fogFactor);
     col += float3(pow(abs(ret.y), 2.)) * float3(.02, .04, .1);
 
     col += LightSource(spotLight-cameraPos, rd, ret.x);
