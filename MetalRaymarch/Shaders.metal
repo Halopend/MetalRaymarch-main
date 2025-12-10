@@ -129,8 +129,8 @@ float Map(float3 pos, float minRad2Val, float fractalScale, float foldingLimit, 
     return (length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters;
 }
 
-// Optimized colour function
-float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
+// Optimized colour function using half precision
+half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
     float4 scale = float4(fractalScale) / minRad2Val;
     scale.w = abs(scale.w);
@@ -138,29 +138,28 @@ float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRa
 
     float3 p = pos;
     float3 p0 = p;
-    float trap = 1.0;
+    half trap = 1.0h;
     
     int steps = max(int(float(colorIters) * quality), 2);
     for (int i = 0; i < steps; i++)
     {
         p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
         float r2 = dot(p, p);
-        // Branchless sphere fold
         p *= clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
         p = p * scale.xyz + p0;
-        trap = min(trap, r2);
+        trap = min(trap, half(r2));
     }
     
-    float2 c = saturate(float2(0.3333 * log(dot(p,p)) - 1.0, sqrt(trap)));
+    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(trap)));
     
-    // Simplified color calculation
-    float3 col1 = float3(.8, .0, 0.);
-    float3 col2 = float3(.4, .4, 0.5);
-    float3 col3 = float3(.5, 0.3, 0.0);
+    // Half precision colors
+    half3 col1 = half3(0.8h, 0.0h, 0.0h);
+    half3 col2 = half3(0.4h, 0.4h, 0.5h);
+    half3 col3 = half3(0.5h, 0.3h, 0.0h);
     
-    float3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
-    float3 altColor = float3(c.x, c.y, 0.5 + 0.3*c.y);
-    return mix(finalColor, altColor, colorMix);
+    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
+    half3 altColor = half3(c.x, c.y, 0.5h + 0.3h * c.y);
+    return mix(finalColor, altColor, half(colorMix));
 }
 
 // Fast normal using forward differences (3 Map calls instead of 4)
@@ -230,38 +229,42 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
     return float2(1000.0, saturate(glow * 0.25));
 }
 
-// Simplified post effects for performance
-float3 PostEffects(float3 rgb, float2 xy)
+// Simplified post effects using half precision
+half3 PostEffects(half3 rgb, half2 xy)
 {
     // Combined contrast/saturation/brightness in fewer ops
-    float luma = dot(rgb, float3(0.2126, 0.7152, 0.0722));
-    rgb = mix(float3(luma), rgb, 1.5) * 1.5; // saturation + brightness
-    rgb = mix(float3(0.5), rgb, 1.08);       // contrast
+    half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
+    rgb = mix(half3(luma), rgb, 1.5h) * 1.5h; // saturation + brightness
+    rgb = mix(half3(0.5h), rgb, 1.08h);       // contrast
     
     // Simplified vignette
-    float2 q = xy * (1.0 - xy);
-    rgb *= 0.5 + 0.5 * pow(16.0 * q.x * q.y, 0.2);
+    half2 q = xy * (1.0h - xy);
+    rgb *= 0.5h + 0.5h * pow(16.0h * q.x * q.y, 0.2h);
     
     // Gamma
-    return pow(rgb, float3(0.47));
+    return pow(rgb, half3(0.47h));
 }
 
+// Ultra-fast shadow approximation
 float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
 {
-    float res = 1.0;
-    float t = 0.05;
-    float h;
+    // Skip shadows entirely in low quality peripheral vision
+    if (quality < 0.3) return 0.7;
     
-    int steps = int(4.0 * quality);
-    if (steps < 2) steps = 2;
+    float res = 1.0;
+    float t = 0.1;
+    
+    // Adaptive steps: 1-3 based on quality
+    int steps = int(2.0 * quality) + 1;
     
     for (int i = 0; i < steps; i++)
     {
-        h = Map( ro + rd*t, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations );
-        res = min(6.0*h / t, res);
-        t += h;
+        float h = Map(ro + rd * t, minRad2Val, fractalScale, foldingLimit, sphereRadius, max(iterations - 2, 3));
+        res = min(res, 8.0 * h / t);
+        t += max(h, 0.1); // Minimum step to prevent slow convergence
+        if (res < 0.01) break; // Early out when in shadow
     }
-    return max(res, 0.0);
+    return saturate(res);
 }
 
 float3 CameraPath( float t )
@@ -297,71 +300,89 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
 {
     FragmentOutput output;
     
-    float gTime = in.time * 0.01 + 15.00; // Adjusted time scale
+    float gTime = in.time * 0.01 + 15.00;
     
     float3 cameraPos = CameraPath(gTime);
-    // Optimization: Use interpolated model position for direction instead of expensive trig
     float3 rd = normalize(in.modelPos);
+    float2 fragCoord = in.texCoord * 1000.0;
     
-    // We don't have fragCoord in pixels, but we have texCoord.
-    // Scene uses fragCoord for dithering. We can use texCoord * 1000 or something.
-    float2 fragCoord = in.texCoord * 1000.0; 
-    
-    float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53))*.2;
-    float3 col = float3(0.0);
-    
-    // Calculate quality based on distance from fovea center with adjustable intensity
+    // Foveation quality calculation
     float2 foveaCenter = in.foveaCenter;
     if (foveaCenter.x == 0.0 && foveaCenter.y == 0.0) {
         foveaCenter = float2(0.5, 0.5);
     }
     float distFromFovea = length(in.texCoord - foveaCenter);
-    float edgeAtten = smoothstep(0.05, 0.25, distFromFovea);
-    float quality = mix(1.0, 0.15, edgeAtten * in.foveationIntensity);
+    float edgeAtten = smoothstep(0.05, 0.3, distFromFovea);
+    float quality = mix(1.0, 0.1, edgeAtten * in.foveationIntensity);
     
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, in.fractalIterations);
+    // LOD: Reduce fractal iterations in periphery
+    int lodIterations = max(int(float(in.fractalIterations) * (0.5 + 0.5 * quality)), 3);
+    
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations);
+    
+    // Use half precision for color accumulation
+    half3 col = half3(0.0h);
     
     if (ret.x < 900.0)
     {
-        float3 p = cameraPos + ret.x*rd; 
-        float3 nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, in.fractalIterations);
+        float3 p = cameraPos + ret.x * rd;
         
-        float3 spot = spotLight - p;
-        float atten = length(spot);
-
-        spot /= atten;
-        float shaSpot = Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, in.fractalIterations);
-        float shaSun = Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, in.fractalIterations);
+        // Skip normal calculation in extreme periphery - use cheap approximation
+        float3 nor;
+        if (quality > 0.2) {
+            nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations);
+        } else {
+            // Cheap normal approximation for periphery
+            nor = normalize(p - cameraPos);
+        }
         
-        float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
-        float briSun = max(dot(sunDir, nor), 0.0) * .2;
-        
-        col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, int(in.colorIterations));
-        col = (col * bri * shaSpot) + (col * briSun * shaSun);
-        
-        float3 ref = reflect(rd, nor);
-        col += pow(max(dot(spot,  ref), 0.0), 10.0) * 2.0 * shaSpot * bri;
-        col += pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0 * shaSun * briSun;
+        // Simplified lighting for periphery
+        if (quality > 0.4) {
+            // Full lighting calculation
+            float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+            float3 spot = spotLight - p;
+            float atten = length(spot);
+            spot /= atten;
+            
+            half shaSpot = half(Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
+            half shaSun = half(Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
+            
+            half bri = half(max(dot(spot, nor), 0.0) / pow(atten, 1.5) * 0.25);
+            half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+            
+            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, max(int(in.colorIterations * quality), 2));
+            col = (col * bri * shaSpot) + (col * briSun * shaSun);
+            
+            // Specular only in high quality
+            if (quality > 0.7) {
+                float3 ref = reflect(rd, nor);
+                col += half3(pow(max(dot(spot, ref), 0.0), 10.0) * 2.0) * shaSpot * bri;
+                col += half3(pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0) * shaSun * briSun;
+            }
+        } else {
+            // Simplified diffuse-only lighting for periphery
+            half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
+            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, 2) * diffuse;
+        }
     }
     
-    float fogFactor = min(exp(-ret.x+1.5), 1.0);
-    float3 sky = float3(0.0);
-    if (fogFactor < 0.99) {
-        sky = float3(0.03, .04, .05) * GetSky(rd);
+    // Simplified fog (half precision)
+    half fogFactor = half(saturate(exp(-ret.x + 1.5)));
+    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
+    
+    // Glow (half precision)
+    half glow = half(ret.y);
+    col += glow * glow * half3(0.02h, 0.04h, 0.1h);
+    
+    // Post effects only in center (skip in periphery for performance)
+    if (quality > 0.5) {
+        col = PostEffects(col, half2(in.texCoord));
+    } else {
+        // Simple gamma only
+        col = pow(saturate(col), half3(0.47h));
     }
-    
-    col = mix(sky, col, fogFactor);
-    col += float3(pow(abs(ret.y), 2.)) * float3(.02, .04, .1);
 
-    col += LightSource(spotLight-cameraPos, rd, ret.x);
-    
-    col = PostEffects(col, in.texCoord);    
-
-    output.color = float4(col, 1.0);
-    
-    // Use the rasterized depth from the proxy geometry (in.position.z)
-    // This is already in correct NDC space for visionOS reprojection
-    // visionOS uses reverse-Z: 1.0 = near, 0.0 = far
+    output.color = float4(float3(col), 1.0);
     output.depth = in.position.z;
     
     return output;
