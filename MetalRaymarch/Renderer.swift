@@ -426,8 +426,12 @@ actor Renderer {
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
         renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        // Use system-provided foveation map (disabled in config)
-        renderPassDescriptor.rasterizationRateMap = nil
+        // Use system-provided foveation map when available, keep original viewports
+        if let systemMap = drawable.rasterizationRateMaps.first {
+            renderPassDescriptor.rasterizationRateMap = systemMap
+        } else {
+            renderPassDescriptor.rasterizationRateMap = nil
+        }
         if layerRenderer.configuration.layout == .layered {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
