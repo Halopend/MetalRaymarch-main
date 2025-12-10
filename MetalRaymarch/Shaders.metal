@@ -163,10 +163,10 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
     float glow = 0.0;
     float2 dist;
     
-    int maxSteps = int(48.0 * quality);
-    if (maxSteps < 24) maxSteps = 24;
+    int maxSteps = int(64.0 * quality);
+    if (maxSteps < 32) maxSteps = 32;
     
-    float threshold = 0.0005 + (1.0 - quality) * 0.002;
+    float threshold = 0.00025 + (1.0 - quality) * 0.001;
 
     for( int j=0; j < maxSteps; j++ )
     {
@@ -265,9 +265,9 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     float3 col = float3(0.0);
     
     // Calculate quality based on distance from center (0.5, 0.5)
-    // Center: 1.0, Edge: ~0.5
     float distFromCenter = length(in.texCoord - 0.5);
-    float quality = 1.0 - smoothstep(0.1, 0.6, distFromCenter) * 0.5;
+    float edgeAtten = smoothstep(0.1, 0.6, distFromCenter);
+    float quality = mix(1.0, 0.65, edgeAtten);
     
     float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance);
     
@@ -280,19 +280,18 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
         float atten = length(spot);
 
         spot /= atten;
-        
         float shaSpot = Shadow(p, spot, quality, in.minDistance);
         float shaSun = Shadow(p, sunDir, quality, in.minDistance);
         
         float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
         float briSun = max(dot(sunDir, nor), 0.0) * .2;
         
-       col = Colour(p, ret.x, gTime, quality, in.minDistance);
-       col = (col * bri * shaSpot) + (col * briSun* shaSun);
+        col = Colour(p, ret.x, gTime, quality, in.minDistance);
+        col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
-       float3 ref = reflect(rd, nor);
-       col += pow(max(dot(spot,  ref), 0.0), 10.0) * 2.0 * shaSpot * bri;
-       col += pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0 * shaSun * briSun;
+        float3 ref = reflect(rd, nor);
+        col += pow(max(dot(spot,  ref), 0.0), 10.0) * 2.0 * shaSpot * bri;
+        col += pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0 * shaSun * briSun;
     }
     
     float fogFactor = min(exp(-ret.x+1.5), 1.0);

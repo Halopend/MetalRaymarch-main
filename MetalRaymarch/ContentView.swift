@@ -33,7 +33,7 @@ struct ContentView: View {
                 })
                 
                 Text("Min Distance")
-                Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.001...1.0)
+                Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...1.0)
                 
                 Text("Drag to move, Pinch to scale")
                     .font(.caption)

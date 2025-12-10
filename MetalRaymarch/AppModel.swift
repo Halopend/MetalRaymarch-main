@@ -27,7 +27,7 @@ class AppModel {
 
 class RenderSettings {
     private let lock = NSLock()
-    private var _minDistance: Float = 0.25
+    private var _minDistance: Float = 0.05
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = .zero
 
