@@ -65,7 +65,7 @@ actor Renderer {
 
     // Pose smoothing
     var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
-    let posePositionAlpha: Float = 0.15
+    let posePositionAlpha: Float = 0.7
     let poseRotationAlpha: Float = 0.12
 
     // FPS tracking
