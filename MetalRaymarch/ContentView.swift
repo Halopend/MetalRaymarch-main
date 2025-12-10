@@ -52,6 +52,15 @@ struct ContentView: View {
                 
                 Text("Glow Intensity")
                 Slider(value: Binding(get: { appModel.renderSettings.glowIntensity }, set: { appModel.renderSettings.glowIntensity = $0 }), in: 0.0...1.0)
+                
+                Text("Box Folding Limit")
+                Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.5...2.0)
+                
+                Text("Sphere Radius")
+                Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.1...1.5)
+                
+                Text("Color Iterations")
+                Slider(value: Binding(get: { appModel.renderSettings.colorIterations }, set: { appModel.renderSettings.colorIterations = $0 }), in: 2...12, step: 1)
 
                 Text("FPS: \(appModel.fps, specifier: "%.1f")")
                     .font(.caption)

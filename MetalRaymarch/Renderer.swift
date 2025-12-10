@@ -340,7 +340,9 @@ actor Renderer {
                             foveationIntensity: settings.foveationIntensity,
                             colorMix: settings.colorMix,
                             glowIntensity: settings.glowIntensity,
-                            padding: 0)
+                            foldingLimit: settings.foldingLimit,
+                            sphereRadius: settings.sphereRadius,
+                            colorIterations: settings.colorIterations)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

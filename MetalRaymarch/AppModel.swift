@@ -38,6 +38,9 @@ class RenderSettings {
     private var _foveationIntensity: Float = 1.0
     private var _colorMix: Float = 0.5
     private var _glowIntensity: Float = 0.25
+    private var _foldingLimit: Float = 1.0
+    private var _sphereRadius: Float = 0.5
+    private var _colorIterations: Float = 5.0
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -82,6 +85,21 @@ class RenderSettings {
     var glowIntensity: Float {
         get { lock.withLock { _glowIntensity } }
         set { lock.withLock { _glowIntensity = newValue } }
+    }
+    
+    var foldingLimit: Float {
+        get { lock.withLock { _foldingLimit } }
+        set { lock.withLock { _foldingLimit = newValue } }
+    }
+    
+    var sphereRadius: Float {
+        get { lock.withLock { _sphereRadius } }
+        set { lock.withLock { _sphereRadius = newValue } }
+    }
+    
+    var colorIterations: Float {
+        get { lock.withLock { _colorIterations } }
+        set { lock.withLock { _colorIterations = newValue } }
     }
 }
 

@@ -50,7 +50,9 @@ typedef struct
     float foveationIntensity;
     float colorMix;
     float glowIntensity;
-    float padding;
+    float foldingLimit;      // Box folding limit (default 1.0)
+    float sphereRadius;      // Sphere folding radius (default 0.5)
+    float colorIterations;   // How many iterations contribute to color
 } Uniforms;
 
 typedef struct

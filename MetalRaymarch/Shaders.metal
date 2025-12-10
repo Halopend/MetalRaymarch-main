@@ -39,6 +39,9 @@ typedef struct
     float foveationIntensity;
     float colorMix;
     float glowIntensity;
+    float foldingLimit;
+    float sphereRadius;
+    float colorIterations;
 } ColorInOut;
 
 vertex ColorInOut vertexShader(Vertex in [[stage_in]],
@@ -64,6 +67,9 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     out.foveationIntensity = uniforms.foveationIntensity;
     out.colorMix = uniforms.colorMix;
     out.glowIntensity = uniforms.glowIntensity;
+    out.foldingLimit = uniforms.foldingLimit;
+    out.sphereRadius = uniforms.sphereRadius;
+    out.colorIterations = uniforms.colorIterations;
     
     return out;
 }
@@ -94,32 +100,46 @@ float GetSky(float3 pos)
     return t;
 }
 
-float Map(float3 pos, float minRad2Val, float fractalScale) 
+float Map(float3 pos, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations) 
 {
     float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
     float4 scale = float4(fractalScale, fractalScale, fractalScale, abs(fractalScale)) / minRad2;
     float absScalem1 = abs(fractalScale - 1.0);
-    float AbsScaleRaisedTo1mIters = pow(abs(fractalScale), float(1-10));
+    float AbsScaleRaisedTo1mIters = pow(abs(fractalScale), float(1-iterations));
+    
+    // Sphere folding parameters
+    float fixedRadius2 = 1.0;  // Fixed radius squared
+    float minRadius2 = sphereRadius * sphereRadius;  // Minimum radius squared
 
     float4 p = float4(pos,1);
     float4 p0 = p;
 
-    for (int i = 0; i < 7; i++)
+    for (int i = 0; i < iterations; i++)
     {
-        p.xyz = clamp(p.xyz, -1.0, 1.0) * 2.0 - p.xyz;
+        // Box fold with adjustable limit
+        p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
 
+        // Sphere fold with adjustable radius
         float r2 = dot(p.xyz, p.xyz);
-        p *= clamp(max(minRad2/r2, minRad2), 0.0, 1.0);
+        if (r2 < minRadius2) {
+            p *= fixedRadius2 / minRadius2;
+        } else if (r2 < fixedRadius2) {
+            p *= fixedRadius2 / r2;
+        }
 
         p = p*scale + p0;
     }
     return ((length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters);
 }
 
-float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix) 
+float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
     float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
     float4 scale = float4(fractalScale, fractalScale, fractalScale, abs(fractalScale)) / minRad2;
+    
+    // Sphere folding parameters
+    float fixedRadius2 = 1.0;
+    float minRadius2 = sphereRadius * sphereRadius;
     
     float3 surfaceColour1 = float3(.8, .0, 0.);
     float3 surfaceColour2 = float3(.4, .4, 0.5);
@@ -129,13 +149,20 @@ float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRa
     float3 p0 = p;
     float trap = 1.0;
     
-    int steps = int(5.0 * quality);
+    int steps = int(float(colorIters) * quality);
     if (steps < 3) steps = 3;
     for (int i = 0; i < steps; i++)
     {
-        p = clamp(p, -1.0, 1.0) * 2.0 - p;
+        // Box fold with adjustable limit
+        p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
+        
+        // Sphere fold with adjustable radius
         float r2 = dot(p, p);
-        p *= clamp(max(minRad2/r2, minRad2), 0.0, 1.0);
+        if (r2 < minRadius2) {
+            p *= fixedRadius2 / minRadius2;
+        } else if (r2 < fixedRadius2) {
+            p *= fixedRadius2 / r2;
+        }
 
         p = p*scale.xyz + p0;
         trap = min(trap, r2);
@@ -152,33 +179,33 @@ float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRa
     return mix(finalColor, altColor, colorMix);
 }
 
-float3 GetNormal(float3 pos, float distance, float minRad2Val, float fractalScale)
+float3 GetNormal(float3 pos, float distance, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
 {
     distance *= 0.001+.0001;
     float2 e = float2(1.0, -1.0) * distance;
     return normalize(
-        e.xyy * Map(pos + e.xyy, minRad2Val, fractalScale) +
-        e.yyx * Map(pos + e.yyx, minRad2Val, fractalScale) +
-        e.yxy * Map(pos + e.yxy, minRad2Val, fractalScale) +
-        e.xxx * Map(pos + e.xxx, minRad2Val, fractalScale)
+        e.xyy * Map(pos + e.xyy, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) +
+        e.yyx * Map(pos + e.yyx, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) +
+        e.yxy * Map(pos + e.yxy, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) +
+        e.xxx * Map(pos + e.xxx, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations)
     );
 }
 
-float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float fractalScale)
+float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
 {
     float halfwayT;
   
     for (int i = 0; i < 6; i++)
     {
         halfwayT = dot(t, float2(.5));
-        float d = Map(rO + halfwayT*rD, minRad2Val, fractalScale); 
+        float d = Map(rO + halfwayT*rD, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations); 
         t = mix(float2(t.x, halfwayT), float2(halfwayT, t.y), step(0.0005, d));
     }
 
     return halfwayT;
 }
 
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity, float foldingLimit, float sphereRadius, int iterations)
 {
     float t = .05 + 0.05 * hash(dot(fragCoord, float2(12.9898, 78.233)));
     
@@ -198,7 +225,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
         if (t > 12.0) break;
         p = rO + t*rD;
        
-        float h = Map(p, minRad2Val, fractalScale);
+        float h = Map(p, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
         
         if(h < threshold)
         {
@@ -212,7 +239,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
     }
     if (!hit)
         t = 1000.0;
-    else       t = BinarySubdivision(rO, rD, dist, minRad2Val, fractalScale);
+    else       t = BinarySubdivision(rO, rD, dist, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
     return float2(t, clamp(glow*.25, 0.0, 1.0));
 }
 
@@ -229,7 +256,7 @@ float3 PostEffects(float3 rgb, float2 xy)
     return rgb;
 }
 
-float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fractalScale)
+float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
 {
     float res = 1.0;
     float t = 0.05;
@@ -240,7 +267,7 @@ float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fracta
     
     for (int i = 0; i < steps; i++)
     {
-        h = Map( ro + rd*t, minRad2Val, fractalScale );
+        h = Map( ro + rd*t, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations );
         res = min(6.0*h / t, res);
         t += h;
     }
@@ -280,8 +307,6 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
 {
     FragmentOutput output;
     
-    Uniforms uniforms = uniformsArray.uniforms[ampId];
-    
     float gTime = in.time * 0.01 + 15.00; // Adjusted time scale
     
     float3 cameraPos = CameraPath(gTime);
@@ -304,38 +329,24 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     float edgeAtten = smoothstep(0.05, 0.25, distFromFovea);
     float quality = mix(1.0, 0.15, edgeAtten * in.foveationIntensity);
     
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, in.fractalIterations);
     
-    // Calculate proper depth for visionOS reprojection
-    float rayDistance = ret.x;
-    float depth = 0.0; // Default to far plane for background
-    
-    if (rayDistance < 900.0) {
-        // Convert ray distance to world space position
-        float3 worldPos = cameraPos + rayDistance * rd;
-        
-        // Transform to view space then to NDC
-        float4 viewPos = uniforms.modelViewMatrix * float4(worldPos, 1.0);
-        float4 clipPos = uniforms.projectionMatrix * viewPos;
-        
-        // Convert to depth value [0,1] for visionOS
-        depth = clipPos.z / clipPos.w;
-        
-        // Calculate lighting
-        float3 p = worldPos; 
-        float3 nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale);
+    if (ret.x < 900.0)
+    {
+        float3 p = cameraPos + ret.x*rd; 
+        float3 nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, in.fractalIterations);
         
         float3 spot = spotLight - p;
         float atten = length(spot);
 
         spot /= atten;
-        float shaSpot = Shadow(p, spot, quality, in.minDistance, in.fractalScale);
-        float shaSun = Shadow(p, sunDir, quality, in.minDistance, in.fractalScale);
+        float shaSpot = Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, in.fractalIterations);
+        float shaSun = Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, in.fractalIterations);
         
         float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
         float briSun = max(dot(sunDir, nor), 0.0) * .2;
         
-        col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix);
+        col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, int(in.colorIterations));
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
         float3 ref = reflect(rd, nor);
@@ -357,7 +368,11 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     col = PostEffects(col, in.texCoord);    
 
     output.color = float4(col, 1.0);
-    output.depth = depth;
+    
+    // Use the rasterized depth from the proxy geometry (in.position.z)
+    // This is already in correct NDC space for visionOS reprojection
+    // visionOS uses reverse-Z: 1.0 = near, 0.0 = far
+    output.depth = in.position.z;
     
     return output;
 }
