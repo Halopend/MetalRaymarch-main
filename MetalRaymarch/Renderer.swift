@@ -62,6 +62,7 @@ actor Renderer {
     let rasterSampleCount: Int
     var memorylessTargetIndex: Int = 0
     var memorylessTargets: [(color: MTLTexture, depth: MTLTexture)?]
+    var hasLoggedFoveationAvailability = false
 
     // Pose smoothing
     var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
@@ -414,11 +415,17 @@ actor Renderer {
             renderPassDescriptor.depthAttachment.storeAction = .store
         }
 
+        let foveationMap = drawable.rasterizationRateMaps.first
+        if foveationMap == nil && !hasLoggedFoveationAvailability {
+            print("Foveation map unavailable; capabilities.supportsFoveation=\(layerRenderer.capabilities.supportsFoveation)")
+            hasLoggedFoveationAvailability = true
+        }
+
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
         renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        renderPassDescriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
+        renderPassDescriptor.rasterizationRateMap = foveationMap
         if layerRenderer.configuration.layout == .layered {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
