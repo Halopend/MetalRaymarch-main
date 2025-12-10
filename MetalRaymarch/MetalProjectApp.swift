@@ -13,10 +13,10 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
         configuration.depthFormat = .depth32Float
         configuration.colorFormat = .bgra8Unorm_srgb
 
-        // Force-enable foveation when available; request foveation-enabled layouts
-        configuration.isFoveationEnabled = true
+        // Disable foveation to avoid viewport constraints
+        configuration.isFoveationEnabled = false
 
-        let supportedLayouts = capabilities.supportedLayouts(options: [.foveationEnabled])
+        let supportedLayouts = capabilities.supportedLayouts(options: [])
 
         configuration.layout = supportedLayouts.contains(.layered) ? .layered : .dedicated
     }

@@ -25,6 +25,7 @@ typedef struct
     float time;
     float3 modelPos;
     float minDistance;
+    float2 foveaCenter;  // Fovea center for quality falloff
 } ColorInOut;
 
 vertex ColorInOut vertexShader(Vertex in [[stage_in]],
@@ -42,6 +43,7 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     out.time = uniforms.time;
     out.modelPos = in.position;
     out.minDistance = uniforms.minDistance;
+    out.foveaCenter = uniforms.foveaCenter;
     
     return out;
 }
@@ -264,11 +266,16 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53))*.2;
     float3 col = float3(0.0);
     
-    // Calculate quality based on distance from center (0.5, 0.5)
-    float distFromCenter = length(in.texCoord - 0.5);
-    // Even more aggressive foveation: very small fovea, strong edge drop
-    float edgeAtten = smoothstep(0.06, 0.28, distFromCenter);
-    float quality = mix(1.0, 0.12, edgeAtten);
+    // Calculate quality based on distance from fovea center (eye-tracked or default center)
+    float2 foveaCenter = in.foveaCenter;
+    // Fallback to center if fovea not provided
+    if (foveaCenter.x == 0.0 && foveaCenter.y == 0.0) {
+        foveaCenter = float2(0.5, 0.5);
+    }
+    float distFromFovea = length(in.texCoord - foveaCenter);
+    // Aggressive foveation: tight high-quality fovea, rapid falloff
+    float edgeAtten = smoothstep(0.05, 0.25, distFromFovea);
+    float quality = mix(1.0, 0.15, edgeAtten);
     
     float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance);
     

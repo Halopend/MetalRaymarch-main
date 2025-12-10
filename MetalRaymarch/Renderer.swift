@@ -325,12 +325,13 @@ actor Renderer {
             let view = drawable.views[viewIndex]
             let viewMatrix = (simdDeviceAnchor * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
-
+            
+            // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: viewMatrix * modelMatrix,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
-                            padding: (0, 0))
+                            foveaCenter: SIMD2<Float>(0.5, 0.5))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -421,28 +422,12 @@ actor Renderer {
             renderPassDescriptor.depthAttachment.storeAction = .store
         }
 
-        // Build custom aggressive rasterization rate map once
-        if customRasterizationRateMap == nil {
-            customRasterizationRateMap = buildCustomRasterizationRateMap(device: device, screenSize: drawable.colorTextures[0].width, drawable: drawable)
-            if let map = customRasterizationRateMap {
-                print("Custom foveation rate map created: screenSize=\(map.screenSize)")
-            } else {
-                print("Failed to create custom foveation rate map")
-            }
-        }
-
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
         renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        // Use custom rate map for aggressive foveation, fall back to drawable's map
-        if let customMap = customRasterizationRateMap {
-            renderPassDescriptor.rasterizationRateMap = customMap
-        } else if let systemMap = drawable.rasterizationRateMaps.first {
-            renderPassDescriptor.rasterizationRateMap = systemMap
-        } else {
-            renderPassDescriptor.rasterizationRateMap = nil
-        }
+        // Use system-provided foveation map (disabled in config)
+        renderPassDescriptor.rasterizationRateMap = nil
         if layerRenderer.configuration.layout == .layered {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
@@ -467,6 +452,7 @@ actor Renderer {
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
+        // Use original per-view viewports
         let viewports = drawable.views.map { $0.textureMap.viewport }
 
         renderEncoder.setViewports(viewports)
@@ -617,10 +603,5 @@ func buildCustomRasterizationRateMap(device: MTLDevice, screenSize: Int, drawabl
         descriptor.setLayer(layerDescriptor, at: layer)
     }
     
-    do {
-        return try device.makeRasterizationRateMap(descriptor: descriptor)
-    } catch {
-        print("Failed to create rasterization rate map: \(error)")
-        return nil
-    }
+    return device.makeRasterizationRateMap(descriptor: descriptor)
 }
