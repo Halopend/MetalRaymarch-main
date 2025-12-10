@@ -63,8 +63,10 @@ actor Renderer {
     var memorylessTargetIndex: Int = 0
     var memorylessTargets: [(color: MTLTexture, depth: MTLTexture)?]
     var hasLoggedFoveationAvailability = false
+    var hasLoggedWorldTrackingWarning = false
 
     let isFoveationEnabled: Bool
+    var customRasterizationRateMap: MTLRasterizationRateMap?
 
     // Pose smoothing
     var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
@@ -91,6 +93,7 @@ actor Renderer {
         self.commandQueue = self.device.makeCommandQueue()!
         self.appModel = appModel
         self.isFoveationEnabled = layerRenderer.configuration.isFoveationEnabled
+        self.customRasterizationRateMap = nil // Will be created on first drawable
 
         let device = self.device
         if device.supports32BitMSAA && device.supportsTextureSampleCount(4) {
@@ -418,23 +421,27 @@ actor Renderer {
             renderPassDescriptor.depthAttachment.storeAction = .store
         }
 
-        let foveationMap = drawable.rasterizationRateMaps.first
-        if foveationMap == nil && !hasLoggedFoveationAvailability {
-            print("Foveation map unavailable; isFoveationEnabled=\(isFoveationEnabled)")
-            hasLoggedFoveationAvailability = true
+        // Build custom aggressive rasterization rate map once
+        if customRasterizationRateMap == nil {
+            customRasterizationRateMap = buildCustomRasterizationRateMap(device: device, screenSize: drawable.colorTextures[0].width, drawable: drawable)
+            if let map = customRasterizationRateMap {
+                print("Custom foveation rate map created: screenSize=\(map.screenSize)")
+            } else {
+                print("Failed to create custom foveation rate map")
+            }
         }
 
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
         renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        if let rateMap = drawable.rasterizationRateMaps.first {
-            renderPassDescriptor.rasterizationRateMap = rateMap
+        // Use custom rate map for aggressive foveation, fall back to drawable's map
+        if let customMap = customRasterizationRateMap {
+            renderPassDescriptor.rasterizationRateMap = customMap
+        } else if let systemMap = drawable.rasterizationRateMaps.first {
+            renderPassDescriptor.rasterizationRateMap = systemMap
         } else {
             renderPassDescriptor.rasterizationRateMap = nil
-            #if DEBUG
-            print("⚠️ No rasterizationRateMap on drawable; foveation inactive for this frame")
-            #endif
         }
         if layerRenderer.configuration.layout == .layered {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
@@ -583,4 +590,37 @@ func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_floa
     var mat = matrix_float4x4(rotation)
     mat.columns.3 = SIMD4<Float>(translation, 1)
     return mat
+}
+
+// Build a custom aggressive rasterization rate map with foveal zones
+func buildCustomRasterizationRateMap(device: MTLDevice, screenSize: Int, drawable: LayerRenderer.Drawable) -> MTLRasterizationRateMap? {
+    guard device.supportsRasterizationRateMap(layerCount: drawable.views.count) else {
+        print("Device does not support rasterization rate maps with \(drawable.views.count) layers")
+        return nil
+    }
+    
+    let width = drawable.colorTextures[0].width
+    let height = drawable.colorTextures[0].height
+    let layerCount = drawable.views.count
+    
+    let descriptor = MTLRasterizationRateMapDescriptor()
+    descriptor.screenSize = MTLSize(width: width, height: height, depth: 1)
+    
+    // Aggressive foveation: center at full rate, rapid falloff to edges
+    // Horizontal zones (9 zones): center high, edges low
+    let horizontalRates: [Float] = [0.15, 0.25, 0.4, 0.65, 1.0, 0.65, 0.4, 0.25, 0.15]
+    // Vertical zones (7 zones): center high, edges low
+    let verticalRates: [Float] = [0.2, 0.35, 0.6, 1.0, 0.6, 0.35, 0.2]
+    
+    for layer in 0..<layerCount {
+        let layerDescriptor = MTLRasterizationRateLayerDescriptor(horizontal: horizontalRates, vertical: verticalRates)
+        descriptor.setLayer(layerDescriptor, at: layer)
+    }
+    
+    do {
+        return try device.makeRasterizationRateMap(descriptor: descriptor)
+    } catch {
+        print("Failed to create rasterization rate map: \(error)")
+        return nil
+    }
 }
