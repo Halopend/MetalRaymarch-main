@@ -86,12 +86,12 @@ float GetSky(float3 pos)
     return t;
 }
 
-float Map(float3 pos, float minRad2Val) 
+float Map(float3 pos, float minRad2Val, float fractalScale) 
 {
     float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
-    float4 scale = float4(SCALE, SCALE, SCALE, abs(SCALE)) / minRad2;
-    float absScalem1 = abs(SCALE - 1.0);
-    float AbsScaleRaisedTo1mIters = pow(abs(SCALE), float(1-10));
+    float4 scale = float4(fractalScale, fractalScale, fractalScale, abs(fractalScale)) / minRad2;
+    float absScalem1 = abs(fractalScale - 1.0);
+    float AbsScaleRaisedTo1mIters = pow(abs(fractalScale), float(1-10));
 
     float4 p = float4(pos,1);
     float4 p0 = p;
@@ -108,10 +108,10 @@ float Map(float3 pos, float minRad2Val)
     return ((length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters);
 }
 
-float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val) 
+float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix) 
 {
     float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
-    float4 scale = float4(SCALE, SCALE, SCALE, abs(SCALE)) / minRad2;
+    float4 scale = float4(fractalScale, fractalScale, fractalScale, abs(fractalScale)) / minRad2;
     
     float3 surfaceColour1 = float3(.8, .0, 0.);
     float3 surfaceColour2 = float3(.4, .4, 0.5);
@@ -137,36 +137,40 @@ float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRa
 
     float t = fmod(length(pos) - gTime*150., 16.0);
     surfaceColour1 = mix( surfaceColour1, float3(.4, 3.0, 5.), pow(smoothstep(0.0, .3, t) * smoothstep(0.6, .3, t), 10.0));
-    return mix(mix(surfaceColour1, surfaceColour2, c.y), surfaceColour3, c.x);
+    
+    // Use colorMix to blend between color schemes
+    float3 finalColor = mix(mix(surfaceColour1, surfaceColour2, c.y), surfaceColour3, c.x);
+    float3 altColor = mix(float3(c.x, c.y, 0.8), float3(0.2, c.x, c.y), c.y);
+    return mix(finalColor, altColor, colorMix);
 }
 
-float3 GetNormal(float3 pos, float distance, float minRad2Val)
+float3 GetNormal(float3 pos, float distance, float minRad2Val, float fractalScale)
 {
     distance *= 0.001+.0001;
     float2 e = float2(1.0, -1.0) * distance;
     return normalize(
-        e.xyy * Map(pos + e.xyy, minRad2Val) +
-        e.yyx * Map(pos + e.yyx, minRad2Val) +
-        e.yxy * Map(pos + e.yxy, minRad2Val) +
-        e.xxx * Map(pos + e.xxx, minRad2Val)
+        e.xyy * Map(pos + e.xyy, minRad2Val, fractalScale) +
+        e.yyx * Map(pos + e.yyx, minRad2Val, fractalScale) +
+        e.yxy * Map(pos + e.yxy, minRad2Val, fractalScale) +
+        e.xxx * Map(pos + e.xxx, minRad2Val, fractalScale)
     );
 }
 
-float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val)
+float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float fractalScale)
 {
     float halfwayT;
   
     for (int i = 0; i < 6; i++)
     {
         halfwayT = dot(t, float2(.5));
-        float d = Map(rO + halfwayT*rD, minRad2Val); 
+        float d = Map(rO + halfwayT*rD, minRad2Val, fractalScale); 
         t = mix(float2(t.x, halfwayT), float2(halfwayT, t.y), step(0.0005, d));
     }
 
     return halfwayT;
 }
 
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity)
 {
     float t = .05 + 0.05 * hash(dot(fragCoord, float2(12.9898, 78.233)));
     
@@ -186,7 +190,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
         if (t > 12.0) break;
         p = rO + t*rD;
        
-        float h = Map(p, minRad2Val);
+        float h = Map(p, minRad2Val, fractalScale);
         
         if(h < threshold)
         {
@@ -194,13 +198,13 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
             hit = true;
             break;
         }
-        glow += clamp(.05-h, 0.0, .4);
+        glow += clamp(.05-h, 0.0, .4) * glowIntensity;
         oldT = t;
         t +=  h + t*0.001;
     }
     if (!hit)
         t = 1000.0;
-    else       t = BinarySubdivision(rO, rD, dist, minRad2Val);
+    else       t = BinarySubdivision(rO, rD, dist, minRad2Val, fractalScale);
     return float2(t, clamp(glow*.25, 0.0, 1.0));
 }
 
@@ -286,12 +290,12 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     float edgeAtten = smoothstep(0.05, 0.25, distFromFovea);
     float quality = mix(1.0, 0.15, edgeAtten * in.foveationIntensity);
     
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity);
     
     if (ret.x < 900.0)
     {
         float3 p = cameraPos + ret.x*rd; 
-        float3 nor = GetNormal(p, ret.x, in.minDistance);
+        float3 nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale);
         
         float3 spot = spotLight - p;
         float atten = length(spot);
@@ -303,7 +307,7 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
         float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
         float briSun = max(dot(sunDir, nor), 0.0) * .2;
         
-        col = Colour(p, ret.x, gTime, quality, in.minDistance);
+        col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix);
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
         float3 ref = reflect(rd, nor);
