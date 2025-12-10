@@ -19,6 +19,8 @@ class AppModel {
     }
     
     var immersiveSpaceState = ImmersiveSpaceState.closed
+
+    var fps: Double = 0
     
     nonisolated let renderSettings = RenderSettings()
     

@@ -34,6 +34,10 @@ struct ContentView: View {
                 
                 Text("Min Distance")
                 Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...1.0)
+
+                Text("FPS: \(appModel.fps, specifier: "%.1f")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 
                 Text("Drag to move, Pinch to scale")
                     .font(.caption)

@@ -14,7 +14,7 @@ import Spatial
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 
-let maxBuffersInFlight = 3
+let maxBuffersInFlight = 1
 
 enum RendererError: Error {
     case badVertexDescriptor
@@ -62,6 +62,15 @@ actor Renderer {
     let rasterSampleCount: Int
     var memorylessTargetIndex: Int = 0
     var memorylessTargets: [(color: MTLTexture, depth: MTLTexture)?]
+
+    // Pose smoothing
+    var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
+    let posePositionAlpha: Float = 0.15
+    let poseRotationAlpha: Float = 0.12
+
+    // FPS tracking
+    var lastPresentationTime: LayerRenderer.Clock.Instant?
+    var smoothedFPS: Double = 0
 
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
@@ -303,7 +312,7 @@ actor Renderer {
         
         let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
         
-        let simdDeviceAnchor = deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        let simdDeviceAnchor = smoothedDeviceTransform
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -353,6 +362,29 @@ actor Renderer {
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
 
         drawable.deviceAnchor = deviceAnchor
+
+        if let anchorTransform = deviceAnchor?.originFromAnchorTransform {
+            smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
+                                                 current: anchorTransform,
+                                                 positionAlpha: posePositionAlpha,
+                                                 rotationAlpha: poseRotationAlpha)
+        } else {
+            smoothedDeviceTransform = matrix_identity_float4x4
+        }
+
+        // FPS tracking using predicted presentation interval
+        if let last = lastPresentationTime {
+            let dt = last.duration(to: drawable.frameTiming.presentationTime).timeInterval
+            if dt > 0 {
+                let instantFPS = 1.0 / dt
+                let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * 0.1
+                smoothedFPS = updatedFPS
+                Task { @MainActor in
+                    appModel.fps = updatedFPS
+                }
+            }
+        }
+        lastPresentationTime = drawable.frameTiming.presentationTime
 
         let semaphore = inFlightSemaphore
         commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
@@ -512,4 +544,26 @@ func matrix4x4_scale(_ scaleX: Float, _ scaleY: Float, _ scaleZ: Float) -> matri
 
 func radians_from_degrees(_ degrees: Float) -> Float {
     return (degrees / 180) * .pi
+}
+
+// Blend two poses with separate position and rotation smoothing factors
+func smoothPose(previous: matrix_float4x4, current: matrix_float4x4, positionAlpha: Float, rotationAlpha: Float) -> matrix_float4x4 {
+    let prevPose = decomposePose(previous)
+    let currPose = decomposePose(current)
+
+    let blendedPos = prevPose.translation + (currPose.translation - prevPose.translation) * positionAlpha
+    let blendedRot = simd_slerp(prevPose.rotation, currPose.rotation, rotationAlpha)
+    return composePose(translation: blendedPos, rotation: blendedRot)
+}
+
+func decomposePose(_ m: matrix_float4x4) -> (translation: SIMD3<Float>, rotation: simd_quatf) {
+    let translation = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
+    let rotation = simd_quaternion(m)
+    return (translation, rotation)
+}
+
+func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_float4x4 {
+    var mat = matrix_float4x4(rotation)
+    mat.columns.3 = SIMD4<Float>(translation, 1)
+    return mat
 }
