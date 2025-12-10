@@ -187,43 +187,69 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float 
     return halfwayT;
 }
 
+// Enhanced sphere tracing with over-relaxation (no binary subdivision needed)
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity, float foldingLimit, float sphereRadius, int iterations)
 {
-    // Faster hash for dithering
-    float t = 0.05 + 0.02 * fract(sin(dot(fragCoord, float2(12.9898, 78.233))) * 43758.5453);
+    // Small dither to prevent banding
+    float t = 0.05 + 0.015 * fract(sin(dot(fragCoord, float2(12.9898, 78.233))) * 43758.5453);
     
-    float oldT = 0.0;
     float glow = 0.0;
-    float2 dist = float2(0.0);
+    int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
-    int maxSteps = max(int(float(maxStepsParam) * quality), 6);
-    float threshold = 0.001 + (1.0 - quality) * 0.004;
+    // Previous distance for over-relaxation
+    float prevH = 1e10;
+    float omega = 1.2; // Over-relaxation factor (1.0 = standard, >1 = aggressive)
     
-    // Adaptive step multiplier for faster convergence
-    float stepMult = 1.0 + (1.0 - quality) * 0.5;
-
+    // Distance-adaptive threshold: allows coarser hits when far away
+    // This is perceptually invisible but saves many iterations
+    
     for(int j = 0; j < maxSteps; j++)
     {
+        // Adaptive threshold grows with distance (imperceptible at distance)
+        float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
+        
         float3 p = rO + t * rD;
         float h = Map(p, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
         
+        // Hit detection
         if(h < threshold)
         {
-            dist = float2(oldT, t);
-            // Skip binary subdivision in low quality mode
-            if (quality > 0.5) {
-                t = BinarySubdivision(rO, rD, dist, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
-            }
+            // No binary subdivision needed - we're close enough
+            // The adaptive threshold ensures we don't overshoot significantly
             return float2(t, saturate(glow * 0.25));
         }
         
-        // Early out for far rays
-        if (t > 10.0) break;
+        // Early termination for rays going to infinity
+        if (t > 12.0) break;
         
-        glow += saturate(0.05 - h) * glowIntensity;
-        oldT = t;
-        // Adaptive stepping: larger steps when far from surface
-        t += h * stepMult + t * 0.002;
+        // Accumulate glow from near-misses
+        glow += saturate(0.04 - h) * glowIntensity;
+        
+        // === Enhanced Sphere Tracing with Over-Relaxation ===
+        // Key insight: If we're moving away from surfaces (h > prevH),
+        // we can safely step MORE than the SDF value suggests.
+        // If approaching (h < prevH), be more conservative.
+        
+        float stepSize;
+        if (h > prevH * 0.9) {
+            // Moving away or constant - use over-relaxation
+            // Can step up to omega * h safely (omega > 1)
+            stepSize = h * omega;
+        } else {
+            // Approaching surface - be conservative to avoid overshoot
+            // But still use some relaxation based on rate of approach
+            float approachRate = prevH / (prevH - h + 0.001);
+            stepSize = h * min(approachRate * 0.5, 1.2);
+        }
+        
+        // Minimum step to prevent getting stuck, maximum to prevent huge jumps
+        stepSize = clamp(stepSize, 0.001, 2.0);
+        
+        // Distance-proportional step bonus (safe because SDF scales with distance)
+        stepSize += t * 0.001;
+        
+        prevH = h;
+        t += stepSize;
     }
     
     return float2(1000.0, saturate(glow * 0.25));
@@ -245,25 +271,39 @@ half3 PostEffects(half3 rgb, half2 xy)
     return pow(rgb, half3(0.47h));
 }
 
-// Ultra-fast shadow approximation
+// Ultra-fast shadow with over-relaxation
 float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
 {
-    // Skip shadows entirely in low quality peripheral vision
-    if (quality < 0.3) return 0.7;
+    // Skip shadows in extreme periphery
+    if (quality < 0.25) return 0.65;
     
     float res = 1.0;
-    float t = 0.1;
+    float t = 0.08;
+    float prevH = 1e10;
     
-    // Adaptive steps: 1-3 based on quality
-    int steps = int(2.0 * quality) + 1;
+    // Very few steps with aggressive over-relaxation
+    int steps = int(quality * 2.0) + 1; // 1-3 steps
+    int reducedIters = max(iterations - 2, 2);
     
     for (int i = 0; i < steps; i++)
     {
-        float h = Map(ro + rd * t, minRad2Val, fractalScale, foldingLimit, sphereRadius, max(iterations - 2, 3));
-        res = min(res, 8.0 * h / t);
-        t += max(h, 0.1); // Minimum step to prevent slow convergence
-        if (res < 0.01) break; // Early out when in shadow
+        float h = Map(ro + rd * t, minRad2Val, fractalScale, foldingLimit, sphereRadius, reducedIters);
+        
+        // Soft shadow calculation
+        res = min(res, 10.0 * h / t);
+        
+        // Early exit if definitely in shadow
+        if (res < 0.02) return 0.0;
+        
+        // Over-relaxation: step more aggressively when safe
+        float step = (h > prevH * 0.8) ? h * 1.5 : h;
+        t += max(step, 0.15);
+        prevH = h;
+        
+        // Don't trace too far for shadows
+        if (t > 4.0) break;
     }
+    
     return saturate(res);
 }
 
