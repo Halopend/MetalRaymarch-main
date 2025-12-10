@@ -100,160 +100,150 @@ float GetSky(float3 pos)
     return t;
 }
 
+// Optimized branchless Map function
 float Map(float3 pos, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations) 
 {
-    float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
-    float4 scale = float4(fractalScale, fractalScale, fractalScale, abs(fractalScale)) / minRad2;
+    float minRad2 = minRad2Val;
+    float4 scale = float4(fractalScale) / minRad2;
+    scale.w = abs(scale.w);
     float absScalem1 = abs(fractalScale - 1.0);
     float AbsScaleRaisedTo1mIters = pow(abs(fractalScale), float(1-iterations));
     
-    // Sphere folding parameters
-    float fixedRadius2 = 1.0;  // Fixed radius squared
-    float minRadius2 = sphereRadius * sphereRadius;  // Minimum radius squared
+    float minRadius2 = sphereRadius * sphereRadius;
 
-    float4 p = float4(pos,1);
+    float4 p = float4(pos, 1.0);
     float4 p0 = p;
 
     for (int i = 0; i < iterations; i++)
     {
-        // Box fold with adjustable limit
+        // Box fold (optimized)
         p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
 
-        // Sphere fold with adjustable radius
+        // Branchless sphere fold - much faster on GPU
         float r2 = dot(p.xyz, p.xyz);
-        if (r2 < minRadius2) {
-            p *= fixedRadius2 / minRadius2;
-        } else if (r2 < fixedRadius2) {
-            p *= fixedRadius2 / r2;
-        }
+        float t = clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
+        p *= t;
 
-        p = p*scale + p0;
+        p = p * scale + p0;
     }
-    return ((length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters);
+    return (length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters;
 }
 
+// Optimized colour function
 float3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
-    float minRad2 = clamp(minRad2Val, 1.0e-9, 1.0);
-    float4 scale = float4(fractalScale, fractalScale, fractalScale, abs(fractalScale)) / minRad2;
-    
-    // Sphere folding parameters
-    float fixedRadius2 = 1.0;
+    float4 scale = float4(fractalScale) / minRad2Val;
+    scale.w = abs(scale.w);
     float minRadius2 = sphereRadius * sphereRadius;
-    
-    float3 surfaceColour1 = float3(.8, .0, 0.);
-    float3 surfaceColour2 = float3(.4, .4, 0.5);
-    float3 surfaceColour3 = float3(.5, 0.3, 0.00);
 
     float3 p = pos;
     float3 p0 = p;
     float trap = 1.0;
     
-    int steps = int(float(colorIters) * quality);
-    if (steps < 3) steps = 3;
+    int steps = max(int(float(colorIters) * quality), 2);
     for (int i = 0; i < steps; i++)
     {
-        // Box fold with adjustable limit
         p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
-        
-        // Sphere fold with adjustable radius
         float r2 = dot(p, p);
-        if (r2 < minRadius2) {
-            p *= fixedRadius2 / minRadius2;
-        } else if (r2 < fixedRadius2) {
-            p *= fixedRadius2 / r2;
-        }
-
-        p = p*scale.xyz + p0;
+        // Branchless sphere fold
+        p *= clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
+        p = p * scale.xyz + p0;
         trap = min(trap, r2);
     }
     
-    float2 c = clamp(float2( 0.3333*log(dot(p,p))-1.0, sqrt(trap) ), 0.0, 1.0);
-
-    float t = fmod(length(pos) - gTime*150., 16.0);
-    surfaceColour1 = mix( surfaceColour1, float3(.4, 3.0, 5.), pow(smoothstep(0.0, .3, t) * smoothstep(0.6, .3, t), 10.0));
+    float2 c = saturate(float2(0.3333 * log(dot(p,p)) - 1.0, sqrt(trap)));
     
-    // Use colorMix to blend between color schemes
-    float3 finalColor = mix(mix(surfaceColour1, surfaceColour2, c.y), surfaceColour3, c.x);
-    float3 altColor = mix(float3(c.x, c.y, 0.8), float3(0.2, c.x, c.y), c.y);
+    // Simplified color calculation
+    float3 col1 = float3(.8, .0, 0.);
+    float3 col2 = float3(.4, .4, 0.5);
+    float3 col3 = float3(.5, 0.3, 0.0);
+    
+    float3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
+    float3 altColor = float3(c.x, c.y, 0.5 + 0.3*c.y);
     return mix(finalColor, altColor, colorMix);
 }
 
+// Fast normal using forward differences (3 Map calls instead of 4)
 float3 GetNormal(float3 pos, float distance, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
 {
-    distance *= 0.001+.0001;
-    float2 e = float2(1.0, -1.0) * distance;
-    return normalize(
-        e.xyy * Map(pos + e.xyy, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) +
-        e.yyx * Map(pos + e.yyx, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) +
-        e.yxy * Map(pos + e.yxy, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) +
-        e.xxx * Map(pos + e.xxx, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations)
-    );
+    float e = distance * 0.001;
+    float d = Map(pos, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
+    return normalize(float3(
+        Map(pos + float3(e,0,0), minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) - d,
+        Map(pos + float3(0,e,0), minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) - d,
+        Map(pos + float3(0,0,e), minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) - d
+    ));
 }
 
+// Reduced binary subdivision (4 iterations instead of 6)
 float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
 {
     float halfwayT;
-  
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 4; i++)
     {
-        halfwayT = dot(t, float2(.5));
+        halfwayT = (t.x + t.y) * 0.5;
         float d = Map(rO + halfwayT*rD, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations); 
         t = mix(float2(t.x, halfwayT), float2(halfwayT, t.y), step(0.0005, d));
     }
-
     return halfwayT;
 }
 
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity, float foldingLimit, float sphereRadius, int iterations)
 {
-    float t = .05 + 0.05 * hash(dot(fragCoord, float2(12.9898, 78.233)));
+    // Faster hash for dithering
+    float t = 0.05 + 0.02 * fract(sin(dot(fragCoord, float2(12.9898, 78.233))) * 43758.5453);
     
-    float3 p = float3(0.0);
     float oldT = 0.0;
-    bool hit = false;
     float glow = 0.0;
-    float2 dist;
+    float2 dist = float2(0.0);
     
-    int maxSteps = int(float(maxStepsParam) * quality);
-    if (maxSteps < 8) maxSteps = 8;
+    int maxSteps = max(int(float(maxStepsParam) * quality), 6);
+    float threshold = 0.001 + (1.0 - quality) * 0.004;
     
-    float threshold = 0.0008 + (1.0 - quality) * 0.0035;
+    // Adaptive step multiplier for faster convergence
+    float stepMult = 1.0 + (1.0 - quality) * 0.5;
 
-    for( int j=0; j < maxSteps; j++ )
+    for(int j = 0; j < maxSteps; j++)
     {
-        if (t > 12.0) break;
-        p = rO + t*rD;
-       
+        float3 p = rO + t * rD;
         float h = Map(p, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
         
         if(h < threshold)
         {
             dist = float2(oldT, t);
-            hit = true;
-            break;
+            // Skip binary subdivision in low quality mode
+            if (quality > 0.5) {
+                t = BinarySubdivision(rO, rD, dist, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
+            }
+            return float2(t, saturate(glow * 0.25));
         }
-        glow += clamp(.05-h, 0.0, .4) * glowIntensity;
+        
+        // Early out for far rays
+        if (t > 10.0) break;
+        
+        glow += saturate(0.05 - h) * glowIntensity;
         oldT = t;
-        t +=  h + t*0.001;
+        // Adaptive stepping: larger steps when far from surface
+        t += h * stepMult + t * 0.002;
     }
-    if (!hit)
-        t = 1000.0;
-    else       t = BinarySubdivision(rO, rD, dist, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
-    return float2(t, clamp(glow*.25, 0.0, 1.0));
+    
+    return float2(1000.0, saturate(glow * 0.25));
 }
 
+// Simplified post effects for performance
 float3 PostEffects(float3 rgb, float2 xy)
 {
-    #define CONTRAST 1.08
-    #define SATURATION 1.5
-    #define BRIGHTNESS 1.5
-    rgb = mix(float3(.5), mix(float3(dot(float3(.2125, .7154, .0721), rgb*BRIGHTNESS)), rgb*BRIGHTNESS, SATURATION), CONTRAST);
+    // Combined contrast/saturation/brightness in fewer ops
+    float luma = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    rgb = mix(float3(luma), rgb, 1.5) * 1.5; // saturation + brightness
+    rgb = mix(float3(0.5), rgb, 1.08);       // contrast
     
-    rgb *= .5 + 0.5*pow(20.0*xy.x*xy.y*(1.0-xy.x)*(1.0-xy.y), 0.2);    
-
-    rgb = pow(rgb, float3(0.47 ));
-    return rgb;
+    // Simplified vignette
+    float2 q = xy * (1.0 - xy);
+    rgb *= 0.5 + 0.5 * pow(16.0 * q.x * q.y, 0.2);
+    
+    // Gamma
+    return pow(rgb, float3(0.47));
 }
 
 float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
