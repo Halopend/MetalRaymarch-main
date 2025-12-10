@@ -164,9 +164,9 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
     float2 dist;
     
     int maxSteps = int(64.0 * quality);
-    if (maxSteps < 32) maxSteps = 32;
+    if (maxSteps < 12) maxSteps = 12;
     
-    float threshold = 0.00025 + (1.0 - quality) * 0.001;
+    float threshold = 0.00055 + (1.0 - quality) * 0.0025;
 
     for( int j=0; j < maxSteps; j++ )
     {
@@ -266,8 +266,9 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     
     // Calculate quality based on distance from center (0.5, 0.5)
     float distFromCenter = length(in.texCoord - 0.5);
-    float edgeAtten = smoothstep(0.1, 0.6, distFromCenter);
-    float quality = mix(1.0, 0.65, edgeAtten);
+    // Aggressive foveation: narrow high-quality center, steep drop to periphery
+    float edgeAtten = smoothstep(0.08, 0.35, distFromCenter);
+    float quality = mix(1.0, 0.22, edgeAtten);
     
     float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance);
     
