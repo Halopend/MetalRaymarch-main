@@ -42,7 +42,14 @@ typedef struct
     matrix_float4x4 modelViewMatrix;
     float time;
     float minDistance;
-    vector_float2 foveaCenter;  // Normalized fovea center (0-1) for foveated rendering
+    vector_float2 foveaCenter;
+    float fractalScale;
+    int fractalIterations;
+    int maxRaySteps;
+    float foveationIntensity;
+    float colorMix;
+    float glowIntensity;
+    float padding;
 } Uniforms;
 
 typedef struct

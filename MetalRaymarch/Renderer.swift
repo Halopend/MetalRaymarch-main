@@ -331,7 +331,14 @@ actor Renderer {
                             modelViewMatrix: viewMatrix * modelMatrix,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
-                            foveaCenter: SIMD2<Float>(0.5, 0.5))
+                            foveaCenter: SIMD2<Float>(0.5, 0.5),
+                            fractalScale: settings.fractalScale,
+                            fractalIterations: Int32(settings.fractalIterations),
+                            maxRaySteps: Int32(settings.maxRaySteps),
+                            foveationIntensity: settings.foveationIntensity,
+                            colorMix: settings.colorMix,
+                            glowIntensity: settings.glowIntensity,
+                            padding: 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

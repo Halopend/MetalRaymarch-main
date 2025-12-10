@@ -32,6 +32,12 @@ class RenderSettings {
     private var _minDistance: Float = 0.05
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = .zero
+    private var _fractalScale: Float = 2.8
+    private var _fractalIterations: Int = 7
+    private var _maxRaySteps: Int = 64
+    private var _foveationIntensity: Float = 1.0
+    private var _colorMix: Float = 0.5
+    private var _glowIntensity: Float = 0.25
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -46,6 +52,36 @@ class RenderSettings {
     var position: SIMD3<Float> {
         get { lock.withLock { _position } }
         set { lock.withLock { _position = newValue } }
+    }
+    
+    var fractalScale: Float {
+        get { lock.withLock { _fractalScale } }
+        set { lock.withLock { _fractalScale = newValue } }
+    }
+    
+    var fractalIterations: Int {
+        get { lock.withLock { _fractalIterations } }
+        set { lock.withLock { _fractalIterations = newValue } }
+    }
+    
+    var maxRaySteps: Int {
+        get { lock.withLock { _maxRaySteps } }
+        set { lock.withLock { _maxRaySteps = newValue } }
+    }
+    
+    var foveationIntensity: Float {
+        get { lock.withLock { _foveationIntensity } }
+        set { lock.withLock { _foveationIntensity = newValue } }
+    }
+    
+    var colorMix: Float {
+        get { lock.withLock { _colorMix } }
+        set { lock.withLock { _colorMix = newValue } }
+    }
+    
+    var glowIntensity: Float {
+        get { lock.withLock { _glowIntensity } }
+        set { lock.withLock { _glowIntensity = newValue } }
     }
 }
 

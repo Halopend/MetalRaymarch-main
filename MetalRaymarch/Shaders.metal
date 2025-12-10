@@ -25,7 +25,13 @@ typedef struct
     float time;
     float3 modelPos;
     float minDistance;
-    float2 foveaCenter;  // Fovea center for quality falloff
+    float2 foveaCenter;
+    float fractalScale;
+    int fractalIterations;
+    int maxRaySteps;
+    float foveationIntensity;
+    float colorMix;
+    float glowIntensity;
 } ColorInOut;
 
 vertex ColorInOut vertexShader(Vertex in [[stage_in]],
@@ -44,6 +50,12 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     out.modelPos = in.position;
     out.minDistance = uniforms.minDistance;
     out.foveaCenter = uniforms.foveaCenter;
+    out.fractalScale = uniforms.fractalScale;
+    out.fractalIterations = uniforms.fractalIterations;
+    out.maxRaySteps = uniforms.maxRaySteps;
+    out.foveationIntensity = uniforms.foveationIntensity;
+    out.colorMix = uniforms.colorMix;
+    out.glowIntensity = uniforms.glowIntensity;
     
     return out;
 }
@@ -154,9 +166,8 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val)
     return halfwayT;
 }
 
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam)
 {
-    // Dithering using hash instead of texture
     float t = .05 + 0.05 * hash(dot(fragCoord, float2(12.9898, 78.233)));
     
     float3 p = float3(0.0);
@@ -165,8 +176,8 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
     float glow = 0.0;
     float2 dist;
     
-    int maxSteps = int(64.0 * quality);
-    if (maxSteps < 12) maxSteps = 12;
+    int maxSteps = int(float(maxStepsParam) * quality);
+    if (maxSteps < 8) maxSteps = 8;
     
     float threshold = 0.0008 + (1.0 - quality) * 0.0035;
 
@@ -266,18 +277,16 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53))*.2;
     float3 col = float3(0.0);
     
-    // Calculate quality based on distance from fovea center (eye-tracked or default center)
+    // Calculate quality based on distance from fovea center with adjustable intensity
     float2 foveaCenter = in.foveaCenter;
-    // Fallback to center if fovea not provided
     if (foveaCenter.x == 0.0 && foveaCenter.y == 0.0) {
         foveaCenter = float2(0.5, 0.5);
     }
     float distFromFovea = length(in.texCoord - foveaCenter);
-    // Aggressive foveation: tight high-quality fovea, rapid falloff
     float edgeAtten = smoothstep(0.05, 0.25, distFromFovea);
-    float quality = mix(1.0, 0.15, edgeAtten);
+    float quality = mix(1.0, 0.15, edgeAtten * in.foveationIntensity);
     
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps);
     
     if (ret.x < 900.0)
     {

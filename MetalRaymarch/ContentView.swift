@@ -34,6 +34,24 @@ struct ContentView: View {
                 
                 Text("Min Distance")
                 Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...1.0)
+                
+                Text("Fractal Scale")
+                Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
+                
+                Text("Fractal Iterations")
+                Slider(value: Binding(get: { Float(appModel.renderSettings.fractalIterations) }, set: { appModel.renderSettings.fractalIterations = Int($0) }), in: 3...15, step: 1)
+                
+                Text("Ray Steps")
+                Slider(value: Binding(get: { Float(appModel.renderSettings.maxRaySteps) }, set: { appModel.renderSettings.maxRaySteps = Int($0) }), in: 16...128, step: 8)
+                
+                Text("Foveation Intensity")
+                Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0.0...2.0)
+                
+                Text("Color Mix")
+                Slider(value: Binding(get: { appModel.renderSettings.colorMix }, set: { appModel.renderSettings.colorMix = $0 }), in: 0.0...1.0)
+                
+                Text("Glow Intensity")
+                Slider(value: Binding(get: { appModel.renderSettings.glowIntensity }, set: { appModel.renderSettings.glowIntensity = $0 }), in: 0.0...1.0)
 
                 Text("FPS: \(appModel.fps, specifier: "%.1f")")
                     .font(.caption)
