@@ -325,10 +325,12 @@ actor Renderer {
             let view = drawable.views[viewIndex]
             let viewMatrix = (simdDeviceAnchor * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
+            let inverseProjection = projection.inverse
             
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: viewMatrix * modelMatrix,
+                            inverseProjectionMatrix: inverseProjection,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
@@ -462,6 +464,9 @@ actor Renderer {
         renderEncoder.setDepthStencilState(depthState)
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        
+        // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
+        renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
         // Use original per-view viewports
         let viewports = drawable.views.map { $0.textureMap.viewport }

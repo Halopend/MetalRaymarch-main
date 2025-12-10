@@ -20,10 +20,17 @@ typedef struct
 
 typedef struct
 {
+    float4 color [[color(0)]];
+    float depth [[depth(any)]];
+} FragmentOutput;
+
+typedef struct
+{
     float4 position [[position]];
     float2 texCoord;
     float time;
     float3 modelPos;
+    float4 ndcPosition;
     float minDistance;
     float2 foveaCenter;
     float fractalScale;
@@ -44,6 +51,7 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     
     float4 position = float4(in.position, 1);
     out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
+    out.ndcPosition = out.position; // Store for depth calculation
     
     out.texCoord = in.texCoord;
     out.time = uniforms.time;
@@ -221,7 +229,7 @@ float3 PostEffects(float3 rgb, float2 xy)
     return rgb;
 }
 
-float Shadow(float3 ro, float3 rd, float quality, float minRad2Val)
+float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fractalScale)
 {
     float res = 1.0;
     float t = 0.05;
@@ -232,7 +240,7 @@ float Shadow(float3 ro, float3 rd, float quality, float minRad2Val)
     
     for (int i = 0; i < steps; i++)
     {
-        h = Map( ro + rd*t, minRad2Val );
+        h = Map( ro + rd*t, minRad2Val, fractalScale );
         res = min(6.0*h / t, res);
         t += h;
     }
@@ -265,9 +273,15 @@ float3 uvToDir(float2 uv) // uv: -1..1
     return float3(xz.x * cos(uvRad.y), sin(uvRad.y), xz.y * cos(uvRad.y));
 }
 
-fragment float4 fragmentShader(ColorInOut in [[stage_in]],
+fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
+                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                               ushort ampId [[amplification_id]],
                                texture2d<half> cubeMap [[texture(TextureIndexColor)]])
 {
+    FragmentOutput output;
+    
+    Uniforms uniforms = uniformsArray.uniforms[ampId];
+    
     float gTime = in.time * 0.01 + 15.00; // Adjusted time scale
     
     float3 cameraPos = CameraPath(gTime);
@@ -292,17 +306,31 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     
     float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity);
     
-    if (ret.x < 900.0)
-    {
-        float3 p = cameraPos + ret.x*rd; 
+    // Calculate proper depth for visionOS reprojection
+    float rayDistance = ret.x;
+    float depth = 0.0; // Default to far plane for background
+    
+    if (rayDistance < 900.0) {
+        // Convert ray distance to world space position
+        float3 worldPos = cameraPos + rayDistance * rd;
+        
+        // Transform to view space then to NDC
+        float4 viewPos = uniforms.modelViewMatrix * float4(worldPos, 1.0);
+        float4 clipPos = uniforms.projectionMatrix * viewPos;
+        
+        // Convert to depth value [0,1] for visionOS
+        depth = clipPos.z / clipPos.w;
+        
+        // Calculate lighting
+        float3 p = worldPos; 
         float3 nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale);
         
         float3 spot = spotLight - p;
         float atten = length(spot);
 
         spot /= atten;
-        float shaSpot = Shadow(p, spot, quality, in.minDistance);
-        float shaSun = Shadow(p, sunDir, quality, in.minDistance);
+        float shaSpot = Shadow(p, spot, quality, in.minDistance, in.fractalScale);
+        float shaSun = Shadow(p, sunDir, quality, in.minDistance, in.fractalScale);
         
         float bri = max(dot(spot, nor), 0.0) / pow(atten, 1.5) * .25;
         float briSun = max(dot(sunDir, nor), 0.0) * .2;
@@ -328,5 +356,8 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
     
     col = PostEffects(col, in.texCoord);    
 
-    return float4(col, 1.0);
+    output.color = float4(col, 1.0);
+    output.depth = depth;
+    
+    return output;
 }
