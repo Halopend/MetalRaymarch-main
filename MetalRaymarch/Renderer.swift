@@ -66,7 +66,6 @@ actor Renderer {
     var hasLoggedWorldTrackingWarning = false
 
     let isFoveationEnabled: Bool
-    var customRasterizationRateMap: MTLRasterizationRateMap?
 
     // Pose smoothing
     var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
@@ -93,7 +92,6 @@ actor Renderer {
         self.commandQueue = self.device.makeCommandQueue()!
         self.appModel = appModel
         self.isFoveationEnabled = layerRenderer.configuration.isFoveationEnabled
-        self.customRasterizationRateMap = nil // Will be created on first drawable
 
         let device = self.device
         if device.supports32BitMSAA && device.supportsTextureSampleCount(4) {
@@ -437,10 +435,16 @@ actor Renderer {
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
         renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        // Use system-provided foveation map when available, keep original viewports
+        // Use system-provided gaze-tracked foveation map only
+        // visionOS rate maps automatically follow eye gaze for optimal quality
         if let systemMap = drawable.rasterizationRateMaps.first {
             renderPassDescriptor.rasterizationRateMap = systemMap
+            if !hasLoggedFoveationAvailability {
+                print("✓ Using system gaze-tracked rasterization rate map")
+                hasLoggedFoveationAvailability = true
+            }
         } else {
+            // No fallback - run at full resolution without rate maps
             renderPassDescriptor.rasterizationRateMap = nil
         }
         if layerRenderer.configuration.layout == .layered {
@@ -596,30 +600,4 @@ func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_floa
     return mat
 }
 
-// Build a custom aggressive rasterization rate map with foveal zones
-func buildCustomRasterizationRateMap(device: MTLDevice, screenSize: Int, drawable: LayerRenderer.Drawable) -> MTLRasterizationRateMap? {
-    guard device.supportsRasterizationRateMap(layerCount: drawable.views.count) else {
-        print("Device does not support rasterization rate maps with \(drawable.views.count) layers")
-        return nil
-    }
-    
-    let width = drawable.colorTextures[0].width
-    let height = drawable.colorTextures[0].height
-    let layerCount = drawable.views.count
-    
-    let descriptor = MTLRasterizationRateMapDescriptor()
-    descriptor.screenSize = MTLSize(width: width, height: height, depth: 1)
-    
-    // Aggressive foveation: center at full rate, rapid falloff to edges
-    // Horizontal zones (9 zones): center high, edges low
-    let horizontalRates: [Float] = [0.15, 0.25, 0.4, 0.65, 1.0, 0.65, 0.4, 0.25, 0.15]
-    // Vertical zones (7 zones): center high, edges low
-    let verticalRates: [Float] = [0.2, 0.35, 0.6, 1.0, 0.6, 0.35, 0.2]
-    
-    for layer in 0..<layerCount {
-        let layerDescriptor = MTLRasterizationRateLayerDescriptor(horizontal: horizontalRates, vertical: verticalRates)
-        descriptor.setLayer(layerDescriptor, at: layer)
-    }
-    
-    return device.makeRasterizationRateMap(descriptor: descriptor)
-}
+

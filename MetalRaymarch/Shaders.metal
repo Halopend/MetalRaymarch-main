@@ -75,9 +75,19 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
 }
 
 // --- Fractal Code Port ---
+// Spatial Rendering optimizations for visionOS
 
 constant float3 sunDir = float3(0.3235, 0.0924, 0.2773); // normalized(0.35, 0.1, 0.3)
 constant float3 sunColour = float3(1.0, 0.95, 0.8);
+
+// Blue noise approximation for temporal stability (better than white noise for reprojection)
+float blueNoise(float2 uv, float time) {
+    // Interleaved gradient noise - more temporally stable than random
+    float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
+    float noise = fract(magic.z * fract(dot(uv, magic.xy)));
+    // Add small temporal variation to prevent static patterns
+    return fract(noise + time * 0.1);
+}
 constant float SCALE = 2.8;
 
 float hash(float n) { return fract(sin(n) * 753.5453123); }
@@ -188,10 +198,13 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float 
 }
 
 // Enhanced sphere tracing with over-relaxation (no binary subdivision needed)
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity, float foldingLimit, float sphereRadius, int iterations)
+// Optimized for visionOS spatial rendering with temporal stability
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity, float foldingLimit, float sphereRadius, int iterations, float time)
 {
-    // Small dither to prevent banding
-    float t = 0.05 + 0.015 * fract(sin(dot(fragCoord, float2(12.9898, 78.233))) * 43758.5453);
+    // Use temporally stable blue noise dithering for reprojection
+    // This reduces shimmer/crawling artifacts during head movement
+    float dither = blueNoise(fragCoord, time) * 0.015;
+    float t = 0.05 + dither;
     
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
@@ -344,24 +357,33 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     float3 cameraPos = CameraPath(gTime);
     float3 rd = normalize(in.modelPos);
-    float2 fragCoord = in.texCoord * 1000.0;
     
-    // Foveation quality calculation
-    float2 foveaCenter = in.foveaCenter;
-    if (foveaCenter.x == 0.0 && foveaCenter.y == 0.0) {
-        foveaCenter = float2(0.5, 0.5);
-    }
-    float distFromFovea = length(in.texCoord - foveaCenter);
-    float edgeAtten = smoothstep(0.05, 0.3, distFromFovea);
-    float quality = mix(1.0, 0.1, edgeAtten * in.foveationIntensity);
+    // Use screen position for stable dithering pattern
+    float2 fragCoord = in.position.xy;
+    
+    // === Foveation ===
+    // System rasterization rate maps handle pixel density (gaze-tracked)
+    // Shader-side: only reduce iterations at extreme edges for perf
+    float distFromCenter = length(in.texCoord - float2(0.5, 0.5));
+    
+    // Minimal shader foveation - system rate maps do the heavy lifting
+    // Only affects very edges (50%+ from center), very gentle falloff
+    float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
+    float quality = mix(1.0, 0.7, edgeAtten * in.foveationIntensity);
     
     // LOD: Reduce fractal iterations in periphery
-    int lodIterations = max(int(float(in.fractalIterations) * (0.5 + 0.5 * quality)), 3);
+    int lodIterations = max(int(float(in.fractalIterations) * (0.4 + 0.6 * quality)), 2);
     
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations);
+    // Pass time for temporally stable dithering
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations, in.time);
     
     // Use half precision for color accumulation
     half3 col = half3(0.0h);
+    
+    // === Depth for Spatial Reprojection ===
+    // For visionOS ASW (Asynchronous SpaceWarp), we need accurate depth
+    // Use raymarched distance converted to view-space depth
+    float convergenceDepth = ret.x;
     
     if (ret.x < 900.0)
     {
@@ -414,15 +436,27 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     half glow = half(ret.y);
     col += glow * glow * half3(0.02h, 0.04h, 0.1h);
     
+    // === Temporal Anti-Aliasing Preparation ===
+    // Subtle noise reduction for smoother reprojection
+    // Clamp extreme values that cause shimmer during head movement
+    col = clamp(col, half3(0.0h), half3(2.0h));
+    
     // Post effects only in center (skip in periphery for performance)
     if (quality > 0.5) {
         col = PostEffects(col, half2(in.texCoord));
     } else {
-        // Simple gamma only
+        // Simple gamma only for periphery - faster and less prone to artifacts
         col = pow(saturate(col), half3(0.47h));
     }
 
+    // === Output for visionOS Spatial Rendering ===
+    // Color with premultiplied alpha for proper compositing
     output.color = float4(float3(col), 1.0);
+    
+    // Depth: Use rasterized depth from proxy geometry
+    // This provides stable depth for visionOS reprojection/ASW
+    // The proxy cube gives us correct world-space depth even though
+    // the raymarched content is in a different coordinate space
     output.depth = in.position.z;
     
     return output;

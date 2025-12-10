@@ -35,7 +35,7 @@ class RenderSettings {
     private var _fractalScale: Float = 2.8
     private var _fractalIterations: Int = 5         // Lower = faster (was 7)
     private var _maxRaySteps: Int = 48              // Lower = faster (was 64)
-    private var _foveationIntensity: Float = 1.5    // Higher = more aggressive foveation
+    private var _foveationIntensity: Float = 1.0    // Gentle shader-side foveation (rate maps handle gaze tracking)
     private var _colorMix: Float = 0.5
     private var _glowIntensity: Float = 0.2
     private var _foldingLimit: Float = 1.0
