@@ -29,7 +29,7 @@ class AppModel {
 
 class RenderSettings {
     private let lock = NSLock()
-    private var _minDistance: Float = 0.1           // Higher = faster (was 0.05)
+    private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = .zero
     private var _fractalScale: Float = 2.8
@@ -40,7 +40,8 @@ class RenderSettings {
     private var _glowIntensity: Float = 0.2
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
-    private var _colorIterations: Float = 3.0       // Lower = faster (was 5)
+    private var _colorIterations: Float = 10.0      // 80% of max (12) for quality
+    private var _resolutionScale: Float = 0.5       // MetalFX upscaling: 0.25 (25%) to 1.0 (100%)
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -100,6 +101,11 @@ class RenderSettings {
     var colorIterations: Float {
         get { lock.withLock { _colorIterations } }
         set { lock.withLock { _colorIterations = newValue } }
+    }
+    
+    var resolutionScale: Float {
+        get { lock.withLock { _resolutionScale } }
+        set { lock.withLock { _resolutionScale = max(0.25, min(1.0, newValue)) } }
     }
 }
 

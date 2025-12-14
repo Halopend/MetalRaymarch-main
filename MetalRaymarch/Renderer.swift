@@ -8,6 +8,9 @@
 import CompositorServices
 import Metal
 import MetalKit
+#if canImport(MetalFX)
+import MetalFX
+#endif
 import simd
 import Spatial
 
@@ -48,6 +51,7 @@ actor Renderer {
     let commandQueue: MTLCommandQueue
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
+    var metalFXPipelineState: MTLRenderPipelineState?  // Pipeline for rgba16Float when using MetalFX
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
 
@@ -86,6 +90,11 @@ actor Renderer {
     let layerRenderer: LayerRenderer
     let appModel: AppModel
 
+    #if canImport(MetalFX)
+    private var metalFXManager: MetalFXManager?
+    // MetalFX is permanently enabled - resolution controlled via appModel.renderSettings.resolutionScale
+    #endif
+
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
@@ -121,6 +130,20 @@ actor Renderer {
         } catch {
             fatalError("Unable to compile render pipeline state.  Error info: \(error)")
         }
+
+        // Build MetalFX pipeline with rgba16Float format
+        #if canImport(MetalFX)
+        do {
+            metalFXPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
+                                                                              layerRenderer: layerRenderer,
+                                                                              rasterSampleCount: 1,
+                                                                              mtlVertexDescriptor: mtlVertexDescriptor,
+                                                                              colorFormat: .rgba16Float)
+        } catch {
+            print("⚠️ Unable to compile MetalFX pipeline: \(error)")
+            metalFXPipelineState = nil
+        }
+        #endif
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.greater
@@ -188,7 +211,8 @@ actor Renderer {
     static func buildRenderPipelineWithDevice(device: MTLDevice,
                                               layerRenderer: LayerRenderer,
                                               rasterSampleCount: Int,
-                                              mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
+                                              mtlVertexDescriptor: MTLVertexDescriptor,
+                                              colorFormat: MTLPixelFormat? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object
 
         let library = device.makeDefaultLibrary()
@@ -203,7 +227,7 @@ actor Renderer {
         pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
         pipelineDescriptor.rasterSampleCount = rasterSampleCount
 
-        pipelineDescriptor.colorAttachments[0].pixelFormat = layerRenderer.configuration.colorFormat
+        pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat ?? layerRenderer.configuration.colorFormat
         pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
 
         pipelineDescriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
@@ -410,45 +434,24 @@ actor Renderer {
 
         self.updateDynamicBufferState()
 
+        #if canImport(MetalFX)
+        let upscalingEnabled = configureMetalFXIfNeeded(for: drawable)
+        #else
+        let upscalingEnabled = false
+        #endif
+
         self.updateGameState(drawable: drawable, deviceAnchor: deviceAnchor)
 
         let renderPassDescriptor = MTLRenderPassDescriptor()
+        configureRenderTargets(renderPassDescriptor: renderPassDescriptor,
+                               drawable: drawable,
+                               useUpscaling: upscalingEnabled)
 
-        if rasterSampleCount > 1 {
-            let renderTargets = memorylessRenderTargets(drawable: drawable)
-            renderPassDescriptor.colorAttachments[0].resolveTexture = drawable.colorTextures[0]
-            renderPassDescriptor.colorAttachments[0].texture = renderTargets.color
-            renderPassDescriptor.depthAttachment.resolveTexture = drawable.depthTextures[0]
-            renderPassDescriptor.depthAttachment.texture = renderTargets.depth
-
-            renderPassDescriptor.colorAttachments[0].storeAction = .multisampleResolve
-            renderPassDescriptor.depthAttachment.storeAction = .multisampleResolve
-        } else {
-            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
-
-            renderPassDescriptor.colorAttachments[0].storeAction = .store
-            renderPassDescriptor.depthAttachment.storeAction = .store
-        }
-
-        renderPassDescriptor.colorAttachments[0].loadAction = .clear
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
-        renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.clearDepth = 0.0
-        // Use system-provided gaze-tracked foveation map only
-        // visionOS rate maps automatically follow eye gaze for optimal quality
-        if let systemMap = drawable.rasterizationRateMaps.first {
-            renderPassDescriptor.rasterizationRateMap = systemMap
-            if !hasLoggedFoveationAvailability {
-                print("✓ Using system gaze-tracked rasterization rate map")
-                hasLoggedFoveationAvailability = true
-            }
-        } else {
-            // No fallback - run at full resolution without rate maps
-            renderPassDescriptor.rasterizationRateMap = nil
-        }
-        if layerRenderer.configuration.layout == .layered {
-            renderPassDescriptor.renderTargetArrayLength = drawable.views.count
+        // Final safety: ensure the color attachment we configured is renderable
+        if let tex = renderPassDescriptor.colorAttachments[0].texture,
+           !tex.usage.contains(.renderTarget) {
+            print("⚠️ Color attachment lacks renderTarget usage (usage=\(tex.usage.rawValue)). Falling back to direct rendering.")
+            configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
         }
 
         /// Final pass rendering code here
@@ -465,7 +468,16 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
+        // Use MetalFX pipeline when upscaling (rgba16Float), otherwise use standard pipeline
+        #if canImport(MetalFX)
+        if upscalingEnabled, let fxPipeline = metalFXPipelineState {
+            renderEncoder.setRenderPipelineState(fxPipeline)
+        } else {
+            renderEncoder.setRenderPipelineState(pipelineState)
+        }
+        #else
         renderEncoder.setRenderPipelineState(pipelineState)
+        #endif
 
         renderEncoder.setDepthStencilState(depthState)
 
@@ -474,8 +486,8 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // Use original per-view viewports
-        let viewports = drawable.views.map { $0.textureMap.viewport }
+        // Use scaled per-view viewports when upscaling
+        let viewports = scaledViewports(for: drawable, useUpscaling: upscalingEnabled)
 
         renderEncoder.setViewports(viewports)
 
@@ -512,6 +524,12 @@ actor Renderer {
 
         renderEncoder.endEncoding()
 
+        #if canImport(MetalFX)
+        if upscalingEnabled {
+            encodeMetalFX(commandBuffer: commandBuffer, drawable: drawable)
+        }
+        #endif
+
         drawable.encodePresent(commandBuffer: commandBuffer)
 
         commandBuffer.commit()
@@ -546,6 +564,224 @@ actor Renderer {
         }
     }
 }
+
+#if canImport(MetalFX)
+private extension Renderer {
+    func configureMetalFXIfNeeded(for drawable: LayerRenderer.Drawable) -> Bool {
+        // MetalFX is permanently enabled - always use neural upscaling
+        
+        // Need the MetalFX pipeline to render to rgba16Float
+        guard metalFXPipelineState != nil else { return false }
+        
+        // MetalFX is available on-device; gate by a conservative GPU family check.
+        if !(device.supportsFamily(.apple7) || device.supportsFamily(.metal3)) {
+            return false
+        }
+        
+        // Get resolution scale from settings (0.25 to 1.0)
+        let metalFXScale = appModel.renderSettings.resolutionScale
+
+        let outputTexture = drawable.colorTextures[0]
+        let outputWidth = outputTexture.width
+        let outputHeight = outputTexture.height
+        let inputWidth = max(1, Int(Float(outputWidth) * metalFXScale))
+        let inputHeight = max(1, Int(Float(outputHeight) * metalFXScale))
+
+        // MetalFX requires rgba16Float for spatial scaling
+        let config = MetalFXManager.Configuration(
+            inputWidth: inputWidth,
+            inputHeight: inputHeight,
+            outputWidth: outputWidth,
+            outputHeight: outputHeight,
+            colorFormat: .rgba16Float,
+            depthFormat: layerRenderer.configuration.depthFormat,
+            scale: metalFXScale
+        )
+
+        do {
+            if let manager = metalFXManager {
+                try manager.update(configuration: config, viewCount: drawable.views.count)
+            } else {
+                metalFXManager = try MetalFXManager(device: device, configuration: config, viewCount: drawable.views.count)
+                print("✓ MetalFX manager created - input texture usage: \(metalFXManager?.inputTexture?.usage.rawValue ?? 0)")
+            }
+            
+            // Double-check the input texture has correct usage
+            if let inputTex = metalFXManager?.inputTexture {
+                if !inputTex.usage.contains(.renderTarget) {
+                    print("⚠️ MetalFX input texture created without renderTarget usage!")
+                    metalFXManager = nil
+                    return false
+                }
+            }
+            
+            return metalFXManager?.inputTexture != nil
+        } catch {
+            print("⚠️ MetalFX configuration failed: \(error)")
+            metalFXManager = nil
+            return false
+        }
+    }
+
+    func configureRenderTargets(renderPassDescriptor: MTLRenderPassDescriptor,
+                                drawable: LayerRenderer.Drawable,
+                                useUpscaling: Bool) {
+        if useUpscaling, let fx = metalFXManager, let inputTex = fx.inputTexture {
+            // Verify texture has render target usage
+            guard inputTex.usage.contains(.renderTarget) else {
+                print("⚠️ MetalFX input texture missing renderTarget usage! Falling back to direct rendering.")
+                configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+                return
+            }
+            
+            renderPassDescriptor.colorAttachments[0].texture = inputTex
+            renderPassDescriptor.colorAttachments[0].loadAction = .clear
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+
+            renderPassDescriptor.depthAttachment.texture = fx.depthTexture
+            renderPassDescriptor.depthAttachment.loadAction = .clear
+            renderPassDescriptor.depthAttachment.storeAction = .dontCare
+            renderPassDescriptor.depthAttachment.clearDepth = 0.0
+
+            renderPassDescriptor.rasterizationRateMap = nil
+            renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
+        } else {
+            configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+        }
+    }
+    
+    func configureDirectRenderTargets(renderPassDescriptor: MTLRenderPassDescriptor, drawable: LayerRenderer.Drawable) {
+        if rasterSampleCount > 1 {
+            let renderTargets = memorylessRenderTargets(drawable: drawable)
+            renderPassDescriptor.colorAttachments[0].resolveTexture = drawable.colorTextures[0]
+            renderPassDescriptor.colorAttachments[0].texture = renderTargets.color
+            renderPassDescriptor.depthAttachment.resolveTexture = drawable.depthTextures[0]
+            renderPassDescriptor.depthAttachment.texture = renderTargets.depth
+
+            renderPassDescriptor.colorAttachments[0].storeAction = .multisampleResolve
+            renderPassDescriptor.depthAttachment.storeAction = .multisampleResolve
+        } else {
+            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
+            renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
+
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            renderPassDescriptor.depthAttachment.storeAction = .store
+        }
+
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+        renderPassDescriptor.depthAttachment.loadAction = .clear
+        renderPassDescriptor.depthAttachment.clearDepth = 0.0
+
+        if let systemMap = drawable.rasterizationRateMaps.first {
+            renderPassDescriptor.rasterizationRateMap = systemMap
+            if !hasLoggedFoveationAvailability {
+                print("✓ Using system gaze-tracked rasterization rate map")
+                hasLoggedFoveationAvailability = true
+            }
+        } else {
+            renderPassDescriptor.rasterizationRateMap = nil
+        }
+        if layerRenderer.configuration.layout == .layered {
+            renderPassDescriptor.renderTargetArrayLength = drawable.views.count
+        }
+    }
+
+    func scaledViewports(for drawable: LayerRenderer.Drawable, useUpscaling: Bool) -> [MTLViewport] {
+        guard useUpscaling, let scale = metalFXManager?.configuration.scale else {
+            return drawable.views.map { $0.textureMap.viewport }
+        }
+        let factor = Double(scale)
+        return drawable.views.map { view in
+            var viewport = view.textureMap.viewport
+            viewport.originX *= factor
+            viewport.originY *= factor
+            viewport.width *= factor
+            viewport.height *= factor
+            return viewport
+        }
+    }
+
+    func encodeMetalFX(commandBuffer: MTLCommandBuffer, drawable: LayerRenderer.Drawable) {
+        guard let fx = metalFXManager, let output = fx.outputTexture else { return }
+
+        do {
+            try fx.encodeSpatialUpscale(commandBuffer: commandBuffer)
+        } catch {
+            print("⚠️ MetalFX upscale failed: \(error)")
+            return
+        }
+
+        guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
+        let views = min(drawable.views.count, output.arrayLength)
+        for eye in 0..<views {
+            let destinationTexture = eye < drawable.colorTextures.count ? drawable.colorTextures[eye] : drawable.colorTextures[0]
+            let destinationSlice = destinationTexture.arrayLength > 1 ? eye : 0
+            let size = MTLSize(width: output.width, height: output.height, depth: 1)
+            blit.copy(from: output,
+                      sourceSlice: eye,
+                      sourceLevel: 0,
+                      sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                      sourceSize: size,
+                      to: destinationTexture,
+                      destinationSlice: destinationSlice,
+                      destinationLevel: 0,
+                      destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        }
+        blit.endEncoding()
+    }
+}
+#else
+private extension Renderer {
+    func configureMetalFXIfNeeded(for _: LayerRenderer.Drawable) -> Bool {
+        return false
+    }
+
+    func configureRenderTargets(renderPassDescriptor: MTLRenderPassDescriptor,
+                                drawable: LayerRenderer.Drawable,
+                                useUpscaling: Bool) {
+        if rasterSampleCount > 1 {
+            let renderTargets = memorylessRenderTargets(drawable: drawable)
+            renderPassDescriptor.colorAttachments[0].resolveTexture = drawable.colorTextures[0]
+            renderPassDescriptor.colorAttachments[0].texture = renderTargets.color
+            renderPassDescriptor.depthAttachment.resolveTexture = drawable.depthTextures[0]
+            renderPassDescriptor.depthAttachment.texture = renderTargets.depth
+
+            renderPassDescriptor.colorAttachments[0].storeAction = .multisampleResolve
+            renderPassDescriptor.depthAttachment.storeAction = .multisampleResolve
+        } else {
+            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
+            renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
+
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            renderPassDescriptor.depthAttachment.storeAction = .store
+        }
+
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+        renderPassDescriptor.depthAttachment.loadAction = .clear
+        renderPassDescriptor.depthAttachment.clearDepth = 0.0
+
+        if let systemMap = drawable.rasterizationRateMaps.first {
+            renderPassDescriptor.rasterizationRateMap = systemMap
+            if !hasLoggedFoveationAvailability {
+                print("✓ Using system gaze-tracked rasterization rate map")
+                hasLoggedFoveationAvailability = true
+            }
+        } else {
+            renderPassDescriptor.rasterizationRateMap = nil
+        }
+        if layerRenderer.configuration.layout == .layered {
+            renderPassDescriptor.renderTargetArrayLength = drawable.views.count
+        }
+    }
+
+    func scaledViewports(for drawable: LayerRenderer.Drawable, useUpscaling _: Bool) -> [MTLViewport] {
+        return drawable.views.map { $0.textureMap.viewport }
+    }
+}
+#endif
 
 // Generic matrix math utility functions
 func matrix4x4_rotation(radians: Float, axis: SIMD3<Float>) -> matrix_float4x4 {

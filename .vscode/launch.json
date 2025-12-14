@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MetalRaymarch-main}/FractalBench",
+            "name": "Debug fractalbench (FractalBench)",
+            "target": "fractalbench",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug fractalbench (FractalBench)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MetalRaymarch-main}/FractalBench",
+            "name": "Release fractalbench (FractalBench)",
+            "target": "fractalbench",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release fractalbench (FractalBench)"
+        }
+    ]
+}
