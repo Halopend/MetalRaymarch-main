@@ -461,3 +461,52 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     return output;
 }
+
+// === Format Conversion Shaders for MetalFX ===
+// Used to convert rgba16Float MetalFX output to drawable format
+
+struct FormatConversionVertex {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+// Full-screen triangle vertex shader - generates vertices procedurally
+vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]) {
+    FormatConversionVertex out;
+    
+    // Generate full-screen triangle covering clip space
+    // Uses oversized triangle technique: one triangle covers entire screen
+    // vertexID 0: (-1, -1), vertexID 1: (3, -1), vertexID 2: (-1, 3)
+    float2 positions[3] = {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0)
+    };
+    
+    // UV coordinates mapped from clip space position
+    // x: [-1,1] -> [0,1], y: [-1,1] -> [0,1] (no flip needed, Metal textures are top-left origin)
+    float2 texCoords[3] = {
+        float2(0.0, 1.0),   // bottom-left in clip -> (0, 1) in UV
+        float2(2.0, 1.0),   // extends past right edge
+        float2(0.0, -1.0)   // extends past top edge
+    };
+    
+    out.position = float4(positions[vertexID], 0.0, 1.0);
+    out.texCoord = texCoords[vertexID];
+    
+    return out;
+}
+
+// Simple passthrough fragment shader with format conversion
+fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
+                                          texture2d<float> sourceTexture [[texture(0)]]) {
+    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+                                      address::clamp_to_edge);
+    
+    // Clamp UV to valid range for safety
+    float2 uv = clamp(in.texCoord, float2(0.0), float2(1.0));
+    float4 color = sourceTexture.sample(textureSampler, uv);
+    
+    // Clamp to valid range and ensure alpha is 1 for proper visionOS compositing
+    return float4(saturate(color.rgb), 1.0);
+}

@@ -24,6 +24,10 @@ class AppModel {
     
     nonisolated let renderSettings = RenderSettings()
     
+    // MetalFX / spatial upscaling state exposed for UI/debugging
+    var metalFXAvailable: Bool = false
+    var metalFXStatus: String = "Unknown"
+    
     nonisolated let clock = AppClock()
 }
 

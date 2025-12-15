@@ -128,7 +128,7 @@ final class MetalFXManager {
         depth.label = "MetalFX Depth"
         depthTexture = depth
 
-        // Output (upscaled)
+        // Output (upscaled) - needs renderTarget for potential use in render passes
         let outputDescriptor = MTLTextureDescriptor()
         outputDescriptor.textureType = .type2DArray
         outputDescriptor.arrayLength = viewCount
@@ -136,7 +136,7 @@ final class MetalFXManager {
         outputDescriptor.height = configuration.outputHeight
         outputDescriptor.pixelFormat = configuration.colorFormat
         outputDescriptor.storageMode = .private
-        outputDescriptor.usage = [.shaderRead, .shaderWrite]
+        outputDescriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
 
         guard let output = device.makeTexture(descriptor: outputDescriptor) else {
             throw Error.textureCreationFailed("output")

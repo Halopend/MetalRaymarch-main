@@ -98,6 +98,8 @@ actor Renderer {
 
     #if canImport(MetalFX)
     private var metalFXManager: MetalFXManager?
+    private var formatConversionPipeline: MTLRenderPipelineState?
+    private var formatConversionTexture: MTLTexture?  // Intermediate texture with renderTarget usage
     // MetalFX is permanently enabled - resolution controlled via appModel.renderSettings.resolutionScale
     #endif
 
@@ -534,8 +536,27 @@ actor Renderer {
         // Final safety: ensure the color attachment we configured is renderable
         if let tex = renderPassDescriptor.colorAttachments[0].texture {
             if !tex.usage.contains(.renderTarget) {
-                print("⚠️ Color attachment lacks renderTarget usage (usage=\(tex.usage.rawValue)). Falling back to direct rendering.")
-                configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+                print("⚠️ Color attachment lacks renderTarget usage (usage=\(tex.usage.rawValue)). Using intermediate render target instead.")
+                // Create an intermediate texture with renderTarget usage matching the configured attachment
+                if let intermediate = getOrCreateFormatConversionTexture(width: tex.width,
+                                                                         height: tex.height,
+                                                                         format: tex.pixelFormat,
+                                                                         arrayLength: tex.arrayLength > 0 ? tex.arrayLength : drawable.views.count) {
+                    renderPassDescriptor.colorAttachments[0].texture = intermediate
+                    renderPassDescriptor.colorAttachments[0].storeAction = .store
+                    // Keep depth attachment as-is if valid; else try to attach drawable depth if available
+                    if renderPassDescriptor.depthAttachment.texture == nil {
+                        if let depth = drawable.depthTextures.first {
+                            renderPassDescriptor.depthAttachment.texture = depth
+                            renderPassDescriptor.depthAttachment.loadAction = .clear
+                            renderPassDescriptor.depthAttachment.storeAction = .store
+                        }
+                    }
+                } else {
+                    print("⚠️ Unable to create intermediate render target; skipping frame")
+                    inFlightSemaphore.signal()
+                    return
+                }
             } else {
                 // print("DEBUG: Render target usage OK: \(tex.usage.rawValue)")
             }
@@ -588,7 +609,7 @@ actor Renderer {
 
         for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
             guard let layout = element as? MDLVertexBufferLayout else {
-                return
+                continue
             }
 
             if layout.stride != 0 {
@@ -658,10 +679,23 @@ private extension Renderer {
         // MetalFX is permanently enabled - always use neural upscaling
         
         // Need the MetalFX pipeline to render to rgba16Float
-        guard metalFXPipelineState != nil else { return false }
+        guard metalFXPipelineState != nil else {
+            Task { @MainActor in
+                appModel.metalFXAvailable = false
+                appModel.metalFXStatus = "MetalFX pipeline not available"
+            }
+            print("⚠️ MetalFX pipeline not available (rgba16Float pipeline missing)")
+            return false
+        }
         
         // MetalFX is available on-device; gate by a conservative GPU family check.
-        if !(device.supportsFamily(.apple7) || device.supportsFamily(.metal3)) {
+        let hasFamilySupport = device.supportsFamily(.apple7) || device.supportsFamily(.metal3)
+        if !hasFamilySupport {
+            Task { @MainActor in
+                appModel.metalFXAvailable = false
+                appModel.metalFXStatus = "GPU family not supported for MetalFX"
+            }
+            print("⚠️ MetalFX unsupported on device: family check failed (apple7 or metal3 required). Device: \(device.name)")
             return false
         }
         
@@ -696,16 +730,39 @@ private extension Renderer {
             // Double-check the input texture has correct usage
             if let inputTex = metalFXManager?.inputTexture {
                 if !inputTex.usage.contains(.renderTarget) {
-                    print("⚠️ MetalFX input texture created without renderTarget usage!")
+                    print("⚠️ MetalFX input texture created without renderTarget usage! Usage: \(inputTex.usage.rawValue)")
+                    Task { @MainActor in
+                        appModel.metalFXAvailable = false
+                        appModel.metalFXStatus = "Input texture missing renderTarget usage (usage=\(inputTex.usage.rawValue))"
+                    }
                     metalFXManager = nil
                     return false
                 }
             }
             
-            return metalFXManager?.inputTexture != nil
+            // Log format info for debugging
+            if let output = metalFXManager?.outputTexture {
+                let drawableFormat = drawable.colorTextures[0].pixelFormat
+                let outputFormat = output.pixelFormat
+                if drawableFormat != outputFormat {
+                    print("ℹ️ MetalFX format conversion needed: output=\(outputFormat.rawValue) → drawable=\(drawableFormat.rawValue)")
+                }
+            }
+            
+            let available = (metalFXManager?.inputTexture != nil)
+            let status = available ? "MetalFX ready (scale \(metalFXScale))" : "MetalFX textures not ready"
+            Task { @MainActor in
+                appModel.metalFXAvailable = available
+                appModel.metalFXStatus = status
+            }
+            return available
         } catch {
             print("⚠️ MetalFX configuration failed: \(error)")
             metalFXManager = nil
+            Task { @MainActor in
+                appModel.metalFXAvailable = false
+                appModel.metalFXStatus = "Configuration failed: \(error)"
+            }
             return false
         }
     }
@@ -796,7 +853,10 @@ private extension Renderer {
     }
 
     func encodeMetalFX(commandBuffer: MTLCommandBuffer, drawable: LayerRenderer.Drawable) {
-        guard let fx = metalFXManager, let output = fx.outputTexture else { return }
+        guard let fx = metalFXManager, let output = fx.outputTexture else { 
+            print("⚠️ MetalFX manager or output texture not available")
+            return 
+        }
 
         do {
             try fx.encodeSpatialUpscale(commandBuffer: commandBuffer)
@@ -805,23 +865,156 @@ private extension Renderer {
             return
         }
 
-        guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
-        let views = min(drawable.views.count, output.arrayLength)
-        for eye in 0..<views {
-            let destinationTexture = eye < drawable.colorTextures.count ? drawable.colorTextures[eye] : drawable.colorTextures[0]
-            let destinationSlice = destinationTexture.arrayLength > 1 ? eye : 0
-            let size = MTLSize(width: output.width, height: output.height, depth: 1)
-            blit.copy(from: output,
-                      sourceSlice: eye,
-                      sourceLevel: 0,
-                      sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                      sourceSize: size,
-                      to: destinationTexture,
-                      destinationSlice: destinationSlice,
-                      destinationLevel: 0,
-                      destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        // The drawable typically has a single type2DArray texture for layered stereo
+        let destinationTexture = drawable.colorTextures[0]
+        let drawableFormat = destinationTexture.pixelFormat
+        let outputFormat = output.pixelFormat
+        
+        // Check if formats match - if not, we need a conversion pass
+        if drawableFormat == outputFormat {
+            // Direct blit - formats match
+            guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
+            let views = min(drawable.views.count, output.arrayLength)
+            for eye in 0..<views {
+                let destinationSlice = destinationTexture.arrayLength > 1 ? eye : 0
+                let size = MTLSize(width: min(output.width, destinationTexture.width), 
+                                   height: min(output.height, destinationTexture.height), 
+                                   depth: 1)
+                blit.copy(from: output,
+                          sourceSlice: eye,
+                          sourceLevel: 0,
+                          sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                          sourceSize: size,
+                          to: destinationTexture,
+                          destinationSlice: destinationSlice,
+                          destinationLevel: 0,
+                          destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+            }
+            blit.endEncoding()
+        } else {
+            // Format conversion needed - use a render pass with texture sampling
+            encodeFormatConversion(commandBuffer: commandBuffer, 
+                                   source: output, 
+                                   destination: destinationTexture,
+                                   viewCount: drawable.views.count)
         }
-        blit.endEncoding()
+    }
+    
+    /// Encode a format conversion pass from rgba16Float to the drawable's format
+    /// Renders directly to the drawable texture using a fullscreen pass
+    func encodeFormatConversion(commandBuffer: MTLCommandBuffer,
+                                source: MTLTexture,
+                                destination: MTLTexture,
+                                viewCount: Int) {
+        // Create conversion pipeline lazily if needed
+        if formatConversionPipeline == nil {
+            createFormatConversionPipeline(destinationFormat: destination.pixelFormat)
+        }
+        
+        guard let pipeline = formatConversionPipeline else {
+            print("⚠️ Format conversion pipeline not available")
+            return
+        }
+        
+        let views = min(viewCount, source.arrayLength)
+        
+        // Render each eye using 2D texture views
+        for eye in 0..<views {
+            guard let sourceView = source.makeTextureView(
+                pixelFormat: source.pixelFormat,
+                textureType: .type2D,
+                levels: 0..<1,
+                slices: eye..<(eye + 1)
+            ) else {
+                print("⚠️ Failed to create source texture view for eye \(eye)")
+                continue
+            }
+            
+            guard let destView = destination.makeTextureView(
+                pixelFormat: destination.pixelFormat,
+                textureType: .type2D,
+                levels: 0..<1,
+                slices: eye..<(eye + 1)
+            ) else {
+                print("⚠️ Failed to create destination texture view for eye \(eye)")
+                continue
+            }
+            
+            let renderPassDescriptor = MTLRenderPassDescriptor()
+            renderPassDescriptor.colorAttachments[0].texture = destView
+            renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+                print("⚠️ Failed to create render encoder for format conversion (eye \(eye))")
+                continue
+            }
+            
+            encoder.label = "Format Conversion Eye \(eye)"
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setFragmentTexture(sourceView, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+        }
+    }
+    
+    /// Get or create the intermediate texture for format conversion
+    func getOrCreateFormatConversionTexture(width: Int, height: Int, format: MTLPixelFormat, arrayLength: Int) -> MTLTexture? {
+        // Check if existing texture matches requirements
+        if let existing = formatConversionTexture,
+           existing.width == width,
+           existing.height == height,
+           existing.pixelFormat == format,
+           existing.arrayLength == arrayLength {
+            return existing
+        }
+        
+        // Create new texture
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = arrayLength > 1 ? .type2DArray : .type2D
+        descriptor.width = width
+        descriptor.height = height
+        descriptor.pixelFormat = format
+        descriptor.arrayLength = arrayLength
+        descriptor.storageMode = .private
+        descriptor.usage = [.renderTarget, .shaderRead]
+        
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            print("⚠️ Failed to create format conversion texture")
+            return nil
+        }
+        
+        texture.label = "Format Conversion Intermediate"
+        formatConversionTexture = texture
+        print("✓ Created format conversion intermediate texture: \(width)x\(height), format=\(format.rawValue), layers=\(arrayLength)")
+        return texture
+    }
+    
+    func createFormatConversionPipeline(destinationFormat: MTLPixelFormat) {
+        guard let library = device.makeDefaultLibrary() else {
+            print("⚠️ Failed to get default library for format conversion")
+            return
+        }
+        
+        // Check if conversion shaders exist
+        guard let vertexFunc = library.makeFunction(name: "formatConversionVertex"),
+              let fragmentFunc = library.makeFunction(name: "formatConversionFragment") else {
+            print("⚠️ Format conversion shaders not found - add formatConversionVertex/Fragment to Shaders.metal")
+            return
+        }
+        
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = "Format Conversion Pipeline"
+        descriptor.vertexFunction = vertexFunc
+        descriptor.fragmentFunction = fragmentFunc
+        descriptor.colorAttachments[0].pixelFormat = destinationFormat
+        
+        do {
+            formatConversionPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            print("✓ Format conversion pipeline created for format \(destinationFormat.rawValue)")
+        } catch {
+            print("⚠️ Failed to create format conversion pipeline: \(error)")
+        }
     }
 }
 #else

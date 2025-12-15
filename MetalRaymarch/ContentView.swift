@@ -31,6 +31,15 @@ struct ContentView: View {
                     get: { appModel.renderSettings.resolutionScale },
                     set: { appModel.renderSettings.resolutionScale = $0 }
                 ), in: 0.25...1.0, step: 0.05)
+                
+                // Show MetalFX / upscaling status for easier debugging
+                HStack(spacing: 8) {
+                    Image(systemName: appModel.metalFXAvailable ? "bolt.fill" : "bolt.slash")
+                        .foregroundStyle(appModel.metalFXAvailable ? .yellow : .secondary)
+                    Text(appModel.metalFXStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.bottom, 20)
 
