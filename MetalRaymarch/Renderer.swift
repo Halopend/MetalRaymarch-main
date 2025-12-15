@@ -414,13 +414,16 @@ actor Renderer {
             let viewMatrix = (simdDeviceAnchor * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             let inverseProjection = projection.inverse
+            let modelViewMatrix = viewMatrix * modelMatrix
+            let inverseModelViewMatrix = modelViewMatrix.inverse
             
             // Get fovea center from the view's texture map (normalized 0-1)
             // Force debug eye tint on by default to verify stereo rendering. Toggle off via renderSettings.debugEyeTint.
             let debugTintEnabled = settings.debugEyeTint
             return Uniforms(projectionMatrix: projection,
-                            modelViewMatrix: viewMatrix * modelMatrix,
+                            modelViewMatrix: modelViewMatrix,
                             inverseProjectionMatrix: inverseProjection,
+                            inverseModelViewMatrix: inverseModelViewMatrix,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
