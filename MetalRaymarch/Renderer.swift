@@ -57,6 +57,10 @@ actor Renderer {
     var depthStateDisabled: MTLDepthStencilState
     var cubeMap: MTLTexture
 
+    // Intermediate texture used as a safety-net render target (and by MetalFX format conversion).
+    // Must exist even when MetalFX isn't available.
+    private var formatConversionTexture: MTLTexture?
+
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
     var uniformBufferOffset = 0
@@ -104,7 +108,7 @@ actor Renderer {
     #if canImport(MetalFX)
     private var metalFXManager: MetalFXManager?
     private var formatConversionPipeline: MTLRenderPipelineState?
-    private var formatConversionTexture: MTLTexture?  // Intermediate texture with renderTarget usage
+    // `formatConversionTexture` is declared unconditionally above.
     // MetalFX is permanently enabled - resolution controlled via appModel.renderSettings.resolutionScale
     #endif
 
@@ -159,7 +163,7 @@ actor Renderer {
         #endif
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = .lessEqual
+        depthStateDescriptor.depthCompareFunction = .greater
         depthStateDescriptor.isDepthWriteEnabled = true
         self.depthState = device.makeDepthStencilState(descriptor:depthStateDescriptor)!
 
@@ -596,7 +600,7 @@ actor Renderer {
                 renderPassDescriptor.depthAttachment.texture = depth
                 renderPassDescriptor.depthAttachment.loadAction = .clear
                 renderPassDescriptor.depthAttachment.storeAction = .store
-                renderPassDescriptor.depthAttachment.clearDepth = 1.0
+                renderPassDescriptor.depthAttachment.clearDepth = 0.0
                 print("⚠️ Depth attachment was nil; attached drawable depth to avoid pipeline assertion")
             } else {
                 print("⚠️ No depth attachment available; skipping frame to avoid pipeline assertion")
@@ -869,7 +873,7 @@ private extension Renderer {
             renderPassDescriptor.depthAttachment.texture = fx.depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = .store
-            renderPassDescriptor.depthAttachment.clearDepth = 1.0
+            renderPassDescriptor.depthAttachment.clearDepth = 0.0
 
             renderPassDescriptor.rasterizationRateMap = nil
             renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
@@ -902,7 +906,7 @@ private extension Renderer {
         // Alpha must be 1.0 for visionOS compositing; alpha 0 produces full transparency/black
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.clearDepth = 1.0
+        renderPassDescriptor.depthAttachment.clearDepth = 0.0
 
         if let systemMap = drawable.rasterizationRateMaps.first {
             renderPassDescriptor.rasterizationRateMap = systemMap
@@ -1086,37 +1090,6 @@ private extension Renderer {
     }
     
     /// Get or create the intermediate texture for format conversion
-    func getOrCreateFormatConversionTexture(width: Int, height: Int, format: MTLPixelFormat, arrayLength: Int) -> MTLTexture? {
-        // Check if existing texture matches requirements
-        if let existing = formatConversionTexture,
-           existing.width == width,
-           existing.height == height,
-           existing.pixelFormat == format,
-           existing.arrayLength == arrayLength {
-            return existing
-        }
-        
-        // Create new texture
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = arrayLength > 1 ? .type2DArray : .type2D
-        descriptor.width = width
-        descriptor.height = height
-        descriptor.pixelFormat = format
-        descriptor.arrayLength = arrayLength
-        descriptor.storageMode = .private
-        descriptor.usage = [.renderTarget, .shaderRead]
-        
-        guard let texture = device.makeTexture(descriptor: descriptor) else {
-            print("⚠️ Failed to create format conversion texture")
-            return nil
-        }
-        
-        texture.label = "Format Conversion Intermediate"
-        formatConversionTexture = texture
-        print("✓ Created format conversion intermediate texture: \(width)x\(height), format=\(format.rawValue), layers=\(arrayLength)")
-        return texture
-    }
-    
     func createFormatConversionPipeline(destinationFormat: MTLPixelFormat) {
         guard let library = device.makeDefaultLibrary() else {
             print("⚠️ Failed to get default library for format conversion")
@@ -1186,6 +1159,39 @@ private extension Renderer {
 }
 #else
 private extension Renderer {
+    /// Get or create an intermediate texture usable as a render target.
+    ///
+    /// This is used both as a general safety-net when a drawable texture lacks `.renderTarget` usage,
+    /// and as the destination for MetalFX output format conversion when MetalFX is available.
+    func getOrCreateFormatConversionTexture(width: Int, height: Int, format: MTLPixelFormat, arrayLength: Int) -> MTLTexture? {
+        if let existing = formatConversionTexture,
+           existing.width == width,
+           existing.height == height,
+           existing.pixelFormat == format,
+           existing.arrayLength == arrayLength {
+            return existing
+        }
+
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = arrayLength > 1 ? .type2DArray : .type2D
+        descriptor.width = width
+        descriptor.height = height
+        descriptor.pixelFormat = format
+        descriptor.arrayLength = arrayLength
+        descriptor.storageMode = .private
+        descriptor.usage = [.renderTarget, .shaderRead]
+
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            print("⚠️ Failed to create intermediate render target texture")
+            return nil
+        }
+
+        texture.label = "Format Conversion Intermediate"
+        formatConversionTexture = texture
+        print("✓ Created intermediate render target texture: \(width)x\(height), format=\(format.rawValue), layers=\(arrayLength)")
+        return texture
+    }
+
     func configureMetalFXIfNeeded(for _: LayerRenderer.Drawable) -> Bool {
         return false
     }
