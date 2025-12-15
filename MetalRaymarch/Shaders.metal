@@ -474,25 +474,21 @@ struct FormatConversionVertex {
 vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]) {
     FormatConversionVertex out;
     
-    // Generate full-screen triangle covering clip space
-    // Uses oversized triangle technique: one triangle covers entire screen
+    // Generate full-screen triangle covering clip space using oversized triangle technique
+    // This avoids needing a vertex buffer
     // vertexID 0: (-1, -1), vertexID 1: (3, -1), vertexID 2: (-1, 3)
-    float2 positions[3] = {
-        float2(-1.0, -1.0),
-        float2( 3.0, -1.0),
-        float2(-1.0,  3.0)
-    };
+    float2 position;
+    position.x = (vertexID == 1) ? 3.0 : -1.0;
+    position.y = (vertexID == 2) ? 3.0 : -1.0;
     
-    // UV coordinates mapped from clip space position
-    // x: [-1,1] -> [0,1], y: [-1,1] -> [0,1] (no flip needed, Metal textures are top-left origin)
-    float2 texCoords[3] = {
-        float2(0.0, 1.0),   // bottom-left in clip -> (0, 1) in UV
-        float2(2.0, 1.0),   // extends past right edge
-        float2(0.0, -1.0)   // extends past top edge
-    };
+    out.position = float4(position, 0.0, 1.0);
     
-    out.position = float4(positions[vertexID], 0.0, 1.0);
-    out.texCoord = texCoords[vertexID];
+    // Convert clip space position to UV coordinates
+    // Clip space: x,y in [-1, 1] (but our triangle extends to 3)
+    // UV space: x in [0, 1], y in [0, 1] where (0,0) is top-left in Metal
+    // For Metal textures: UV.y = 0 is top, UV.y = 1 is bottom
+    out.texCoord.x = (position.x + 1.0) * 0.5;  // [-1,1] -> [0,1]
+    out.texCoord.y = (1.0 - position.y) * 0.5;  // [-1,1] -> [1,0] (flip Y for Metal)
     
     return out;
 }
@@ -503,10 +499,8 @@ fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
-    // Clamp UV to valid range for safety
-    float2 uv = clamp(in.texCoord, float2(0.0), float2(1.0));
-    float4 color = sourceTexture.sample(textureSampler, uv);
+    float4 color = sourceTexture.sample(textureSampler, in.texCoord);
     
-    // Clamp to valid range and ensure alpha is 1 for proper visionOS compositing
-    return float4(saturate(color.rgb), 1.0);
+    // Ensure alpha is 1 for proper visionOS compositing
+    return float4(color.rgb, 1.0);
 }

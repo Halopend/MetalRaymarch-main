@@ -901,7 +901,7 @@ private extension Renderer {
     }
     
     /// Encode a format conversion pass from rgba16Float to the drawable's format
-    /// Renders directly to the drawable texture using a fullscreen pass
+    /// Uses compute-style blit since drawable textures may not support texture views
     func encodeFormatConversion(commandBuffer: MTLCommandBuffer,
                                 source: MTLTexture,
                                 destination: MTLTexture,
@@ -918,7 +918,18 @@ private extension Renderer {
         
         let views = min(viewCount, source.arrayLength)
         
-        // Render each eye using 2D texture views
+        // Get or create intermediate texture that matches destination format
+        guard let intermediate = getOrCreateFormatConversionTexture(
+            width: destination.width,
+            height: destination.height,
+            format: destination.pixelFormat,
+            arrayLength: views
+        ) else {
+            print("⚠️ Failed to create intermediate texture")
+            return
+        }
+        
+        // Step 1: Render from source (rgba16Float) to intermediate (destination format)
         for eye in 0..<views {
             guard let sourceView = source.makeTextureView(
                 pixelFormat: source.pixelFormat,
@@ -930,18 +941,18 @@ private extension Renderer {
                 continue
             }
             
-            guard let destView = destination.makeTextureView(
-                pixelFormat: destination.pixelFormat,
+            guard let intermediateView = intermediate.makeTextureView(
+                pixelFormat: intermediate.pixelFormat,
                 textureType: .type2D,
                 levels: 0..<1,
                 slices: eye..<(eye + 1)
             ) else {
-                print("⚠️ Failed to create destination texture view for eye \(eye)")
+                print("⚠️ Failed to create intermediate texture view for eye \(eye)")
                 continue
             }
             
             let renderPassDescriptor = MTLRenderPassDescriptor()
-            renderPassDescriptor.colorAttachments[0].texture = destView
+            renderPassDescriptor.colorAttachments[0].texture = intermediateView
             renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             
@@ -956,6 +967,26 @@ private extension Renderer {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
         }
+        
+        // Step 2: Blit from intermediate to drawable (same format, should work)
+        guard let blit = commandBuffer.makeBlitCommandEncoder() else {
+            print("⚠️ Failed to create blit encoder")
+            return
+        }
+        
+        for eye in 0..<views {
+            let destSlice = destination.arrayLength > 1 ? eye : 0
+            blit.copy(from: intermediate,
+                      sourceSlice: eye,
+                      sourceLevel: 0,
+                      sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                      sourceSize: MTLSize(width: destination.width, height: destination.height, depth: 1),
+                      to: destination,
+                      destinationSlice: destSlice,
+                      destinationLevel: 0,
+                      destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        }
+        blit.endEncoding()
     }
     
     /// Get or create the intermediate texture for format conversion
