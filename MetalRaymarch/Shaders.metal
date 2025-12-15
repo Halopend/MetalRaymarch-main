@@ -461,3 +461,41 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     return output;
 }
+
+// === Format Conversion Shaders for MetalFX ===
+// Used to convert rgba16Float MetalFX output to drawable format (BGRA8Unorm_sRGB)
+
+struct FormatConversionVertex {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+// Full-screen triangle vertex shader - generates vertices procedurally
+vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]) {
+    FormatConversionVertex out;
+    
+    // Generate full-screen triangle using oversized triangle technique
+    float2 position;
+    position.x = (vertexID == 1) ? 3.0 : -1.0;
+    position.y = (vertexID == 2) ? 3.0 : -1.0;
+    
+    out.position = float4(position, 0.0, 1.0);
+    
+    // Convert clip space to UV coordinates
+    out.texCoord.x = (position.x + 1.0) * 0.5;
+    out.texCoord.y = (1.0 - position.y) * 0.5;  // Flip Y for Metal
+    
+    return out;
+}
+
+// Simple passthrough fragment shader with format conversion
+fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
+                                          texture2d<float> sourceTexture [[texture(0)]]) {
+    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+                                      address::clamp_to_edge);
+    
+    float4 color = sourceTexture.sample(textureSampler, in.texCoord);
+    
+    // Ensure alpha is 1 for proper visionOS compositing
+    return float4(color.rgb, 1.0);
+}
