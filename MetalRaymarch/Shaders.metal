@@ -42,8 +42,6 @@ typedef struct
     float foldingLimit;
     float sphereRadius;
     float colorIterations;
-    float4x4 inverseProjectionMatrix;
-    float4x4 inverseModelViewMatrix;
 } ColorInOut;
 
 vertex ColorInOut vertexShader(Vertex in [[stage_in]],
@@ -72,8 +70,6 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     out.foldingLimit = uniforms.foldingLimit;
     out.sphereRadius = uniforms.sphereRadius;
     out.colorIterations = uniforms.colorIterations;
-    out.inverseProjectionMatrix = uniforms.inverseProjectionMatrix;
-    out.inverseModelViewMatrix = uniforms.inverseModelViewMatrix;
     
     return out;
 }
@@ -371,18 +367,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     float gTime = in.time * 0.01 + 15.00;
     
     float3 cameraPos = CameraPath(gTime);
-    
-    // === Proper stereo ray direction ===
-    // Reconstruct view-space ray from NDC position using inverse projection
-    // This gives each eye the correct ray direction based on its own projection matrix
-    float3 ndc = in.ndcPosition.xyz / in.ndcPosition.w;
-    float4 viewSpacePos = in.inverseProjectionMatrix * float4(ndc.xy, -1.0, 1.0);
-    viewSpacePos /= viewSpacePos.w;
-    float3 viewRayDir = normalize(viewSpacePos.xyz);
-    
-    // Transform view-space ray to world space using inverse modelView matrix
-    // This accounts for the per-eye camera position offset (IPD)
-    float3 rd = normalize((in.inverseModelViewMatrix * float4(viewRayDir, 0.0)).xyz);
+    float3 rd = normalize(in.modelPos);
     
     // Use screen position for stable dithering pattern
     float2 fragCoord = in.position.xy;

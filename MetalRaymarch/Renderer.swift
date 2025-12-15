@@ -414,16 +414,13 @@ actor Renderer {
             let viewMatrix = (simdDeviceAnchor * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             let inverseProjection = projection.inverse
-            let modelViewMatrix = viewMatrix * modelMatrix
-            let inverseModelViewMatrix = modelViewMatrix.inverse
             
             // Get fovea center from the view's texture map (normalized 0-1)
             // Force debug eye tint on by default to verify stereo rendering. Toggle off via renderSettings.debugEyeTint.
             let debugTintEnabled = settings.debugEyeTint
             return Uniforms(projectionMatrix: projection,
-                            modelViewMatrix: modelViewMatrix,
+                            modelViewMatrix: viewMatrix * modelMatrix,
                             inverseProjectionMatrix: inverseProjection,
-                            inverseModelViewMatrix: inverseModelViewMatrix,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
@@ -917,20 +914,18 @@ private extension Renderer {
     }
 
     func scaledViewports(for drawable: LayerRenderer.Drawable, useUpscaling: Bool) -> [MTLViewport] {
-        // For layered stereo: each eye renders to a separate array slice at full texture resolution.
-        // Viewports must cover the full slice; the per-eye projection matrix handles stereo separation.
-        guard useUpscaling, let fx = metalFXManager, let inputTex = fx.inputTexture else {
+        guard useUpscaling, let scale = metalFXManager?.configuration.scale else {
             return drawable.views.map { $0.textureMap.viewport }
         }
-
-        // All views use the same full-texture viewport when upscaling (per-slice)
-        let fullViewport = MTLViewport(originX: 0,
-                                       originY: 0,
-                                       width: Double(inputTex.width),
-                                       height: Double(inputTex.height),
-                                       znear: 0.0,
-                                       zfar: 1.0)
-        return drawable.views.map { _ in fullViewport }
+        let factor = Double(scale)
+        return drawable.views.map { view in
+            var viewport = view.textureMap.viewport
+            viewport.originX *= factor
+            viewport.originY *= factor
+            viewport.width *= factor
+            viewport.height *= factor
+            return viewport
+        }
     }
 
     func encodeMetalFX(commandBuffer: MTLCommandBuffer, drawable: LayerRenderer.Drawable) {
