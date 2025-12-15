@@ -914,18 +914,20 @@ private extension Renderer {
     }
 
     func scaledViewports(for drawable: LayerRenderer.Drawable, useUpscaling: Bool) -> [MTLViewport] {
-        // When upscaling, render into the full input texture without additional scaling
+        // For layered stereo: each eye renders to a separate array slice at full texture resolution.
+        // Viewports must cover the full slice; the per-eye projection matrix handles stereo separation.
         guard useUpscaling, let fx = metalFXManager, let inputTex = fx.inputTexture else {
             return drawable.views.map { $0.textureMap.viewport }
         }
-        return drawable.views.enumerated().map { index, _ in
-            MTLViewport(originX: 0,
-                        originY: 0,
-                        width: Double(inputTex.width),
-                        height: Double(inputTex.height),
-                        znear: 0.0,
-                        zfar: 1.0)
-        }
+
+        // All views use the same full-texture viewport when upscaling (per-slice)
+        let fullViewport = MTLViewport(originX: 0,
+                                       originY: 0,
+                                       width: Double(inputTex.width),
+                                       height: Double(inputTex.height),
+                                       znear: 0.0,
+                                       zfar: 1.0)
+        return drawable.views.map { _ in fullViewport }
     }
 
     func encodeMetalFX(commandBuffer: MTLCommandBuffer, drawable: LayerRenderer.Drawable) {

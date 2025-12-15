@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>WebXR Mandelbulb Raymarcher</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<style>
+		body { margin: 0; background-color: #000; overflow: hidden; }
+		#info {
+			position: absolute; top: 10px; width: 100%;
+			text-align: center; color: white; font-family: sans-serif;
+			pointer-events: none; z-index: 1;
+		}
+		#controls {
+			position: absolute;
+			bottom: 20px;
+			left: 50%;
+			transform: translateX(-50%);
+			background: rgba(0, 0, 0, 0.7);
+			padding: 15px 25px;
+			border-radius: 10px;
+			color: white;
+			font-family: sans-serif;
+			z-index: 100;
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+			min-width: 250px;
+		}
+		#controls label {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			gap: 15px;
+		}
+		#controls input[type="range"] {
+			flex: 1;
+			cursor: pointer;
+		}
+		#controls .value {
+			min-width: 40px;
+			text-align: right;
+			font-family: monospace;
+		}
+	</style>
+	<script type="importmap">
+		{
+			"imports": {
+				"three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+				"three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+			}
+		}
+	</script>
+</head>
+<body>
+	<div id="info">WebXR Mandelbulb<br/>Put on headset & click "ENTER VR"</div>
+	<div id="controls">
+		<label>
+			<span>Power</span>
+			<input type="range" id="powerSlider" min="2" max="16" step="0.1" value="8">
+			<span class="value" id="powerValue">8.0</span>
+		</label>
+	</div>
+
+	<script type="module">
+		import * as THREE from 'three';
+		import { VRButton } from 'three/addons/webxr/VRButton.js';
+		import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+		let camera, scene, renderer;
+		let fractalMesh;
+		let power = 8.0;
+		let hand1, hand2;
+		let hand1Status = "Disconnected";
+		let hand2Status = "Disconnected";
+		let debugTexture, debugContext; // For VR debugging
+		
+		// Configuration
+		const FRACTAL_POS = new THREE.Vector3(0, 1.6, -2.0); // 1.6m high, 2m in front
+		const BOX_SIZE = 2.5; // Size of the volume box
+
+		init();
+		animate();
+
+		function init() {
+			// 1. Setup Scene
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color(0x101010);
+
+			// 2. Setup Camera (User Head)
+			camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+			// 3. Create the Raymarching Volume (The Box)
+			// We render the fractal ONLY inside this box to save performance.
+			const geometry = new THREE.BoxGeometry(BOX_SIZE, BOX_SIZE, BOX_SIZE);
+
+			// 4. The Magic Shader
+			const material = new THREE.ShaderMaterial({
+				side: THREE.BackSide, // Optimization: Render back faces so we can enter the box
+				transparent: true,
+				uniforms: {
+					uTime: { value: 0 },
+					uCameraPosition: { value: new THREE.Vector3() },
+					uFractalPos: { value: FRACTAL_POS },
+					uBoxSize: { value: BOX_SIZE },
+					uPower: { value: power },
+					uColor1: { value: new THREE.Color(0x00aaff) }, // Cyan
+					uColor2: { value: new THREE.Color(0xffaa00) }  // Orange
+				},
+				vertexShader: `
+					varying vec3 vWorldPosition;
+					void main() {
+						vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+						vWorldPosition = worldPosition.xyz;
+						gl_Position = projectionMatrix * viewMatrix * worldPosition;
+					}
+				`,
+				fragmentShader: `
+					varying vec3 vWorldPosition;
+					uniform vec3 uCameraPosition;
+					uniform vec3 uFractalPos;
+					uniform float uTime;
+					uniform float uPower;
+					uniform vec3 uColor1;
+					uniform vec3 uColor2;
+
+					// --- Mandelbulb Parameters ---
+					const int MAX_STEPS = 34;       // Lower for VR performance (90fps target)
+					const float MIN_DIST = 0.0009;
+					const float MAX_DIST = 5.0;
+
+					// Distance Estimator for Mandelbulb
+					float DE(vec3 pos) {
+						vec3 z = pos;
+						float dr = 1.0;
+						float r = 0.0;
+						
+						// Animate the fractal shape slightly
+						// float power = uPower + sin(uTime * 0.2) * 1.5;
+						float power = uPower; // Direct control, no animation
+
+						for (int i = 0; i < 8; i++) {
+							r = length(z);
+							if (r > 2.0) break;
+
+							// Convert to polar
+							float theta = acos(z.z / r);
+							float phi = atan(z.y, z.x);
+							
+							dr = pow(r, power - 1.0) * power * dr + 1.0;
+
+							// Scale and rotate
+							float zr = pow(r, power);
+							theta = theta * power;
+							phi = phi * power;
+							
+							// Convert back to cartesian
+							z = zr * vec3(sin(theta)*cos(phi), sin(phi)*sin(theta), cos(theta));
+							z += pos; // Mandelbulb "c" is pixel position
+						}
+						return 0.5 * log(r) * r / dr;
+					}
+
+					// Calculate Normal for lighting
+					vec3 calcNormal(vec3 p) {
+						vec2 e = vec2(0.001, 0.0);
+						return normalize(vec3(
+							DE(p + e.xyy) - DE(p - e.xyy),
+							DE(p + e.yxy) - DE(p - e.yxy),
+							DE(p + e.yyx) - DE(p - e.yyx)
+						));
+					}
+
+					void main() {
+						// VR Stereo Logic: Ray goes from Camera -> World Pixel
+						vec3 ro = uCameraPosition;
+						vec3 rd = normalize(vWorldPosition - uCameraPosition);
+
+						float t = 0.0;
+						float d = 0.0;
+						int steps = 0;
+						
+						// Offset ray origin to be local to the fractal object
+						// We subtract uFractalPos so (0,0,0) is the center of the bulb
+						vec3 localRo = ro - uFractalPos;
+
+						// Raymarching Loop
+						for(int i = 0; i < MAX_STEPS; i++) {
+							vec3 p = localRo + rd * t;
+							d = DE(p);
+							if(d < MIN_DIST || t > MAX_DIST) break;
+							t += d;
+							steps = i;
+						}
+
+						// Coloring
+						if(d < MIN_DIST) {
+							vec3 p = localRo + rd * t;
+							vec3 normal = calcNormal(p);
+							
+							// Simple lighting
+							vec3 lightDir = normalize(vec3(1.0, 1.0, -1.0));
+							float diff = max(dot(normal, lightDir), 0.0);
+							float ambient = 0.2;
+							
+							// Glow based on iteration count (steps)
+							float glow = float(steps) / float(MAX_STEPS);
+							vec3 baseColor = mix(uColor1, uColor2, glow + length(p)*0.5);
+							
+							vec3 finalColor = baseColor * (diff + ambient);
+							gl_FragColor = vec4(finalColor, 1.0);
+						} else {
+							discard; // Draw nothing if we miss (show background)
+						}
+					}
+				`
+			});
+
+			fractalMesh = new THREE.Mesh(geometry, material);
+			fractalMesh.position.copy(FRACTAL_POS);
+			scene.add(fractalMesh);
+
+			// 5. Setup Renderer
+			renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+			renderer.setPixelRatio(window.devicePixelRatio);
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			renderer.xr.enabled = true; // IMPORTANT: Enable WebXR
+			document.body.appendChild(renderer.domElement);
+
+			// 6. Add VR Button
+			const sessionInit = { optionalFeatures: [ 'local-floor', 'bounded-floor', 'hand-tracking', 'layers' ] };
+			document.body.appendChild(VRButton.createButton(renderer, sessionInit));
+
+			// 7. Setup Hands
+			const handModelFactory = new XRHandModelFactory();
+
+			// Hand 1
+			hand1 = renderer.xr.getHand(0);
+			hand1.add(handModelFactory.createHandModel(hand1, "spheres")); 
+			scene.add(hand1);
+			
+			hand1.addEventListener('connected', (event) => {
+				hand1Status = "Connected: " + (event.data.hand ? "Hand" : "Controller");
+			});
+			hand1.addEventListener('disconnected', () => { hand1Status = "Disconnected"; });
+
+			// Hand 2
+			hand2 = renderer.xr.getHand(1);
+			hand2.add(handModelFactory.createHandModel(hand2, "spheres"));
+			scene.add(hand2);
+			
+			hand2.addEventListener('connected', (event) => {
+				hand2Status = "Connected: " + (event.data.hand ? "Hand" : "Controller");
+			});
+			hand2.addEventListener('disconnected', () => { hand2Status = "Disconnected"; });
+
+			// 8. Setup VR Debug Panel (so we can see what's happening inside the headset)
+			const debugCanvas = document.createElement('canvas');
+			debugCanvas.width = 512;
+			debugCanvas.height = 256;
+			debugContext = debugCanvas.getContext('2d');
+			debugTexture = new THREE.CanvasTexture(debugCanvas);
+			
+			const debugMaterial = new THREE.MeshBasicMaterial({ map: debugTexture, transparent: true, opacity: 0.8 });
+			const debugGeometry = new THREE.PlaneGeometry(0.5, 0.25);
+			const debugMesh = new THREE.Mesh(debugGeometry, debugMaterial);
+			debugMesh.position.set(0, 1.5, -1.0); // Floating in front of user
+			scene.add(debugMesh);
+
+			// 9. Setup Controls
+			const powerSlider = document.getElementById('powerSlider');
+			const powerValue = document.getElementById('powerValue');
+			powerSlider.addEventListener('input', (e) => {
+				power = parseFloat(e.target.value);
+				powerValue.textContent = power.toFixed(1);
+				fractalMesh.material.uniforms.uPower.value = power;
+			});
+
+			// Handle window resize
+			window.addEventListener('resize', onWindowResize);
+		}
+
+		function onWindowResize() {
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+			renderer.setSize(window.innerWidth, window.innerHeight);
+		}
+
+		function animate() {
+			renderer.setAnimationLoop(render);
+		}
+
+		function updateDebugPanel(text) {
+			if (!debugContext || !debugTexture) return;
+			
+			debugContext.fillStyle = 'rgba(0, 0, 0, 0.8)';
+			debugContext.fillRect(0, 0, 512, 256);
+			
+			debugContext.fillStyle = 'white';
+			debugContext.font = '30px monospace';
+			
+			const lines = text.split('\n');
+			for (let i = 0; i < lines.length; i++) {
+				debugContext.fillText(lines[i], 20, 50 + i * 40);
+			}
+			
+			debugTexture.needsUpdate = true;
+		}
+
+		function render(time, frame) {
+			// Update Uniforms
+			fractalMesh.material.uniforms.uTime.value = time / 1000;
+			
+			// CRITICAL: Pass the actual XR camera position to the shader
+			// renderer.xr.getCamera() handles the VR headset position
+			const xrCamera = renderer.xr.getCamera();
+			const camPos = new THREE.Vector3();
+			
+			// We need world position of the camera (headset)
+			xrCamera.getWorldPosition(camPos);
+			fractalMesh.material.uniforms.uCameraPosition.value.copy(camPos);
+
+			// Slowly rotate the box itself for effect (optional)
+			fractalMesh.rotation.y = Math.sin(time / 4000) * 0.1;
+
+			// Hand Gesture Logic: Distance between hands controls power
+			let debugText = `L: ${hand1Status}\nR: ${hand2Status}`;
+			
+			if (hand1 && hand2) {
+				// Check if hands are tracking (visible)
+				if (hand1.visible && hand2.visible) {
+					const pos1 = new THREE.Vector3();
+					const pos2 = new THREE.Vector3();
+					
+					// Get world positions of the hand anchors
+					hand1.getWorldPosition(pos1);
+					hand2.getWorldPosition(pos2);
+					
+					const dist = pos1.distanceTo(pos2);
+					
+					debugText += `\nDist: ${dist.toFixed(3)}m\nPower: ${power.toFixed(2)}\nL: ${pos1.x.toFixed(2)},${pos1.y.toFixed(2)},${pos1.z.toFixed(2)}\nR: ${pos2.x.toFixed(2)},${pos2.y.toFixed(2)},${pos2.z.toFixed(2)}`;
+
+					// Map distance (e.g., 0.05m to 0.6m) to power (2.0 to 16.0)
+					if (dist > 0) {
+						// Simple mapping: 5cm = power 2, 60cm = power 16
+						let targetPower = THREE.MathUtils.mapLinear(dist, 0.05, 0.6, 2.0, 16.0);
+						targetPower = THREE.MathUtils.clamp(targetPower, 2.0, 16.0);
+						
+						// Smooth transition (0.05 = slower, more precise feel)
+						power += (targetPower - power) * 0.05;
+						
+						// Update shader and UI
+						fractalMesh.material.uniforms.uPower.value = power;
+						
+						// Update UI if available
+						const powerValue = document.getElementById('powerValue');
+						const powerSlider = document.getElementById('powerSlider');
+						if (powerValue) powerValue.textContent = power.toFixed(1);
+						if (powerSlider) powerSlider.value = power;
+					}
+				} else {
+					debugText += "\nHands not visible.\nPut hands in front of cameras.";
+				}
+			}
+			
+			updateDebugPanel(debugText);
+
+			renderer.render(scene, camera);
+		}
+	</script>
+</body>
+</html>
