@@ -13,6 +13,7 @@ import MetalFX
 #endif
 import simd
 import Spatial
+import ARKit
 
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
@@ -87,8 +88,13 @@ actor Renderer {
 
     let arSession: ARKitSession
     let worldTracking: WorldTrackingProvider
+    let handTracking: HandTrackingProvider
     let layerRenderer: LayerRenderer
     let appModel: AppModel
+
+    // Hand Tracking State
+    var lastLeftHandPose: (position: SIMD3<Float>, rotation: simd_quatf, timestamp: TimeInterval)?
+    var lastRightHandPose: (position: SIMD3<Float>, rotation: simd_quatf, timestamp: TimeInterval)?
 
     #if canImport(MetalFX)
     private var metalFXManager: MetalFXManager?
@@ -163,14 +169,16 @@ actor Renderer {
         }
 
         worldTracking = WorldTrackingProvider()
+        handTracking = HandTrackingProvider()
         arSession = ARKitSession()
     }
 
     private func startARSession() async {
         do {
-            try await arSession.run([worldTracking])
+            try await arSession.run([worldTracking, handTracking])
         } catch {
-            fatalError("Failed to initialize ARSession")
+            print("Failed to initialize ARSession: \(error)")
+            // Don't fatalError, just continue without tracking if it fails (e.g. simulator)
         }
     }
 
@@ -325,6 +333,37 @@ actor Renderer {
         return newTargets
     }
 
+    // Velocity-based exponential moving average filter (ported from ALVR)
+    func filterHandPose(current: (position: SIMD3<Float>, rotation: simd_quatf),
+                        last: (position: SIMD3<Float>, rotation: simd_quatf, timestamp: TimeInterval),
+                        currentTimestamp: TimeInterval) -> (position: SIMD3<Float>, rotation: simd_quatf) {
+        
+        let dt = Float(currentTimestamp - last.timestamp)
+        let safeDt = dt > 0 ? dt : 0.010 // fallback 10ms
+        
+        let dp = current.position - last.position
+        let linVel = dp / safeDt
+        
+        let movementThreshold: Float = 0.15
+        // Calculate alpha based on velocity
+        var alpha: Float = length(linVel) * 0.6 // strength factor
+        
+        // make alphas under movementThreshold even lower and higher even higher
+        alpha = alpha / movementThreshold
+        alpha *= alpha
+        alpha *= movementThreshold
+
+        if alpha > 1.0 { alpha = 1.0 }
+        else if alpha < 0.01 { alpha = 0.01 } // Minimum alpha to prevent freezing
+        
+        let invAlpha = 1.0 - alpha
+        
+        let filteredPos = current.position * alpha + last.position * invAlpha
+        let filteredRot = simd_slerp(last.rotation, current.rotation, alpha)
+        
+        return (filteredPos, filteredRot)
+    }
+
     private func updateGameState(drawable: LayerRenderer.Drawable, deviceAnchor: DeviceAnchor?) {
         /// Update any game state before rendering
 
@@ -332,7 +371,20 @@ actor Renderer {
         
         // Smoothing
         let t: Float = 0.1
-        smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
+        
+        var targetPosition = settings.position
+        
+        // Override with hand position if available (Right hand index finger tip)
+        if let hand = lastRightHandPose {
+             // Map hand position to fractal space
+             // Hand is in world space (meters).
+             // We might want to offset it or scale it.
+             // For now, use direct mapping but maybe inverted or scaled?
+             // Let's just use it directly to see if it tracks.
+             targetPosition = hand.position
+        }
+
+        smoothedPosition = smoothedPosition + (targetPosition - smoothedPosition) * t
         smoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
         
         let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
@@ -401,6 +453,13 @@ actor Renderer {
 
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+        
+        // DEBUG: Check drawable texture usage
+        if let drawTex = drawable.colorTextures.first {
+            if !drawTex.usage.contains(.renderTarget) {
+                print("DEBUG: Drawable texture usage: \(drawTex.usage.rawValue) (Missing renderTarget!)")
+            }
+        }
 
         drawable.deviceAnchor = deviceAnchor
 
@@ -411,6 +470,31 @@ actor Renderer {
                                                  rotationAlpha: poseRotationAlpha)
         } else {
             smoothedDeviceTransform = matrix_identity_float4x4
+        }
+        
+        // Hand Tracking Update
+        let handAnchors = handTracking.handAnchors(at: time)
+        if let rightHand = handAnchors.rightHand, rightHand.isTracked {
+            // Get index finger tip
+            if let indexTip = rightHand.handSkeleton?.joint(.indexFingerTip), indexTip.isTracked {
+                // Get world transform
+                // Note: handAnchors are in world space relative to the session origin, same as deviceAnchor
+                // But we need to be careful about coordinate spaces.
+                // handAnchors.rightHand.originFromAnchorTransform is from anchor to world origin.
+                
+                let originFromHand = rightHand.originFromAnchorTransform
+                let handFromJoint = indexTip.anchorFromJointTransform
+                let worldTransform = originFromHand * handFromJoint
+                
+                let (pos, rot) = decomposePose(worldTransform)
+                
+                if let last = lastRightHandPose {
+                    let filtered = filterHandPose(current: (pos, rot), last: last, currentTimestamp: time)
+                    lastRightHandPose = (filtered.position, filtered.rotation, time)
+                } else {
+                    lastRightHandPose = (pos, rot, time)
+                }
+            }
         }
 
         // FPS tracking using predicted presentation interval
@@ -448,10 +532,13 @@ actor Renderer {
                                useUpscaling: upscalingEnabled)
 
         // Final safety: ensure the color attachment we configured is renderable
-        if let tex = renderPassDescriptor.colorAttachments[0].texture,
-           !tex.usage.contains(.renderTarget) {
-            print("⚠️ Color attachment lacks renderTarget usage (usage=\(tex.usage.rawValue)). Falling back to direct rendering.")
-            configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+        if let tex = renderPassDescriptor.colorAttachments[0].texture {
+            if !tex.usage.contains(.renderTarget) {
+                print("⚠️ Color attachment lacks renderTarget usage (usage=\(tex.usage.rawValue)). Falling back to direct rendering.")
+                configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+            } else {
+                // print("DEBUG: Render target usage OK: \(tex.usage.rawValue)")
+            }
         }
 
         /// Final pass rendering code here
@@ -629,9 +716,14 @@ private extension Renderer {
         if useUpscaling, let fx = metalFXManager, let inputTex = fx.inputTexture {
             // Verify texture has render target usage
             guard inputTex.usage.contains(.renderTarget) else {
-                print("⚠️ MetalFX input texture missing renderTarget usage! Falling back to direct rendering.")
+                print("⚠️ MetalFX input texture missing renderTarget usage! Usage: \(inputTex.usage.rawValue). Falling back to direct rendering.")
                 configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
                 return
+            }
+            
+            // DEBUG: Check for usage 3 (ShaderRead | ShaderWrite) which caused the error
+            if inputTex.usage.rawValue == 3 {
+                print("⚠️ CRITICAL: Input texture has usage 3 (ShaderRead|ShaderWrite) but needs RenderTarget (4)!")
             }
             
             renderPassDescriptor.colorAttachments[0].texture = inputTex

@@ -19,5 +19,7 @@
 			</array>
 		</dict>
 	</dict>
+	<key>NSHandsTrackingUsageDescription</key>
+	<string>Hand tracking is used to interact with the fractal.</string>
 </dict>
 </plist>

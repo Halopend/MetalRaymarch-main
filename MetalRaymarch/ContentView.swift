@@ -19,30 +19,28 @@ struct ContentView: View {
     var body: some View {
         @Bindable var appModel = appModel
         
+        let _ = print("DEBUG: ContentView body re-evaluated. Resolution Scale: \(appModel.renderSettings.resolutionScale)")
+
         VStack {
+            // Resolution Scale - Always visible
+            VStack(spacing: 5) {
+                Text("Resolution Scale: \(Int(appModel.renderSettings.resolutionScale * 100))%")
+                    .font(.headline)
+                
+                Slider(value: Binding(
+                    get: { appModel.renderSettings.resolutionScale },
+                    set: { appModel.renderSettings.resolutionScale = $0 }
+                ), in: 0.25...1.0, step: 0.05)
+            }
+            .padding(.bottom, 20)
+
             ToggleImmersiveSpaceButton()
             
             if appModel.immersiveSpaceState == .open {
-                // Fixed high-priority controls
-                VStack(spacing: 8) {
-                    Text("Resolution Scale: \(Int(resolutionScale * 100))%")
-                        .font(.headline)
-                    
-                    Slider(value: $resolutionScale, in: 0.25...1.0, step: 0.05)
-                        .onChange(of: resolutionScale) { _, newValue in
-                            appModel.renderSettings.resolutionScale = newValue
-                        }
-                }
-                .padding()
-                .background(.regularMaterial)
-                .cornerRadius(12)
-                .padding(.bottom, 8)
-                .onAppear {
-                    resolutionScale = appModel.renderSettings.resolutionScale
-                }
-
                 ScrollView {
                     VStack(spacing: 12) {
+                        Divider()
+                        
                         Text("Animation speed (caution: motion sickness!)")
                         
                         Slider(value: $speed, in: 0...2, onEditingChanged: { editing in
