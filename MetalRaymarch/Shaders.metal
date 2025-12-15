@@ -352,39 +352,19 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                texture2d<half> cubeMap [[texture(TextureIndexColor)]])
 {
     FragmentOutput output;
-    Uniforms uniforms = uniformsArray.uniforms[ampId];
-
-    // Debug: force per-eye solid colors (left=red, right=blue) to verify stereo rendering
-    if (uniforms.debugEyeTint != 0) {
-        float3 tint = (ampId % 2 == 0) ? float3(1.0, 0.0, 0.0) : float3(0.0, 0.0, 1.0);
-        output.color = float4(tint, 1.0);
-        output.depth = in.position.z;
-        return output;
-    }
     
     float gTime = in.time * 0.01 + 15.00;
-
-    // Reconstruct screen-space UV from interpolated clip position.
-    // This is stable across viewports (including MetalFX input scaling).
-    float2 ndc = in.ndcPosition.xy / in.ndcPosition.w;        // [-1, 1]
-    float2 screenUV = ndc * 0.5 + 0.5;                        // [0, 1]
-
-    // Ray origin/direction in model space.
-    // `inverseProjectionMatrix` turns NDC into a view-space direction.
-    // `inverseModelViewMatrix` maps view-space into model space.
-    float4 viewH = uniforms.inverseProjectionMatrix * float4(ndc, 1.0, 1.0);
-    float3 viewDir = normalize(viewH.xyz / max(viewH.w, 1e-6));
-
-    float3 rayOrigin = (uniforms.inverseModelViewMatrix * float4(0.0, 0.0, 0.0, 1.0)).xyz;
-    float3 rd = normalize((uniforms.inverseModelViewMatrix * float4(viewDir, 0.0)).xyz);
-
-    // Use pixel position for temporally stable dithering.
+    
+    float3 cameraPos = CameraPath(gTime);
+    float3 rd = normalize(in.modelPos);
+    
+    // Use screen position for stable dithering pattern
     float2 fragCoord = in.position.xy;
     
     // === Foveation ===
     // System rasterization rate maps handle pixel density (gaze-tracked)
     // Shader-side: only reduce iterations at extreme edges for perf
-    float distFromCenter = length(screenUV - uniforms.foveaCenter);
+    float distFromCenter = length(in.texCoord - float2(0.5, 0.5));
     
     // Minimal shader foveation - system rate maps do the heavy lifting
     // Only affects very edges (50%+ from center), very gentle falloff
@@ -395,7 +375,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     int lodIterations = max(int(float(in.fractalIterations) * (0.4 + 0.6 * quality)), 2);
     
     // Pass time for temporally stable dithering
-    float2 ret = Scene(rayOrigin, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations, in.time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations, in.time);
     
     // Use half precision for color accumulation
     half3 col = half3(0.0h);
@@ -407,7 +387,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     if (ret.x < 900.0)
     {
-        float3 p = rayOrigin + ret.x * rd;
+        float3 p = cameraPos + ret.x * rd;
         
         // Skip normal calculation in extreme periphery - use cheap approximation
         float3 nor;
@@ -415,7 +395,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
             nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations);
         } else {
             // Cheap normal approximation for periphery
-            nor = normalize(p - rayOrigin);
+            nor = normalize(p - cameraPos);
         }
         
         // Simplified lighting for periphery
@@ -463,7 +443,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     // Post effects only in center (skip in periphery for performance)
     if (quality > 0.5) {
-        col = PostEffects(col, half2(screenUV));
+        col = PostEffects(col, half2(in.texCoord));
     } else {
         // Simple gamma only for periphery - faster and less prone to artifacts
         col = pow(saturate(col), half3(0.47h));
@@ -480,52 +460,4 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     output.depth = in.position.z;
     
     return output;
-}
-
-// === Format Conversion Shaders for MetalFX ===
-// Used to convert rgba16Float MetalFX output to drawable format
-
-struct FormatConversionVertex {
-    float4 position [[position]];
-    float2 texCoord;
-};
-
-// Full-screen triangle vertex shader - generates vertices procedurally
-vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]) {
-    FormatConversionVertex out;
-    
-    // Generate full-screen triangle covering clip space using oversized triangle technique
-    // This avoids needing a vertex buffer
-    // vertexID 0: (-1, -1), vertexID 1: (3, -1), vertexID 2: (-1, 3)
-    float2 position;
-    position.x = (vertexID == 1) ? 3.0 : -1.0;
-    position.y = (vertexID == 2) ? 3.0 : -1.0;
-    
-    out.position = float4(position, 0.0, 1.0);
-    
-    // Convert clip space position to UV coordinates
-    // Clip space: x,y in [-1, 1] (but our triangle extends to 3)
-    // UV space: x in [0, 1], y in [0, 1] where (0,0) is top-left in Metal
-    // For Metal textures: UV.y = 0 is top, UV.y = 1 is bottom
-    out.texCoord.x = (position.x + 1.0) * 0.5;  // [-1,1] -> [0,1]
-    out.texCoord.y = (1.0 - position.y) * 0.5;  // [-1,1] -> [1,0] (flip Y for Metal)
-    
-    return out;
-}
-
-// Simple passthrough fragment shader with format conversion
-fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
-                                          texture2d<float> sourceTexture [[texture(0)]]) {
-    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
-                                      address::clamp_to_edge);
-    
-    float4 color = sourceTexture.sample(textureSampler, in.texCoord);
-    
-    // DEBUG: Output magenta if color is black/near-black to help diagnose
-    // if (length(color.rgb) < 0.01) {
-    //     return float4(1.0, 0.0, 1.0, 1.0); // magenta
-    // }
-    
-    // Ensure alpha is 1 for proper visionOS compositing
-    return float4(color.rgb, 1.0);
 }

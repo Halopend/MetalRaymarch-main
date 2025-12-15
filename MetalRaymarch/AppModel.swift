@@ -45,7 +45,7 @@ class RenderSettings {
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 10.0      // 80% of max (12) for quality
-    private var _resolutionScale: Float = 0.5       // MetalFX upscaling: 0.25 (25%) to 1.0 (100%)
+    private var _resolutionScale: Float = 1.0       // MetalFX upscaling: 0.25 (25%) to 1.0 (100%)
     private var _debugEyeTint: Bool = false          // Force per-eye red/blue debug fill
 
     var minDistance: Float {
