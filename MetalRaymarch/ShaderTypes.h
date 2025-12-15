@@ -53,6 +53,7 @@ typedef struct
     float foldingLimit;      // Box folding limit (default 1.0)
     float sphereRadius;      // Sphere folding radius (default 0.5)
     float colorIterations;   // How many iterations contribute to color
+    int debugEyeTint;        // When nonzero, fill per-eye debug colors instead of fractal
 } Uniforms;
 
 typedef struct

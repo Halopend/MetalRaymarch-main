@@ -54,6 +54,7 @@ actor Renderer {
     var pipelineState: MTLRenderPipelineState
     var metalFXPipelineState: MTLRenderPipelineState?  // Pipeline for rgba16Float when using MetalFX
     var depthState: MTLDepthStencilState
+    var depthStateDisabled: MTLDepthStencilState
     var cubeMap: MTLTexture
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
@@ -69,6 +70,9 @@ actor Renderer {
     var memorylessTargets: [(color: MTLTexture, depth: MTLTexture)?]
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
+    var hasLoggedWorldTrackingState = false
+    var hasLoggedHandTrackingState = false
+    var hasLoggedMissingAnchor = false
 
     let isFoveationEnabled: Bool
 
@@ -91,6 +95,7 @@ actor Renderer {
     let handTracking: HandTrackingProvider
     let layerRenderer: LayerRenderer
     let appModel: AppModel
+    var lastValidDeviceAnchor: DeviceAnchor?
 
     // Hand Tracking State
     var lastLeftHandPose: (position: SIMD3<Float>, rotation: simd_quatf, timestamp: TimeInterval)?
@@ -154,9 +159,14 @@ actor Renderer {
         #endif
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.greater
+        depthStateDescriptor.depthCompareFunction = .lessEqual
         depthStateDescriptor.isDepthWriteEnabled = true
         self.depthState = device.makeDepthStencilState(descriptor:depthStateDescriptor)!
+
+        let depthStateDisabledDescriptor = MTLDepthStencilDescriptor()
+        depthStateDisabledDescriptor.depthCompareFunction = .always
+        depthStateDisabledDescriptor.isDepthWriteEnabled = false
+        self.depthStateDisabled = device.makeDepthStencilState(descriptor: depthStateDisabledDescriptor)!
 
         do {
             mesh = try Renderer.buildMesh(device: device, mtlVertexDescriptor: mtlVertexDescriptor)
@@ -175,9 +185,11 @@ actor Renderer {
         arSession = ARKitSession()
     }
 
+    @MainActor
     private func startARSession() async {
         do {
             try await arSession.run([worldTracking, handTracking])
+            print("✓ ARSession started (world: \(worldTracking.state), hand: \(handTracking.state))")
         } catch {
             print("Failed to initialize ARSession: \(error)")
             // Don't fatalError, just continue without tracking if it fails (e.g. simulator)
@@ -404,6 +416,8 @@ actor Renderer {
             let inverseProjection = projection.inverse
             
             // Get fovea center from the view's texture map (normalized 0-1)
+            // Force debug eye tint on by default to verify stereo rendering. Toggle off via renderSettings.debugEyeTint.
+            let debugTintEnabled = settings.debugEyeTint
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: viewMatrix * modelMatrix,
                             inverseProjectionMatrix: inverseProjection,
@@ -418,7 +432,8 @@ actor Renderer {
                             glowIntensity: settings.glowIntensity,
                             foldingLimit: settings.foldingLimit,
                             sphereRadius: settings.sphereRadius,
-                            colorIterations: settings.colorIterations)
+                            colorIterations: settings.colorIterations,
+                            debugEyeTint: debugTintEnabled ? 1 : 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -444,25 +459,31 @@ actor Renderer {
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
 
         guard let drawable = frame.queryDrawable() else { return }
-        
-        // Check for device anchor
+
+        // Check provider states before querying anchors
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
-        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
-        
-        // If no device anchor, we still need to submit the frame but skip rendering
-        guard let deviceAnchor = deviceAnchor else {
-            if !hasLoggedWorldTrackingWarning {
-                print("⚠️ Waiting for world tracking to start...")
-                hasLoggedWorldTrackingWarning = true
-            }
-            // Submit an empty frame to avoid frame buildup
-            frame.startSubmission()
-            drawable.deviceAnchor = nil
-            guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
-            drawable.encodePresent(commandBuffer: commandBuffer)
-            commandBuffer.commit()
-            frame.endSubmission()
-            return
+        let worldState = worldTracking.state
+        let handState = handTracking.state
+        let debugTintEnabled = appModel.renderSettings.debugEyeTint
+
+        if worldState != .running, !hasLoggedWorldTrackingState {
+            print("⚠️ World tracking not running (state: \(worldState))")
+            hasLoggedWorldTrackingState = true
+        }
+        if handState != .running, !hasLoggedHandTrackingState {
+            print("⚠️ Hand tracking not running (state: \(handState))")
+            hasLoggedHandTrackingState = true
+        }
+
+        let deviceAnchor: DeviceAnchor? = (worldState == .running) ? worldTracking.queryDeviceAnchor(atTimestamp: time) : nil
+
+        if let anchor = deviceAnchor {
+            lastValidDeviceAnchor = anchor
+        }
+
+        if deviceAnchor == nil, worldState == .running, !hasLoggedWorldTrackingWarning {
+            print("⚠️ Waiting for world tracking to start...")
+            hasLoggedWorldTrackingWarning = true
         }
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
@@ -480,35 +501,52 @@ actor Renderer {
             }
         }
 
-        drawable.deviceAnchor = deviceAnchor
+        let anchorForFrame = deviceAnchor ?? lastValidDeviceAnchor
 
-        let anchorTransform = deviceAnchor.originFromAnchorTransform
-        smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
-                                             current: anchorTransform,
-                                             positionAlpha: posePositionAlpha,
-                                             rotationAlpha: poseRotationAlpha)
+        if anchorForFrame == nil {
+            if !hasLoggedMissingAnchor {
+                print("⚠️ No device anchor yet; skipping present until anchor is available")
+                hasLoggedMissingAnchor = true
+            }
+            inFlightSemaphore.signal()
+            frame.endSubmission()
+            return
+        }
+
+        drawable.deviceAnchor = anchorForFrame
+
+        if let anchorTransform = anchorForFrame?.originFromAnchorTransform {
+            smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
+                                                 current: anchorTransform,
+                                                 positionAlpha: posePositionAlpha,
+                                                 rotationAlpha: poseRotationAlpha)
+        } else {
+            smoothedDeviceTransform = matrix_identity_float4x4
+        }
         
         // Hand Tracking Update
-        let handAnchors = handTracking.handAnchors(at: time)
-        if let rightHand = handAnchors.rightHand, rightHand.isTracked {
-            // Get index finger tip
-            if let indexTip = rightHand.handSkeleton?.joint(.indexFingerTip), indexTip.isTracked {
-                // Get world transform
-                // Note: handAnchors are in world space relative to the session origin, same as deviceAnchor
-                // But we need to be careful about coordinate spaces.
-                // handAnchors.rightHand.originFromAnchorTransform is from anchor to world origin.
-                
-                let originFromHand = rightHand.originFromAnchorTransform
-                let handFromJoint = indexTip.anchorFromJointTransform
-                let worldTransform = originFromHand * handFromJoint
-                
-                let (pos, rot) = decomposePose(worldTransform)
-                
-                if let last = lastRightHandPose {
-                    let filtered = filterHandPose(current: (pos, rot), last: last, currentTimestamp: time)
-                    lastRightHandPose = (filtered.position, filtered.rotation, time)
-                } else {
-                    lastRightHandPose = (pos, rot, time)
+        if handState == .running {
+            let handAnchors = handTracking.handAnchors(at: time)
+            if let rightHand = handAnchors.rightHand, rightHand.isTracked {
+                // Get index finger tip
+                if let indexTip = rightHand.handSkeleton?.joint(.indexFingerTip), indexTip.isTracked {
+                    // Get world transform
+                    // Note: handAnchors are in world space relative to the session origin, same as deviceAnchor
+                    // But we need to be careful about coordinate spaces.
+                    // handAnchors.rightHand.originFromAnchorTransform is from anchor to world origin.
+                    
+                    let originFromHand = rightHand.originFromAnchorTransform
+                    let handFromJoint = indexTip.anchorFromJointTransform
+                    let worldTransform = originFromHand * handFromJoint
+                    
+                    let (pos, rot) = decomposePose(worldTransform)
+                    
+                    if let last = lastRightHandPose {
+                        let filtered = filterHandPose(current: (pos, rot), last: last, currentTimestamp: time)
+                        lastRightHandPose = (filtered.position, filtered.rotation, time)
+                    } else {
+                        lastRightHandPose = (pos, rot, time)
+                    }
                 }
             }
         }
@@ -535,7 +573,7 @@ actor Renderer {
         self.updateDynamicBufferState()
 
         #if canImport(MetalFX)
-        let upscalingEnabled = configureMetalFXIfNeeded(for: drawable)
+        let upscalingEnabled = debugTintEnabled ? false : configureMetalFXIfNeeded(for: drawable)
         #else
         let upscalingEnabled = false
         #endif
@@ -546,6 +584,22 @@ actor Renderer {
         configureRenderTargets(renderPassDescriptor: renderPassDescriptor,
                                drawable: drawable,
                                useUpscaling: upscalingEnabled)
+
+        // Safety net: pipeline expects a depth attachment; attach drawable depth or skip frame if missing
+        if renderPassDescriptor.depthAttachment.texture == nil {
+            if let depth = drawable.depthTextures.first {
+                renderPassDescriptor.depthAttachment.texture = depth
+                renderPassDescriptor.depthAttachment.loadAction = .clear
+                renderPassDescriptor.depthAttachment.storeAction = .store
+                renderPassDescriptor.depthAttachment.clearDepth = 1.0
+                print("⚠️ Depth attachment was nil; attached drawable depth to avoid pipeline assertion")
+            } else {
+                print("⚠️ No depth attachment available; skipping frame to avoid pipeline assertion")
+                inFlightSemaphore.signal()
+                frame.endSubmission()
+                return
+            }
+        }
 
         // Final safety: ensure the color attachment we configured is renderable
         if let tex = renderPassDescriptor.colorAttachments[0].texture {
@@ -585,8 +639,12 @@ actor Renderer {
 
         renderEncoder.pushDebugGroup("Draw Box")
 
-//        renderEncoder.setCullMode(.back)
-        renderEncoder.setCullMode(.front)
+        // In debug tint mode, disable culling and depth tests to guarantee visibility
+        if debugTintEnabled {
+            renderEncoder.setCullMode(.none)
+        } else {
+            renderEncoder.setCullMode(.front)
+        }
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
@@ -601,15 +659,15 @@ actor Renderer {
         renderEncoder.setRenderPipelineState(pipelineState)
         #endif
 
-        renderEncoder.setDepthStencilState(depthState)
+        renderEncoder.setDepthStencilState(debugTintEnabled ? depthStateDisabled : depthState)
 
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // Use scaled per-view viewports when upscaling
-        let viewports = scaledViewports(for: drawable, useUpscaling: upscalingEnabled)
+        // Use scaled per-view viewports when upscaling; in debug tint mode, avoid scaling complexities
+        let viewports = scaledViewports(for: drawable, useUpscaling: upscalingEnabled && !debugTintEnabled)
 
         renderEncoder.setViewports(viewports)
 
@@ -805,8 +863,8 @@ private extension Renderer {
 
             renderPassDescriptor.depthAttachment.texture = fx.depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
-            renderPassDescriptor.depthAttachment.storeAction = .dontCare
-            renderPassDescriptor.depthAttachment.clearDepth = 0.0
+            renderPassDescriptor.depthAttachment.storeAction = .store
+            renderPassDescriptor.depthAttachment.clearDepth = 1.0
 
             renderPassDescriptor.rasterizationRateMap = nil
             renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
@@ -836,9 +894,10 @@ private extension Renderer {
         }
 
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+        // Alpha must be 1.0 for visionOS compositing; alpha 0 produces full transparency/black
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.clearDepth = 0.0
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
 
         if let systemMap = drawable.rasterizationRateMaps.first {
             renderPassDescriptor.rasterizationRateMap = systemMap
@@ -855,17 +914,17 @@ private extension Renderer {
     }
 
     func scaledViewports(for drawable: LayerRenderer.Drawable, useUpscaling: Bool) -> [MTLViewport] {
-        guard useUpscaling, let scale = metalFXManager?.configuration.scale else {
+        // When upscaling, render into the full input texture without additional scaling
+        guard useUpscaling, let fx = metalFXManager, let inputTex = fx.inputTexture else {
             return drawable.views.map { $0.textureMap.viewport }
         }
-        let factor = Double(scale)
-        return drawable.views.map { view in
-            var viewport = view.textureMap.viewport
-            viewport.originX *= factor
-            viewport.originY *= factor
-            viewport.width *= factor
-            viewport.height *= factor
-            return viewport
+        return drawable.views.enumerated().map { index, _ in
+            MTLViewport(originX: 0,
+                        originY: 0,
+                        width: Double(inputTex.width),
+                        height: Double(inputTex.height),
+                        znear: 0.0,
+                        zfar: 1.0)
         }
     }
 
@@ -920,6 +979,8 @@ private extension Renderer {
                                    destination: destinationTexture,
                                    viewCount: drawable.views.count)
         }
+
+        copyFXDepthToDrawableDepth(fxDepth: fx.depthTexture, drawable: drawable, commandBuffer: commandBuffer)
     }
     
     /// Encode a format conversion pass from rgba16Float to the drawable's format
@@ -1076,6 +1137,46 @@ private extension Renderer {
         } catch {
             print("⚠️ Failed to create format conversion pipeline: \(error)")
         }
+    }
+
+    /// Copy MetalFX depth into the drawable depth so the compositor has depth after upscaling
+    func copyFXDepthToDrawableDepth(fxDepth: MTLTexture?, drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer) {
+        guard let src = fxDepth else {
+            print("⚠️ MetalFX depth texture unavailable; depth not copied")
+            return
+        }
+        guard let dst = drawable.depthTextures.first else {
+            print("⚠️ Drawable depth texture unavailable; depth not copied")
+            return
+        }
+        if src.pixelFormat != dst.pixelFormat {
+            print("⚠️ Depth format mismatch MetalFX \(src.pixelFormat.rawValue) -> drawable \(dst.pixelFormat.rawValue); skipping depth copy")
+            return
+        }
+
+        guard let blit = commandBuffer.makeBlitCommandEncoder() else {
+            print("⚠️ Failed to create blit encoder for depth copy")
+            return
+        }
+
+        let views = min(drawable.views.count, src.arrayLength)
+        for eye in 0..<views {
+            let destSlice = dst.arrayLength > 1 ? eye : 0
+            let size = MTLSize(width: min(src.width, dst.width),
+                               height: min(src.height, dst.height),
+                               depth: 1)
+            blit.copy(from: src,
+                      sourceSlice: eye,
+                      sourceLevel: 0,
+                      sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                      sourceSize: size,
+                      to: dst,
+                      destinationSlice: destSlice,
+                      destinationLevel: 0,
+                      destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        }
+        blit.endEncoding()
+        print("DEBUG: Copied MetalFX depth to drawable depth")
     }
 }
 #else

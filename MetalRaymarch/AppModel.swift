@@ -46,6 +46,7 @@ class RenderSettings {
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 10.0      // 80% of max (12) for quality
     private var _resolutionScale: Float = 0.5       // MetalFX upscaling: 0.25 (25%) to 1.0 (100%)
+    private var _debugEyeTint: Bool = false          // Force per-eye red/blue debug fill
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -110,6 +111,11 @@ class RenderSettings {
     var resolutionScale: Float {
         get { lock.withLock { _resolutionScale } }
         set { lock.withLock { _resolutionScale = max(0.25, min(1.0, newValue)) } }
+    }
+
+    var debugEyeTint: Bool {
+        get { lock.withLock { _debugEyeTint } }
+        set { lock.withLock { _debugEyeTint = newValue } }
     }
 }
 

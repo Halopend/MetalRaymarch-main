@@ -352,6 +352,17 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                texture2d<half> cubeMap [[texture(TextureIndexColor)]])
 {
     FragmentOutput output;
+    Uniforms uniforms = uniformsArray.uniforms[ampId];
+
+    // Debug: force per-eye solid colors (left=red, right=blue) to verify stereo rendering
+    if (uniforms.debugEyeTint != 0) {
+        float3 tint = (ampId % 2 == 0) ? float3(1.0, 0.0, 0.0) : float3(0.0, 0.0, 1.0);
+        output.color = float4(tint, 1.0);
+        // Write proper NDC depth so depth tests use correct range
+        float ndcDepth = in.ndcPosition.z / in.ndcPosition.w;
+        output.depth = ndcDepth;
+        return output;
+    }
     
     float gTime = in.time * 0.01 + 15.00;
     
@@ -453,11 +464,9 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     // Color with premultiplied alpha for proper compositing
     output.color = float4(float3(col), 1.0);
     
-    // Depth: Use rasterized depth from proxy geometry
-    // This provides stable depth for visionOS reprojection/ASW
-    // The proxy cube gives us correct world-space depth even though
-    // the raymarched content is in a different coordinate space
-    output.depth = in.position.z;
+    // Depth: write normalized device coordinate depth for compositor
+    float ndcDepth = in.ndcPosition.z / in.ndcPosition.w;
+    output.depth = ndcDepth;
     
     return output;
 }
