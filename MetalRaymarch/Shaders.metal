@@ -366,8 +366,13 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     float gTime = in.time * 0.01 + 15.00;
     
-    float3 cameraPos = CameraPath(gTime);
-    float3 rd = normalize(in.modelPos);
+    // FIX: Calculate camera position in Model Space using the inverse matrix
+    // This effectively 'un-moves' the camera so the fractal stays fixed in the world
+    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0, 0, 0, 1)).xyz;
+
+    // FIX: Calculate Ray Direction (rd) from Camera to the Pixel (in.modelPos)
+    // in.modelPos is the point on the bounding sphere surface
+    float3 rd = normalize(in.modelPos - cameraPos);
     
     // Use screen position for stable dithering pattern
     float2 fragCoord = in.position.xy;

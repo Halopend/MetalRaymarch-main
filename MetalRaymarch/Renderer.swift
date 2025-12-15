@@ -415,12 +415,17 @@ actor Renderer {
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             let inverseProjection = projection.inverse
             
+            // Calculate modelView and then its inverse for correct camera positioning in shader
+            let modelView = viewMatrix * modelMatrix
+            let inverseModelView = modelView.inverse
+            
             // Get fovea center from the view's texture map (normalized 0-1)
             // Force debug eye tint on by default to verify stereo rendering. Toggle off via renderSettings.debugEyeTint.
             let debugTintEnabled = settings.debugEyeTint
             return Uniforms(projectionMatrix: projection,
-                            modelViewMatrix: viewMatrix * modelMatrix,
+                            modelViewMatrix: modelView,
                             inverseProjectionMatrix: inverseProjection,
+                            inverseModelViewMatrix: inverseModelView, // <--- CHANGED
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
@@ -1282,5 +1287,3 @@ func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_floa
     mat.columns.3 = SIMD4<Float>(translation, 1)
     return mat
 }
-
-
