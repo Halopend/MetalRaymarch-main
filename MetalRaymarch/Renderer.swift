@@ -443,18 +443,35 @@ actor Renderer {
         guard let timing = frame.predictTiming() else { return }
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
 
+        guard let drawable = frame.queryDrawable() else { return }
+        
+        // Check for device anchor
+        let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
+        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+        
+        // If no device anchor, we still need to submit the frame but skip rendering
+        guard let deviceAnchor = deviceAnchor else {
+            if !hasLoggedWorldTrackingWarning {
+                print("⚠️ Waiting for world tracking to start...")
+                hasLoggedWorldTrackingWarning = true
+            }
+            // Submit an empty frame to avoid frame buildup
+            frame.startSubmission()
+            drawable.deviceAnchor = nil
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+            drawable.encodePresent(commandBuffer: commandBuffer)
+            commandBuffer.commit()
+            frame.endSubmission()
+            return
+        }
+
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             fatalError("Failed to create command buffer")
         }
 
-        guard let drawable = frame.queryDrawable() else { return }
-
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
 
         frame.startSubmission()
-
-        let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
-        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
         
         // DEBUG: Check drawable texture usage
         if let drawTex = drawable.colorTextures.first {
@@ -465,14 +482,11 @@ actor Renderer {
 
         drawable.deviceAnchor = deviceAnchor
 
-        if let anchorTransform = deviceAnchor?.originFromAnchorTransform {
-            smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
-                                                 current: anchorTransform,
-                                                 positionAlpha: posePositionAlpha,
-                                                 rotationAlpha: poseRotationAlpha)
-        } else {
-            smoothedDeviceTransform = matrix_identity_float4x4
-        }
+        let anchorTransform = deviceAnchor.originFromAnchorTransform
+        smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
+                                             current: anchorTransform,
+                                             positionAlpha: posePositionAlpha,
+                                             rotationAlpha: poseRotationAlpha)
         
         // Hand Tracking Update
         let handAnchors = handTracking.handAnchors(at: time)
@@ -786,7 +800,8 @@ private extension Renderer {
             renderPassDescriptor.colorAttachments[0].texture = inputTex
             renderPassDescriptor.colorAttachments[0].loadAction = .clear
             renderPassDescriptor.colorAttachments[0].storeAction = .store
-            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.0)
+            // Use alpha = 1.0 for visionOS - alpha = 0 would be fully transparent!
+            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
 
             renderPassDescriptor.depthAttachment.texture = fx.depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
@@ -795,6 +810,8 @@ private extension Renderer {
 
             renderPassDescriptor.rasterizationRateMap = nil
             renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
+            
+            print("DEBUG: Configured MetalFX render target: \(inputTex.width)x\(inputTex.height), arrayLength=\(inputTex.arrayLength)")
         } else {
             configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
         }
@@ -860,6 +877,7 @@ private extension Renderer {
 
         do {
             try fx.encodeSpatialUpscale(commandBuffer: commandBuffer)
+            print("DEBUG: MetalFX upscale encoded successfully")
         } catch {
             print("⚠️ MetalFX upscale failed: \(error)")
             return
@@ -870,8 +888,11 @@ private extension Renderer {
         let drawableFormat = destinationTexture.pixelFormat
         let outputFormat = output.pixelFormat
         
+        print("DEBUG: Output size: \(output.width)x\(output.height), Drawable size: \(destinationTexture.width)x\(destinationTexture.height)")
+        
         // Check if formats match - if not, we need a conversion pass
         if drawableFormat == outputFormat {
+            print("DEBUG: Direct blit - formats match")
             // Direct blit - formats match
             guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
             let views = min(drawable.views.count, output.arrayLength)
@@ -892,6 +913,7 @@ private extension Renderer {
             }
             blit.endEncoding()
         } else {
+            print("DEBUG: Format conversion needed - calling encodeFormatConversion")
             // Format conversion needed - use a render pass with texture sampling
             encodeFormatConversion(commandBuffer: commandBuffer, 
                                    source: output, 
@@ -906,6 +928,8 @@ private extension Renderer {
                                 source: MTLTexture,
                                 destination: MTLTexture,
                                 viewCount: Int) {
+        print("DEBUG: encodeFormatConversion called - source: \(source.width)x\(source.height), dest: \(destination.width)x\(destination.height)")
+        
         // Create conversion pipeline lazily if needed
         if formatConversionPipeline == nil {
             createFormatConversionPipeline(destinationFormat: destination.pixelFormat)
@@ -915,6 +939,8 @@ private extension Renderer {
             print("⚠️ Format conversion pipeline not available")
             return
         }
+        
+        print("DEBUG: Format conversion pipeline available")
         
         let views = min(viewCount, source.arrayLength)
         
@@ -928,6 +954,8 @@ private extension Renderer {
             print("⚠️ Failed to create intermediate texture")
             return
         }
+        
+        print("DEBUG: Intermediate texture ready: \(intermediate.width)x\(intermediate.height), format=\(intermediate.pixelFormat.rawValue)")
         
         // Step 1: Render from source (rgba16Float) to intermediate (destination format)
         for eye in 0..<views {
@@ -966,6 +994,7 @@ private extension Renderer {
             encoder.setFragmentTexture(sourceView, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
+            print("DEBUG: Format conversion render pass completed for eye \(eye)")
         }
         
         // Step 2: Blit from intermediate to drawable (same format, should work)
@@ -987,6 +1016,7 @@ private extension Renderer {
                       destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
         }
         blit.endEncoding()
+        print("DEBUG: Format conversion complete - blit to drawable done")
     }
     
     /// Get or create the intermediate texture for format conversion

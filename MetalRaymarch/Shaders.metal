@@ -501,6 +501,11 @@ fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
     
     float4 color = sourceTexture.sample(textureSampler, in.texCoord);
     
+    // DEBUG: Output magenta if color is black/near-black to help diagnose
+    // if (length(color.rgb) < 0.01) {
+    //     return float4(1.0, 0.0, 1.0, 1.0); // magenta
+    // }
+    
     // Ensure alpha is 1 for proper visionOS compositing
     return float4(color.rgb, 1.0);
 }
