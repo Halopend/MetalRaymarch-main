@@ -73,8 +73,12 @@ actor Renderer {
 
     // Pose smoothing
     var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
-    let posePositionAlpha: Float = 0.7
-    let poseRotationAlpha: Float = 0.12
+    
+    // FIX: Convert fixed alpha values to time constants (tau) for frame-rate independence.
+    // Low tau (e.g., 0.012s) means faster, aggressive smoothing (for position).
+    // High tau (e.g., 0.086s) means slower, gentle smoothing (for rotation).
+    let posePositionTau: Double = 0.012 // Time constant for Position smoothing (~0.7 alpha at 90Hz)
+    let poseRotationTau: Double = 0.086 // Time constant for Rotation smoothing (~0.12 alpha at 90Hz)
 
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
@@ -404,11 +408,20 @@ actor Renderer {
 
         drawable.deviceAnchor = deviceAnchor
 
+        // Calculate deltaTime for smoothing
+        let deltaTime: TimeInterval
+        if let last = lastPresentationTime {
+            deltaTime = last.duration(to: drawable.frameTiming.presentationTime).timeInterval
+        } else {
+            deltaTime = 1.0 / 90.0 // Default to 90Hz
+        }
+
         if let anchorTransform = deviceAnchor?.originFromAnchorTransform {
             smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
                                                  current: anchorTransform,
-                                                 positionAlpha: posePositionAlpha,
-                                                 rotationAlpha: poseRotationAlpha)
+                                                 deltaTime: deltaTime,
+                                                 tauPosition: posePositionTau,
+                                                 tauRotation: poseRotationTau)
         } else {
             smoothedDeviceTransform = matrix_identity_float4x4
         }
@@ -832,12 +845,20 @@ func radians_from_degrees(_ degrees: Float) -> Float {
 }
 
 // Blend two poses with separate position and rotation smoothing factors
-func smoothPose(previous: matrix_float4x4, current: matrix_float4x4, positionAlpha: Float, rotationAlpha: Float) -> matrix_float4x4 {
+// FIX: Implementation uses the time-independent EMA formula: alpha = 1 - exp(-dt / tau)
+func smoothPose(previous: matrix_float4x4, current: matrix_float4x4, deltaTime: TimeInterval, tauPosition: Double, tauRotation: Double) -> matrix_float4x4 {
     let prevPose = decomposePose(previous)
     let currPose = decomposePose(current)
 
-    let blendedPos = prevPose.translation + (currPose.translation - prevPose.translation) * positionAlpha
-    let blendedRot = simd_slerp(prevPose.rotation, currPose.rotation, rotationAlpha)
+    // Calculate time-independent alpha for position (using tauPosition)
+    let alphaPos = 1.0 - pow(Float(M_E), -Float(deltaTime / tauPosition))
+    // Calculate time-independent alpha for rotation (using tauRotation)
+    let alphaRot = 1.0 - pow(Float(M_E), -Float(deltaTime / tauRotation))
+
+    // Apply blending
+    let blendedPos = prevPose.translation + (currPose.translation - prevPose.translation) * alphaPos
+    let blendedRot = simd_slerp(prevPose.rotation, currPose.rotation, alphaRot)
+    
     return composePose(translation: blendedPos, rotation: blendedRot)
 }
 
