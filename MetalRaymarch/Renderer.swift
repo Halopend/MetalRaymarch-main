@@ -136,14 +136,17 @@ actor Renderer {
             fatalError("Unable to compile render pipeline state.  Error info: \(error)")
         }
 
-        // Build MetalFX pipeline with rgba16Float format
+        // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
+        // Uses explicit per-eye shader variants to avoid relying on vertex amplification IDs.
         #if canImport(MetalFX)
         do {
             metalFXPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
                                                                               layerRenderer: layerRenderer,
                                                                               rasterSampleCount: 1,
                                                                               mtlVertexDescriptor: mtlVertexDescriptor,
-                                                                              colorFormat: .rgba16Float)
+                                                                              colorFormat: .rgba16Float,
+                                                                              vertexFunctionName: "vertexShaderEyeIndex",
+                                                                              fragmentFunctionName: "fragmentShaderEyeIndex")
             
             depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
                                                                                layerRenderer: layerRenderer, 
@@ -239,13 +242,15 @@ actor Renderer {
                                               layerRenderer: LayerRenderer,
                                               rasterSampleCount: Int,
                                               mtlVertexDescriptor: MTLVertexDescriptor,
-                                              colorFormat: MTLPixelFormat? = nil) throws -> MTLRenderPipelineState {
+                                              colorFormat: MTLPixelFormat? = nil,
+                                              vertexFunctionName: String = "vertexShader",
+                                              fragmentFunctionName: String = "fragmentShader") throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object
 
         let library = device.makeDefaultLibrary()
 
-        let vertexFunction = library?.makeFunction(name: "vertexShader")
-        let fragmentFunction = library?.makeFunction(name: "fragmentShader")
+        let vertexFunction = library?.makeFunction(name: vertexFunctionName)
+        let fragmentFunction = library?.makeFunction(name: fragmentFunctionName)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.label = "RenderPipeline"
@@ -482,6 +487,109 @@ actor Renderer {
 
         self.updateGameState(drawable: drawable, deviceAnchor: deviceAnchor)
 
+        #if canImport(MetalFX)
+        // MetalFX path: render each eye explicitly into its slice, avoiding reliance on amplification_id.
+        if upscalingEnabled,
+           let fx = metalFXManager,
+           let inputTex = fx.inputTexture,
+           let depthTex = fx.depthTexture,
+           let fxPipeline = metalFXPipelineState {
+
+            let views = min(drawable.views.count, inputTex.arrayLength)
+            let factor = Double(fx.configuration.scale)
+
+            for eye in 0..<views {
+                guard let colorView = inputTex.makeTextureView(
+                    pixelFormat: inputTex.pixelFormat,
+                    textureType: .type2D,
+                    levels: 0..<1,
+                    slices: eye..<(eye + 1)
+                ), let depthView = depthTex.makeTextureView(
+                    pixelFormat: depthTex.pixelFormat,
+                    textureType: .type2D,
+                    levels: 0..<1,
+                    slices: eye..<(eye + 1)
+                ) else {
+                    continue
+                }
+
+                let pass = MTLRenderPassDescriptor()
+                pass.colorAttachments[0].texture = colorView
+                pass.colorAttachments[0].loadAction = .clear
+                pass.colorAttachments[0].storeAction = .store
+                pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
+
+                pass.depthAttachment.texture = depthView
+                pass.depthAttachment.loadAction = .clear
+                pass.depthAttachment.storeAction = .store
+                pass.depthAttachment.clearDepth = 0.0
+
+                pass.rasterizationRateMap = nil
+                pass.renderTargetArrayLength = 1
+
+                guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+                    continue
+                }
+
+                renderEncoder.label = "MetalFX Eye \(eye) Render Encoder"
+                renderEncoder.pushDebugGroup("Draw Box")
+                renderEncoder.setCullMode(.front)
+                renderEncoder.setFrontFacing(.counterClockwise)
+                renderEncoder.setRenderPipelineState(fxPipeline)
+                renderEncoder.setDepthStencilState(depthState)
+
+                renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+                renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+
+                var eyeIndex = UInt32(eye)
+                renderEncoder.setVertexBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
+                renderEncoder.setFragmentBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
+
+                let originalViewport = drawable.views[eye].textureMap.viewport
+                let viewport = MTLViewport(
+                    originX: 0,
+                    originY: 0,
+                    width: originalViewport.width * factor,
+                    height: originalViewport.height * factor,
+                    znear: originalViewport.znear,
+                    zfar: originalViewport.zfar
+                )
+                renderEncoder.setViewport(viewport)
+
+                for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
+                    guard let layout = element as? MDLVertexBufferLayout else {
+                        renderEncoder.endEncoding()
+                        return
+                    }
+
+                    if layout.stride != 0 {
+                        let buffer = mesh.vertexBuffers[index]
+                        renderEncoder.setVertexBuffer(buffer.buffer, offset: buffer.offset, index: index)
+                    }
+                }
+
+                renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
+
+                for submesh in mesh.submeshes {
+                    renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
+                                                        indexCount: submesh.indexCount,
+                                                        indexType: submesh.indexType,
+                                                        indexBuffer: submesh.indexBuffer.buffer,
+                                                        indexBufferOffset: submesh.indexBuffer.offset)
+                }
+
+                renderEncoder.popDebugGroup()
+                renderEncoder.endEncoding()
+            }
+
+            encodeMetalFXUpscale(commandBuffer: commandBuffer, drawable: drawable)
+            drawable.encodePresent(commandBuffer: commandBuffer)
+            commandBuffer.commit()
+            frame.endSubmission()
+            return
+        }
+        #endif
+
         let renderPassDescriptor = MTLRenderPassDescriptor()
 
         #if canImport(MetalFX)
@@ -520,7 +628,7 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
-        // Use MetalFX pipeline when upscaling (rgba16Float), otherwise use standard pipeline
+        // Use MetalFX pipeline when upscaling (no MSAA), otherwise use standard pipeline
         #if canImport(MetalFX)
         if upscalingEnabled, let fxPipeline = metalFXPipelineState {
             renderEncoder.setRenderPipelineState(fxPipeline)
@@ -542,14 +650,20 @@ actor Renderer {
         #if canImport(MetalFX)
         let viewports: [MTLViewport]
         if upscalingEnabled, let scale = metalFXManager?.configuration.scale {
+            // When rendering to MetalFX input textures, scale the viewport dimensions
+            // but keep the same relative positions for each eye
+            // Each eye renders to its own slice starting at (0,0)
             let factor = Double(scale)
             viewports = drawable.views.map { view in
-                var viewport = view.textureMap.viewport
-                viewport.originX *= factor
-                viewport.originY *= factor
-                viewport.width *= factor
-                viewport.height *= factor
-                return viewport
+                let originalViewport = view.textureMap.viewport
+                return MTLViewport(
+                    originX: 0,  // Each eye slice starts at origin
+                    originY: 0,
+                    width: originalViewport.width * factor,
+                    height: originalViewport.height * factor,
+                    znear: originalViewport.znear,
+                    zfar: originalViewport.zfar
+                )
             }
         } else {
             viewports = drawable.views.map { $0.textureMap.viewport }
@@ -673,11 +787,13 @@ actor Renderer {
             return false
         }
 
-        let outputTexture = drawable.colorTextures[0]
-        let outputWidth = outputTexture.width
-        let outputHeight = outputTexture.height
-        let inputWidth = max(1, Int(Float(outputWidth) * metalFXScale))
-        let inputHeight = max(1, Int(Float(outputHeight) * metalFXScale))
+        // Use the actual viewport dimensions, not the full texture dimensions.
+        // Each eye's viewport defines the actual renderable area.
+        let firstViewport = drawable.views[0].textureMap.viewport
+        let outputWidth = Int(firstViewport.width)
+        let outputHeight = Int(firstViewport.height)
+        let inputWidth = max(1, Int(Double(outputWidth) * Double(metalFXScale)))
+        let inputHeight = max(1, Int(Double(outputHeight) * Double(metalFXScale)))
 
         let config = MetalFXManager.Configuration(
             inputWidth: inputWidth,
@@ -723,91 +839,156 @@ actor Renderer {
             return
         }
 
-        // Need format conversion: MetalFX outputs rgba16Float, drawable is BGRA8Unorm_sRGB
-        let destinationTexture = drawable.colorTextures[0]
-        
-        // Create format conversion pipeline if needed
-        if formatConversionPipeline == nil {
-            createFormatConversionPipeline(destinationFormat: destinationTexture.pixelFormat)
-        }
-        
-        guard let pipeline = formatConversionPipeline else {
-            print("⚠️ Format conversion pipeline not available")
-            return
-        }
-        
+        // Copy MetalFX output to drawable using format conversion
+        // MetalFX outputs rgba16Float, drawable expects BGRA8Unorm_sRGB
         let views = min(drawable.views.count, output.arrayLength)
         
-        // Render each eye with format conversion
-        for eye in 0..<views {
-            guard let sourceView = output.makeTextureView(
-                pixelFormat: output.pixelFormat,
-                textureType: MTLTextureType.type2D,
-                levels: 0..<1,
-                slices: eye..<(eye + 1)
-            ) else {
-                print("⚠️ Failed to create source texture view for eye \(eye)")
-                continue
+        // Check if formats match - if so, we can use blit
+        let drawableFormat = drawable.colorTextures[0].pixelFormat
+        let outputFormat = output.pixelFormat
+        
+        if drawableFormat == outputFormat {
+            // Direct blit when formats match
+            guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
+            
+            for eye in 0..<views {
+                let destinationTexture: MTLTexture
+                let destinationSlice: Int
+                let drawableViewport = drawable.views[eye].textureMap.viewport
+                
+                if drawable.colorTextures.count > eye {
+                    // Dedicated layout
+                    destinationTexture = drawable.colorTextures[eye]
+                    destinationSlice = 0
+                } else {
+                    // Layered layout
+                    destinationTexture = drawable.colorTextures[0]
+                    destinationSlice = eye
+                }
+                
+                // Copy to the viewport region within the drawable, not the full texture
+                let copyWidth = min(output.width, Int(drawableViewport.width))
+                let copyHeight = min(output.height, Int(drawableViewport.height))
+                
+                blit.copy(from: output,
+                          sourceSlice: eye,
+                          sourceLevel: 0,
+                          sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                          sourceSize: MTLSize(width: copyWidth, height: copyHeight, depth: 1),
+                          to: destinationTexture,
+                          destinationSlice: destinationSlice,
+                          destinationLevel: 0,
+                          destinationOrigin: MTLOrigin(x: Int(drawableViewport.originX), y: Int(drawableViewport.originY), z: 0))
+            }
+            blit.endEncoding()
+        } else {
+            // Need format conversion via render pass
+            if formatConversionPipeline == nil {
+                createFormatConversionPipeline(destinationFormat: drawableFormat)
             }
             
-            // Create render pass targeting the drawable slice
-            let renderPassDescriptor = MTLRenderPassDescriptor()
+            guard let pipeline = formatConversionPipeline else {
+                print("⚠️ Format conversion pipeline not available")
+                return
+            }
             
-            if destinationTexture.textureType == .type2DArray {
-                // For array textures, we need to render to a specific slice
-                guard let destView = destinationTexture.makeTextureView(
-                    pixelFormat: destinationTexture.pixelFormat,
+            for eye in 0..<views {
+                guard let sourceView = output.makeTextureView(
+                    pixelFormat: output.pixelFormat,
                     textureType: MTLTextureType.type2D,
                     levels: 0..<1,
                     slices: eye..<(eye + 1)
                 ) else {
-                    print("⚠️ Failed to create destination texture view for eye \(eye)")
+                    print("⚠️ Failed to create source texture view for eye \(eye)")
                     continue
                 }
-                renderPassDescriptor.colorAttachments[0].texture = destView
-            } else {
-                renderPassDescriptor.colorAttachments[0].texture = destinationTexture
+                
+                let renderPassDescriptor = MTLRenderPassDescriptor()
+                
+                // Handle both dedicated and layered layouts
+                let destinationTexture: MTLTexture
+                if drawable.colorTextures.count > eye {
+                    destinationTexture = drawable.colorTextures[eye]
+                } else {
+                    destinationTexture = drawable.colorTextures[0]
+                }
+                
+                if destinationTexture.textureType == .type2DArray {
+                    guard let destView = destinationTexture.makeTextureView(
+                        pixelFormat: destinationTexture.pixelFormat,
+                        textureType: MTLTextureType.type2D,
+                        levels: 0..<1,
+                        slices: eye..<(eye + 1)
+                    ) else {
+                        print("⚠️ Failed to create destination texture view for eye \(eye)")
+                        continue
+                    }
+                    renderPassDescriptor.colorAttachments[0].texture = destView
+                } else {
+                    renderPassDescriptor.colorAttachments[0].texture = destinationTexture
+                }
+                
+                renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
+                renderPassDescriptor.colorAttachments[0].storeAction = .store
+                
+                guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+                    print("⚠️ Failed to create render encoder for format conversion (eye \(eye))")
+                    continue
+                }
+                
+                // Use the drawable's viewport - this is where the content should go
+                let drawableViewport = drawable.views[eye].textureMap.viewport
+                encoder.setViewport(drawableViewport)
+                
+                encoder.label = "Format Conversion Eye \(eye)"
+                encoder.setRenderPipelineState(pipeline)
+                encoder.setFragmentTexture(sourceView, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+                encoder.endEncoding()
             }
-            
-            renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
-            renderPassDescriptor.colorAttachments[0].storeAction = .store
-            
-            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-                print("⚠️ Failed to create render encoder for format conversion (eye \(eye))")
-                continue
-            }
-            
-            encoder.label = "Format Conversion Eye \(eye)"
-            encoder.setRenderPipelineState(pipeline)
-            encoder.setFragmentTexture(sourceView, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-            encoder.endEncoding()
         }
 
         copyFXDepthToDrawableDepth(fxDepth: fx.depthTexture, drawable: drawable, commandBuffer: commandBuffer)
     }
     
     func copyFXDepthToDrawableDepth(fxDepth: MTLTexture?, drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer) {
-        guard let src = fxDepth, let dst = drawable.depthTextures.first else { return }
+        guard let src = fxDepth else { return }
         guard let pipeline = depthUpscalePipelineState else { return }
 
         let views = min(drawable.views.count, src.arrayLength)
 
         for eye in 0..<views {
-            guard let srcView = src.makeTextureView(pixelFormat: src.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1)),
-                  let dstView = dst.makeTextureView(pixelFormat: dst.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1)) 
+            guard let srcView = src.makeTextureView(pixelFormat: src.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1))
             else { continue }
+            
+            // Handle both dedicated and layered layouts
+            let destinationDepth: MTLTexture
+            if drawable.depthTextures.count > eye {
+                destinationDepth = drawable.depthTextures[eye]
+            } else if let first = drawable.depthTextures.first {
+                destinationDepth = first
+            } else {
+                continue
+            }
 
             let desc = MTLRenderPassDescriptor()
-            desc.depthAttachment.texture = dstView
+            
+            if destinationDepth.textureType == .type2DArray {
+                guard let dstView = destinationDepth.makeTextureView(pixelFormat: destinationDepth.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1))
+                else { continue }
+                desc.depthAttachment.texture = dstView
+            } else {
+                desc.depthAttachment.texture = destinationDepth
+            }
+            
             desc.depthAttachment.loadAction = .dontCare
             desc.depthAttachment.storeAction = .store
             
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { continue }
             
-            // FIX 2: Explicitly set the viewport for the destination eye slice.
-            let viewport = drawable.views[eye].textureMap.viewport
-            encoder.setViewport(viewport)
+            // Use the drawable's viewport - this is where the content should go
+            let drawableViewport = drawable.views[eye].textureMap.viewport
+            encoder.setViewport(drawableViewport)
             
             encoder.label = "Depth Upscale Eye \(eye)"
             encoder.setRenderPipelineState(pipeline)

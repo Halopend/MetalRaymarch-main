@@ -463,6 +463,115 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     return output;
 }
 
+// MetalFX path: render each eye in a separate pass, selecting the eye explicitly.
+vertex ColorInOut vertexShaderEyeIndex(Vertex in [[stage_in]],
+                                       constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]],
+                                       constant uint & eyeIndex [[ buffer(BufferIndexEyeIndex) ]])
+{
+    ColorInOut out;
+
+    Uniforms uniforms = uniformsArray.uniforms[eyeIndex];
+    float4 position = float4(in.position, 1);
+    out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
+    out.ndcPosition = out.position;
+
+    out.texCoord = in.texCoord;
+    out.time = uniforms.time;
+    out.modelPos = in.position;
+    out.minDistance = uniforms.minDistance;
+    out.foveaCenter = uniforms.foveaCenter;
+    out.fractalScale = uniforms.fractalScale;
+    out.fractalIterations = uniforms.fractalIterations;
+    out.maxRaySteps = uniforms.maxRaySteps;
+    out.foveationIntensity = uniforms.foveationIntensity;
+    out.colorMix = uniforms.colorMix;
+    out.glowIntensity = uniforms.glowIntensity;
+    out.foldingLimit = uniforms.foldingLimit;
+    out.sphereRadius = uniforms.sphereRadius;
+    out.colorIterations = uniforms.colorIterations;
+
+    return out;
+}
+
+fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
+                                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                                               constant uint & eyeIndex [[ buffer(BufferIndexEyeIndex) ]],
+                                               texture2d<half> cubeMap [[texture(TextureIndexColor)]])
+{
+    FragmentOutput output;
+
+    float gTime = in.time * 0.01 + 15.00;
+
+    Uniforms uniforms = uniformsArray.uniforms[eyeIndex];
+    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
+    float3 rd = normalize(in.modelPos - cameraPos);
+
+    float2 fragCoord = in.position.xy;
+
+    float distFromCenter = length(in.texCoord - float2(0.5, 0.5));
+    float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
+    float quality = mix(1.0, 0.7, edgeAtten * in.foveationIntensity);
+    int lodIterations = max(int(float(in.fractalIterations) * (0.4 + 0.6 * quality)), 2);
+
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations, in.time);
+    half3 col = half3(0.0h);
+
+    if (ret.x < 900.0)
+    {
+        float3 p = cameraPos + ret.x * rd;
+
+        float3 nor;
+        if (quality > 0.2) {
+            nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations);
+        } else {
+            nor = normalize(p - cameraPos);
+        }
+
+        if (quality > 0.4) {
+            float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+            float3 spot = spotLight - p;
+            float atten = length(spot);
+            spot /= atten;
+
+            half shaSpot = half(Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
+            half shaSun = half(Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
+
+            half bri = half(max(dot(spot, nor), 0.0) / pow(atten, 1.5) * 0.25);
+            half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+
+            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, max(int(in.colorIterations * quality), 2));
+            col = (col * bri * shaSpot) + (col * briSun * shaSun);
+
+            if (quality > 0.7) {
+                float3 ref = reflect(rd, nor);
+                col += half3(pow(max(dot(spot, ref), 0.0), 10.0) * 2.0) * shaSpot * bri;
+                col += half3(pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0) * shaSun * briSun;
+            }
+        } else {
+            half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
+            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, 2) * diffuse;
+        }
+    }
+
+    half fogFactor = half(saturate(exp(-ret.x + 1.5)));
+    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
+
+    half glow = half(ret.y);
+    col += glow * glow * half3(0.02h, 0.04h, 0.1h);
+
+    col = clamp(col, half3(0.0h), half3(2.0h));
+
+    if (quality > 0.5) {
+        col = PostEffects(col, half2(in.texCoord));
+    } else {
+        col = pow(saturate(col), half3(0.47h));
+    }
+
+    output.color = float4(float3(col), 1.0);
+    output.depth = in.position.z;
+    return output;
+}
+
 // === Format Conversion Shaders for MetalFX ===
 // Used to convert rgba16Float MetalFX output to drawable format (BGRA8Unorm_sRGB)
 
