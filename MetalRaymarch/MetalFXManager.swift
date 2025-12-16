@@ -120,7 +120,7 @@ final class MetalFXManager {
         depthDescriptor.height = configuration.inputHeight
         depthDescriptor.pixelFormat = configuration.depthFormat
         depthDescriptor.storageMode = .private
-        depthDescriptor.usage = .renderTarget
+        depthDescriptor.usage = [.renderTarget, .shaderRead]
 
         guard let depth = device.makeTexture(descriptor: depthDescriptor) else {
             throw Error.textureCreationFailed("depth")

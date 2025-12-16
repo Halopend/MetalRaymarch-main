@@ -52,6 +52,7 @@ actor Renderer {
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
     var metalFXPipelineState: MTLRenderPipelineState?  // Pipeline for rgba16Float when using MetalFX
+    var depthUpscalePipelineState: MTLRenderPipelineState?
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
 
@@ -143,8 +144,12 @@ actor Renderer {
                                                                               rasterSampleCount: 1,
                                                                               mtlVertexDescriptor: mtlVertexDescriptor,
                                                                               colorFormat: .rgba16Float)
+            
+            depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
+                                                                               layerRenderer: layerRenderer, 
+                                                                               mtlVertexDescriptor: mtlVertexDescriptor)
         } catch {
-            print("⚠️ Unable to compile MetalFX pipeline: \(error)")
+            print("⚠️ Unable to compile MetalFX or Depth Upscale pipeline: \(error)")
             metalFXPipelineState = nil
         }
         #endif
@@ -210,6 +215,24 @@ actor Renderer {
         mtlVertexDescriptor.layouts[BufferIndex.meshGenerics.rawValue].stepFunction = MTLVertexStepFunction.perVertex
 
         return mtlVertexDescriptor
+    }
+
+    static func buildDepthUpscalePipeline(device: MTLDevice,
+                                          layerRenderer: LayerRenderer,
+                                          mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
+        let library = device.makeDefaultLibrary()
+        let vertexFunction = library?.makeFunction(name: "formatConversionVertex")
+        let fragmentFunction = library?.makeFunction(name: "depthUpscaleFragment")
+
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.label = "DepthUpscale"
+        pipelineDescriptor.vertexFunction = vertexFunction
+        pipelineDescriptor.fragmentFunction = fragmentFunction
+        
+        pipelineDescriptor.colorAttachments[0].pixelFormat = .invalid
+        pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
+        
+        return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
 
     static func buildRenderPipelineWithDevice(device: MTLDevice,
@@ -353,9 +376,13 @@ actor Renderer {
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             let inverseProjection = projection.inverse
             
+            let modelView = viewMatrix * modelMatrix
+            let inverseModelView = modelView.inverse
+            
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
-                            modelViewMatrix: viewMatrix * modelMatrix,
+                            modelViewMatrix: modelView,
+                            inverseModelViewMatrix: inverseModelView,
                             inverseProjectionMatrix: inverseProjection,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
@@ -753,6 +780,38 @@ actor Renderer {
             encoder.label = "Format Conversion Eye \(eye)"
             encoder.setRenderPipelineState(pipeline)
             encoder.setFragmentTexture(sourceView, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+        }
+
+        copyFXDepthToDrawableDepth(fxDepth: fx.depthTexture, drawable: drawable, commandBuffer: commandBuffer)
+    }
+    
+    func copyFXDepthToDrawableDepth(fxDepth: MTLTexture?, drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer) {
+        guard let src = fxDepth, let dst = drawable.depthTextures.first else { return }
+        guard let pipeline = depthUpscalePipelineState else { return }
+
+        let views = min(drawable.views.count, src.arrayLength)
+
+        for eye in 0..<views {
+            guard let srcView = src.makeTextureView(pixelFormat: src.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1)),
+                  let dstView = dst.makeTextureView(pixelFormat: dst.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1)) 
+            else { continue }
+
+            let desc = MTLRenderPassDescriptor()
+            desc.depthAttachment.texture = dstView
+            desc.depthAttachment.loadAction = .dontCare
+            desc.depthAttachment.storeAction = .store
+            
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { continue }
+            
+            // FIX 2: Explicitly set the viewport for the destination eye slice.
+            let viewport = drawable.views[eye].textureMap.viewport
+            encoder.setViewport(viewport)
+            
+            encoder.label = "Depth Upscale Eye \(eye)"
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setFragmentTexture(srcView, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
         }

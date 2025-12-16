@@ -148,7 +148,7 @@ half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad
 
     float3 p = pos;
     float3 p0 = p;
-    half trap = 1.0h;
+    float trap = 1.0;
     
     int steps = max(int(float(colorIters) * quality), 2);
     for (int i = 0; i < steps; i++)
@@ -157,10 +157,10 @@ half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad
         float r2 = dot(p, p);
         p *= clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
         p = p * scale.xyz + p0;
-        trap = min(trap, half(r2));
+        trap = min(trap, r2);
     }
     
-    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(trap)));
+    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
     
     // Half precision colors
     half3 col1 = half3(0.8h, 0.0h, 0.0h);
@@ -355,8 +355,9 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     float gTime = in.time * 0.01 + 15.00;
     
-    float3 cameraPos = CameraPath(gTime);
-    float3 rd = normalize(in.modelPos);
+    Uniforms uniforms = uniformsArray.uniforms[ampId];
+    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
+    float3 rd = normalize(in.modelPos - cameraPos);
     
     // Use screen position for stable dithering pattern
     float2 fragCoord = in.position.xy;
@@ -498,4 +499,19 @@ fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
     
     // Ensure alpha is 1 for proper visionOS compositing
     return float4(color.rgb, 1.0);
+}
+
+struct DepthOutput {
+    float depth [[depth(any)]];
+};
+
+// Fragment shader for depth upscaling
+fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
+                                          depth2d<float> sourceTexture [[texture(0)]]) {
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
+                                      address::clamp_to_edge);
+    
+    DepthOutput out;
+    out.depth = sourceTexture.sample(textureSampler, in.texCoord);
+    return out;
 }
