@@ -865,10 +865,11 @@ actor Renderer {
                     destinationTexture = drawable.colorTextures[0]
                     destinationSlice = eye
                 }
-                
-                // Copy to the viewport region within the drawable, not the full texture
-                let copyWidth = min(output.width, Int(drawableViewport.width))
-                let copyHeight = min(output.height, Int(drawableViewport.height))
+
+                // Each destination (dedicated texture or array slice) is its own renderable surface.
+                // Using drawableViewport.origin here can crop/offset the image, causing stereo mismatch.
+                let copyWidth = min(output.width, destinationTexture.width)
+                let copyHeight = min(output.height, destinationTexture.height)
                 
                 blit.copy(from: output,
                           sourceSlice: eye,
@@ -878,7 +879,7 @@ actor Renderer {
                           to: destinationTexture,
                           destinationSlice: destinationSlice,
                           destinationLevel: 0,
-                          destinationOrigin: MTLOrigin(x: Int(drawableViewport.originX), y: Int(drawableViewport.originY), z: 0))
+                          destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
             }
             blit.endEncoding()
         } else {
@@ -935,10 +936,15 @@ actor Renderer {
                     print("⚠️ Failed to create render encoder for format conversion (eye \(eye))")
                     continue
                 }
-                
-                // Use the drawable's viewport - this is where the content should go
-                let drawableViewport = drawable.views[eye].textureMap.viewport
-                encoder.setViewport(drawableViewport)
+
+                // IMPORTANT: The render target is a per-eye texture (or per-eye slice view).
+                // Using drawable.views[eye].textureMap.viewport (often non-zero origin) can make us render
+                // only a sub-rect, which looks like "cropped" upscale and breaks stereo convergence.
+                if let target = renderPassDescriptor.colorAttachments[0].texture {
+                    encoder.setViewport(MTLViewport(originX: 0, originY: 0,
+                                                   width: Double(target.width), height: Double(target.height),
+                                                   znear: 0.0, zfar: 1.0))
+                }
                 
                 encoder.label = "Format Conversion Eye \(eye)"
                 encoder.setRenderPipelineState(pipeline)
@@ -985,10 +991,15 @@ actor Renderer {
             desc.depthAttachment.storeAction = .store
             
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { continue }
-            
-            // Use the drawable's viewport - this is where the content should go
-            let drawableViewport = drawable.views[eye].textureMap.viewport
-            encoder.setViewport(drawableViewport)
+
+            // IMPORTANT: Depth destination is a per-eye texture (or per-eye slice view).
+            // Using drawable.views[eye].textureMap.viewport (often non-zero origin) can offset/crop depth,
+            // which contributes to stereo mismatch and unstable reprojection.
+            if let target = desc.depthAttachment.texture {
+                encoder.setViewport(MTLViewport(originX: 0, originY: 0,
+                                               width: Double(target.width), height: Double(target.height),
+                                               znear: 0.0, zfar: 1.0))
+            }
             
             encoder.label = "Depth Upscale Eye \(eye)"
             encoder.setRenderPipelineState(pipeline)
