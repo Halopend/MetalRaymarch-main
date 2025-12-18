@@ -51,7 +51,8 @@ actor Renderer {
     let commandQueue: MTLCommandQueue
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
-    var metalFXPipelineState: MTLRenderPipelineState?  // Pipeline for rgba16Float when using MetalFX
+    var metalFXPipelineState: MTLRenderPipelineState?  // Pipeline for per-eye rgba16Float (uses eyeIndex)
+    var metalFXAmplificationPipelineState: MTLRenderPipelineState?  // Pipeline for amplification rgba16Float (uses amplification_id)
     var depthUpscalePipelineState: MTLRenderPipelineState?
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
@@ -140,6 +141,7 @@ actor Renderer {
         // Uses explicit per-eye shader variants to avoid relying on vertex amplification IDs.
         #if canImport(MetalFX)
         do {
+            // Pipeline for per-eye rendering (explicit eyeIndex)
             metalFXPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
                                                                               layerRenderer: layerRenderer,
                                                                               rasterSampleCount: 1,
@@ -148,12 +150,22 @@ actor Renderer {
                                                                               vertexFunctionName: "vertexShaderEyeIndex",
                                                                               fragmentFunctionName: "fragmentShaderEyeIndex")
             
+            // Pipeline for vertex amplification rendering to rgba16Float (uses amplification_id)
+            metalFXAmplificationPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
+                                                                              layerRenderer: layerRenderer,
+                                                                              rasterSampleCount: 1,
+                                                                              mtlVertexDescriptor: mtlVertexDescriptor,
+                                                                              colorFormat: .rgba16Float,
+                                                                              vertexFunctionName: "vertexShader",
+                                                                              fragmentFunctionName: "fragmentShader")
+            
             depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
                                                                                layerRenderer: layerRenderer, 
                                                                                mtlVertexDescriptor: mtlVertexDescriptor)
         } catch {
             print("⚠️ Unable to compile MetalFX or Depth Upscale pipeline: \(error)")
             metalFXPipelineState = nil
+            metalFXAmplificationPipelineState = nil
         }
         #endif
 
@@ -488,8 +500,10 @@ actor Renderer {
         self.updateGameState(drawable: drawable, deviceAnchor: deviceAnchor)
 
         #if canImport(MetalFX)
-        // MetalFX path: render each eye explicitly into its slice, avoiding reliance on amplification_id.
-        if upscalingEnabled,
+        // DISABLED: Per-eye MetalFX path - using vertex amplification path instead for debugging
+        // This block is skipped to test if the issue is in per-eye rendering vs vertex amplification
+        if false,  // DISABLED FOR TESTING
+           upscalingEnabled,
            let fx = metalFXManager,
            let inputTex = fx.inputTexture,
            let depthTex = fx.depthTexture,
@@ -641,10 +655,10 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
-        // Use MetalFX pipeline when upscaling (no MSAA), otherwise use standard pipeline
+        // Use MetalFX amplification pipeline when upscaling (uses amplification_id, outputs rgba16Float)
         #if canImport(MetalFX)
-        if upscalingEnabled, let fxPipeline = metalFXPipelineState {
-            renderEncoder.setRenderPipelineState(fxPipeline)
+        if upscalingEnabled, let fxAmpPipeline = metalFXAmplificationPipelineState {
+            renderEncoder.setRenderPipelineState(fxAmpPipeline)
         } else {
             renderEncoder.setRenderPipelineState(pipelineState)
         }
@@ -659,25 +673,21 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // Use scaled viewports when upscaling, original viewports otherwise
+        // When rendering to MetalFX input, use physical texture dimensions as viewport
+        // When rendering to drawable with foveation, use the virtual viewport from drawable
         #if canImport(MetalFX)
         let viewports: [MTLViewport]
-        if upscalingEnabled, let scale = metalFXManager?.configuration.scale {
-            // When rendering to MetalFX input textures, scale the viewport dimensions
-            // but keep the same relative positions for each eye
-            // Each eye renders to its own slice starting at (0,0)
-            let factor = Double(scale)
-            viewports = drawable.views.map { view in
-                let originalViewport = view.textureMap.viewport
-                return MTLViewport(
-                    originX: 0,  // Each eye slice starts at origin
-                    originY: 0,
-                    width: originalViewport.width * factor,
-                    height: originalViewport.height * factor,
-                    znear: originalViewport.znear,
-                    zfar: originalViewport.zfar
-                )
-            }
+        if upscalingEnabled, let inputTex = metalFXManager?.inputTexture {
+            // Render to physical texture dimensions (no foveation)
+            let viewport = MTLViewport(
+                originX: 0,
+                originY: 0,
+                width: Double(inputTex.width),
+                height: Double(inputTex.height),
+                znear: 0.0,
+                zfar: 1.0
+            )
+            viewports = Array(repeating: viewport, count: drawable.views.count)
         } else {
             viewports = drawable.views.map { $0.textureMap.viewport }
         }
@@ -800,13 +810,26 @@ actor Renderer {
             return false
         }
 
-        // Use the actual viewport dimensions, not the full texture dimensions.
-        // Each eye's viewport defines the actual renderable area.
-        let firstViewport = drawable.views[0].textureMap.viewport
-        let outputWidth = Int(firstViewport.width)
-        let outputHeight = Int(firstViewport.height)
+        // IMPORTANT: Use the PHYSICAL drawable texture size, not the virtual viewport size.
+        // The viewport can be larger than the texture when using rasterization rate maps (foveation).
+        // MetalFX needs to match the physical texture dimensions.
+        let drawableTexture = drawable.colorTextures[0]
+        let outputWidth = drawableTexture.width
+        let outputHeight = drawableTexture.height
         let inputWidth = max(1, Int(Double(outputWidth) * Double(metalFXScale)))
         let inputHeight = max(1, Int(Double(outputHeight) * Double(metalFXScale)))
+        
+        // Debug: print dimensions once
+        if !hasLoggedFoveationAvailability {
+            let firstViewport = drawable.views[0].textureMap.viewport
+            print("🔍 MetalFX Config Debug (FIXED):")
+            print("   Drawable texture size: \(drawableTexture.width) x \(drawableTexture.height)")
+            print("   Viewport[0] (virtual): origin=(\(firstViewport.originX), \(firstViewport.originY)) size=\(firstViewport.width) x \(firstViewport.height)")
+            print("   MetalFX output size: \(outputWidth) x \(outputHeight)")
+            print("   MetalFX input size: \(inputWidth) x \(inputHeight)")
+            print("   Scale: \(metalFXScale)")
+            hasLoggedFoveationAvailability = true
+        }
 
         let config = MetalFXManager.Configuration(
             inputWidth: inputWidth,
