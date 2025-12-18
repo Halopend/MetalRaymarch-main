@@ -85,6 +85,9 @@ final class MetalFXManager {
             let scaler = scalers[eye]
             scaler.colorTexture = inView
             scaler.outputTexture = outView
+            // Tell the scaler exactly how much of the input texture contains valid content
+            scaler.inputContentWidth = configuration.inputWidth
+            scaler.inputContentHeight = configuration.inputHeight
             scaler.encode(commandBuffer: commandBuffer)
         }
     }

@@ -496,7 +496,18 @@ actor Renderer {
            let fxPipeline = metalFXPipelineState {
 
             let views = min(drawable.views.count, inputTex.arrayLength)
-            let factor = Double(fx.configuration.scale)
+            
+            // Debug: Log dimensions once
+            if !hasLoggedFoveationAvailability {
+                let vp = drawable.views[0].textureMap.viewport
+                let drawTex = drawable.colorTextures[0]
+                print("🔍 MetalFX Debug:")
+                print("   Drawable texture: \(drawTex.width)x\(drawTex.height)")
+                print("   Viewport: origin=(\(vp.originX),\(vp.originY)) size=\(vp.width)x\(vp.height)")
+                print("   Input texture: \(inputTex.width)x\(inputTex.height)")
+                print("   Output texture: \(fx.outputTexture?.width ?? 0)x\(fx.outputTexture?.height ?? 0)")
+                hasLoggedFoveationAvailability = true
+            }
 
             for eye in 0..<views {
                 guard let colorView = inputTex.makeTextureView(
@@ -545,17 +556,16 @@ actor Renderer {
                 renderEncoder.setVertexBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
                 renderEncoder.setFragmentBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
 
-                // The viewport must match the actual input texture size.
-                // The projection matrix is already correct for the full output; the spatial
-                // upscaler handles the resolution difference, so we just render to the
-                // full extent of our smaller input texture.
+                // Use exact texture dimensions to avoid floating-point discrepancies between
+                // viewport size and texture size. The projection matrix is resolution-independent.
+                let originalViewport = drawable.views[eye].textureMap.viewport
                 let viewport = MTLViewport(
                     originX: 0,
                     originY: 0,
                     width: Double(inputTex.width),
                     height: Double(inputTex.height),
-                    znear: 0.0,
-                    zfar: 1.0
+                    znear: originalViewport.znear,
+                    zfar: originalViewport.zfar
                 )
                 renderEncoder.setViewport(viewport)
 
