@@ -545,14 +545,17 @@ actor Renderer {
                 renderEncoder.setVertexBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
                 renderEncoder.setFragmentBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
 
-                let originalViewport = drawable.views[eye].textureMap.viewport
+                // The viewport must match the actual input texture size.
+                // The projection matrix is already correct for the full output; the spatial
+                // upscaler handles the resolution difference, so we just render to the
+                // full extent of our smaller input texture.
                 let viewport = MTLViewport(
                     originX: 0,
                     originY: 0,
-                    width: originalViewport.width * factor,
-                    height: originalViewport.height * factor,
-                    znear: originalViewport.znear,
-                    zfar: originalViewport.zfar
+                    width: Double(inputTex.width),
+                    height: Double(inputTex.height),
+                    znear: 0.0,
+                    zfar: 1.0
                 )
                 renderEncoder.setViewport(viewport)
 
