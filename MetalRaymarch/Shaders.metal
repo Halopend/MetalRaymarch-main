@@ -427,6 +427,33 @@ struct FormatConversionVertex {
 };
 
 // Full-screen triangle vertex shader - generates vertices procedurally
+// Supports stereo via amplification_id for render_target_array_index
+struct FormatConversionVertexOut {
+    float4 position [[position]];
+    float2 texCoord;
+    uint eyeIndex;  // Pass eye index to fragment
+};
+
+vertex FormatConversionVertexOut formatConversionVertexStereo(uint vertexID [[vertex_id]],
+                                                              ushort ampId [[amplification_id]]) {
+    FormatConversionVertexOut out;
+    
+    // Generate full-screen triangle using oversized triangle technique
+    float2 position;
+    position.x = (vertexID == 1) ? 3.0 : -1.0;
+    position.y = (vertexID == 2) ? 3.0 : -1.0;
+    
+    out.position = float4(position, 0.0, 1.0);
+    
+    // Convert clip space to UV coordinates
+    out.texCoord.x = (position.x + 1.0) * 0.5;
+    out.texCoord.y = (1.0 - position.y) * 0.5;  // Flip Y for Metal
+    out.eyeIndex = ampId;
+    
+    return out;
+}
+
+// Non-stereo version for backward compatibility
 vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]) {
     FormatConversionVertex out;
     
@@ -444,30 +471,23 @@ vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]
     return out;
 }
 
-// Simple passthrough fragment shader with format conversion
-// When rate map is active, the viewport is in SCREEN coordinates and in.position
-// is in PHYSICAL coordinates after rate map transformation.
-// The source texture is at SCREEN resolution, so we need to map physical → screen.
-// Since the rate map transforms screen → physical, we use:
-//   screenPos = in.position * (screenSize / physicalSize)
-//   uv = screenPos / screenSize = in.position / physicalSize... wait no.
-// Actually simpler: in.position.xy / sourceTexture.size gives correct UV since
-// when rate map is enabled with screen-sized viewport, in.position is still in
-// physical space but the fullscreen triangle covers the physical render target.
-// The UV we need is just position / target_physical_size, and we sample the
-// source using those same UVs since source is screen-sized and we want the
-// rate-map-compressed sampling pattern.
+// Stereo fragment shader - samples from correct array slice based on eye index
+fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[stage_in]],
+                                                texture2d_array<float> sourceTexture [[texture(0)]]) {
+    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+                                      address::clamp_to_edge);
+    
+    float4 color = sourceTexture.sample(textureSampler, in.texCoord, in.eyeIndex);
+    return float4(color.rgb, 1.0);
+}
+
+// Non-stereo fragment shader for backward compatibility
 fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
                                           texture2d<float> sourceTexture [[texture(0)]]) {
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
-    // Use the interpolated texCoord from vertex shader.
-    // The fullscreen triangle covers clip space -1 to 1, and texCoord is 0 to 1.
-    // This samples the full source texture and the rate map handles where fragments land.
     float4 color = sourceTexture.sample(textureSampler, in.texCoord);
-    
-    // Ensure alpha is 1 for proper visionOS compositing
     return float4(color.rgb, 1.0);
 }
 
@@ -475,8 +495,18 @@ struct DepthOutput {
     float depth [[depth(any)]];
 };
 
-// Fragment shader for depth upscaling
-// Uses interpolated texCoord like formatConversionFragment.
+// Stereo depth upscale fragment shader
+fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[stage_in]],
+                                                 depth2d_array<float> sourceTexture [[texture(0)]]) {
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
+                                      address::clamp_to_edge);
+    
+    DepthOutput out;
+    out.depth = sourceTexture.sample(textureSampler, in.texCoord, in.eyeIndex);
+    return out;
+}
+
+// Non-stereo depth upscale for backward compatibility
 fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
                                           depth2d<float> sourceTexture [[texture(0)]]) {
     constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 

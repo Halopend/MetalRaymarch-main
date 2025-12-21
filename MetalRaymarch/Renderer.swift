@@ -225,16 +225,17 @@ actor Renderer {
                                           layerRenderer: LayerRenderer,
                                           mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
         let library = device.makeDefaultLibrary()
-        let vertexFunction = library?.makeFunction(name: "formatConversionVertex")
-        let fragmentFunction = library?.makeFunction(name: "depthUpscaleFragment")
+        let vertexFunction = library?.makeFunction(name: "formatConversionVertexStereo")
+        let fragmentFunction = library?.makeFunction(name: "depthUpscaleFragmentStereo")
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "DepthUpscale"
+        pipelineDescriptor.label = "DepthUpscaleStereo"
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
         
         pipelineDescriptor.colorAttachments[0].pixelFormat = .invalid
         pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
+        pipelineDescriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
         
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
@@ -737,10 +738,16 @@ actor Renderer {
             let vp = view.textureMap.viewport
             print("   View[\(i)] viewport: origin=(\(vp.originX), \(vp.originY)) size=\(vp.width) x \(vp.height)")
         }
-        if let rateMap = drawable.rasterizationRateMaps.first {
-            print("   Rate map: \(rateMap.screenSize.width) x \(rateMap.screenSize.height) screen, physical=\(rateMap.physicalSize(layer: 0).width) x \(rateMap.physicalSize(layer: 0).height)")
+        if drawable.rasterizationRateMaps.count > 0 {
+            print("   Rate maps count: \(drawable.rasterizationRateMaps.count)")
+            for (i, rateMap) in drawable.rasterizationRateMaps.enumerated() {
+                print("   Rate map[\(i)]: \(rateMap.screenSize.width) x \(rateMap.screenSize.height) screen, physical=\(rateMap.physicalSize(layer: 0).width) x \(rateMap.physicalSize(layer: 0).height)")
+            }
         } else {
             print("   Rate map: nil")
+        }
+        if let input = fx.inputTexture {
+            print("   MetalFX input: \(input.width) x \(input.height)")
         }
 
         // Copy MetalFX output to drawable.
@@ -797,7 +804,7 @@ actor Renderer {
             }
             blit.endEncoding()
         } else {
-            // Need format conversion via render pass
+            // Need format conversion via render pass - use single stereo pass with vertex amplification
             if formatConversionPipeline == nil {
                 createFormatConversionPipeline(destinationFormat: drawableFormat)
             }
@@ -807,71 +814,47 @@ actor Renderer {
                 return
             }
             
-            for eye in 0..<views {
-                guard let sourceView = output.makeTextureView(
-                    pixelFormat: output.pixelFormat,
-                    textureType: MTLTextureType.type2D,
-                    levels: 0..<1,
-                    slices: eye..<(eye + 1)
-                ) else {
-                    print("⚠️ Failed to create source texture view for eye \(eye)")
-                    continue
-                }
-                
-                let renderPassDescriptor = MTLRenderPassDescriptor()
-
-                // Apply system rate map to match native path.
-                renderPassDescriptor.rasterizationRateMap = systemRateMap
-                
-                // Handle both dedicated and layered layouts
-                let destinationTexture: MTLTexture
-                if drawable.colorTextures.count > eye {
-                    destinationTexture = drawable.colorTextures[eye]
-                } else {
-                    destinationTexture = drawable.colorTextures[0]
-                }
-                
-                if destinationTexture.textureType == .type2DArray {
-                    guard let destView = destinationTexture.makeTextureView(
-                        pixelFormat: destinationTexture.pixelFormat,
-                        textureType: MTLTextureType.type2D,
-                        levels: 0..<1,
-                        slices: eye..<(eye + 1)
-                    ) else {
-                        print("⚠️ Failed to create destination texture view for eye \(eye)")
-                        continue
-                    }
-                    renderPassDescriptor.colorAttachments[0].texture = destView
-                } else {
-                    renderPassDescriptor.colorAttachments[0].texture = destinationTexture
-                }
-                
-                renderPassDescriptor.colorAttachments[0].loadAction = .clear
-                renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-                renderPassDescriptor.colorAttachments[0].storeAction = .store
-                
-                guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-                    print("⚠️ Failed to create render encoder for format conversion (eye \(eye))")
-                    continue
-                }
-
-                // When using rate map, viewport must be in SCREEN coordinates.
-                // The rate map transforms screen → physical automatically.
-                // The drawable viewport is already in screen coordinates.
-                let viewport = drawable.views[eye].textureMap.viewport
-                
-                encoder.setViewport(MTLViewport(originX: viewport.originX,
-                                                originY: viewport.originY,
-                                                width: viewport.width,
-                                                height: viewport.height,
-                                                znear: 0.0, zfar: 1.0))
-                
-                encoder.label = "Format Conversion Eye \(eye)"
-                encoder.setRenderPipelineState(pipeline)
-                encoder.setFragmentTexture(sourceView, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-                encoder.endEncoding()
+            let renderPassDescriptor = MTLRenderPassDescriptor()
+            
+            // Use the system rate map (for stereo, it handles both eyes via layers)
+            renderPassDescriptor.rasterizationRateMap = systemRateMap
+            
+            // Render to the array texture directly, not a view
+            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
+            renderPassDescriptor.colorAttachments[0].loadAction = .clear
+            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            renderPassDescriptor.renderTargetArrayLength = views
+            
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+                print("⚠️ Failed to create render encoder for format conversion")
+                return
             }
+            
+            // Set up viewports for each eye (same viewport, rate map handles per-eye transformation)
+            let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
+                let vp = view.textureMap.viewport
+                return MTLViewport(originX: vp.originX,
+                                   originY: vp.originY,
+                                   width: vp.width,
+                                   height: vp.height,
+                                   znear: 0.0, zfar: 1.0)
+            }
+            encoder.setViewports(viewports)
+            
+            // Use vertex amplification to render both eyes
+            var viewMappings = (0..<views).map {
+                MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
+                                                  renderTargetArrayIndexOffset: UInt32($0))
+            }
+            encoder.setVertexAmplificationCount(views, viewMappings: &viewMappings)
+            
+            encoder.label = "Format Conversion Stereo"
+            encoder.setRenderPipelineState(pipeline)
+            // Pass the full array texture - shader samples using eye index from amplification_id
+            encoder.setFragmentTexture(output, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
         }
 
         copyFXDepthToDrawableDepth(fxDepth: fx.depthTexture, drawable: drawable, commandBuffer: commandBuffer)
@@ -882,56 +865,40 @@ actor Renderer {
         guard let pipeline = depthUpscalePipelineState else { return }
 
         let systemRateMap = drawable.rasterizationRateMaps.first
-
         let views = min(drawable.views.count, src.arrayLength)
 
-        for eye in 0..<views {
-            guard let srcView = src.makeTextureView(pixelFormat: src.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1))
-            else { continue }
-            
-            // Handle both dedicated and layered layouts
-            let destinationDepth: MTLTexture
-            if drawable.depthTextures.count > eye {
-                destinationDepth = drawable.depthTextures[eye]
-            } else if let first = drawable.depthTextures.first {
-                destinationDepth = first
-            } else {
-                continue
-            }
+        let desc = MTLRenderPassDescriptor()
+        desc.rasterizationRateMap = systemRateMap
+        desc.depthAttachment.texture = drawable.depthTextures[0]
+        desc.depthAttachment.loadAction = .dontCare
+        desc.depthAttachment.storeAction = .store
+        desc.renderTargetArrayLength = views
+        
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { return }
 
-            let desc = MTLRenderPassDescriptor()
-            // Apply system rate map to match native path.
-            desc.rasterizationRateMap = systemRateMap
-            
-            if destinationDepth.textureType == .type2DArray {
-                guard let dstView = destinationDepth.makeTextureView(pixelFormat: destinationDepth.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1))
-                else { continue }
-                desc.depthAttachment.texture = dstView
-            } else {
-                desc.depthAttachment.texture = destinationDepth
-            }
-            
-            desc.depthAttachment.loadAction = .dontCare
-            desc.depthAttachment.storeAction = .store
-            
-            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { continue }
-
-            // When using rate map, viewport must be in SCREEN coordinates.
-            // The rate map transforms screen → physical automatically.
-            let viewport = drawable.views[eye].textureMap.viewport
-            
-            encoder.setViewport(MTLViewport(originX: viewport.originX,
-                                           originY: viewport.originY,
-                                           width: viewport.width,
-                                           height: viewport.height,
-                                           znear: 0.0, zfar: 1.0))
-            
-            encoder.label = "Depth Upscale Eye \(eye)"
-            encoder.setRenderPipelineState(pipeline)
-            encoder.setFragmentTexture(srcView, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-            encoder.endEncoding()
+        // Set up viewports for each eye
+        let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
+            let vp = view.textureMap.viewport
+            return MTLViewport(originX: vp.originX,
+                               originY: vp.originY,
+                               width: vp.width,
+                               height: vp.height,
+                               znear: 0.0, zfar: 1.0)
         }
+        encoder.setViewports(viewports)
+        
+        // Use vertex amplification
+        var viewMappings = (0..<views).map {
+            MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
+                                              renderTargetArrayIndexOffset: UInt32($0))
+        }
+        encoder.setVertexAmplificationCount(views, viewMappings: &viewMappings)
+        
+        encoder.label = "Depth Upscale Stereo"
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setFragmentTexture(src, index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
     }
     
     private func createFormatConversionPipeline(destinationFormat: MTLPixelFormat) {
@@ -940,21 +907,22 @@ actor Renderer {
             return
         }
         
-        guard let vertexFunc = library.makeFunction(name: "formatConversionVertex"),
-              let fragmentFunc = library.makeFunction(name: "formatConversionFragment") else {
-            print("⚠️ Format conversion shaders not found")
+        guard let vertexFunc = library.makeFunction(name: "formatConversionVertexStereo"),
+              let fragmentFunc = library.makeFunction(name: "formatConversionFragmentStereo") else {
+            print("⚠️ Format conversion stereo shaders not found")
             return
         }
         
         let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.label = "Format Conversion Pipeline"
+        descriptor.label = "Format Conversion Pipeline Stereo"
         descriptor.vertexFunction = vertexFunc
         descriptor.fragmentFunction = fragmentFunc
         descriptor.colorAttachments[0].pixelFormat = destinationFormat
+        descriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
         
         do {
             formatConversionPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-            print("✓ Format conversion pipeline created")
+            print("✓ Format conversion stereo pipeline created")
         } catch {
             print("⚠️ Failed to create format conversion pipeline: \(error)")
         }
