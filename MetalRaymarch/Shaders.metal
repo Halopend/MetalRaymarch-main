@@ -79,6 +79,8 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
 
 constant float3 sunDir = float3(0.3235, 0.0924, 0.2773); // normalized(0.35, 0.1, 0.3)
 constant float3 sunColour = float3(1.0, 0.95, 0.8);
+constant float kPowEpsilon = 1e-6f;
+constant half kPowEpsilonHalf = 1e-4h;
 
 // Blue noise approximation for temporal stability (better than white noise for reprojection)
 float blueNoise(float2 uv, float time) {
@@ -117,7 +119,7 @@ float Map(float3 pos, float minRad2Val, float fractalScale, float foldingLimit, 
     float4 scale = float4(fractalScale) / minRad2;
     scale.w = abs(scale.w);
     float absScalem1 = abs(fractalScale - 1.0);
-    float AbsScaleRaisedTo1mIters = pow(abs(fractalScale), float(1-iterations));
+    float AbsScaleRaisedTo1mIters = exp2(log2(max(abs(fractalScale), kPowEpsilon)) * float(1 - iterations));
     
     float minRadius2 = sphereRadius * sphereRadius;
 
@@ -278,10 +280,11 @@ half3 PostEffects(half3 rgb, half2 xy)
     
     // Simplified vignette
     half2 q = xy * (1.0h - xy);
-    rgb *= 0.5h + 0.5h * pow(16.0h * q.x * q.y, 0.2h);
+    half vignetteBase = max(16.0h * q.x * q.y, kPowEpsilonHalf);
+    rgb *= 0.5h + 0.5h * exp2(log2(vignetteBase) * 0.2h);
     
     // Gamma
-    return pow(rgb, half3(0.47h));
+    return exp2(log2(max(rgb, half3(kPowEpsilonHalf))) * half3(0.47h));
 }
 
 // Ultra-fast shadow with over-relaxation
@@ -332,8 +335,9 @@ float3 LightSource(float3 spotLight, float3 dir, float dis)
     if (length(spotLight) < dis)
     {
         float a = max(dot(normalize(spotLight), dir), 0.0);
-        g = pow(a, 500.0);
-        g +=  pow(a, 5000.0)*.2;
+        float safeA = max(a, kPowEpsilon);
+        g = exp2(log2(safeA) * 500.0);
+        g +=  exp2(log2(safeA) * 5000.0)*.2;
     }
    
     return float3(.6) * g;
@@ -410,7 +414,8 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
             half shaSpot = half(Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
             half shaSun = half(Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
             
-            half bri = half(max(dot(spot, nor), 0.0) / pow(atten, 1.5) * 0.25);
+            float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
+            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
             
             col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, max(int(in.colorIterations * quality), 2));
@@ -419,8 +424,10 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
             // Specular only in high quality
             if (quality > 0.7) {
                 float3 ref = reflect(rd, nor);
-                col += half3(pow(max(dot(spot, ref), 0.0), 10.0) * 2.0) * shaSpot * bri;
-                col += half3(pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0) * shaSun * briSun;
+                float specSpot = exp2(log2(max(max(dot(spot, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
+                float specSun = exp2(log2(max(max(dot(sunDir, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
+                col += half3(specSpot) * shaSpot * bri;
+                col += half3(specSun) * shaSun * briSun;
             }
         } else {
             // Simplified diffuse-only lighting for periphery
@@ -447,7 +454,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
         col = PostEffects(col, half2(in.texCoord));
     } else {
         // Simple gamma only for periphery - faster and less prone to artifacts
-        col = pow(saturate(col), half3(0.47h));
+        col = exp2(log2(max(saturate(col), half3(kPowEpsilonHalf))) * half3(0.47h));
     }
 
     // === Output for visionOS Spatial Rendering ===
@@ -536,7 +543,8 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
             half shaSpot = half(Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
             half shaSun = half(Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
 
-            half bri = half(max(dot(spot, nor), 0.0) / pow(atten, 1.5) * 0.25);
+            float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
+            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
             col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, max(int(in.colorIterations * quality), 2));
@@ -544,8 +552,10 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
 
             if (quality > 0.7) {
                 float3 ref = reflect(rd, nor);
-                col += half3(pow(max(dot(spot, ref), 0.0), 10.0) * 2.0) * shaSpot * bri;
-                col += half3(pow(max(dot(sunDir, ref), 0.0), 10.0) * 2.0) * shaSun * briSun;
+                float specSpot = exp2(log2(max(max(dot(spot, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
+                float specSun = exp2(log2(max(max(dot(sunDir, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
+                col += half3(specSpot) * shaSpot * bri;
+                col += half3(specSun) * shaSun * briSun;
             }
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
@@ -564,7 +574,7 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
     if (quality > 0.5) {
         col = PostEffects(col, half2(in.texCoord));
     } else {
-        col = pow(saturate(col), half3(0.47h));
+        col = exp2(log2(max(saturate(col), half3(kPowEpsilonHalf))) * half3(0.47h));
     }
 
     output.color = float4(float3(col), 1.0);
