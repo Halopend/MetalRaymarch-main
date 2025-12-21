@@ -777,6 +777,11 @@ actor Renderer {
             }
         }
 
+        // Copy MetalFX output to drawable.
+        // If the drawable provides a rasterizationRateMap (foveated render target), we MUST use it
+        // when rendering into the drawable textures; otherwise the copy can appear scaled/warped.
+        let systemRateMap = drawable.rasterizationRateMaps.first
+
         // Copy MetalFX output to drawable using format conversion
         // MetalFX outputs rgba16Float, drawable expects BGRA8Unorm_sRGB
         let views = min(drawable.views.count, output.arrayLength)
@@ -785,7 +790,7 @@ actor Renderer {
         let drawableFormat = drawable.colorTextures[0].pixelFormat
         let outputFormat = output.pixelFormat
         
-        if drawableFormat == outputFormat {
+        if drawableFormat == outputFormat, systemRateMap == nil {
             // Direct blit when formats match
             guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
             
@@ -847,6 +852,9 @@ actor Renderer {
                 }
                 
                 let renderPassDescriptor = MTLRenderPassDescriptor()
+
+                // If we are copying into a foveated drawable texture, apply the rate map.
+                renderPassDescriptor.rasterizationRateMap = systemRateMap
                 
                 // Handle both dedicated and layered layouts
                 let destinationTexture: MTLTexture
@@ -910,6 +918,8 @@ actor Renderer {
         guard let src = fxDepth else { return }
         guard let pipeline = depthUpscalePipelineState else { return }
 
+        let systemRateMap = drawable.rasterizationRateMaps.first
+
         let views = min(drawable.views.count, src.arrayLength)
 
         for eye in 0..<views {
@@ -927,6 +937,7 @@ actor Renderer {
             }
 
             let desc = MTLRenderPassDescriptor()
+            desc.rasterizationRateMap = systemRateMap
             
             if destinationDepth.textureType == .type2DArray {
                 guard let dstView = destinationDepth.makeTextureView(pixelFormat: destinationDepth.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1))
