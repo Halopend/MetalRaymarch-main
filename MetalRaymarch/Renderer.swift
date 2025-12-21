@@ -12,7 +12,6 @@ import MetalKit
 import MetalFX
 #endif
 import simd
-import Spatial
 
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
@@ -51,7 +50,6 @@ actor Renderer {
     let commandQueue: MTLCommandQueue
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
-    var metalFXPipelineState: MTLRenderPipelineState?  // Pipeline for per-eye rgba16Float (uses eyeIndex)
     var metalFXAmplificationPipelineState: MTLRenderPipelineState?  // Pipeline for amplification rgba16Float (uses amplification_id)
     var depthUpscalePipelineState: MTLRenderPipelineState?
     var depthState: MTLDepthStencilState
@@ -65,13 +63,9 @@ actor Renderer {
 
     var uniforms: UnsafeMutablePointer<UniformsArray>
 
-    let rasterSampleCount: Int
-    var memorylessTargetIndex: Int = 0
-    var memorylessTargets: [(color: MTLTexture, depth: MTLTexture)?]
+    let rasterSampleCount: Int = 1
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
-
-    let isFoveationEnabled: Bool
 
     // Pose smoothing
     var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
@@ -117,14 +111,8 @@ actor Renderer {
         self.device = layerRenderer.device
         self.commandQueue = self.device.makeCommandQueue()!
         self.appModel = appModel
-        self.isFoveationEnabled = layerRenderer.configuration.isFoveationEnabled
 
         let device = self.device
-        if device.supports32BitMSAA && device.supportsTextureSampleCount(4) {
-            rasterSampleCount = 1 // Optimized: Disable MSAA as it doesn't help with internal raymarching details
-        } else {
-            rasterSampleCount = 1
-        }
 
         let uniformBufferSize = alignedUniformsSize * maxBuffersInFlight
 
@@ -132,8 +120,6 @@ actor Renderer {
                                                            options:[MTLResourceOptions.storageModeShared])!
 
         self.dynamicUniformBuffer.label = "UniformBuffer"
-
-        self.memorylessTargets = .init(repeating: nil, count: maxBuffersInFlight)
 
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents()).bindMemory(to:UniformsArray.self, capacity:1)
 
@@ -149,19 +135,8 @@ actor Renderer {
         }
 
         // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
-        // Uses explicit per-eye shader variants to avoid relying on vertex amplification IDs.
         #if canImport(MetalFX)
         do {
-            // Pipeline for per-eye rendering (explicit eyeIndex)
-            metalFXPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
-                                                                              layerRenderer: layerRenderer,
-                                                                              rasterSampleCount: 1,
-                                                                              mtlVertexDescriptor: mtlVertexDescriptor,
-                                                                              colorFormat: .rgba16Float,
-                                                                              vertexFunctionName: "vertexShaderEyeIndex",
-                                                                              fragmentFunctionName: "fragmentShaderEyeIndex",
-                                                                              usesVertexAmplification: false)
-            
             // Pipeline for vertex amplification rendering to rgba16Float (uses amplification_id)
             metalFXAmplificationPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
                                                                               layerRenderer: layerRenderer,
@@ -176,7 +151,6 @@ actor Renderer {
                                                                                mtlVertexDescriptor: mtlVertexDescriptor)
         } catch {
             print("⚠️ Unable to compile MetalFX or Depth Upscale pipeline: \(error)")
-            metalFXPipelineState = nil
             metalFXAmplificationPipelineState = nil
         }
         #endif
@@ -354,40 +328,7 @@ actor Renderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to:UniformsArray.self, capacity:1)
     }
 
-    private func memorylessRenderTargets(drawable: LayerRenderer.Drawable) -> (color: MTLTexture, depth: MTLTexture) {
-
-        func renderTarget(resolveTexture: MTLTexture, cachedTexture: MTLTexture?) -> MTLTexture {
-            if let cachedTexture,
-               resolveTexture.width == cachedTexture.width && resolveTexture.height == cachedTexture.height {
-                return cachedTexture
-            } else {
-                let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: resolveTexture.pixelFormat,
-                                                                          width: resolveTexture.width,
-                                                                          height: resolveTexture.height,
-                                                                          mipmapped: false)
-                descriptor.usage = .renderTarget
-                descriptor.textureType = .type2DMultisampleArray
-                descriptor.sampleCount = rasterSampleCount
-                descriptor.storageMode = .memoryless
-                descriptor.arrayLength = resolveTexture.arrayLength
-                return resolveTexture.device.makeTexture(descriptor: descriptor)!
-            }
-        }
-
-        memorylessTargetIndex = (memorylessTargetIndex + 1) % maxBuffersInFlight
-
-        let cachedTargets = memorylessTargets[memorylessTargetIndex]
-        let newTargets = (renderTarget(resolveTexture: drawable.colorTextures[0], cachedTexture: cachedTargets?.color),
-                          renderTarget(resolveTexture: drawable.depthTextures[0], cachedTexture: cachedTargets?.depth))
-
-        memorylessTargets[memorylessTargetIndex] = newTargets
-
-        return newTargets
-    }
-
-    private func updateGameState(drawable: LayerRenderer.Drawable,
-                                deviceAnchor: DeviceAnchor?,
-                                upscalingConfig: UpscaleConfig?) {
+    private func updateGameState(drawable: LayerRenderer.Drawable) {
         /// Update any game state before rendering
 
         let settings = appModel.renderSettings
@@ -408,24 +349,7 @@ actor Renderer {
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
             let viewMatrix = (simdDeviceAnchor * view.transform).inverse
-            var projection = drawable.computeProjection(viewIndex: viewIndex)
-
-#if canImport(MetalFX)
-            // When MetalFX is active, adjust the projection to match the
-            // output texture size used by the scaler so the FOV stays identical
-            // to the non-upscaled path. We scale the projection's focal length
-            // by the ratio between the logical viewport and the MetalFX output
-            // size (which may be aligned to 16px or stabilized across frames).
-            if let fxConfig = upscalingConfig as? MetalFXManager.Configuration,
-               fxConfig.outputWidth > 0,
-               fxConfig.outputHeight > 0 {
-                let viewport = view.textureMap.viewport
-                let scaleX = Float(viewport.width) / Float(fxConfig.outputWidth)
-                let scaleY = Float(viewport.height) / Float(fxConfig.outputHeight)
-                projection.columns.0.x *= scaleX
-                projection.columns.1.y *= scaleY
-            }
-#endif
+            let projection = drawable.computeProjection(viewIndex: viewIndex)
             let inverseProjection = projection.inverse
             
             let modelView = viewMatrix * modelMatrix
@@ -533,131 +457,9 @@ actor Renderer {
         #endif
 
         #if canImport(MetalFX)
-        self.updateGameState(drawable: drawable,
-                     deviceAnchor: deviceAnchor,
-                     upscalingConfig: upscalingEnabled ? metalFXManager?.configuration : nil)
+        self.updateGameState(drawable: drawable)
         #else
-        self.updateGameState(drawable: drawable,
-                     deviceAnchor: deviceAnchor,
-                     upscalingConfig: nil)
-        #endif
-
-        #if canImport(MetalFX)
-        // DISABLED: Per-eye MetalFX path - using vertex amplification path instead for debugging
-        // This block is skipped to test if the issue is in per-eye rendering vs vertex amplification
-        if false,  // DISABLED FOR TESTING
-           upscalingEnabled,
-           let fx = metalFXManager,
-           let inputTex = fx.inputTexture,
-           let depthTex = fx.depthTexture,
-           let fxPipeline = metalFXPipelineState {
-
-            let views = min(drawable.views.count, inputTex.arrayLength)
-            
-            // Debug: Log dimensions once
-            if !hasLoggedFoveationAvailability {
-                let vp = drawable.views[0].textureMap.viewport
-                let drawTex = drawable.colorTextures[0]
-                print("🔍 MetalFX Debug:")
-                print("   Drawable texture: \(drawTex.width)x\(drawTex.height)")
-                print("   Viewport: origin=(\(vp.originX),\(vp.originY)) size=\(vp.width)x\(vp.height)")
-                print("   Input texture: \(inputTex.width)x\(inputTex.height)")
-                print("   Output texture: \(fx.outputTexture?.width ?? 0)x\(fx.outputTexture?.height ?? 0)")
-                hasLoggedFoveationAvailability = true
-            }
-
-            for eye in 0..<views {
-                guard let colorView = inputTex.makeTextureView(
-                    pixelFormat: inputTex.pixelFormat,
-                    textureType: .type2D,
-                    levels: 0..<1,
-                    slices: eye..<(eye + 1)
-                ), let depthView = depthTex.makeTextureView(
-                    pixelFormat: depthTex.pixelFormat,
-                    textureType: .type2D,
-                    levels: 0..<1,
-                    slices: eye..<(eye + 1)
-                ) else {
-                    continue
-                }
-
-                let pass = MTLRenderPassDescriptor()
-                pass.colorAttachments[0].texture = colorView
-                pass.colorAttachments[0].loadAction = .clear
-                pass.colorAttachments[0].storeAction = .store
-                pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
-
-                pass.depthAttachment.texture = depthView
-                pass.depthAttachment.loadAction = .clear
-                pass.depthAttachment.storeAction = .store
-                pass.depthAttachment.clearDepth = 1.0
-
-                pass.rasterizationRateMap = nil
-                pass.renderTargetArrayLength = 1
-
-                guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
-                    continue
-                }
-
-                renderEncoder.label = "MetalFX Eye \(eye) Render Encoder"
-                renderEncoder.pushDebugGroup("Draw Box")
-                renderEncoder.setCullMode(.front)
-                renderEncoder.setFrontFacing(.counterClockwise)
-                renderEncoder.setRenderPipelineState(fxPipeline)
-                renderEncoder.setDepthStencilState(depthState)
-
-                renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-                renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-
-                var eyeIndex = UInt32(eye)
-                renderEncoder.setVertexBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
-                renderEncoder.setFragmentBytes(&eyeIndex, length: MemoryLayout<UInt32>.size, index: BufferIndex.eyeIndex.rawValue)
-
-                // Use exact texture dimensions to avoid floating-point discrepancies between
-                // viewport size and texture size. The projection matrix is resolution-independent.
-                let originalViewport = drawable.views[eye].textureMap.viewport
-                let viewport = MTLViewport(
-                    originX: 0,
-                    originY: 0,
-                    width: Double(inputTex.width),
-                    height: Double(inputTex.height),
-                    znear: originalViewport.znear,
-                    zfar: originalViewport.zfar
-                )
-                renderEncoder.setViewport(viewport)
-
-                for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
-                    guard let layout = element as? MDLVertexBufferLayout else {
-                        renderEncoder.endEncoding()
-                        return
-                    }
-
-                    if layout.stride != 0 {
-                        let buffer = mesh.vertexBuffers[index]
-                        renderEncoder.setVertexBuffer(buffer.buffer, offset: buffer.offset, index: index)
-                    }
-                }
-
-                renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
-
-                for submesh in mesh.submeshes {
-                    renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
-                                                        indexCount: submesh.indexCount,
-                                                        indexType: submesh.indexType,
-                                                        indexBuffer: submesh.indexBuffer.buffer,
-                                                        indexBufferOffset: submesh.indexBuffer.offset)
-                }
-
-                renderEncoder.popDebugGroup()
-                renderEncoder.endEncoding()
-            }
-
-            encodeMetalFXUpscale(commandBuffer: commandBuffer, drawable: drawable)
-            drawable.encodePresent(commandBuffer: commandBuffer)
-            commandBuffer.commit()
-            frame.endSubmission()
-            return
-        }
+        self.updateGameState(drawable: drawable)
         #endif
 
         let renderPassDescriptor = MTLRenderPassDescriptor()
@@ -795,22 +597,11 @@ actor Renderer {
     }
     
     private func configureDirectRenderTargets(renderPassDescriptor: MTLRenderPassDescriptor, drawable: LayerRenderer.Drawable) {
-        if rasterSampleCount > 1 {
-            let renderTargets = memorylessRenderTargets(drawable: drawable)
-            renderPassDescriptor.colorAttachments[0].resolveTexture = drawable.colorTextures[0]
-            renderPassDescriptor.colorAttachments[0].texture = renderTargets.color
-            renderPassDescriptor.depthAttachment.resolveTexture = drawable.depthTextures[0]
-            renderPassDescriptor.depthAttachment.texture = renderTargets.depth
+        renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
+        renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
 
-            renderPassDescriptor.colorAttachments[0].storeAction = .multisampleResolve
-            renderPassDescriptor.depthAttachment.storeAction = .multisampleResolve
-        } else {
-            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
-
-            renderPassDescriptor.colorAttachments[0].storeAction = .store
-            renderPassDescriptor.depthAttachment.storeAction = .store
-        }
+        renderPassDescriptor.colorAttachments[0].storeAction = .store
+        renderPassDescriptor.depthAttachment.storeAction = .store
 
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
@@ -833,7 +624,7 @@ actor Renderer {
     
     #if canImport(MetalFX)
     private func configureMetalFXIfNeeded(for drawable: LayerRenderer.Drawable) -> Bool {
-        guard metalFXPipelineState != nil else {
+        guard metalFXAmplificationPipelineState != nil else {
             Task { @MainActor in
                 appModel.metalFXAvailable = false
                 appModel.metalFXStatus = "MetalFX pipeline not available"

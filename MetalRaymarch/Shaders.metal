@@ -420,32 +420,6 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     return fragmentMain(in, uniforms, fragCoord, uniforms.time);
 }
 
-// MetalFX path: render each eye in a separate pass, selecting the eye explicitly.
-vertex ColorInOut vertexShaderEyeIndex(Vertex in [[stage_in]],
-                                       constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]],
-                                       constant uint & eyeIndex [[ buffer(BufferIndexEyeIndex) ]])
-{
-    ColorInOut out;
-
-    Uniforms uniforms = uniformsArray.uniforms[eyeIndex];
-    float4 position = float4(in.position, 1);
-    out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
-    out.texCoord = in.texCoord;
-    out.modelPos = in.position;
-
-    return out;
-}
-
-fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
-                                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
-                                               constant uint & eyeIndex [[ buffer(BufferIndexEyeIndex) ]],
-                                               texture2d<half> cubeMap [[texture(TextureIndexColor)]])
-{
-    Uniforms uniforms = uniformsArray.uniforms[eyeIndex];
-    float2 fragCoord = in.position.xy;
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time);
-}
-
 // === Format Conversion Shaders for MetalFX ===
 // Used to convert rgba16Float MetalFX output to drawable format (BGRA8Unorm_sRGB)
 

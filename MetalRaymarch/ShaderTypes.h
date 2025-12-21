@@ -22,8 +22,7 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
 {
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
-    BufferIndexUniforms      = 2,
-    BufferIndexEyeIndex      = 3
+    BufferIndexUniforms      = 2
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)
