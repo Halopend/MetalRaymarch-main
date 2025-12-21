@@ -445,20 +445,27 @@ vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]
 }
 
 // Simple passthrough fragment shader with format conversion
-// When rate map is active, in.position is in physical (rate-mapped) space.
-// We use pixel coordinates directly to sample the source texture.
+// When rate map is active, the viewport is in SCREEN coordinates and in.position
+// is in PHYSICAL coordinates after rate map transformation.
+// The source texture is at SCREEN resolution, so we need to map physical → screen.
+// Since the rate map transforms screen → physical, we use:
+//   screenPos = in.position * (screenSize / physicalSize)
+//   uv = screenPos / screenSize = in.position / physicalSize... wait no.
+// Actually simpler: in.position.xy / sourceTexture.size gives correct UV since
+// when rate map is enabled with screen-sized viewport, in.position is still in
+// physical space but the fullscreen triangle covers the physical render target.
+// The UV we need is just position / target_physical_size, and we sample the
+// source using those same UVs since source is screen-sized and we want the
+// rate-map-compressed sampling pattern.
 fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
                                           texture2d<float> sourceTexture [[texture(0)]]) {
-    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
+    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
-    // Use physical pixel position to compute UV into source texture.
-    // This correctly handles rate map transformation - in.position.xy is the
-    // physical fragment location, and we map it to the source texture dimensions.
-    float2 sourceSize = float2(sourceTexture.get_width(), sourceTexture.get_height());
-    float2 uv = in.position.xy / sourceSize;
-    
-    float4 color = sourceTexture.sample(textureSampler, uv);
+    // Use the interpolated texCoord from vertex shader.
+    // The fullscreen triangle covers clip space -1 to 1, and texCoord is 0 to 1.
+    // This samples the full source texture and the rate map handles where fragments land.
+    float4 color = sourceTexture.sample(textureSampler, in.texCoord);
     
     // Ensure alpha is 1 for proper visionOS compositing
     return float4(color.rgb, 1.0);
@@ -469,17 +476,13 @@ struct DepthOutput {
 };
 
 // Fragment shader for depth upscaling
-// Uses physical position coordinates like formatConversionFragment for rate map compatibility.
+// Uses interpolated texCoord like formatConversionFragment.
 fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
                                           depth2d<float> sourceTexture [[texture(0)]]) {
     constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
                                       address::clamp_to_edge);
     
-    // Use physical pixel position to compute UV into source texture.
-    float2 sourceSize = float2(sourceTexture.get_width(), sourceTexture.get_height());
-    float2 uv = in.position.xy / sourceSize;
-    
     DepthOutput out;
-    out.depth = sourceTexture.sample(textureSampler, uv);
+    out.depth = sourceTexture.sample(textureSampler, in.texCoord);
     return out;
 }

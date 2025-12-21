@@ -508,25 +508,22 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // When rendering to MetalFX input, use the input texture dimensions (physical-sized output)
-        // When rendering to drawable with foveation, use the virtual viewport from drawable
+        // When rendering to MetalFX input, use FULL input texture as viewport.
+        // The input texture is already sized with the correct aspect ratio (screen aspect).
+        // When rendering to drawable with foveation, use the virtual viewport from drawable.
         #if canImport(MetalFX)
         let viewports: [MTLViewport]
         if upscalingEnabled,
            let fx = metalFXManager,
-           let inputTex = fx.inputTexture,
-           let config = fx.configuration as UpscaleConfig? {
-            // When rendering to the MetalFX input texture, that texture is already sized to the
-            // physical drawable size (scaled down by resolutionScale). Honor each eye's viewport
-            // origin/size, clamped to the MetalFX input bounds.
+           let inputTex = fx.inputTexture {
+            // Render to full MetalFX input texture. The input is sized with screen aspect ratio,
+            // so the projection matrix (also screen aspect) will work correctly.
             viewports = drawable.views.map { view in
                 let vp = view.textureMap.viewport
-                let maxWidth = Double(inputTex.width) - vp.originX
-                let maxHeight = Double(inputTex.height) - vp.originY
-                return MTLViewport(originX: vp.originX,
-                                   originY: vp.originY,
-                                   width: min(vp.width, maxWidth),
-                                   height: min(vp.height, maxHeight),
+                return MTLViewport(originX: 0.0,
+                                   originY: 0.0,
+                                   width: Double(inputTex.width),
+                                   height: Double(inputTex.height),
                                    znear: vp.znear,
                                    zfar: vp.zfar)
             }
@@ -642,37 +639,38 @@ actor Renderer {
         }
 
         // MetalFX input and output sizing:
-        // - Output: Must match physical drawable texture for the copy to work
-        // - Input: Scaled version of output, maintaining the same aspect ratio
+        // CRITICAL: Must use SCREEN dimensions, not physical dimensions!
+        // The projection matrix is based on FOV tangents which give an aspect ratio
+        // matching the screen viewport. When rendering without a rate map, the viewport
+        // aspect must match the projection aspect, or you get distortion.
         //
-        // The projection matrix from drawable.computeProjection() is based on tangent values
-        // which define angular FOV, making it resolution-independent. As long as we maintain
-        // the correct aspect ratio, the projection works correctly.
+        // Screen: 4851x3887 (aspect 1.248) - what projection expects
+        // Physical: 2048x1984 (aspect 1.032) - after rate map compression
         //
-        // Note: The logical viewport (view.textureMap.viewport) may differ from physical texture
-        // due to foveation, but both should have the same aspect ratio.
-        let drawableTexture = drawable.colorTextures[0]
-        
-        // Size MetalFX to the physical drawable dimensions. This keeps the upscaled output
-        // aligned with the foveated target; the rate map and the system will handle how the
-        // physical texture is sampled.
+        // If we size input from physical, aspect is wrong → distortion!
         func alignTo16(_ value: Int) -> Int { max(16, (value + 15) & ~15) }
 
-        let physicalWidth = drawableTexture.width
-        let physicalHeight = drawableTexture.height
-
-        let outputWidth = alignTo16(physicalWidth)
-        let outputHeight = alignTo16(physicalHeight)
+        // Get screen dimensions from the viewport (this is what projection expects)
+        let screenViewport = drawable.views[0].textureMap.viewport
+        let screenWidth = Int(screenViewport.width)
+        let screenHeight = Int(screenViewport.height)
+        
+        // Size MetalFX textures based on SCREEN dimensions to match projection aspect ratio
+        let outputWidth = alignTo16(screenWidth)
+        let outputHeight = alignTo16(screenHeight)
+        
+        let inputWidth = alignTo16(max(1, Int(round(Double(screenWidth) * Double(metalFXScale)))))
+        let inputHeight = alignTo16(max(1, Int(round(Double(screenHeight) * Double(metalFXScale)))))
+        
         lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
-
-        let inputWidth = alignTo16(max(1, Int(round(Double(outputWidth) * Double(metalFXScale)))))
-        let inputHeight = alignTo16(max(1, Int(round(Double(outputHeight) * Double(metalFXScale)))))
         
         // Debug: print dimensions and check aspect ratio
         if !hasLoggedFoveationAvailability {
+            let drawableTexture = drawable.colorTextures[0]
             print("🔍 MetalFX Config Debug:")
-            print("   Physical texture: \(physicalWidth) x \(physicalHeight)")
-            print("   MetalFX input: \(inputWidth) x \(inputHeight)")
+            print("   Screen viewport: \(screenWidth) x \(screenHeight) (aspect \(Double(screenWidth)/Double(screenHeight)))")
+            print("   Physical texture: \(drawableTexture.width) x \(drawableTexture.height) (aspect \(Double(drawableTexture.width)/Double(drawableTexture.height)))")
+            print("   MetalFX input: \(inputWidth) x \(inputHeight) (aspect \(Double(inputWidth)/Double(inputHeight)))")
             print("   MetalFX output: \(outputWidth) x \(outputHeight)")
             print("   Resolution scale: \(metalFXScale)")
             hasLoggedFoveationAvailability = true
