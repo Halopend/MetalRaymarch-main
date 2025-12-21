@@ -112,17 +112,26 @@ float GetSky(float3 pos)
     return t;
 }
 
-// Optimized branchless Map function
-float Map(float3 pos, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations) 
-{
-    float minRad2 = minRad2Val;
-    float4 scale = float4(fractalScale) / minRad2;
-    scale.w = abs(scale.w);
-    float absScalem1 = abs(fractalScale - 1.0);
-    float AbsScaleRaisedTo1mIters = exp2(log2(max(abs(fractalScale), kPowEpsilon)) * float(1 - iterations));
-    
-    float minRadius2 = sphereRadius * sphereRadius;
+struct FractalParams {
+    float4 scale;
+    float absScalem1;
+    float absScalePow;
+    float minRadius2;
+};
 
+inline FractalParams makeFractalParams(float minRad2Val, float fractalScale, float sphereRadius, int iterations) {
+    FractalParams params;
+    params.scale = float4(fractalScale) / minRad2Val;
+    params.scale.w = abs(params.scale.w);
+    params.absScalem1 = abs(fractalScale - 1.0);
+    params.absScalePow = exp2(log2(max(abs(fractalScale), kPowEpsilon)) * float(1 - iterations));
+    params.minRadius2 = sphereRadius * sphereRadius;
+    return params;
+}
+
+// Optimized branchless Map function
+float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
+{
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
 
@@ -133,12 +142,12 @@ float Map(float3 pos, float minRad2Val, float fractalScale, float foldingLimit, 
 
         // Branchless sphere fold - much faster on GPU
         float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
+        float t = clamp(1.0 / max(r2, params.minRadius2), 1.0, 1.0/params.minRadius2);
         p *= t;
 
-        p = p * scale + p0;
+        p = p * params.scale + p0;
     }
-    return (length(p.xyz) - absScalem1) / p.w - AbsScaleRaisedTo1mIters;
+    return (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
 }
 
 // Optimized colour function using half precision
@@ -175,25 +184,25 @@ half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad
 }
 
 // Fast normal using forward differences (3 Map calls instead of 4)
-float3 GetNormal(float3 pos, float distance, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
+float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
 {
     float e = distance * 0.001;
-    float d = Map(pos, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
+    float d = Map(pos, params, foldingLimit, iterations);
     return normalize(float3(
-        Map(pos + float3(e,0,0), minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) - d,
-        Map(pos + float3(0,e,0), minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) - d,
-        Map(pos + float3(0,0,e), minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations) - d
+        Map(pos + float3(e,0,0), params, foldingLimit, iterations) - d,
+        Map(pos + float3(0,e,0), params, foldingLimit, iterations) - d,
+        Map(pos + float3(0,0,e), params, foldingLimit, iterations) - d
     ));
 }
 
 // Reduced binary subdivision (4 iterations instead of 6)
-float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
+float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, float foldingLimit, int iterations)
 {
     float halfwayT;
     for (int i = 0; i < 4; i++)
     {
         halfwayT = (t.x + t.y) * 0.5;
-        float d = Map(rO + halfwayT*rD, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations); 
+        float d = Map(rO + halfwayT*rD, params, foldingLimit, iterations); 
         t = mix(float2(t.x, halfwayT), float2(halfwayT, t.y), step(0.0005, d));
     }
     return halfwayT;
@@ -201,7 +210,7 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, float minRad2Val, float 
 
 // Enhanced sphere tracing with over-relaxation (no binary subdivision needed)
 // Optimized for visionOS spatial rendering with temporal stability
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad2Val, int maxStepsParam, float fractalScale, float glowIntensity, float foldingLimit, float sphereRadius, int iterations, float time)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
     // This reduces shimmer/crawling artifacts during head movement
@@ -224,7 +233,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
         float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
         
         float3 p = rO + t * rD;
-        float h = Map(p, minRad2Val, fractalScale, foldingLimit, sphereRadius, iterations);
+        float h = Map(p, params, foldingLimit, iterations);
         
         // Hit detection
         if(h < threshold)
@@ -283,7 +292,7 @@ half3 PostEffects(half3 rgb, half2 xy)
 }
 
 // Ultra-fast shadow with over-relaxation
-float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int iterations)
+float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
 {
     // Skip shadows in extreme periphery
     if (quality < 0.25) return 0.65;
@@ -294,11 +303,10 @@ float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fracta
     
     // Very few steps with aggressive over-relaxation
     int steps = int(quality * 2.0) + 1; // 1-3 steps
-    int reducedIters = max(iterations - 2, 2);
     
     for (int i = 0; i < steps; i++)
     {
-        float h = Map(ro + rd * t, minRad2Val, fractalScale, foldingLimit, sphereRadius, reducedIters);
+        float h = Map(ro + rd * t, params, foldingLimit, iterations);
         
         // Soft shadow calculation
         res = min(res, 10.0 * h / t);
@@ -374,9 +382,10 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     
     // LOD: Reduce fractal iterations in periphery
     int lodIterations = max(int(float(in.fractalIterations) * (0.4 + 0.6 * quality)), 2);
-    
+    FractalParams fractalParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, lodIterations);
+
     // Pass time for temporally stable dithering
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations, in.time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.maxRaySteps, in.glowIntensity, in.foldingLimit, fractalParams, lodIterations, in.time);
     
     // Use half precision for color accumulation
     half3 col = half3(0.0h);
@@ -393,7 +402,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
         // Skip normal calculation in extreme periphery - use cheap approximation
         float3 nor;
         if (quality > 0.2) {
-            nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations);
+            nor = GetNormal(p, ret.x, fractalParams, in.foldingLimit, lodIterations);
         } else {
             // Cheap normal approximation for periphery
             nor = normalize(p - cameraPos);
@@ -406,9 +415,12 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
             float3 spot = spotLight - p;
             float atten = length(spot);
             spot /= atten;
+
+            int shadowIterations = max(lodIterations - 2, 2);
+            FractalParams shadowParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, shadowIterations);
             
-            half shaSpot = half(Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
-            half shaSun = half(Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
+            half shaSpot = half(Shadow(p, spot, quality, in.foldingLimit, shadowParams, shadowIterations));
+            half shaSun = half(Shadow(p, sunDir, quality, in.foldingLimit, shadowParams, shadowIterations));
             
             float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
@@ -515,8 +527,9 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
     float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
     float quality = mix(1.0, 0.7, edgeAtten * in.foveationIntensity);
     int lodIterations = max(int(float(in.fractalIterations) * (0.4 + 0.6 * quality)), 2);
+    FractalParams fractalParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, lodIterations);
 
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.minDistance, in.maxRaySteps, in.fractalScale, in.glowIntensity, in.foldingLimit, in.sphereRadius, lodIterations, in.time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.maxRaySteps, in.glowIntensity, in.foldingLimit, fractalParams, lodIterations, in.time);
     half3 col = half3(0.0h);
 
     if (ret.x < 900.0)
@@ -525,7 +538,7 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
 
         float3 nor;
         if (quality > 0.2) {
-            nor = GetNormal(p, ret.x, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations);
+            nor = GetNormal(p, ret.x, fractalParams, in.foldingLimit, lodIterations);
         } else {
             nor = normalize(p - cameraPos);
         }
@@ -536,8 +549,11 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
             float atten = length(spot);
             spot /= atten;
 
-            half shaSpot = half(Shadow(p, spot, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
-            half shaSun = half(Shadow(p, sunDir, quality, in.minDistance, in.fractalScale, in.foldingLimit, in.sphereRadius, lodIterations));
+            int shadowIterations = max(lodIterations - 2, 2);
+            FractalParams shadowParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, shadowIterations);
+
+            half shaSpot = half(Shadow(p, spot, quality, in.foldingLimit, shadowParams, shadowIterations));
+            half shaSun = half(Shadow(p, sunDir, quality, in.foldingLimit, shadowParams, shadowIterations));
 
             float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
