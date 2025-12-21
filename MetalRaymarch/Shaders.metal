@@ -28,20 +28,7 @@ typedef struct
 {
     float4 position [[position]];
     float2 texCoord;
-    float time;
     float3 modelPos;
-    float4 ndcPosition;
-    float minDistance;
-    float2 foveaCenter;
-    float fractalScale;
-    int fractalIterations;
-    int maxRaySteps;
-    float foveationIntensity;
-    float colorMix;
-    float glowIntensity;
-    float foldingLimit;
-    float sphereRadius;
-    float colorIterations;
 } ColorInOut;
 
 vertex ColorInOut vertexShader(Vertex in [[stage_in]],
@@ -54,22 +41,8 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     
     float4 position = float4(in.position, 1);
     out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
-    out.ndcPosition = out.position; // Store for depth calculation
-    
     out.texCoord = in.texCoord;
-    out.time = uniforms.time;
     out.modelPos = in.position;
-    out.minDistance = uniforms.minDistance;
-    out.foveaCenter = uniforms.foveaCenter;
-    out.fractalScale = uniforms.fractalScale;
-    out.fractalIterations = uniforms.fractalIterations;
-    out.maxRaySteps = uniforms.maxRaySteps;
-    out.foveationIntensity = uniforms.foveationIntensity;
-    out.colorMix = uniforms.colorMix;
-    out.glowIntensity = uniforms.glowIntensity;
-    out.foldingLimit = uniforms.foldingLimit;
-    out.sphereRadius = uniforms.sphereRadius;
-    out.colorIterations = uniforms.colorIterations;
     
     return out;
 }
@@ -361,9 +334,10 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
 {
     FragmentOutput output;
     
-    float gTime = in.time * 0.01 + 15.00;
-    
+    // Fetch all uniform data directly - avoids interpolator overhead
     Uniforms uniforms = uniformsArray.uniforms[ampId];
+    
+    float gTime = uniforms.time * 0.01 + 15.00;
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
@@ -378,14 +352,14 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     // Minimal shader foveation - system rate maps do the heavy lifting
     // Only affects very edges (50%+ from center), very gentle falloff
     float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
-    float quality = mix(1.0, 0.7, edgeAtten * in.foveationIntensity);
+    float quality = mix(1.0, 0.7, edgeAtten * uniforms.foveationIntensity);
     
     // LOD: Reduce fractal iterations in periphery
-    int lodIterations = max(int(float(in.fractalIterations) * (0.4 + 0.6 * quality)), 2);
-    FractalParams fractalParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, lodIterations);
+    int lodIterations = max(int(float(uniforms.fractalIterations) * (0.4 + 0.6 * quality)), 2);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
 
     // Pass time for temporally stable dithering
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.maxRaySteps, in.glowIntensity, in.foldingLimit, fractalParams, lodIterations, in.time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
     
     // Use half precision for color accumulation
     half3 col = half3(0.0h);
@@ -402,7 +376,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
         // Skip normal calculation in extreme periphery - use cheap approximation
         float3 nor;
         if (quality > 0.2) {
-            nor = GetNormal(p, ret.x, fractalParams, in.foldingLimit, lodIterations);
+            nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
         } else {
             // Cheap normal approximation for periphery
             nor = normalize(p - cameraPos);
@@ -417,16 +391,16 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
             spot /= atten;
 
             int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, shadowIterations);
+            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
             
-            half shaSpot = half(Shadow(p, spot, quality, in.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, quality, in.foldingLimit, shadowParams, shadowIterations));
+            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
             
             float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
             
-            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, max(int(in.colorIterations * quality), 2));
+            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
             
             // Specular only in high quality
@@ -440,7 +414,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
         } else {
             // Simplified diffuse-only lighting for periphery
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
-            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, 2) * diffuse;
+            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
         }
     }
     
@@ -488,22 +462,8 @@ vertex ColorInOut vertexShaderEyeIndex(Vertex in [[stage_in]],
     Uniforms uniforms = uniformsArray.uniforms[eyeIndex];
     float4 position = float4(in.position, 1);
     out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
-    out.ndcPosition = out.position;
-
     out.texCoord = in.texCoord;
-    out.time = uniforms.time;
     out.modelPos = in.position;
-    out.minDistance = uniforms.minDistance;
-    out.foveaCenter = uniforms.foveaCenter;
-    out.fractalScale = uniforms.fractalScale;
-    out.fractalIterations = uniforms.fractalIterations;
-    out.maxRaySteps = uniforms.maxRaySteps;
-    out.foveationIntensity = uniforms.foveationIntensity;
-    out.colorMix = uniforms.colorMix;
-    out.glowIntensity = uniforms.glowIntensity;
-    out.foldingLimit = uniforms.foldingLimit;
-    out.sphereRadius = uniforms.sphereRadius;
-    out.colorIterations = uniforms.colorIterations;
 
     return out;
 }
@@ -515,9 +475,10 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
 {
     FragmentOutput output;
 
-    float gTime = in.time * 0.01 + 15.00;
-
+    // Fetch all uniform data directly - avoids interpolator overhead
     Uniforms uniforms = uniformsArray.uniforms[eyeIndex];
+    
+    float gTime = uniforms.time * 0.01 + 15.00;
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
 
@@ -525,11 +486,11 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
 
     float distFromCenter = length(in.texCoord - float2(0.5, 0.5));
     float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
-    float quality = mix(1.0, 0.7, edgeAtten * in.foveationIntensity);
-    int lodIterations = max(int(float(in.fractalIterations) * (0.4 + 0.6 * quality)), 2);
-    FractalParams fractalParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, lodIterations);
+    float quality = mix(1.0, 0.7, edgeAtten * uniforms.foveationIntensity);
+    int lodIterations = max(int(float(uniforms.fractalIterations) * (0.4 + 0.6 * quality)), 2);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
 
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, in.maxRaySteps, in.glowIntensity, in.foldingLimit, fractalParams, lodIterations, in.time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
     half3 col = half3(0.0h);
 
     if (ret.x < 900.0)
@@ -538,7 +499,7 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
 
         float3 nor;
         if (quality > 0.2) {
-            nor = GetNormal(p, ret.x, fractalParams, in.foldingLimit, lodIterations);
+            nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
         } else {
             nor = normalize(p - cameraPos);
         }
@@ -550,16 +511,16 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
             spot /= atten;
 
             int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(in.minDistance, in.fractalScale, in.sphereRadius, shadowIterations);
+            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
 
-            half shaSpot = half(Shadow(p, spot, quality, in.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, quality, in.foldingLimit, shadowParams, shadowIterations));
+            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
 
             float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
-            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, max(int(in.colorIterations * quality), 2));
+            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
 
             if (quality > 0.7) {
@@ -571,7 +532,7 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
             }
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
-            col = Colour(p, ret.x, gTime, quality, in.minDistance, in.fractalScale, in.colorMix, in.foldingLimit, in.sphereRadius, 2) * diffuse;
+            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
         }
     }
 
