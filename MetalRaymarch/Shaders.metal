@@ -327,64 +327,41 @@ float3 uvToDir(float2 uv) // uv: -1..1
     return float3(xz.x * cos(uvRad.y), sin(uvRad.y), xz.y * cos(uvRad.y));
 }
 
-fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
-                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
-                               ushort ampId [[amplification_id]],
-                               texture2d<half> cubeMap [[texture(TextureIndexColor)]])
+// Shared fragment body to avoid duplication and improve i-cache locality
+inline FragmentOutput fragmentMain(ColorInOut in,
+                                   Uniforms uniforms,
+                                   float2 fragCoord,
+                                   float time)
 {
     FragmentOutput output;
     
-    // Fetch all uniform data directly - avoids interpolator overhead
-    Uniforms uniforms = uniformsArray.uniforms[ampId];
-    
-    float gTime = uniforms.time * 0.01 + 15.00;
+    float gTime = time * 0.01 + 15.00;
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
-    // Use screen position for stable dithering pattern
-    float2 fragCoord = in.position.xy;
-    
     // === Foveation ===
-    // System rasterization rate maps handle pixel density (gaze-tracked)
-    // Shader-side: only reduce iterations at extreme edges for perf
     float distFromCenter = length(in.texCoord - float2(0.5, 0.5));
-    
-    // Minimal shader foveation - system rate maps do the heavy lifting
-    // Only affects very edges (50%+ from center), very gentle falloff
     float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
     float quality = mix(1.0, 0.7, edgeAtten * uniforms.foveationIntensity);
     
-    // LOD: Reduce fractal iterations in periphery
     int lodIterations = max(int(float(uniforms.fractalIterations) * (0.4 + 0.6 * quality)), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
 
-    // Pass time for temporally stable dithering
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
-    
-    // Use half precision for color accumulation
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
     half3 col = half3(0.0h);
-    
-    // === Depth for Spatial Reprojection ===
-    // For visionOS ASW (Asynchronous SpaceWarp), we need accurate depth
-    // Use raymarched distance converted to view-space depth
-    float convergenceDepth = ret.x;
-    
+
     if (ret.x < 900.0)
     {
         float3 p = cameraPos + ret.x * rd;
-        
-        // Skip normal calculation in extreme periphery - use cheap approximation
+
         float3 nor;
         if (quality > 0.2) {
             nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
         } else {
-            // Cheap normal approximation for periphery
             nor = normalize(p - cameraPos);
         }
-        
-        // Simplified lighting for periphery
+
         if (quality > 0.4) {
-            // Full lighting calculation
             float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
             float3 spot = spotLight - p;
             float atten = length(spot);
@@ -392,18 +369,17 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
 
             int shadowIterations = max(lodIterations - 2, 2);
             FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
-            
+
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
-            
+
             float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
-            
+
             col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
-            
-            // Specular only in high quality
+
             if (quality > 0.7) {
                 float3 ref = reflect(rd, nor);
                 float specSpot = exp2(log2(max(max(dot(spot, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
@@ -412,44 +388,38 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                 col += half3(specSun) * shaSun * briSun;
             }
         } else {
-            // Simplified diffuse-only lighting for periphery
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
             col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
         }
     }
-    
-    // Simplified fog (half precision)
+
     half fogFactor = half(saturate(exp(-ret.x + 1.5)));
     col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
-    
-    // Glow (half precision)
+
     half glow = half(ret.y);
     col += glow * glow * half3(0.02h, 0.04h, 0.1h);
-    
-    // === Temporal Anti-Aliasing Preparation ===
-    // Subtle noise reduction for smoother reprojection
-    // Clamp extreme values that cause shimmer during head movement
+
     col = clamp(col, half3(0.0h), half3(2.0h));
-    
-    // Post effects only in center (skip in periphery for performance)
+
     if (quality > 0.5) {
         col = PostEffects(col, half2(in.texCoord));
     } else {
-        // Simple gamma only for periphery - faster and less prone to artifacts
         col = exp2(log2(max(saturate(col), half3(kPowEpsilonHalf))) * half3(0.47h));
     }
 
-    // === Output for visionOS Spatial Rendering ===
-    // Color with premultiplied alpha for proper compositing
     output.color = float4(float3(col), 1.0);
-    
-    // Depth: Use rasterized depth from proxy geometry
-    // This provides stable depth for visionOS reprojection/ASW
-    // The proxy cube gives us correct world-space depth even though
-    // the raymarched content is in a different coordinate space
     output.depth = in.position.z;
-    
     return output;
+}
+
+fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
+                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                               ushort ampId [[amplification_id]],
+                               texture2d<half> cubeMap [[texture(TextureIndexColor)]])
+{
+    Uniforms uniforms = uniformsArray.uniforms[ampId];
+    float2 fragCoord = in.position.xy;
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time);
 }
 
 // MetalFX path: render each eye in a separate pass, selecting the eye explicitly.
@@ -473,86 +443,9 @@ fragment FragmentOutput fragmentShaderEyeIndex(ColorInOut in [[stage_in]],
                                                constant uint & eyeIndex [[ buffer(BufferIndexEyeIndex) ]],
                                                texture2d<half> cubeMap [[texture(TextureIndexColor)]])
 {
-    FragmentOutput output;
-
-    // Fetch all uniform data directly - avoids interpolator overhead
     Uniforms uniforms = uniformsArray.uniforms[eyeIndex];
-    
-    float gTime = uniforms.time * 0.01 + 15.00;
-    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
-    float3 rd = normalize(in.modelPos - cameraPos);
-
     float2 fragCoord = in.position.xy;
-
-    float distFromCenter = length(in.texCoord - float2(0.5, 0.5));
-    float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
-    float quality = mix(1.0, 0.7, edgeAtten * uniforms.foveationIntensity);
-    int lodIterations = max(int(float(uniforms.fractalIterations) * (0.4 + 0.6 * quality)), 2);
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
-
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
-    half3 col = half3(0.0h);
-
-    if (ret.x < 900.0)
-    {
-        float3 p = cameraPos + ret.x * rd;
-
-        float3 nor;
-        if (quality > 0.2) {
-            nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
-        } else {
-            nor = normalize(p - cameraPos);
-        }
-
-        if (quality > 0.4) {
-            float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
-            float3 spot = spotLight - p;
-            float atten = length(spot);
-            spot /= atten;
-
-            int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
-
-            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
-
-            float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
-            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
-            half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
-
-            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
-            col = (col * bri * shaSpot) + (col * briSun * shaSun);
-
-            if (quality > 0.7) {
-                float3 ref = reflect(rd, nor);
-                float specSpot = exp2(log2(max(max(dot(spot, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
-                float specSun = exp2(log2(max(max(dot(sunDir, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
-                col += half3(specSpot) * shaSpot * bri;
-                col += half3(specSun) * shaSun * briSun;
-            }
-        } else {
-            half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
-            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
-        }
-    }
-
-    half fogFactor = half(saturate(exp(-ret.x + 1.5)));
-    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
-
-    half glow = half(ret.y);
-    col += glow * glow * half3(0.02h, 0.04h, 0.1h);
-
-    col = clamp(col, half3(0.0h), half3(2.0h));
-
-    if (quality > 0.5) {
-        col = PostEffects(col, half2(in.texCoord));
-    } else {
-        col = exp2(log2(max(saturate(col), half3(kPowEpsilonHalf))) * half3(0.47h));
-    }
-
-    output.color = float4(float3(col), 1.0);
-    output.depth = in.position.z;
-    return output;
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time);
 }
 
 // === Format Conversion Shaders for MetalFX ===
