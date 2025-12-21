@@ -97,7 +97,7 @@ inline FractalParams makeFractalParams(float minRad2Val, float fractalScale, flo
     params.scale = float4(fractalScale) / minRad2Val;
     params.scale.w = abs(params.scale.w);
     params.absScalem1 = abs(fractalScale - 1.0);
-    params.absScalePow = exp2(log2(max(abs(fractalScale), kPowEpsilon)) * float(1 - iterations));
+    params.absScalePow = powr(max(abs(fractalScale), kPowEpsilon), float(1 - iterations));
     params.minRadius2 = sphereRadius * sphereRadius;
     return params;
 }
@@ -258,10 +258,10 @@ half3 PostEffects(half3 rgb, half2 xy)
     // Simplified vignette
     half2 q = xy * (1.0h - xy);
     half vignetteBase = max(16.0h * q.x * q.y, kPowEpsilonHalf);
-    rgb *= 0.5h + 0.5h * exp2(log2(vignetteBase) * 0.2h);
+    rgb *= 0.5h + 0.5h * powr(vignetteBase, 0.2h);
     
     // Gamma
-    return exp2(log2(max(rgb, half3(kPowEpsilonHalf))) * half3(0.47h));
+    return powr(max(rgb, half3(kPowEpsilonHalf)), half3(0.47h));
 }
 
 // Ultra-fast shadow with over-relaxation
@@ -313,8 +313,8 @@ float3 LightSource(float3 spotLight, float3 dir, float dis)
     {
         float a = max(dot(normalize(spotLight), dir), 0.0);
         float safeA = max(a, kPowEpsilon);
-        g = exp2(log2(safeA) * 500.0);
-        g +=  exp2(log2(safeA) * 5000.0)*.2;
+        g = powr(safeA, 500.0);
+        g +=  powr(safeA, 5000.0)*.2;
     }
    
     return float3(.6) * g;
@@ -373,7 +373,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
 
-            float attenPow = exp2(log2(max(atten, kPowEpsilon)) * 1.5);
+            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
@@ -382,8 +382,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
             if (quality > 0.7) {
                 float3 ref = reflect(rd, nor);
-                float specSpot = exp2(log2(max(max(dot(spot, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
-                float specSun = exp2(log2(max(max(dot(sunDir, ref), 0.0), kPowEpsilon)) * 10.0) * 2.0;
+                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+                float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
                 col += half3(specSpot) * shaSpot * bri;
                 col += half3(specSun) * shaSun * briSun;
             }
@@ -404,7 +404,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     if (quality > 0.5) {
         col = PostEffects(col, half2(in.texCoord));
     } else {
-        col = exp2(log2(max(saturate(col), half3(kPowEpsilonHalf))) * half3(0.47h));
+        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
     }
 
     output.color = float4(float3(col), 1.0);
