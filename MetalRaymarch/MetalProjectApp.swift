@@ -45,7 +45,7 @@ struct MetalProjectTestApp: App {
             }
         }
         .immersionStyle(selection: .constant(.full), in: .full)
-        .upperLimbVisibility(.hidden)
+        .upperLimbVisibility(.visible)
     }
 }
 
