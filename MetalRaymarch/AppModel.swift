@@ -47,6 +47,7 @@ class RenderSettings {
     private var _colorIterations: Float = 10.0      // 80% of max (12) for quality
     private var _resolutionScale: Float = 1.0       // MetalFX upscaling: 0.25 (25%) to 1.0 (100%)
     private var _debugEyeTint: Bool = false          // Force per-eye red/blue debug fill
+    private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4 tile-based raymarching
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -116,6 +117,14 @@ class RenderSettings {
     var debugEyeTint: Bool {
         get { lock.withLock { _debugEyeTint } }
         set { lock.withLock { _debugEyeTint = newValue } }
+    }
+    
+    // 0 = disabled (standard per-pixel raymarch)
+    // 2 = 2x2 tiles (4x overhead reduction, high quality)
+    // 4 = 4x4 tiles (16x overhead reduction, performance mode)
+    var tileSize: Int {
+        get { lock.withLock { _tileSize } }
+        set { lock.withLock { _tileSize = newValue } }
     }
 }
 

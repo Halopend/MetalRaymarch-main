@@ -50,10 +50,17 @@ actor Renderer {
     let commandQueue: MTLCommandQueue
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
+    var quadSharedPipelineState: MTLRenderPipelineState?  // Quad-shared raymarch (2x2 sharing)
     var metalFXAmplificationPipelineState: MTLRenderPipelineState?  // Pipeline for amplification rgba16Float (uses amplification_id)
+    var metalFXQuadSharedPipelineState: MTLRenderPipelineState?  // MetalFX + quad-shared
     var depthUpscalePipelineState: MTLRenderPipelineState?
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
+    
+    // Tile-based compute pipelines (4x4 and 2x2 variants)
+    var tileRaymarchPipeline4x4: MTLComputePipelineState?
+    var tileRaymarchPipeline2x2: MTLComputePipelineState?
+    var tileUniformBuffer: MTLBuffer?
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -136,6 +143,20 @@ actor Renderer {
         } catch {
             fatalError("Unable to compile render pipeline state.  Error info: \(error)")
         }
+        
+        // Build quad-shared pipeline (uses SIMD quad operations for 2x2 pixel grouping)
+        do {
+            quadSharedPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
+                                                                                 layerRenderer: layerRenderer,
+                                                                                 rasterSampleCount: rasterSampleCount,
+                                                                                 mtlVertexDescriptor: mtlVertexDescriptor,
+                                                                                 vertexFunctionName: "vertexShader",
+                                                                                 fragmentFunctionName: "fragmentShaderQuadShared")
+            print("✓ Quad-shared pipeline ready (2x2 SIMD grouping)")
+        } catch {
+            print("⚠️ Quad-shared pipeline failed: \(error)")
+            quadSharedPipelineState = nil
+        }
 
         // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
         #if canImport(MetalFX)
@@ -149,12 +170,22 @@ actor Renderer {
                                                                               vertexFunctionName: "vertexShader",
                                                                               fragmentFunctionName: "fragmentShader")
             
+            // MetalFX + quad-shared pipeline
+            metalFXQuadSharedPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
+                                                                              layerRenderer: layerRenderer,
+                                                                              rasterSampleCount: 1,
+                                                                              mtlVertexDescriptor: mtlVertexDescriptor,
+                                                                              colorFormat: .rgba16Float,
+                                                                              vertexFunctionName: "vertexShader",
+                                                                              fragmentFunctionName: "fragmentShaderQuadShared")
+            
             depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
                                                                                layerRenderer: layerRenderer, 
                                                                                mtlVertexDescriptor: mtlVertexDescriptor)
         } catch {
             print("⚠️ Unable to compile MetalFX or Depth Upscale pipeline: \(error)")
             metalFXAmplificationPipelineState = nil
+            metalFXQuadSharedPipelineState = nil
         }
         #endif
 
@@ -173,6 +204,32 @@ actor Renderer {
             cubeMap = try Renderer.loadTexture(device: device, textureName: "CubeMap")
         } catch {
             fatalError("Unable to load texture. Error info: \(error)")
+        }
+        
+        // Build tile-based compute pipelines
+        do {
+            let library = device.makeDefaultLibrary()!
+            
+            // 4x4 tile kernel (16x DE reduction)
+            if let kernel4x4 = library.makeFunction(name: "tileRaymarchKernel") {
+                tileRaymarchPipeline4x4 = try device.makeComputePipelineState(function: kernel4x4)
+            }
+            
+            // 2x2 tile kernel (4x DE reduction, higher quality)
+            if let kernel2x2 = library.makeFunction(name: "tileRaymarchKernel2x2") {
+                tileRaymarchPipeline2x2 = try device.makeComputePipelineState(function: kernel2x2)
+            }
+            
+            // Uniform buffer for tile compute (one per eye)
+            let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
+            tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
+            tileUniformBuffer?.label = "TileUniforms"
+            
+            print("✓ Tile-based compute pipelines ready (4x4 and 2x2)")
+        } catch {
+            print("⚠️ Failed to create tile compute pipelines: \(error)")
+            tileRaymarchPipeline4x4 = nil
+            tileRaymarchPipeline2x2 = nil
         }
 
         worldTracking = WorldTrackingProvider()
@@ -494,15 +551,34 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
+        // Select pipeline based on tile size and MetalFX settings
+        // tileSize: 0 = standard per-pixel, 2 = quad-shared (2x2 SIMD), 4 = (future compute-based)
+        let tileSize = appModel.renderSettings.tileSize
+        let useQuadShared = (tileSize == 2)
+        
         // Use MetalFX amplification pipeline when upscaling (uses amplification_id, outputs rgba16Float)
         #if canImport(MetalFX)
-        if upscalingEnabled, let fxAmpPipeline = metalFXAmplificationPipelineState {
-            renderEncoder.setRenderPipelineState(fxAmpPipeline)
+        if upscalingEnabled {
+            if useQuadShared, let quadPipeline = metalFXQuadSharedPipelineState {
+                renderEncoder.setRenderPipelineState(quadPipeline)
+            } else if let fxAmpPipeline = metalFXAmplificationPipelineState {
+                renderEncoder.setRenderPipelineState(fxAmpPipeline)
+            } else {
+                renderEncoder.setRenderPipelineState(pipelineState)
+            }
+        } else {
+            if useQuadShared, let quadPipeline = quadSharedPipelineState {
+                renderEncoder.setRenderPipelineState(quadPipeline)
+            } else {
+                renderEncoder.setRenderPipelineState(pipelineState)
+            }
+        }
+        #else
+        if useQuadShared, let quadPipeline = quadSharedPipelineState {
+            renderEncoder.setRenderPipelineState(quadPipeline)
         } else {
             renderEncoder.setRenderPipelineState(pipelineState)
         }
-        #else
-        renderEncoder.setRenderPipelineState(pipelineState)
         #endif
 
         renderEncoder.setDepthStencilState(depthState)

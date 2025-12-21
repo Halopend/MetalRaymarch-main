@@ -32,6 +32,20 @@ struct ContentView: View {
                     set: { appModel.renderSettings.resolutionScale = $0 }
                 ), in: 0.25...1.0, step: 0.05)
                 
+                // Tile-based rendering mode (2x2 quad sharing for ~4x less raymarching)
+                HStack {
+                    Text("Tile Mode:")
+                    Picker("", selection: Binding(
+                        get: { appModel.renderSettings.tileSize },
+                        set: { appModel.renderSettings.tileSize = $0 }
+                    )) {
+                        Text("Off").tag(0)
+                        Text("2×2 (Quad)").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.top, 8)
+                
                 // Show MetalFX / upscaling status for easier debugging
                 HStack(spacing: 8) {
                     Image(systemName: appModel.metalFXAvailable ? "bolt.fill" : "bolt.slash")

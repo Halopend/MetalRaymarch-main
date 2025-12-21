@@ -61,5 +61,26 @@ typedef struct
     Uniforms uniforms[2];
 } UniformsArray;
 
+// Tile-based compute shader uniforms
+// Used for 4x4 pixel tile processing (1 DE per tile, 16 normal calcs)
+typedef struct
+{
+    matrix_float4x4 invViewMatrix;
+    matrix_float4x4 invProjMatrix;
+    vector_float3 cameraPos;
+    float time;
+    vector_float2 resolution;
+    float minDistance;
+    float fractalScale;
+    float sphereRadius;
+    float foldingLimit;
+    float glowIntensity;
+    float colorMix;
+    int fractalIterations;
+    int colorIterations;
+    int maxRaySteps;
+    uint32_t eyeIndex;
+} TileUniforms;
+
 #endif /* ShaderTypes_h */
 

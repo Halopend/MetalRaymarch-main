@@ -180,28 +180,106 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, fl
     return halfwayT;
 }
 
-// Enhanced sphere tracing with over-relaxation (no binary subdivision needed)
-// Optimized for visionOS spatial rendering with temporal stability
+// === COARSE RAYMARCH ===
+// Fast approximate raymarch for hierarchical rendering
+// Uses fewer iterations and larger steps to find approximate hit distance
+float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
+{
+    float t = 0.05;
+    
+    // Very few steps, aggressive stepping
+    for(int j = 0; j < 12; j++)
+    {
+        float3 p = rO + t * rD;
+        float h = Map(p, params, foldingLimit, iterations);
+        
+        // Coarse threshold - we just need to get close
+        if(h < 0.05) return t;
+        
+        if (t > 12.0) return 1000.0;
+        
+        // Aggressive stepping for coarse pass
+        t += h * 1.3;
+    }
+    
+    return 1000.0;
+}
+
+// === FINE RAYMARCH FROM STARTING POINT (with Lipschitz tracking) ===
+// Refines from a known starting distance (from coarse pass or neighbor)
+// Uses Lipschitz tracking for adaptive stepping
+float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+{
+    float dither = blueNoise(fragCoord, time) * 0.01;
+    
+    // Back up slightly from the starting point to ensure we don't miss the surface
+    float t = max(0.01, startT - 0.1) + dither;
+    
+    float glow = 0.0;
+    // Far fewer steps needed when starting close
+    int maxSteps = max(int(float(maxStepsParam) * quality * 0.4), 3);
+    
+    // Lipschitz tracking for fine pass
+    float prevH = 1e10;
+    float prevT = t;
+    float lipschitz = 0.8;  // Start with slightly optimistic estimate for fine pass
+    
+    for(int j = 0; j < maxSteps; j++)
+    {
+        float threshold = 0.0005 + t * 0.0006;
+        
+        float3 p = rO + t * rD;
+        float h = Map(p, params, foldingLimit, iterations);
+        
+        if(h < threshold)
+        {
+            return float2(t, saturate(glow * 0.25));
+        }
+        
+        if (t > startT + 2.0) break; // Don't search too far past expected hit
+        
+        glow += saturate(0.04 - h) * glowIntensity;
+        
+        // Lipschitz tracking
+        float stepTaken = t - prevT;
+        if (stepTaken > 0.0001 && j > 0) {
+            float gradEstimate = abs(h - prevH) / stepTaken;
+            lipschitz = mix(lipschitz, gradEstimate, 0.4);
+            lipschitz = clamp(lipschitz, 0.15, 1.2);
+        }
+        
+        // Adaptive step with Lipschitz
+        float stepSize = h / max(lipschitz, 0.2);
+        stepSize = clamp(stepSize, 0.0005, 0.5);
+        
+        prevT = t;
+        prevH = h;
+        t += stepSize;
+    }
+    
+    return float2(1000.0, saturate(glow * 0.25));
+}
+
+// Enhanced sphere tracing with Lipschitz tracking and over-relaxation
+// Lipschitz tracking: estimates local SDF gradient to step more aggressively
+// when the surface is "gentle" (gradient < 1)
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
-    // This reduces shimmer/crawling artifacts during head movement
     float dither = blueNoise(fragCoord, time) * 0.015;
     float t = 0.05 + dither;
     
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
-    // Previous distance for over-relaxation
+    // Lipschitz tracking state
     float prevH = 1e10;
-    float omega = 1.2; // Over-relaxation factor (1.0 = standard, >1 = aggressive)
+    float prevT = t;
+    float lipschitz = 1.0;  // Running estimate of local Lipschitz constant (|gradient|)
     
-    // Distance-adaptive threshold: allows coarser hits when far away
-    // This is perceptually invisible but saves many iterations
-    
+    // Distance-adaptive threshold
     for(int j = 0; j < maxSteps; j++)
     {
-        // Adaptive threshold grows with distance (imperceptible at distance)
         float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
         
         float3 p = rO + t * rD;
@@ -210,35 +288,49 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         // Hit detection
         if(h < threshold)
         {
-            // No binary subdivision needed - we're close enough
-            // The adaptive threshold ensures we don't overshoot significantly
             return float2(t, saturate(glow * 0.25));
         }
         
-        // Early termination for rays going to infinity
         if (t > 12.0) break;
         
-        // Accumulate glow from near-misses
+        // Accumulate glow
         glow += saturate(0.04 - h) * glowIntensity;
         
-        // === Enhanced Sphere Tracing with Over-Relaxation ===
-        // Key insight: If we're moving away from surfaces (h > prevH),
-        // we can safely step MORE than the SDF value suggests.
-        // If approaching (h < prevH), be more conservative.
+        // === LIPSCHITZ TRACKING ===
+        // Estimate local Lipschitz constant: L ≈ |d(h)/d(t)| = |h - prevH| / stepTaken
+        // For a true SDF, L ≤ 1. For fractals, L can be < 1 locally, allowing bigger steps.
+        float stepTaken = t - prevT;
+        if (stepTaken > 0.0001 && j > 0) {
+            // Estimate gradient magnitude along ray
+            float gradEstimate = abs(h - prevH) / stepTaken;
+            
+            // Smooth the Lipschitz estimate (EMA) to avoid noise
+            // Use higher weight for larger gradients (conservative)
+            float alpha = 0.3;
+            lipschitz = mix(lipschitz, gradEstimate, alpha);
+            
+            // Clamp to valid range: 0.1 (very aggressive) to 1.5 (conservative for non-SDF)
+            lipschitz = clamp(lipschitz, 0.1, 1.5);
+        }
         
-        // Branchless over-relaxation to reduce SIMD divergence
-        float relax = step(prevH * 0.9, h);
-        float approachRate = prevH / (prevH - h + 0.001);
-        float conservative = h * min(approachRate * 0.5, 1.2);
-        float aggressive = h * omega;
-        float stepSize = mix(conservative, aggressive, relax);
+        // === ADAPTIVE STEP SIZE ===
+        // Base step: SDF value divided by Lipschitz constant
+        // If L < 1, we can step further than h suggests
+        float baseStep = h / max(lipschitz, 0.2);
         
-        // Minimum step to prevent getting stuck, maximum to prevent huge jumps
+        // Additional over-relaxation when moving away from surfaces
+        float movingAway = step(prevH * 0.9, h);
+        float relaxFactor = mix(0.9, 1.3, movingAway);
+        
+        float stepSize = baseStep * relaxFactor;
+        
+        // Safety clamps
         stepSize = clamp(stepSize, 0.001, 2.0);
         
-        // Distance-proportional step bonus (safe because SDF scales with distance)
+        // Distance-proportional bonus (safe far from surface)
         stepSize += t * 0.001;
         
+        prevT = t;
         prevH = h;
         t += stepSize;
     }
@@ -299,11 +391,287 @@ float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalPar
     return saturate(res);
 }
 
-float3 CameraPath( float t )
+// === TILE-BASED RAYMARCHING (4x4 pixel groups) ===
+// One DE raymarch per tile, per-pixel normals for smooth shading
+// Reduces DE overhead by ~16x while maintaining surface detail
+
+#define TILE_SIZE 4
+
+// Shared tile data structure for threadgroup communication
+struct TileHitData {
+    float hitDistance;      // Distance along center ray
+    float3 hitPoint;        // World-space hit position (center)
+    float glow;             // Glow accumulation
+    bool didHit;            // Whether the tile hit geometry
+};
+
+// Compute the ray direction for a given pixel in clip/NDC space
+// This requires the inverse projection matrix
+float3 computeRayDirection(float2 pixelCoord, float2 resolution, float4x4 invProjMatrix, float4x4 invViewMatrix) {
+    // Convert pixel to NDC (-1 to 1)
+    float2 ndc = (pixelCoord / resolution) * 2.0 - 1.0;
+    ndc.y = -ndc.y; // Flip Y for Metal
+    
+    // Unproject to view space (at z = -1)
+    float4 viewPos = invProjMatrix * float4(ndc, -1.0, 1.0);
+    viewPos /= viewPos.w;
+    
+    // Transform to world space and normalize
+    float3 worldDir = (invViewMatrix * float4(viewPos.xyz, 0.0)).xyz;
+    return normalize(worldDir);
+}
+
+// Per-pixel normal calculation - fast tetrahedron method
+float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
+{
+    float e = max(distance * 0.0005, 0.0001);
+    
+    // Tetrahedron technique - 4 samples instead of 6
+    float2 h = float2(1.0, -1.0) * e;
+    return normalize(
+        h.xyy * Map(pos + h.xyy, params, foldingLimit, iterations) +
+        h.yyx * Map(pos + h.yyx, params, foldingLimit, iterations) +
+        h.yxy * Map(pos + h.yxy, params, foldingLimit, iterations) +
+        h.xxx * Map(pos + h.xxx, params, foldingLimit, iterations)
+    );
+}
+
+// Forward declaration needed by compute kernels
+float3 CameraPath(float t);
+
+// CameraPath implementation (also used by compute kernels)
+float3 CameraPath(float t)
 {
     float3 p = float3(-.78 + 3. * sin(2.14*t),.05+2.5 * sin(.942*t+1.3),.05 + 3.5 * cos(3.594*t) );
     return p;
-} 
+}
+
+// === HIERARCHICAL TILE-BASED COMPUTE KERNEL ===
+// Two-level approach for 4x4 tiles:
+// 1. Thread (1,1) does COARSE raymarch to find approximate starting point
+// 2. All 16 threads do FINE raymarch from that starting point
+// Results in ~10-20x fewer total DE evaluations
+// TileUniforms is defined in ShaderTypes.h for Swift/Metal interop
+
+kernel void tileRaymarchKernel(
+    uint2 tileId [[threadgroup_position_in_grid]],
+    uint2 localId [[thread_position_in_threadgroup]],
+    uint localIndex [[thread_index_in_threadgroup]],
+    constant TileUniforms& uniforms [[buffer(0)]],
+    texture2d_array<float, access::write> outputTexture [[texture(0)]]
+) {
+    // Calculate pixel coordinates for this thread
+    uint2 pixelCoord = tileId * TILE_SIZE + localId;
+    
+    // Early exit if outside texture bounds
+    if (pixelCoord.x >= uint(uniforms.resolution.x) || pixelCoord.y >= uint(uniforms.resolution.y)) {
+        return;
+    }
+    
+    // Shared memory for hierarchical raymarch
+    threadgroup float sharedCoarseT;        // Coarse starting distance
+    threadgroup float3 sharedCenterRayDir;  // Leader ray direction for adjustment
+    
+    // Setup fractal params
+    int lodIterations = max(uniforms.fractalIterations, 2);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    
+    // Calculate per-pixel ray direction
+    float2 pixelCenter = float2(pixelCoord) + 0.5;
+    float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    
+    float4 viewPos = uniforms.invProjMatrix * float4(ndc, -1.0, 1.0);
+    viewPos /= viewPos.w;
+    float3 rd = normalize((uniforms.invViewMatrix * float4(viewPos.xyz, 0.0)).xyz);
+    
+    // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
+    if (localId.x == 1 && localId.y == 1) {
+        sharedCenterRayDir = rd;
+        
+        // Fast coarse march with minimal iterations
+        sharedCoarseT = SceneCoarse(uniforms.cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+    }
+    
+    // Synchronize - all threads get the coarse starting point
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    float coarseT = sharedCoarseT;
+    float3 centerRayDir = sharedCenterRayDir;
+    
+    // === LEVEL 2: FINE RAYMARCH (all threads, from starting point) ===
+    half3 col = half3(0.0h);
+    float gTime = uniforms.time * 0.01 + 15.00;
+    float adjustedDist = 1000.0;
+    float glow = 0.0;
+    
+    if (coarseT < 900.0) {
+        // Adjust starting distance for this pixel's ray direction
+        float rayDot = max(dot(rd, centerRayDir), 0.9);
+        float myStartT = coarseT * rayDot;
+        
+        // Fine raymarch from the starting point
+        float2 tileCenter = float2(pixelCoord) + 0.5;
+        float2 ret = SceneFromStart(uniforms.cameraPos, rd, myStartT, tileCenter, 1.0, uniforms.maxRaySteps, 
+                                    uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+        
+        adjustedDist = ret.x;
+        glow = ret.y;
+        
+        if (ret.x < 900.0) {
+            // Calculate per-pixel hit point
+            float3 p = uniforms.cameraPos + adjustedDist * rd;
+            
+            // Per-pixel normal for smooth shading
+            float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
+            
+            // Lighting
+            float3 spotLight = CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+            float3 spot = spotLight - p;
+            float atten = length(spot);
+            spot /= atten;
+            
+            // Simplified shadows
+            int shadowIterations = max(lodIterations - 2, 2);
+            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+            
+            half shaSpot = half(Shadow(p, spot, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSun = half(Shadow(p, sunDir, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
+            
+            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+            half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+            
+            col = Colour(p, adjustedDist, gTime, 0.8, uniforms.minDistance, uniforms.fractalScale, 
+                        uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 
+                        max(int(uniforms.colorIterations * 0.8), 2));
+            col = (col * bri * shaSpot) + (col * briSun * shaSun);
+            
+            // Specular
+            float3 ref = reflect(rd, nor);
+            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            col += half3(specSpot) * shaSpot * bri;
+            col += half3(specSun) * shaSun * briSun;
+            
+            // Fog
+            half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
+            col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
+        }
+    }
+    
+    // Add glow
+    half glowH = half(glow);
+    col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
+    
+    col = clamp(col, half3(0.0h), half3(2.0h));
+    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    
+    // Write output
+    outputTexture.write(float4(float3(col), 1.0), pixelCoord, uniforms.eyeIndex);
+}
+
+// === HIERARCHICAL 2x2 TILE KERNEL ===
+// Same hierarchical approach but with 2x2 tiles for higher quality
+kernel void tileRaymarchKernel2x2(
+    uint2 tileId [[threadgroup_position_in_grid]],
+    uint2 localId [[thread_position_in_threadgroup]],
+    uint localIndex [[thread_index_in_threadgroup]],
+    constant TileUniforms& uniforms [[buffer(0)]],
+    texture2d_array<float, access::write> outputTexture [[texture(0)]]
+) {
+    const uint TILE_SIZE_2 = 2;
+    
+    uint2 pixelCoord = tileId * TILE_SIZE_2 + localId;
+    
+    if (pixelCoord.x >= uint(uniforms.resolution.x) || pixelCoord.y >= uint(uniforms.resolution.y)) {
+        return;
+    }
+    
+    threadgroup float sharedCoarseT;
+    threadgroup float3 sharedCenterRayDir;
+    
+    int lodIterations = max(uniforms.fractalIterations, 2);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    
+    float2 pixelCenter = float2(pixelCoord) + 0.5;
+    float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    
+    float4 viewPos = uniforms.invProjMatrix * float4(ndc, -1.0, 1.0);
+    viewPos /= viewPos.w;
+    float3 rd = normalize((uniforms.invViewMatrix * float4(viewPos.xyz, 0.0)).xyz);
+    
+    // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
+    if (localIndex == 0) {
+        sharedCenterRayDir = rd;
+        sharedCoarseT = SceneCoarse(uniforms.cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+    }
+    
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    float coarseT = sharedCoarseT;
+    float3 centerRayDir = sharedCenterRayDir;
+    
+    // === LEVEL 2: FINE RAYMARCH (all threads) ===
+    half3 col = half3(0.0h);
+    float gTime = uniforms.time * 0.01 + 15.00;
+    float adjustedDist = 1000.0;
+    float glow = 0.0;
+    
+    if (coarseT < 900.0) {
+        float rayDot = max(dot(rd, centerRayDir), 0.9);
+        float myStartT = coarseT * rayDot;
+        
+        float2 ret = SceneFromStart(uniforms.cameraPos, rd, myStartT, pixelCenter, 1.0, uniforms.maxRaySteps,
+                                    uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+        
+        adjustedDist = ret.x;
+        glow = ret.y;
+        
+        if (ret.x < 900.0) {
+            float3 p = uniforms.cameraPos + adjustedDist * rd;
+            float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
+            
+            float3 spotLight = CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+            float3 spot = spotLight - p;
+            float atten = length(spot);
+            spot /= atten;
+            
+            int shadowIterations = max(lodIterations - 2, 2);
+            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+            
+            half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+            
+            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+            half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+            
+            col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
+                        uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
+            col = (col * bri * shaSpot) + (col * briSun * shaSun);
+            
+            float3 ref = reflect(rd, nor);
+            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            col += half3(specSpot) * shaSpot * bri;
+            col += half3(specSun) * shaSun * briSun;
+            
+            half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
+            col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
+        }
+    }
+    
+    half glowH = half(glow);
+    col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
+    col = clamp(col, half3(0.0h), half3(2.0h));
+    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    
+    outputTexture.write(float4(float3(col), 1.0), pixelCoord, uniforms.eyeIndex);
+}
+
+// CameraPath is defined earlier in this file (before compute kernels)
 
 float3 LightSource(float3 spotLight, float3 dir, float dis)
 {
@@ -416,6 +784,114 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     Uniforms uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
     return fragmentMain(in, uniforms, fragCoord, uniforms.time);
+}
+
+// === HIERARCHICAL QUAD-SHARED RAYMARCHING ===
+// Two-level approach:
+// 1. Lane 0 does COARSE raymarch (few steps) to find approximate distance
+// 2. All lanes do FINE raymarch from that starting point (far fewer steps needed)
+// Combined with per-pixel normals for smooth shading
+// ~8-16x reduction in total DE evaluations
+
+fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
+                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                               ushort ampId [[amplification_id]],
+                               texture2d<half> cubeMap [[texture(TextureIndexColor)]],
+                               uint quadLaneId [[thread_index_in_quadgroup]])
+{
+    FragmentOutput output;
+    Uniforms uniforms = uniformsArray.uniforms[ampId];
+    float2 fragCoord = in.position.xy;
+    float time = uniforms.time;
+    
+    float gTime = time * 0.01 + 15.00;
+    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
+    float3 rd = normalize(in.modelPos - cameraPos);
+    
+    int lodIterations = max(int(uniforms.fractalIterations), 2);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    
+    // === LEVEL 1: COARSE RAYMARCH (leader only) ===
+    // Find approximate hit distance with minimal DE evaluations
+    float coarseT = 1000.0;
+    float3 leaderRd = rd;
+    
+    if (quadLaneId == 0) {
+        // Leader does fast coarse march to find starting point
+        coarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+    }
+    
+    // Broadcast coarse result and leader ray direction
+    float startT = quad_broadcast(coarseT, 0);
+    leaderRd = float3(quad_broadcast(leaderRd.x, 0), quad_broadcast(leaderRd.y, 0), quad_broadcast(leaderRd.z, 0));
+    
+    // === LEVEL 2: FINE RAYMARCH (all pixels, from starting point) ===
+    float2 ret;
+    float adjustedDist;
+    float glow = 0.0;
+    
+    if (startT < 900.0) {
+        // Adjust starting distance for this pixel's ray direction
+        float rayDot = max(dot(rd, leaderRd), 0.9); // Clamp to avoid extreme adjustments
+        float myStartT = startT * rayDot;
+        
+        // Fine raymarch from the starting point - needs far fewer iterations
+        ret = SceneFromStart(cameraPos, rd, myStartT, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+        adjustedDist = ret.x;
+        glow = ret.y;
+    } else {
+        ret = float2(1000.0, 0.0);
+        adjustedDist = 1000.0;
+    }
+    
+    half3 col = half3(0.0h);
+    
+    if (ret.x < 900.0)
+    {
+        // Each pixel calculates its own hit point and normal
+        float3 p = cameraPos + adjustedDist * rd;
+        
+        // Per-pixel normal for smooth shading detail
+        float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
+        
+        // Full lighting calculations per-pixel
+        float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+        float3 spot = spotLight - p;
+        float atten = length(spot);
+        spot /= atten;
+        
+        int shadowIterations = max(lodIterations - 2, 2);
+        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        
+        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        
+        float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+        half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+        
+        col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
+        col = (col * bri * shaSpot) + (col * briSun * shaSun);
+        
+        // Specular
+        float3 ref = reflect(rd, nor);
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        col += half3(specSpot) * shaSpot * bri;
+        col += half3(specSun) * shaSun * briSun;
+    }
+    
+    half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
+    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
+    
+    half glowH = half(glow);
+    col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
+    
+    col = clamp(col, half3(0.0h), half3(2.0h));
+    col = PostEffects(col, half2(in.texCoord));
+    
+    output.color = float4(float3(col), 1.0);
+    return output;
 }
 
 // === Format Conversion Shaders for MetalFX ===
