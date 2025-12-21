@@ -338,12 +338,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
-    // === Foveation ===
-    float distFromCenter = length(in.texCoord - float2(0.5, 0.5));
-    float edgeAtten = smoothstep(0.5, 0.8, distFromCenter);
-    float quality = mix(1.0, 0.7, edgeAtten * uniforms.foveationIntensity);
-    
-    int lodIterations = max(int(float(uniforms.fractalIterations) * (0.4 + 0.6 * quality)), 2);
+    // NOTE: Disable shader-side foveation/LOD. The current heuristic uses mesh UVs
+    // (`in.texCoord`), which are not screen-space and can behave incorrectly.
+    float quality = 1.0;
+    int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
 
     float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);

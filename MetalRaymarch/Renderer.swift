@@ -526,20 +526,18 @@ actor Renderer {
            let fx = metalFXManager,
            let inputTex = fx.inputTexture,
            let config = fx.configuration as UpscaleConfig? {
-            // Preserve the logical viewport (including origin) but scale it down to the MetalFX input size
-            // so the projection and rasterization match what the system expects. This avoids stretching at
-            // the edges when the logical viewport is smaller/offset (e.g., foveated render targets).
-            let scaleX = Double(config.inputWidth) / Double(config.outputWidth)
-            let scaleY = Double(config.inputHeight) / Double(config.outputHeight)
-
+            // When rendering to the MetalFX input texture, that texture is already sized to the
+            // logical viewport. Applying the drawable viewport's origin here effectively renders
+            // into a sub-rect, which shows up as a major scale/FOV mismatch after upscaling.
+            // Render full-coverage starting at (0,0).
             viewports = drawable.views.map { view in
                 let vp = view.textureMap.viewport
-                return MTLViewport(originX: vp.originX * scaleX,
-                                   originY: vp.originY * scaleY,
-                                   width:  min(Double(inputTex.width),  vp.width  * scaleX),
-                                   height: min(Double(inputTex.height), vp.height * scaleY),
+                return MTLViewport(originX: 0.0,
+                                   originY: 0.0,
+                                   width: Double(min(config.inputWidth, inputTex.width)),
+                                   height: Double(min(config.inputHeight, inputTex.height)),
                                    znear: vp.znear,
-                                   zfar:  vp.zfar)
+                                   zfar: vp.zfar)
             }
         } else {
             viewports = drawable.views.map { $0.textureMap.viewport }
