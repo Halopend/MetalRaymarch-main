@@ -445,13 +445,20 @@ vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]
 }
 
 // Simple passthrough fragment shader with format conversion
-// Uses nearest filtering since MetalFX output matches drawable size exactly
+// When rate map is active, in.position is in physical (rate-mapped) space.
+// We use pixel coordinates directly to sample the source texture.
 fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
                                           texture2d<float> sourceTexture [[texture(0)]]) {
     constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
                                       address::clamp_to_edge);
     
-    float4 color = sourceTexture.sample(textureSampler, in.texCoord);
+    // Use physical pixel position to compute UV into source texture.
+    // This correctly handles rate map transformation - in.position.xy is the
+    // physical fragment location, and we map it to the source texture dimensions.
+    float2 sourceSize = float2(sourceTexture.get_width(), sourceTexture.get_height());
+    float2 uv = in.position.xy / sourceSize;
+    
+    float4 color = sourceTexture.sample(textureSampler, uv);
     
     // Ensure alpha is 1 for proper visionOS compositing
     return float4(color.rgb, 1.0);
@@ -462,12 +469,17 @@ struct DepthOutput {
 };
 
 // Fragment shader for depth upscaling
+// Uses physical position coordinates like formatConversionFragment for rate map compatibility.
 fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
                                           depth2d<float> sourceTexture [[texture(0)]]) {
     constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
                                       address::clamp_to_edge);
     
+    // Use physical pixel position to compute UV into source texture.
+    float2 sourceSize = float2(sourceTexture.get_width(), sourceTexture.get_height());
+    float2 uv = in.position.xy / sourceSize;
+    
     DepthOutput out;
-    out.depth = sourceTexture.sample(textureSampler, in.texCoord);
+    out.depth = sourceTexture.sample(textureSampler, uv);
     return out;
 }

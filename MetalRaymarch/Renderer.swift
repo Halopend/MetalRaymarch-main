@@ -517,14 +517,16 @@ actor Renderer {
            let inputTex = fx.inputTexture,
            let config = fx.configuration as UpscaleConfig? {
             // When rendering to the MetalFX input texture, that texture is already sized to the
-            // physical drawable size (scaled down by resolutionScale). Render full-coverage
-            // starting at (0,0).
+            // physical drawable size (scaled down by resolutionScale). Honor each eye's viewport
+            // origin/size, clamped to the MetalFX input bounds.
             viewports = drawable.views.map { view in
                 let vp = view.textureMap.viewport
-                return MTLViewport(originX: 0.0,
-                                   originY: 0.0,
-                                   width: Double(min(config.inputWidth, inputTex.width)),
-                                   height: Double(min(config.inputHeight, inputTex.height)),
+                let maxWidth = Double(inputTex.width) - vp.originX
+                let maxHeight = Double(inputTex.height) - vp.originY
+                return MTLViewport(originX: vp.originX,
+                                   originY: vp.originY,
+                                   width: min(vp.width, maxWidth),
+                                   height: min(vp.height, maxHeight),
                                    znear: vp.znear,
                                    zfar: vp.zfar)
             }
@@ -727,17 +729,20 @@ actor Renderer {
             return
         }
 
-        // DEBUG: Log dimension comparison once
-        if !hasLoggedFoveationAvailability {
-            print("🔍 MetalFX Copy Debug:")
-            print("   MetalFX output: \(output.width) x \(output.height) (arrayLength=\(output.arrayLength))")
-            if let first = drawable.colorTextures.first {
-                print("   Drawable[0]: \(first.width) x \(first.height) (type=\(first.textureType.rawValue))")
-            }
-            for (i, view) in drawable.views.enumerated() {
-                let vp = view.textureMap.viewport
-                print("   View[\(i)] viewport: origin=(\(vp.originX), \(vp.originY)) size=\(vp.width) x \(vp.height)")
-            }
+        // DEBUG: Always log for now to diagnose the issue
+        print("🔍 MetalFX Copy Debug:")
+        print("   MetalFX output: \(output.width) x \(output.height) (arrayLength=\(output.arrayLength))")
+        if let first = drawable.colorTextures.first {
+            print("   Drawable[0]: \(first.width) x \(first.height) (type=\(first.textureType.rawValue))")
+        }
+        for (i, view) in drawable.views.enumerated() {
+            let vp = view.textureMap.viewport
+            print("   View[\(i)] viewport: origin=(\(vp.originX), \(vp.originY)) size=\(vp.width) x \(vp.height)")
+        }
+        if let rateMap = drawable.rasterizationRateMaps.first {
+            print("   Rate map: \(rateMap.screenSize.width) x \(rateMap.screenSize.height) screen, physical=\(rateMap.physicalSize(layer: 0).width) x \(rateMap.physicalSize(layer: 0).height)")
+        } else {
+            print("   Rate map: nil")
         }
 
         // Copy MetalFX output to drawable.
@@ -817,9 +822,8 @@ actor Renderer {
                 
                 let renderPassDescriptor = MTLRenderPassDescriptor()
 
-                // Do NOT apply rate map here - MetalFX output is non-foveated and we're
-                // copying it directly into the drawable's viewport region.
-                renderPassDescriptor.rasterizationRateMap = nil
+                // Apply system rate map to match native path.
+                renderPassDescriptor.rasterizationRateMap = systemRateMap
                 
                 // Handle both dedicated and layered layouts
                 let destinationTexture: MTLTexture
@@ -844,7 +848,8 @@ actor Renderer {
                     renderPassDescriptor.colorAttachments[0].texture = destinationTexture
                 }
                 
-                renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
+                renderPassDescriptor.colorAttachments[0].loadAction = .clear
+                renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
                 renderPassDescriptor.colorAttachments[0].storeAction = .store
                 
                 guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
@@ -852,25 +857,15 @@ actor Renderer {
                     continue
                 }
 
-                // Copy to the drawable's full viewport region
+                // When using rate map, viewport must be in SCREEN coordinates.
+                // The rate map transforms screen → physical automatically.
+                // The drawable viewport is already in screen coordinates.
                 let viewport = drawable.views[eye].textureMap.viewport
-                let target = renderPassDescriptor.colorAttachments[0].texture
-                let targetWidth = Double(target?.width ?? 0)
-                let targetHeight = Double(target?.height ?? 0)
                 
-                // Use the viewport dimensions, clamped to target texture size
-                let width = min(viewport.width, targetWidth - viewport.originX)
-                let height = min(viewport.height, targetHeight - viewport.originY)
-                if width <= 0 || height <= 0 {
-                    encoder.endEncoding()
-                    continue
-                }
-                
-                // Fill the drawable's viewport region
                 encoder.setViewport(MTLViewport(originX: viewport.originX,
                                                 originY: viewport.originY,
-                                                width: width,
-                                                height: height,
+                                                width: viewport.width,
+                                                height: viewport.height,
                                                 znear: 0.0, zfar: 1.0))
                 
                 encoder.label = "Format Conversion Eye \(eye)"
@@ -907,8 +902,8 @@ actor Renderer {
             }
 
             let desc = MTLRenderPassDescriptor()
-            // Do NOT apply rate map - copy directly into drawable's viewport region
-            desc.rasterizationRateMap = nil
+            // Apply system rate map to match native path.
+            desc.rasterizationRateMap = systemRateMap
             
             if destinationDepth.textureType == .type2DArray {
                 guard let dstView = destinationDepth.makeTextureView(pixelFormat: destinationDepth.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1))
@@ -923,21 +918,15 @@ actor Renderer {
             
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { continue }
 
-            if let target = desc.depthAttachment.texture {
-                let viewport = drawable.views[eye].textureMap.viewport
-                // Fill the drawable's viewport region
-                let width = min(viewport.width, Double(target.width) - viewport.originX)
-                let height = min(viewport.height, Double(target.height) - viewport.originY)
-                if width <= 0 || height <= 0 {
-                    encoder.endEncoding()
-                    continue
-                }
-                encoder.setViewport(MTLViewport(originX: viewport.originX,
-                                               originY: viewport.originY,
-                                               width: width,
-                                               height: height,
-                                               znear: 0.0, zfar: 1.0))
-            }
+            // When using rate map, viewport must be in SCREEN coordinates.
+            // The rate map transforms screen → physical automatically.
+            let viewport = drawable.views[eye].textureMap.viewport
+            
+            encoder.setViewport(MTLViewport(originX: viewport.originX,
+                                           originY: viewport.originY,
+                                           width: viewport.width,
+                                           height: viewport.height,
+                                           znear: 0.0, zfar: 1.0))
             
             encoder.label = "Depth Upscale Eye \(eye)"
             encoder.setRenderPipelineState(pipeline)
