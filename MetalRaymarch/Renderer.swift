@@ -99,6 +99,9 @@ actor Renderer {
     #if canImport(MetalFX)
     private var metalFXManager: MetalFXManager?
     private var formatConversionPipeline: MTLRenderPipelineState?
+    // Keep last output size so we don't recreate MetalFX textures every time the system
+    // nudges the foveated viewport by a few pixels (that churn tanks perf).
+    private var lastMetalFXOutputSize = SIMD2<Int>(repeating: 0)
     #endif
 
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
@@ -823,15 +826,33 @@ actor Renderer {
         let drawableTexture = drawable.colorTextures[0]
         let logicalViewport = drawable.views[0].textureMap.viewport
         
-        // Use the logical viewport size (the region the system actually samples) to size MetalFX.
-        // This preserves the correct aspect ratio even when the backing texture is larger or offset
-        // due to foveation/tiling.
-        let viewportWidth = max(1, Int(round(logicalViewport.width)))
-        let viewportHeight = max(1, Int(round(logicalViewport.height)))
-        let outputWidth = viewportWidth
-        let outputHeight = viewportHeight
-        let inputWidth = max(1, Int(round(Double(outputWidth) * Double(metalFXScale))))
-        let inputHeight = max(1, Int(round(Double(outputHeight) * Double(metalFXScale))))
+        // Use the logical viewport size (the region the system actually samples) to size MetalFX,
+        // but stabilize it so tiny gaze-driven viewport jitters don't force us to recreate
+        // MetalFX textures/scalers every frame (that was the perf cliff when Spatial was enabled).
+        func alignTo16(_ value: Int) -> Int { max(16, (value + 15) & ~15) }
+        func stabilized(_ value: Int, previous: Int, tolerance: Int = 24) -> Int {
+            guard previous > 0 else { return value }
+            return abs(value - previous) <= tolerance ? previous : value
+        }
+
+        let physicalWidth = drawable.colorTextures[0].width
+        let physicalHeight = drawable.colorTextures[0].height
+
+        var viewportWidth = max(1, Int(round(logicalViewport.width)))
+        var viewportHeight = max(1, Int(round(logicalViewport.height)))
+
+        viewportWidth = min(viewportWidth, physicalWidth)
+        viewportHeight = min(viewportHeight, physicalHeight)
+
+        viewportWidth = stabilized(viewportWidth, previous: lastMetalFXOutputSize.x)
+        viewportHeight = stabilized(viewportHeight, previous: lastMetalFXOutputSize.y)
+
+        let outputWidth = alignTo16(viewportWidth)
+        let outputHeight = alignTo16(viewportHeight)
+        lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
+
+        let inputWidth = alignTo16(max(1, Int(round(Double(outputWidth) * Double(metalFXScale)))))
+        let inputHeight = alignTo16(max(1, Int(round(Double(outputHeight) * Double(metalFXScale)))))
         
         // Debug: print dimensions and check aspect ratio
         if !hasLoggedFoveationAvailability {
@@ -840,7 +861,7 @@ actor Renderer {
             let aspectDiff = abs(physicalAspect - logicalAspect)
             
             print("🔍 MetalFX Config Debug:")
-            print("   Physical texture: \(outputWidth) x \(outputHeight) (aspect=\(physicalAspect))")
+            print("   Physical texture: \(physicalWidth) x \(physicalHeight) (aspect=\(physicalAspect))")
             print("   Logical viewport: \(Int(logicalViewport.width)) x \(Int(logicalViewport.height)) origin=(\(Int(logicalViewport.originX)), \(Int(logicalViewport.originY))) (aspect=\(logicalAspect))")
             print("   MetalFX input: \(inputWidth) x \(inputHeight)")
             print("   MetalFX output: \(outputWidth) x \(outputHeight)")

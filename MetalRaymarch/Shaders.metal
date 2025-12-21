@@ -21,7 +21,6 @@ typedef struct
 typedef struct
 {
     float4 color [[color(0)]];
-    float depth [[depth(any)]];
 } FragmentOutput;
 
 typedef struct
@@ -408,7 +407,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
 
     output.color = float4(float3(col), 1.0);
-    output.depth = in.position.z;
     return output;
 }
 
