@@ -599,9 +599,10 @@ vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]
 }
 
 // Simple passthrough fragment shader with format conversion
+// Uses nearest filtering since MetalFX output matches drawable size exactly
 fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
                                           texture2d<float> sourceTexture [[texture(0)]]) {
-    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
                                       address::clamp_to_edge);
     
     float4 color = sourceTexture.sample(textureSampler, in.texCoord);

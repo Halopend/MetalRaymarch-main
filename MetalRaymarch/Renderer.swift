@@ -810,24 +810,48 @@ actor Renderer {
             return false
         }
 
-        // IMPORTANT: Use the PHYSICAL drawable texture size, not the virtual viewport size.
-        // The viewport can be larger than the texture when using rasterization rate maps (foveation).
-        // MetalFX needs to match the physical texture dimensions.
+        // MetalFX input and output sizing:
+        // - Output: Must match physical drawable texture for the copy to work
+        // - Input: Scaled version of output, maintaining the same aspect ratio
+        //
+        // The projection matrix from drawable.computeProjection() is based on tangent values
+        // which define angular FOV, making it resolution-independent. As long as we maintain
+        // the correct aspect ratio, the projection works correctly.
+        //
+        // Note: The logical viewport (view.textureMap.viewport) may differ from physical texture
+        // due to foveation, but both should have the same aspect ratio.
         let drawableTexture = drawable.colorTextures[0]
-        let outputWidth = drawableTexture.width
-        let outputHeight = drawableTexture.height
-        let inputWidth = max(1, Int(Double(outputWidth) * Double(metalFXScale)))
-        let inputHeight = max(1, Int(Double(outputHeight) * Double(metalFXScale)))
+        let logicalViewport = drawable.views[0].textureMap.viewport
         
-        // Debug: print dimensions once
+        // Use the logical viewport size (the region the system actually samples) to size MetalFX.
+        // This preserves the correct aspect ratio even when the backing texture is larger or offset
+        // due to foveation/tiling.
+        let viewportWidth = max(1, Int(round(logicalViewport.width)))
+        let viewportHeight = max(1, Int(round(logicalViewport.height)))
+        let outputWidth = viewportWidth
+        let outputHeight = viewportHeight
+        let inputWidth = max(1, Int(round(Double(outputWidth) * Double(metalFXScale))))
+        let inputHeight = max(1, Int(round(Double(outputHeight) * Double(metalFXScale))))
+        
+        // Debug: print dimensions and check aspect ratio
         if !hasLoggedFoveationAvailability {
-            let firstViewport = drawable.views[0].textureMap.viewport
-            print("🔍 MetalFX Config Debug (FIXED):")
-            print("   Drawable texture size: \(drawableTexture.width) x \(drawableTexture.height)")
-            print("   Viewport[0] (virtual): origin=(\(firstViewport.originX), \(firstViewport.originY)) size=\(firstViewport.width) x \(firstViewport.height)")
-            print("   MetalFX output size: \(outputWidth) x \(outputHeight)")
-            print("   MetalFX input size: \(inputWidth) x \(inputHeight)")
-            print("   Scale: \(metalFXScale)")
+            let physicalAspect = Float(drawableTexture.width) / Float(drawableTexture.height)
+            let logicalAspect = Float(logicalViewport.width) / Float(logicalViewport.height)
+            let aspectDiff = abs(physicalAspect - logicalAspect)
+            
+            print("🔍 MetalFX Config Debug:")
+            print("   Physical texture: \(outputWidth) x \(outputHeight) (aspect=\(physicalAspect))")
+            print("   Logical viewport: \(Int(logicalViewport.width)) x \(Int(logicalViewport.height)) origin=(\(Int(logicalViewport.originX)), \(Int(logicalViewport.originY))) (aspect=\(logicalAspect))")
+            print("   MetalFX input: \(inputWidth) x \(inputHeight)")
+            print("   MetalFX output: \(outputWidth) x \(outputHeight)")
+            print("   Resolution scale: \(metalFXScale)")
+            
+            if aspectDiff > 0.01 {
+                print("   ⚠️ ASPECT RATIO MISMATCH: physical vs logical differ by \(aspectDiff)!")
+                print("   This may cause zoom/warp issues with projection.")
+            } else {
+                print("   ✓ Aspect ratios match")
+            }
             hasLoggedFoveationAvailability = true
         }
 
@@ -875,6 +899,19 @@ actor Renderer {
             return
         }
 
+        // DEBUG: Log dimension comparison once
+        if !hasLoggedFoveationAvailability {
+            print("🔍 MetalFX Copy Debug:")
+            print("   MetalFX output: \(output.width) x \(output.height) (arrayLength=\(output.arrayLength))")
+            if let first = drawable.colorTextures.first {
+                print("   Drawable[0]: \(first.width) x \(first.height) (type=\(first.textureType.rawValue))")
+            }
+            for (i, view) in drawable.views.enumerated() {
+                let vp = view.textureMap.viewport
+                print("   View[\(i)] viewport: origin=(\(vp.originX), \(vp.originY)) size=\(vp.width) x \(vp.height)")
+            }
+        }
+
         // Copy MetalFX output to drawable using format conversion
         // MetalFX outputs rgba16Float, drawable expects BGRA8Unorm_sRGB
         let views = min(drawable.views.count, output.arrayLength)
@@ -891,7 +928,7 @@ actor Renderer {
                 let destinationTexture: MTLTexture
                 let destinationSlice: Int
                 let drawableViewport = drawable.views[eye].textureMap.viewport
-                
+
                 if drawable.colorTextures.count > eye {
                     // Dedicated layout
                     destinationTexture = drawable.colorTextures[eye]
@@ -902,11 +939,15 @@ actor Renderer {
                     destinationSlice = eye
                 }
 
-                // Each destination (dedicated texture or array slice) is its own renderable surface.
-                // Using drawableViewport.origin here can crop/offset the image, causing stereo mismatch.
-                let copyWidth = min(output.width, destinationTexture.width)
-                let copyHeight = min(output.height, destinationTexture.height)
-                
+                let destOriginX = max(0, Int(drawableViewport.originX.rounded()))
+                let destOriginY = max(0, Int(drawableViewport.originY.rounded()))
+                let maxWidth = max(0, destinationTexture.width - destOriginX)
+                let maxHeight = max(0, destinationTexture.height - destOriginY)
+                let copyWidth = min(output.width, maxWidth)
+                let copyHeight = min(output.height, maxHeight)
+
+                if copyWidth <= 0 || copyHeight <= 0 { continue }
+
                 blit.copy(from: output,
                           sourceSlice: eye,
                           sourceLevel: 0,
@@ -915,7 +956,7 @@ actor Renderer {
                           to: destinationTexture,
                           destinationSlice: destinationSlice,
                           destinationLevel: 0,
-                          destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+                          destinationOrigin: MTLOrigin(x: destOriginX, y: destOriginY, z: 0))
             }
             blit.endEncoding()
         } else {
@@ -973,14 +1014,21 @@ actor Renderer {
                     continue
                 }
 
-                // IMPORTANT: The render target is a per-eye texture (or per-eye slice view).
-                // Using drawable.views[eye].textureMap.viewport (often non-zero origin) can make us render
-                // only a sub-rect, which looks like "cropped" upscale and breaks stereo convergence.
-                if let target = renderPassDescriptor.colorAttachments[0].texture {
-                    encoder.setViewport(MTLViewport(originX: 0, originY: 0,
-                                                   width: Double(target.width), height: Double(target.height),
-                                                   znear: 0.0, zfar: 1.0))
+                let viewport = drawable.views[eye].textureMap.viewport
+                let originX = viewport.originX
+                let originY = viewport.originY
+                let target = renderPassDescriptor.colorAttachments[0].texture
+                let width = min(Double(output.width), Double(target?.width ?? 0) - originX)
+                let height = min(Double(output.height), Double(target?.height ?? 0) - originY)
+                if width <= 0 || height <= 0 {
+                    encoder.endEncoding()
+                    continue
                 }
+                encoder.setViewport(MTLViewport(originX: originX,
+                                                originY: originY,
+                                                width: width,
+                                                height: height,
+                                                znear: 0.0, zfar: 1.0))
                 
                 encoder.label = "Format Conversion Eye \(eye)"
                 encoder.setRenderPipelineState(pipeline)
@@ -1028,12 +1076,18 @@ actor Renderer {
             
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { continue }
 
-            // IMPORTANT: Depth destination is a per-eye texture (or per-eye slice view).
-            // Using drawable.views[eye].textureMap.viewport (often non-zero origin) can offset/crop depth,
-            // which contributes to stereo mismatch and unstable reprojection.
             if let target = desc.depthAttachment.texture {
-                encoder.setViewport(MTLViewport(originX: 0, originY: 0,
-                                               width: Double(target.width), height: Double(target.height),
+                let viewport = drawable.views[eye].textureMap.viewport
+                let width = min(viewport.width, Double(target.width) - viewport.originX)
+                let height = min(viewport.height, Double(target.height) - viewport.originY)
+                if width <= 0 || height <= 0 {
+                    encoder.endEncoding()
+                    continue
+                }
+                encoder.setViewport(MTLViewport(originX: viewport.originX,
+                                               originY: viewport.originY,
+                                               width: width,
+                                               height: height,
                                                znear: 0.0, zfar: 1.0))
             }
             

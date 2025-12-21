@@ -156,7 +156,9 @@ final class MetalFXManager {
         descriptor.outputHeight = configuration.outputHeight
         descriptor.colorTextureFormat = configuration.colorFormat
         descriptor.outputTextureFormat = configuration.colorFormat
-        descriptor.colorProcessingMode = .perceptual
+        // Use linear processing for rgba16Float (HDR/linear content)
+        // .perceptual assumes sRGB gamma which causes edge artifacts with linear formats
+        descriptor.colorProcessingMode = .linear
 
         var newScalers: [MTLFXSpatialScaler] = []
         for _ in 0..<viewCount {
