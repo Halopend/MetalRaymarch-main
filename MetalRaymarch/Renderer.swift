@@ -96,6 +96,12 @@ actor Renderer {
     let layerRenderer: LayerRenderer
     let appModel: AppModel
 
+#if canImport(MetalFX)
+    typealias UpscaleConfig = MetalFXManager.Configuration
+#else
+    typealias UpscaleConfig = Any
+#endif
+
     #if canImport(MetalFX)
     private var metalFXManager: MetalFXManager?
     private var formatConversionPipeline: MTLRenderPipelineState?
@@ -379,7 +385,9 @@ actor Renderer {
         return newTargets
     }
 
-    private func updateGameState(drawable: LayerRenderer.Drawable, deviceAnchor: DeviceAnchor?) {
+    private func updateGameState(drawable: LayerRenderer.Drawable,
+                                deviceAnchor: DeviceAnchor?,
+                                upscalingConfig: UpscaleConfig?) {
         /// Update any game state before rendering
 
         let settings = appModel.renderSettings
@@ -400,7 +408,24 @@ actor Renderer {
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
             let viewMatrix = (simdDeviceAnchor * view.transform).inverse
-            let projection = drawable.computeProjection(viewIndex: viewIndex)
+            var projection = drawable.computeProjection(viewIndex: viewIndex)
+
+#if canImport(MetalFX)
+            // When MetalFX is active, adjust the projection to match the
+            // output texture size used by the scaler so the FOV stays identical
+            // to the non-upscaled path. We scale the projection's focal length
+            // by the ratio between the logical viewport and the MetalFX output
+            // size (which may be aligned to 16px or stabilized across frames).
+            if let fxConfig = upscalingConfig as? MetalFXManager.Configuration,
+               fxConfig.outputWidth > 0,
+               fxConfig.outputHeight > 0 {
+                let viewport = view.textureMap.viewport
+                let scaleX = Float(viewport.width) / Float(fxConfig.outputWidth)
+                let scaleY = Float(viewport.height) / Float(fxConfig.outputHeight)
+                projection.columns.0.x *= scaleX
+                projection.columns.1.y *= scaleY
+            }
+#endif
             let inverseProjection = projection.inverse
             
             let modelView = viewMatrix * modelMatrix
@@ -507,7 +532,15 @@ actor Renderer {
         let upscalingEnabled = false
         #endif
 
-        self.updateGameState(drawable: drawable, deviceAnchor: deviceAnchor)
+        #if canImport(MetalFX)
+        self.updateGameState(drawable: drawable,
+                     deviceAnchor: deviceAnchor,
+                     upscalingConfig: upscalingEnabled ? metalFXManager?.configuration : nil)
+        #else
+        self.updateGameState(drawable: drawable,
+                     deviceAnchor: deviceAnchor,
+                     upscalingConfig: nil)
+        #endif
 
         #if canImport(MetalFX)
         // DISABLED: Per-eye MetalFX path - using vertex amplification path instead for debugging
@@ -687,17 +720,25 @@ actor Renderer {
         // When rendering to drawable with foveation, use the virtual viewport from drawable
         #if canImport(MetalFX)
         let viewports: [MTLViewport]
-        if upscalingEnabled, let inputTex = metalFXManager?.inputTexture {
-            // Render to physical texture dimensions (no foveation)
-            let viewport = MTLViewport(
-                originX: 0,
-                originY: 0,
-                width: Double(inputTex.width),
-                height: Double(inputTex.height),
-                znear: 0.0,
-                zfar: 1.0
-            )
-            viewports = Array(repeating: viewport, count: drawable.views.count)
+        if upscalingEnabled,
+           let fx = metalFXManager,
+           let inputTex = fx.inputTexture,
+           let config = fx.configuration as UpscaleConfig? {
+            // Preserve the logical viewport (including origin) but scale it down to the MetalFX input size
+            // so the projection and rasterization match what the system expects. This avoids stretching at
+            // the edges when the logical viewport is smaller/offset (e.g., foveated render targets).
+            let scaleX = Double(config.inputWidth) / Double(config.outputWidth)
+            let scaleY = Double(config.inputHeight) / Double(config.outputHeight)
+
+            viewports = drawable.views.map { view in
+                let vp = view.textureMap.viewport
+                return MTLViewport(originX: vp.originX * scaleX,
+                                   originY: vp.originY * scaleY,
+                                   width:  min(Double(inputTex.width),  vp.width  * scaleX),
+                                   height: min(Double(inputTex.height), vp.height * scaleY),
+                                   znear: vp.znear,
+                                   zfar:  vp.zfar)
+            }
         } else {
             viewports = drawable.views.map { $0.textureMap.viewport }
         }
