@@ -102,6 +102,8 @@ actor Renderer {
     // Keep last output size so we don't recreate MetalFX textures every time the system
     // nudges the foveated viewport by a few pixels (that churn tanks perf).
     private var lastMetalFXOutputSize = SIMD2<Int>(repeating: 0)
+    private var lastMetalFXConfig: MetalFXManager.Configuration?
+    private var lastMetalFXViewCount: Int = 0
     #endif
 
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
@@ -151,7 +153,8 @@ actor Renderer {
                                                                               mtlVertexDescriptor: mtlVertexDescriptor,
                                                                               colorFormat: .rgba16Float,
                                                                               vertexFunctionName: "vertexShaderEyeIndex",
-                                                                              fragmentFunctionName: "fragmentShaderEyeIndex")
+                                                                              fragmentFunctionName: "fragmentShaderEyeIndex",
+                                                                              usesVertexAmplification: false)
             
             // Pipeline for vertex amplification rendering to rgba16Float (uses amplification_id)
             metalFXAmplificationPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
@@ -173,7 +176,7 @@ actor Renderer {
         #endif
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.greater
+        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
         depthStateDescriptor.isDepthWriteEnabled = true
         self.depthState = device.makeDepthStencilState(descriptor:depthStateDescriptor)!
 
@@ -197,7 +200,10 @@ actor Renderer {
         do {
             try await arSession.run([worldTracking])
         } catch {
-            fatalError("Failed to initialize ARSession")
+            if !hasLoggedWorldTrackingWarning {
+                print("⚠️ World tracking unavailable: \(error)")
+                hasLoggedWorldTrackingWarning = true
+            }
         }
     }
 
@@ -259,7 +265,8 @@ actor Renderer {
                                               mtlVertexDescriptor: MTLVertexDescriptor,
                                               colorFormat: MTLPixelFormat? = nil,
                                               vertexFunctionName: String = "vertexShader",
-                                              fragmentFunctionName: String = "fragmentShader") throws -> MTLRenderPipelineState {
+                                              fragmentFunctionName: String = "fragmentShader",
+                                              usesVertexAmplification: Bool = true) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object
 
         let library = device.makeDefaultLibrary()
@@ -277,7 +284,7 @@ actor Renderer {
         pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat ?? layerRenderer.configuration.colorFormat
         pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
 
-        pipelineDescriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
+        pipelineDescriptor.maxVertexAmplificationCount = usesVertexAmplification ? layerRenderer.properties.viewCount : 1
 
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
@@ -550,7 +557,7 @@ actor Renderer {
                 pass.depthAttachment.texture = depthView
                 pass.depthAttachment.loadAction = .clear
                 pass.depthAttachment.storeAction = .store
-                pass.depthAttachment.clearDepth = 0.0
+                pass.depthAttachment.clearDepth = 1.0
 
                 pass.rasterizationRateMap = nil
                 pass.renderTargetArrayLength = 1
@@ -633,7 +640,7 @@ actor Renderer {
             renderPassDescriptor.depthAttachment.texture = fx.depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = .store
-            renderPassDescriptor.depthAttachment.clearDepth = 0.0
+            renderPassDescriptor.depthAttachment.clearDepth = 1.0
 
             renderPassDescriptor.rasterizationRateMap = nil
             renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
@@ -767,7 +774,7 @@ actor Renderer {
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.clearDepth = 0.0
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
         
         if let systemMap = drawable.rasterizationRateMaps.first {
             renderPassDescriptor.rasterizationRateMap = systemMap
@@ -886,11 +893,18 @@ actor Renderer {
             scale: metalFXScale
         )
 
+        let viewCount = drawable.views.count
+        let needsUpdate = metalFXManager == nil || config != lastMetalFXConfig || viewCount != lastMetalFXViewCount
+
         do {
-            if let manager = metalFXManager {
-                try manager.update(configuration: config, viewCount: drawable.views.count)
-            } else {
-                metalFXManager = try MetalFXManager(device: device, configuration: config, viewCount: drawable.views.count)
+            if needsUpdate {
+                if let manager = metalFXManager {
+                    try manager.update(configuration: config, viewCount: viewCount)
+                } else {
+                    metalFXManager = try MetalFXManager(device: device, configuration: config, viewCount: viewCount)
+                }
+                lastMetalFXConfig = config
+                lastMetalFXViewCount = viewCount
             }
             
             let available = (metalFXManager?.inputTexture != nil)
