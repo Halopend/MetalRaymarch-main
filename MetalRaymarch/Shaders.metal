@@ -205,9 +205,9 @@ float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params
     return 1000.0;
 }
 
-// === FINE RAYMARCH FROM STARTING POINT (with Lipschitz tracking) ===
+// === FINE RAYMARCH FROM STARTING POINT (with Lipschitz + Cone Step Mapping) ===
 // Refines from a known starting distance (from coarse pass or neighbor)
-// Uses Lipschitz tracking for adaptive stepping
+// Uses Lipschitz tracking + Cone Step Mapping for adaptive stepping
 float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     float dither = blueNoise(fragCoord, time) * 0.01;
@@ -219,6 +219,9 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
     // Far fewer steps needed when starting close
     int maxSteps = max(int(float(maxStepsParam) * quality * 0.4), 3);
     
+    // Cone step mapping (same as Scene)
+    const float pixelConeRadius = 0.0006;
+    
     // Lipschitz tracking for fine pass
     float prevH = 1e10;
     float prevT = t;
@@ -226,7 +229,9 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
     
     for(int j = 0; j < maxSteps; j++)
     {
-        float threshold = 0.0005 + t * 0.0006;
+        // Cone-adaptive threshold
+        float coneFootprint = t * pixelConeRadius;
+        float threshold = 0.0005 + coneFootprint * 0.5;
         
         float3 p = rO + t * rD;
         float h = Map(p, params, foldingLimit, iterations);
@@ -248,8 +253,11 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
             lipschitz = clamp(lipschitz, 0.15, 1.2);
         }
         
-        // Adaptive step with Lipschitz
-        float stepSize = h / max(lipschitz, 0.2);
+        // Cone step bonus: can step further when pixel footprint is larger
+        float coneBonus = coneFootprint * 0.6;  // More conservative for fine pass
+        
+        // Adaptive step with Lipschitz + Cone
+        float stepSize = (h + coneBonus) / max(lipschitz, 0.2);
         stepSize = clamp(stepSize, 0.0005, 0.5);
         
         prevT = t;
@@ -260,9 +268,10 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
     return float2(1000.0, saturate(glow * 0.25));
 }
 
-// Enhanced sphere tracing with Lipschitz tracking and over-relaxation
-// Lipschitz tracking: estimates local SDF gradient to step more aggressively
-// when the surface is "gentle" (gradient < 1)
+// Enhanced sphere tracing with Lipschitz tracking, Cone Step Mapping, and over-relaxation
+// - Lipschitz tracking: estimates local SDF gradient to step more aggressively
+// - Cone Step Mapping: accounts for pixel footprint to allow larger steps at distance
+// - Over-relaxation: steps more aggressively when moving away from surfaces
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
@@ -272,15 +281,24 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
+    // === CONE STEP MAPPING SETUP ===
+    // Pixel cone half-angle tangent: approximates pixel footprint growth with distance
+    // For visionOS: ~2000px wide, ~90° FOV → tan(45°/2000) ≈ 0.0004
+    // We use a slightly larger value for safety margin
+    const float pixelConeRadius = 0.0006;
+    
     // Lipschitz tracking state
     float prevH = 1e10;
     float prevT = t;
-    float lipschitz = 1.0;  // Running estimate of local Lipschitz constant (|gradient|)
+    float lipschitz = 1.0;
     
-    // Distance-adaptive threshold
     for(int j = 0; j < maxSteps; j++)
     {
-        float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
+        // === CONE-ADAPTIVE THRESHOLD ===
+        // Threshold grows with distance based on pixel cone
+        // At distance t, pixel footprint ≈ t * pixelConeRadius
+        float coneFootprint = t * pixelConeRadius;
+        float threshold = 0.0005 + coneFootprint * 0.5 + (1.0 - quality) * 0.003;
         
         float3 p = rO + t * rD;
         float h = Map(p, params, foldingLimit, iterations);
@@ -297,28 +315,23 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         glow += saturate(0.04 - h) * glowIntensity;
         
         // === LIPSCHITZ TRACKING ===
-        // Estimate local Lipschitz constant: L ≈ |d(h)/d(t)| = |h - prevH| / stepTaken
-        // For a true SDF, L ≤ 1. For fractals, L can be < 1 locally, allowing bigger steps.
         float stepTaken = t - prevT;
         if (stepTaken > 0.0001 && j > 0) {
-            // Estimate gradient magnitude along ray
             float gradEstimate = abs(h - prevH) / stepTaken;
-            
-            // Smooth the Lipschitz estimate (EMA) to avoid noise
-            // Use higher weight for larger gradients (conservative)
-            float alpha = 0.3;
-            lipschitz = mix(lipschitz, gradEstimate, alpha);
-            
-            // Clamp to valid range: 0.1 (very aggressive) to 1.5 (conservative for non-SDF)
+            lipschitz = mix(lipschitz, gradEstimate, 0.3);
             lipschitz = clamp(lipschitz, 0.1, 1.5);
         }
         
-        // === ADAPTIVE STEP SIZE ===
-        // Base step: SDF value divided by Lipschitz constant
-        // If L < 1, we can step further than h suggests
-        float baseStep = h / max(lipschitz, 0.2);
+        // === CONE STEP MAPPING ===
+        // Key insight: we can step further than h if the "miss" would be sub-pixel
+        // Safe cone step: h + (pixel footprint at current distance)
+        // This is geometrically derived from the cone of visibility
+        float coneBonus = coneFootprint * 0.8;  // 80% of pixel footprint for safety
         
-        // Additional over-relaxation when moving away from surfaces
+        // Combine with Lipschitz: step = (h + coneBonus) / lipschitz
+        float baseStep = (h + coneBonus) / max(lipschitz, 0.2);
+        
+        // Over-relaxation when moving away from surfaces
         float movingAway = step(prevH * 0.9, h);
         float relaxFactor = mix(0.9, 1.3, movingAway);
         
@@ -326,9 +339,6 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         
         // Safety clamps
         stepSize = clamp(stepSize, 0.001, 2.0);
-        
-        // Distance-proportional bonus (safe far from surface)
-        stepSize += t * 0.001;
         
         prevT = t;
         prevH = h;
