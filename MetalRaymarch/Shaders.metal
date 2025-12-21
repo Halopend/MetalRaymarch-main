@@ -245,17 +245,12 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, float minRad
         // we can safely step MORE than the SDF value suggests.
         // If approaching (h < prevH), be more conservative.
         
-        float stepSize;
-        if (h > prevH * 0.9) {
-            // Moving away or constant - use over-relaxation
-            // Can step up to omega * h safely (omega > 1)
-            stepSize = h * omega;
-        } else {
-            // Approaching surface - be conservative to avoid overshoot
-            // But still use some relaxation based on rate of approach
-            float approachRate = prevH / (prevH - h + 0.001);
-            stepSize = h * min(approachRate * 0.5, 1.2);
-        }
+        // Branchless over-relaxation to reduce SIMD divergence
+        float relax = step(prevH * 0.9, h);
+        float approachRate = prevH / (prevH - h + 0.001);
+        float conservative = h * min(approachRate * 0.5, 1.2);
+        float aggressive = h * omega;
+        float stepSize = mix(conservative, aggressive, relax);
         
         // Minimum step to prevent getting stuck, maximum to prevent huge jumps
         stepSize = clamp(stepSize, 0.001, 2.0);
@@ -312,7 +307,8 @@ float Shadow(float3 ro, float3 rd, float quality, float minRad2Val, float fracta
         if (res < 0.02) return 0.0;
         
         // Over-relaxation: step more aggressively when safe
-        float step = (h > prevH * 0.8) ? h * 1.5 : h;
+        float relax = step(prevH * 0.8, h);
+        float step = mix(h, h * 1.5, relax);
         t += max(step, 0.15);
         prevH = h;
         
