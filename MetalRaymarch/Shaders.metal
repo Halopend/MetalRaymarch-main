@@ -420,6 +420,11 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
 
 // === Format Conversion Shaders for MetalFX ===
 // Used to convert rgba16Float MetalFX output to drawable format (BGRA8Unorm_sRGB)
+// Also handles aspect ratio correction when MetalFX uses physical-sized textures
+
+struct FormatConversionParams {
+    float aspectCorrection;  // physicalAspect / screenAspect (< 1.0 means horizontally squished)
+};
 
 struct FormatConversionVertex {
     float4 position [[position]];
@@ -473,11 +478,19 @@ vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]
 
 // Stereo fragment shader - samples from correct array slice based on eye index
 fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[stage_in]],
-                                                texture2d_array<float> sourceTexture [[texture(0)]]) {
+                                                texture2d_array<float> sourceTexture [[texture(0)]],
+                                                constant FormatConversionParams& params [[buffer(0)]]) {
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
-    float4 color = sourceTexture.sample(textureSampler, in.texCoord, in.eyeIndex);
+    // Sample using normalized UVs - works correctly regardless of source texture resolution
+    // aspectCorrection is 1.0 when source has correct screen aspect
+    float2 uv = in.texCoord;
+    if (params.aspectCorrection != 1.0) {
+        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
+    }
+    
+    float4 color = sourceTexture.sample(textureSampler, uv, in.eyeIndex);
     return float4(color.rgb, 1.0);
 }
 
