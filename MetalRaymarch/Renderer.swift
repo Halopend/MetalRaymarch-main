@@ -275,11 +275,6 @@ actor Renderer {
 
         let metalAllocator = MTKMeshBufferAllocator(device: device)
 
-//        let mdlMesh = MDLMesh.newBox(withDimensions: SIMD3<Float>(4, 4, 4),
-//                                     segments: SIMD3<UInt32>(2, 2, 2),
-//                                     geometryType: MDLGeometryType.triangles,
-//                                     inwardNormals:false,
-//                                     allocator: metalAllocator)
         let mdlMesh = MDLMesh.newEllipsoid(withRadii: .init(repeating: 100),
                                            radialSegments: 64,
                                            verticalSegments: 32,
@@ -456,11 +451,7 @@ actor Renderer {
         let upscalingEnabled = false
         #endif
 
-        #if canImport(MetalFX)
         self.updateGameState(drawable: drawable)
-        #else
-        self.updateGameState(drawable: drawable)
-        #endif
 
         let renderPassDescriptor = MTLRenderPassDescriptor()
 
@@ -495,7 +486,6 @@ actor Renderer {
 
         renderEncoder.pushDebugGroup("Draw Box")
 
-//        renderEncoder.setCullMode(.back)
         renderEncoder.setCullMode(.front)
 
         renderEncoder.setFrontFacing(.counterClockwise)
@@ -518,7 +508,7 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // When rendering to MetalFX input, use physical texture dimensions as viewport
+        // When rendering to MetalFX input, use the input texture dimensions (physical-sized output)
         // When rendering to drawable with foveation, use the virtual viewport from drawable
         #if canImport(MetalFX)
         let viewports: [MTLViewport]
@@ -527,9 +517,8 @@ actor Renderer {
            let inputTex = fx.inputTexture,
            let config = fx.configuration as UpscaleConfig? {
             // When rendering to the MetalFX input texture, that texture is already sized to the
-            // logical viewport. Applying the drawable viewport's origin here effectively renders
-            // into a sub-rect, which shows up as a major scale/FOV mismatch after upscaling.
-            // Render full-coverage starting at (0,0).
+            // physical drawable size (scaled down by resolutionScale). Render full-coverage
+            // starting at (0,0).
             viewports = drawable.views.map { view in
                 let vp = view.textureMap.viewport
                 return MTLViewport(originX: 0.0,
@@ -661,31 +650,17 @@ actor Renderer {
         // Note: The logical viewport (view.textureMap.viewport) may differ from physical texture
         // due to foveation, but both should have the same aspect ratio.
         let drawableTexture = drawable.colorTextures[0]
-        let logicalViewport = drawable.views[0].textureMap.viewport
         
-        // Use the logical viewport size (the region the system actually samples) to size MetalFX,
-        // but stabilize it so tiny gaze-driven viewport jitters don't force us to recreate
-        // MetalFX textures/scalers every frame (that was the perf cliff when Spatial was enabled).
+        // Size MetalFX to the physical drawable dimensions. This keeps the upscaled output
+        // aligned with the foveated target; the rate map and the system will handle how the
+        // physical texture is sampled.
         func alignTo16(_ value: Int) -> Int { max(16, (value + 15) & ~15) }
-        func stabilized(_ value: Int, previous: Int, tolerance: Int = 24) -> Int {
-            guard previous > 0 else { return value }
-            return abs(value - previous) <= tolerance ? previous : value
-        }
 
-        let physicalWidth = drawable.colorTextures[0].width
-        let physicalHeight = drawable.colorTextures[0].height
+        let physicalWidth = drawableTexture.width
+        let physicalHeight = drawableTexture.height
 
-        var viewportWidth = max(1, Int(round(logicalViewport.width)))
-        var viewportHeight = max(1, Int(round(logicalViewport.height)))
-
-        viewportWidth = min(viewportWidth, physicalWidth)
-        viewportHeight = min(viewportHeight, physicalHeight)
-
-        viewportWidth = stabilized(viewportWidth, previous: lastMetalFXOutputSize.x)
-        viewportHeight = stabilized(viewportHeight, previous: lastMetalFXOutputSize.y)
-
-        let outputWidth = alignTo16(viewportWidth)
-        let outputHeight = alignTo16(viewportHeight)
+        let outputWidth = alignTo16(physicalWidth)
+        let outputHeight = alignTo16(physicalHeight)
         lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
 
         let inputWidth = alignTo16(max(1, Int(round(Double(outputWidth) * Double(metalFXScale)))))
@@ -693,23 +668,11 @@ actor Renderer {
         
         // Debug: print dimensions and check aspect ratio
         if !hasLoggedFoveationAvailability {
-            let physicalAspect = Float(drawableTexture.width) / Float(drawableTexture.height)
-            let logicalAspect = Float(logicalViewport.width) / Float(logicalViewport.height)
-            let aspectDiff = abs(physicalAspect - logicalAspect)
-            
             print("🔍 MetalFX Config Debug:")
-            print("   Physical texture: \(physicalWidth) x \(physicalHeight) (aspect=\(physicalAspect))")
-            print("   Logical viewport: \(Int(logicalViewport.width)) x \(Int(logicalViewport.height)) origin=(\(Int(logicalViewport.originX)), \(Int(logicalViewport.originY))) (aspect=\(logicalAspect))")
+            print("   Physical texture: \(physicalWidth) x \(physicalHeight)")
             print("   MetalFX input: \(inputWidth) x \(inputHeight)")
             print("   MetalFX output: \(outputWidth) x \(outputHeight)")
             print("   Resolution scale: \(metalFXScale)")
-            
-            if aspectDiff > 0.01 {
-                print("   ⚠️ ASPECT RATIO MISMATCH: physical vs logical differ by \(aspectDiff)!")
-                print("   This may cause zoom/warp issues with projection.")
-            } else {
-                print("   ✓ Aspect ratios match")
-            }
             hasLoggedFoveationAvailability = true
         }
 
@@ -778,15 +741,16 @@ actor Renderer {
         }
 
         // Copy MetalFX output to drawable.
-        // If the drawable provides a rasterizationRateMap (foveated render target), we MUST use it
-        // when rendering into the drawable textures; otherwise the copy can appear scaled/warped.
+        // MetalFX outputs a non-foveated texture. We copy it directly into the drawable's
+        // viewport region. If there's a rate map (foveated target), we use the format conversion
+        // path which handles the viewport positioning correctly.
         let systemRateMap = drawable.rasterizationRateMaps.first
 
         // Copy MetalFX output to drawable using format conversion
         // MetalFX outputs rgba16Float, drawable expects BGRA8Unorm_sRGB
         let views = min(drawable.views.count, output.arrayLength)
         
-        // Check if formats match - if so, we can use blit
+        // Use direct blit only when formats match AND no rate map (no foveation)
         let drawableFormat = drawable.colorTextures[0].pixelFormat
         let outputFormat = output.pixelFormat
         
@@ -853,8 +817,9 @@ actor Renderer {
                 
                 let renderPassDescriptor = MTLRenderPassDescriptor()
 
-                // If we are copying into a foveated drawable texture, apply the rate map.
-                renderPassDescriptor.rasterizationRateMap = systemRateMap
+                // Do NOT apply rate map here - MetalFX output is non-foveated and we're
+                // copying it directly into the drawable's viewport region.
+                renderPassDescriptor.rasterizationRateMap = nil
                 
                 // Handle both dedicated and layered layouts
                 let destinationTexture: MTLTexture
@@ -887,18 +852,23 @@ actor Renderer {
                     continue
                 }
 
+                // Copy to the drawable's full viewport region
                 let viewport = drawable.views[eye].textureMap.viewport
-                let originX = viewport.originX
-                let originY = viewport.originY
                 let target = renderPassDescriptor.colorAttachments[0].texture
-                let width = min(Double(output.width), Double(target?.width ?? 0) - originX)
-                let height = min(Double(output.height), Double(target?.height ?? 0) - originY)
+                let targetWidth = Double(target?.width ?? 0)
+                let targetHeight = Double(target?.height ?? 0)
+                
+                // Use the viewport dimensions, clamped to target texture size
+                let width = min(viewport.width, targetWidth - viewport.originX)
+                let height = min(viewport.height, targetHeight - viewport.originY)
                 if width <= 0 || height <= 0 {
                     encoder.endEncoding()
                     continue
                 }
-                encoder.setViewport(MTLViewport(originX: originX,
-                                                originY: originY,
+                
+                // Fill the drawable's viewport region
+                encoder.setViewport(MTLViewport(originX: viewport.originX,
+                                                originY: viewport.originY,
                                                 width: width,
                                                 height: height,
                                                 znear: 0.0, zfar: 1.0))
@@ -937,7 +907,8 @@ actor Renderer {
             }
 
             let desc = MTLRenderPassDescriptor()
-            desc.rasterizationRateMap = systemRateMap
+            // Do NOT apply rate map - copy directly into drawable's viewport region
+            desc.rasterizationRateMap = nil
             
             if destinationDepth.textureType == .type2DArray {
                 guard let dstView = destinationDepth.makeTextureView(pixelFormat: destinationDepth.pixelFormat, textureType: .type2D, levels: 0..<1, slices: eye..<(eye+1))
@@ -954,6 +925,7 @@ actor Renderer {
 
             if let target = desc.depthAttachment.texture {
                 let viewport = drawable.views[eye].textureMap.viewport
+                // Fill the drawable's viewport region
                 let width = min(viewport.width, Double(target.width) - viewport.originX)
                 let height = min(viewport.height, Double(target.height) - viewport.originY)
                 if width <= 0 || height <= 0 {
@@ -1055,10 +1027,6 @@ func matrix4x4_scale(_ scaleX: Float, _ scaleY: Float, _ scaleZ: Float) -> matri
                                          vector_float4(0, scaleY, 0, 0),
                                          vector_float4(0, 0, scaleZ, 0),
                                          vector_float4(0, 0, 0, 1)))
-}
-
-func radians_from_degrees(_ degrees: Float) -> Float {
-    return (degrees / 180) * .pi
 }
 
 // Blend two poses with separate position and rotation smoothing factors
