@@ -32,7 +32,7 @@ struct ContentView: View {
                     set: { appModel.renderSettings.resolutionScale = $0 }
                 ), in: 0.25...1.0, step: 0.05)
                 
-                // Tile-based rendering mode (2x2 quad sharing for ~4x less raymarching)
+                // Tile-based rendering mode (2x2 quad sharing shadows)
                 HStack {
                     Text("Tile Mode:")
                     Picker("", selection: Binding(
@@ -40,20 +40,11 @@ struct ContentView: View {
                         set: { appModel.renderSettings.tileSize = $0 }
                     )) {
                         Text("Off").tag(0)
-                        Text("2×2 (Quad)").tag(2)
+                        Text("2×2 (Shared Shadows)").tag(2)
                     }
                     .pickerStyle(.segmented)
                 }
                 .padding(.top, 8)
-                
-                // Hierarchical raymarch toggle (only applies when Tile Mode is on)
-                if appModel.renderSettings.tileSize > 0 {
-                    Toggle("Hierarchical Raymarch", isOn: Binding(
-                        get: { appModel.renderSettings.useHierarchical },
-                        set: { appModel.renderSettings.useHierarchical = $0 }
-                    ))
-                    .font(.caption)
-                }
                 
                 // Show MetalFX / upscaling status for easier debugging
                 HStack(spacing: 8) {

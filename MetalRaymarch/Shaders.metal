@@ -771,68 +771,46 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
     
-    float2 ret;
-    float adjustedDist;
-    float glow = 0.0;
-    float startT = 1000.0;  // For debug visualization
-    
-    if (uniforms.useHierarchical == 1) {
-        // === HIERARCHICAL MODE ===
-        // Level 1: Coarse raymarch (leader only)
-        float coarseT = 1000.0;
-        float3 leaderRd = rd;
-        
-        if (quadLaneId == 0) {
-            coarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
-        }
-        
-        // Broadcast coarse result and leader ray direction
-        startT = quad_broadcast(coarseT, 0);
-        leaderRd = float3(quad_broadcast(leaderRd.x, 0), quad_broadcast(leaderRd.y, 0), quad_broadcast(leaderRd.z, 0));
-        
-        // Level 2: Fine raymarch from starting point
-        if (startT < 900.0) {
-            float rayDot = max(dot(rd, leaderRd), 0.9);
-            float myStartT = startT * rayDot;
-            ret = SceneFromStart(cameraPos, rd, myStartT, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
-            adjustedDist = ret.x;
-            glow = ret.y;
-        } else {
-            // Coarse missed - fall back to full raymarch
-            ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
-            adjustedDist = ret.x;
-            glow = ret.y;
-        }
-    } else {
-        // === STANDARD MODE (no hierarchical) ===
-        // Every pixel does full raymarch independently
-        ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
-        adjustedDist = ret.x;
-        glow = ret.y;
-    }
+    // === STANDARD RAYMARCH (every pixel) ===
+    // The hierarchical coarse/fine approach doesn't help due to SIMD lockstep execution
+    float2 ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    float adjustedDist = ret.x;
+    float glow = ret.y;
     
     half3 col = half3(0.0h);
     
     if (ret.x < 900.0)
     {
-        // Each pixel calculates its own hit point and normal
         float3 p = cameraPos + adjustedDist * rd;
         
-        // Per-pixel normal for smooth shading detail
+        // Per-pixel normal (needed for quality)
         float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
         
-        // Full lighting calculations per-pixel
+        // === QUAD-SHARED SHADOWS ===
+        // Shadows are expensive (many SDF evaluations) but vary slowly across a 2x2 quad
+        // Leader computes shadows, broadcasts to all 4 pixels
+        half shaSpot = 1.0h;
+        half shaSun = 1.0h;
+        
+        int shadowIterations = max(lodIterations - 2, 2);
+        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        
         float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
         float3 spot = spotLight - p;
         float atten = length(spot);
         spot /= atten;
         
-        int shadowIterations = max(lodIterations - 2, 2);
-        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        if (quadLaneId == 0) {
+            // Only leader computes shadows - expensive!
+            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        }
         
-        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        // Broadcast shadow values to all 4 pixels in quad
+        shaSpot = quad_broadcast(shaSpot, 0);
+        shaSun = quad_broadcast(shaSun, 0);
         
+        // Per-pixel lighting with shared shadows
         float attenPow = powr(max(atten, kPowEpsilon), 1.5);
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
@@ -855,20 +833,6 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     
     col = clamp(col, half3(0.0h), half3(2.0h));
-    
-    // DEBUG: Uncomment to visualize hierarchical rendering
-    // Green tint = coarse pass found hit, Red = coarse miss (fallback to full raymarch)
-    // Only shows when hierarchical mode is enabled
-    //#define DEBUG_HIERARCHICAL 1
-    #ifdef DEBUG_HIERARCHICAL
-    if (uniforms.useHierarchical == 1) {
-        if (startT < 900.0) {
-            col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
-        } else {
-            col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
-        }
-    }
-    #endif
     
     col = PostEffects(col, half2(in.texCoord));
     
