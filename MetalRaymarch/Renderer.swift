@@ -427,7 +427,8 @@ actor Renderer {
                             glowIntensity: settings.glowIntensity,
                             foldingLimit: settings.foldingLimit,
                             sphereRadius: settings.sphereRadius,
-                            colorIterations: settings.colorIterations)
+                            colorIterations: settings.colorIterations,
+                            useHierarchical: settings.useHierarchical ? 1 : 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

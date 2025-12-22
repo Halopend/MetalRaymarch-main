@@ -182,56 +182,45 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, fl
 
 // === COARSE RAYMARCH ===
 // Fast approximate raymarch for hierarchical rendering
-// Uses fewer iterations and larger steps to find approximate hit distance
+// Uses fewer iterations but standard stepping to find approximate hit distance
 float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
 {
     float t = 0.05;
     
-    // Very few steps, aggressive stepping
-    for(int j = 0; j < 12; j++)
+    // More steps with standard stepping for reliability
+    for(int j = 0; j < 24; j++)
     {
         float3 p = rO + t * rD;
         float h = Map(p, params, foldingLimit, iterations);
         
-        // Coarse threshold - we just need to get close
-        if(h < 0.05) return t;
+        // Tighter threshold to get closer before handing off
+        if(h < 0.02) return t;
         
         if (t > 12.0) return 1000.0;
         
-        // Aggressive stepping for coarse pass
-        t += h * 1.3;
+        // Standard sphere tracing - no overstepping
+        t += h;
     }
     
     return 1000.0;
 }
 
-// === FINE RAYMARCH FROM STARTING POINT (with Lipschitz + Cone Step Mapping) ===
+// === FINE RAYMARCH FROM STARTING POINT ===
 // Refines from a known starting distance (from coarse pass or neighbor)
-// Uses Lipschitz tracking + Cone Step Mapping for adaptive stepping
 float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     float dither = blueNoise(fragCoord, time) * 0.01;
     
-    // Back up slightly from the starting point to ensure we don't miss the surface
-    float t = max(0.01, startT - 0.1) + dither;
+    // Back up further from the starting point to ensure we don't miss the surface
+    float t = max(0.01, startT - 0.3) + dither;
     
     float glow = 0.0;
-    // Far fewer steps needed when starting close
-    int maxSteps = max(int(float(maxStepsParam) * quality * 0.4), 3);
-    
-    // Cone step mapping (same as Scene)
-    const float pixelConeRadius = 0.0006;
-    
-    // Lipschitz tracking for fine pass
-    float prevH = 1e10;
-    float prevT = t;
-    float lipschitz = 0.8;  // Start with slightly optimistic estimate for fine pass
+    // More steps for reliability
+    int maxSteps = max(int(float(maxStepsParam) * quality * 0.5), 8);
     
     for(int j = 0; j < maxSteps; j++)
     {
-        // Cone-adaptive threshold
-        float coneFootprint = t * pixelConeRadius;
-        float threshold = 0.0005 + coneFootprint * 0.5;
+        float threshold = 0.0005 + t * 0.0006;
         
         float3 p = rO + t * rD;
         float h = Map(p, params, foldingLimit, iterations);
@@ -245,33 +234,14 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
         
         glow += saturate(0.04 - h) * glowIntensity;
         
-        // Lipschitz tracking
-        float stepTaken = t - prevT;
-        if (stepTaken > 0.0001 && j > 0) {
-            float gradEstimate = abs(h - prevH) / stepTaken;
-            lipschitz = mix(lipschitz, gradEstimate, 0.4);
-            lipschitz = clamp(lipschitz, 0.15, 1.2);
-        }
-        
-        // Cone step bonus: can step further when pixel footprint is larger
-        float coneBonus = coneFootprint * 0.6;  // More conservative for fine pass
-        
-        // Adaptive step with Lipschitz + Cone
-        float stepSize = (h + coneBonus) / max(lipschitz, 0.2);
-        stepSize = clamp(stepSize, 0.0005, 0.5);
-        
-        prevT = t;
-        prevH = h;
-        t += stepSize;
+        // Standard sphere tracing
+        t += h;
     }
     
     return float2(1000.0, saturate(glow * 0.25));
 }
 
-// Enhanced sphere tracing with Lipschitz tracking, Cone Step Mapping, and over-relaxation
-// - Lipschitz tracking: estimates local SDF gradient to step more aggressively
-// - Cone Step Mapping: accounts for pixel footprint to allow larger steps at distance
-// - Over-relaxation: steps more aggressively when moving away from surfaces
+// Standard sphere tracing - reliable, no aggressive optimizations
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
@@ -281,24 +251,10 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
-    // === CONE STEP MAPPING SETUP ===
-    // Pixel cone half-angle tangent: approximates pixel footprint growth with distance
-    // For visionOS: ~2000px wide, ~90° FOV → tan(45°/2000) ≈ 0.0004
-    // We use a slightly larger value for safety margin
-    const float pixelConeRadius = 0.0006;
-    
-    // Lipschitz tracking state
-    float prevH = 1e10;
-    float prevT = t;
-    float lipschitz = 1.0;
-    
     for(int j = 0; j < maxSteps; j++)
     {
-        // === CONE-ADAPTIVE THRESHOLD ===
-        // Threshold grows with distance based on pixel cone
-        // At distance t, pixel footprint ≈ t * pixelConeRadius
-        float coneFootprint = t * pixelConeRadius;
-        float threshold = 0.0005 + coneFootprint * 0.5 + (1.0 - quality) * 0.003;
+        // Distance-adaptive threshold (standard approach)
+        float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
         
         float3 p = rO + t * rD;
         float h = Map(p, params, foldingLimit, iterations);
@@ -314,35 +270,9 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         // Accumulate glow
         glow += saturate(0.04 - h) * glowIntensity;
         
-        // === LIPSCHITZ TRACKING ===
-        float stepTaken = t - prevT;
-        if (stepTaken > 0.0001 && j > 0) {
-            float gradEstimate = abs(h - prevH) / stepTaken;
-            lipschitz = mix(lipschitz, gradEstimate, 0.3);
-            lipschitz = clamp(lipschitz, 0.1, 1.5);
-        }
-        
-        // === CONE STEP MAPPING ===
-        // Key insight: we can step further than h if the "miss" would be sub-pixel
-        // Safe cone step: h + (pixel footprint at current distance)
-        // This is geometrically derived from the cone of visibility
-        float coneBonus = coneFootprint * 0.8;  // 80% of pixel footprint for safety
-        
-        // Combine with Lipschitz: step = (h + coneBonus) / lipschitz
-        float baseStep = (h + coneBonus) / max(lipschitz, 0.2);
-        
-        // Over-relaxation when moving away from surfaces
-        float movingAway = step(prevH * 0.9, h);
-        float relaxFactor = mix(0.9, 1.3, movingAway);
-        
-        float stepSize = baseStep * relaxFactor;
-        
-        // Safety clamps
-        stepSize = clamp(stepSize, 0.001, 2.0);
-        
-        prevT = t;
-        prevH = h;
-        t += stepSize;
+        // Standard sphere tracing: step by the SDF value
+        // This is guaranteed safe for a valid SDF
+        t += h;
     }
     
     return float2(1000.0, saturate(glow * 0.25));
@@ -577,6 +507,17 @@ kernel void tileRaymarchKernel(
     col = clamp(col, half3(0.0h), half3(2.0h));
     col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
     
+    // Debug visualization: show hierarchical status
+    // Green tint = coarse pass found hit (hierarchical worked)
+    // Red tint = coarse missed, background/sky
+    if (uniforms.debugHierarchical == 1) {
+        if (coarseT < 900.0) {
+            col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
+        } else {
+            col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
+        }
+    }
+    
     // Write output
     outputTexture.write(float4(float3(col), 1.0), pixelCoord, uniforms.eyeIndex);
 }
@@ -677,6 +618,15 @@ kernel void tileRaymarchKernel2x2(
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     col = clamp(col, half3(0.0h), half3(2.0h));
     col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    
+    // Debug visualization for 2x2 kernel
+    if (uniforms.debugHierarchical == 1) {
+        if (coarseT < 900.0) {
+            col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
+        } else {
+            col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
+        }
+    }
     
     outputTexture.write(float4(float3(col), 1.0), pixelCoord, uniforms.eyeIndex);
 }
@@ -821,37 +771,44 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
     
-    // === LEVEL 1: COARSE RAYMARCH (leader only) ===
-    // Find approximate hit distance with minimal DE evaluations
-    float coarseT = 1000.0;
-    float3 leaderRd = rd;
-    
-    if (quadLaneId == 0) {
-        // Leader does fast coarse march to find starting point
-        coarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
-    }
-    
-    // Broadcast coarse result and leader ray direction
-    float startT = quad_broadcast(coarseT, 0);
-    leaderRd = float3(quad_broadcast(leaderRd.x, 0), quad_broadcast(leaderRd.y, 0), quad_broadcast(leaderRd.z, 0));
-    
-    // === LEVEL 2: FINE RAYMARCH (all pixels, from starting point) ===
     float2 ret;
     float adjustedDist;
     float glow = 0.0;
+    float startT = 1000.0;  // For debug visualization
     
-    if (startT < 900.0) {
-        // Adjust starting distance for this pixel's ray direction
-        float rayDot = max(dot(rd, leaderRd), 0.9); // Clamp to avoid extreme adjustments
-        float myStartT = startT * rayDot;
+    if (uniforms.useHierarchical == 1) {
+        // === HIERARCHICAL MODE ===
+        // Level 1: Coarse raymarch (leader only)
+        float coarseT = 1000.0;
+        float3 leaderRd = rd;
         
-        // Fine raymarch from the starting point - needs far fewer iterations
-        ret = SceneFromStart(cameraPos, rd, myStartT, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+        if (quadLaneId == 0) {
+            coarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+        }
+        
+        // Broadcast coarse result and leader ray direction
+        startT = quad_broadcast(coarseT, 0);
+        leaderRd = float3(quad_broadcast(leaderRd.x, 0), quad_broadcast(leaderRd.y, 0), quad_broadcast(leaderRd.z, 0));
+        
+        // Level 2: Fine raymarch from starting point
+        if (startT < 900.0) {
+            float rayDot = max(dot(rd, leaderRd), 0.9);
+            float myStartT = startT * rayDot;
+            ret = SceneFromStart(cameraPos, rd, myStartT, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+            adjustedDist = ret.x;
+            glow = ret.y;
+        } else {
+            // Coarse missed - fall back to full raymarch
+            ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+            adjustedDist = ret.x;
+            glow = ret.y;
+        }
+    } else {
+        // === STANDARD MODE (no hierarchical) ===
+        // Every pixel does full raymarch independently
+        ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
         adjustedDist = ret.x;
         glow = ret.y;
-    } else {
-        ret = float2(1000.0, 0.0);
-        adjustedDist = 1000.0;
     }
     
     half3 col = half3(0.0h);
@@ -898,6 +855,21 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     
     col = clamp(col, half3(0.0h), half3(2.0h));
+    
+    // DEBUG: Uncomment to visualize hierarchical rendering
+    // Green tint = coarse pass found hit, Red = coarse miss (fallback to full raymarch)
+    // Only shows when hierarchical mode is enabled
+    //#define DEBUG_HIERARCHICAL 1
+    #ifdef DEBUG_HIERARCHICAL
+    if (uniforms.useHierarchical == 1) {
+        if (startT < 900.0) {
+            col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
+        } else {
+            col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
+        }
+    }
+    #endif
+    
     col = PostEffects(col, half2(in.texCoord));
     
     output.color = float4(float3(col), 1.0);

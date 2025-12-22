@@ -46,6 +46,15 @@ struct ContentView: View {
                 }
                 .padding(.top, 8)
                 
+                // Hierarchical raymarch toggle (only applies when Tile Mode is on)
+                if appModel.renderSettings.tileSize > 0 {
+                    Toggle("Hierarchical Raymarch", isOn: Binding(
+                        get: { appModel.renderSettings.useHierarchical },
+                        set: { appModel.renderSettings.useHierarchical = $0 }
+                    ))
+                    .font(.caption)
+                }
+                
                 // Show MetalFX / upscaling status for easier debugging
                 HStack(spacing: 8) {
                     Image(systemName: appModel.metalFXAvailable ? "bolt.fill" : "bolt.slash")

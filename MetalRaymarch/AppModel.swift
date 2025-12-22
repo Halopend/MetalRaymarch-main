@@ -37,17 +37,18 @@ class RenderSettings {
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = .zero
     private var _fractalScale: Float = 2.8
-    private var _fractalIterations: Int = 5         // Lower = faster (was 7)
-    private var _maxRaySteps: Int = 48              // Lower = faster (was 64)
+    private var _fractalIterations: Int = 4         // Lower = faster (was 5)
+    private var _maxRaySteps: Int = 32              // Lower = faster (was 48) - target 90fps
     private var _foveationIntensity: Float = 1.0    // Gentle shader-side foveation (rate maps handle gaze tracking)
     private var _colorMix: Float = 0.5
     private var _glowIntensity: Float = 0.2
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
-    private var _colorIterations: Float = 10.0      // 80% of max (12) for quality
-    private var _resolutionScale: Float = 1.0       // MetalFX upscaling: 0.25 (25%) to 1.0 (100%)
+    private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
+    private var _resolutionScale: Float = 0.5       // MetalFX upscaling: render at 50%, upscale to 100%
     private var _debugEyeTint: Bool = false          // Force per-eye red/blue debug fill
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4 tile-based raymarching
+    private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -125,6 +126,11 @@ class RenderSettings {
     var tileSize: Int {
         get { lock.withLock { _tileSize } }
         set { lock.withLock { _tileSize = newValue } }
+    }
+    
+    var useHierarchical: Bool {
+        get { lock.withLock { _useHierarchical } }
+        set { lock.withLock { _useHierarchical = newValue } }
     }
 }
 

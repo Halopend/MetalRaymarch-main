@@ -54,6 +54,7 @@ typedef struct
     float foldingLimit;      // Box folding limit (default 1.0)
     float sphereRadius;      // Sphere folding radius (default 0.5)
     float colorIterations;   // How many iterations contribute to color
+    int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
 } Uniforms;
 
 typedef struct
@@ -80,6 +81,7 @@ typedef struct
     int colorIterations;
     int maxRaySteps;
     uint32_t eyeIndex;
+    uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
 } TileUniforms;
 
 #endif /* ShaderTypes_h */
