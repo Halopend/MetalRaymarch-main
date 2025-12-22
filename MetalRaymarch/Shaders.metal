@@ -21,7 +21,8 @@ typedef struct
 typedef struct
 {
     float4 color [[color(0)]];
-} FragmentOutput;
+    float depth [[depth(any)]]; // Output clip-space depth for async timewarp
+} FragmentOutput;  
 
 typedef struct
 {
@@ -678,6 +679,29 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     if (ret.x < 900.0)
     {
         float3 p = cameraPos + ret.x * rd;
+        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
+        output.depth = clipPos.z / clipPos.w;
+
+        // Debug: visualize depth as grayscale
+        if (DEBUG_DEPTH_VISUALIZATION) {
+            float depthGray = saturate(output.depth); // Clamp depth to [0, 1]
+            output.color = float4(depthGray, depthGray, depthGray, 1.0);
+            return output;
+        }
+    }
+    else
+    {
+        output.depth = 1e-7;
+
+        if (DEBUG_DEPTH_VISUALIZATION) {
+            output.color = float4(0.0, 0.0, 0.0, 1.0); // Black for far plane
+            return output;
+        }
+    }
+
+    if (ret.x < 900.0)
+    {
+        float3 p = cameraPos + ret.x * rd;
 
         float3 nor;
         if (quality > 0.2) {
@@ -716,6 +740,15 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
             col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
         }
+
+        // Compute clip-space depth and write it out for async timewarp
+        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
+        output.depth = clipPos.z / clipPos.w;
+    }
+    else
+    {
+        // Far plane / no hit: use tiny depth so compositor treats this as far away
+        output.depth = 1e-7;
     }
 
     half fogFactor = half(saturate(exp(-ret.x + 1.5)));
@@ -824,6 +857,14 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
+
+        // Compute clip-space depth and write it out for async timewarp
+        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
+        output.depth = clipPos.z / clipPos.w;
+    }
+    else
+    {
+        output.depth = 1e-7;
     }
     
     half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));

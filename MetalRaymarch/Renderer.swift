@@ -75,14 +75,8 @@ actor Renderer {
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
 
-    // Pose smoothing
-    var smoothedDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
+    // Device pose smoothing removed — use raw device anchor from drawable for async timewarp
     
-    // FIX: Convert fixed alpha values to time constants (tau) for frame-rate independence.
-    // Low tau (e.g., 0.012s) means faster, aggressive smoothing (for position).
-    // High tau (e.g., 0.086s) means slower, gentle smoothing (for rotation).
-    let posePositionTau: Double = 0.012 // Time constant for Position smoothing (~0.7 alpha at 90Hz)
-    let poseRotationTau: Double = 0.086 // Time constant for Rotation smoothing (~0.12 alpha at 90Hz)
 
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
@@ -401,11 +395,12 @@ actor Renderer {
         
         let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
         
-        let simdDeviceAnchor = smoothedDeviceTransform
+        // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
+        let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
-            let viewMatrix = (simdDeviceAnchor * view.transform).inverse
+            let viewMatrix = (deviceTransform * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             let inverseProjection = projection.inverse
             
@@ -470,19 +465,9 @@ actor Renderer {
 
         drawable.deviceAnchor = deviceAnchor
 
-        // Calculate deltaTime for smoothing; clamp to avoid spikes when more frames are queued
+        // Calculate deltaTime (clamped) for FPS tracking; pose smoothing removed
         let rawDelta = lastPresentationTime.map { $0.duration(to: presentationTime).timeInterval } ?? (1.0 / 90.0)
         let deltaTime = max(1.0 / 240.0, min(1.0 / 30.0, rawDelta))
-
-        if let anchorTransform = deviceAnchor?.originFromAnchorTransform {
-            smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
-                                                 current: anchorTransform,
-                                                 deltaTime: deltaTime,
-                                                 tauPosition: posePositionTau,
-                                                 tauRotation: poseRotationTau)
-        } else {
-            smoothedDeviceTransform = matrix_identity_float4x4
-        }
 
         // FPS tracking using clamped interval (stable with triple buffering)
         if deltaTime > 0 {
@@ -1068,23 +1053,8 @@ func matrix4x4_scale(_ scaleX: Float, _ scaleY: Float, _ scaleZ: Float) -> matri
                                          vector_float4(0, 0, 0, 1)))
 }
 
-// Blend two poses with separate position and rotation smoothing factors
-// FIX: Implementation uses the time-independent EMA formula: alpha = 1 - exp(-dt / tau)
-func smoothPose(previous: matrix_float4x4, current: matrix_float4x4, deltaTime: TimeInterval, tauPosition: Double, tauRotation: Double) -> matrix_float4x4 {
-    let prevPose = decomposePose(previous)
-    let currPose = decomposePose(current)
+// smoothPose removed: renderer uses raw drawable.deviceAnchor for async timewarp
 
-    // Calculate time-independent alpha for position (using tauPosition)
-    let alphaPos = 1.0 - pow(Float(M_E), -Float(deltaTime / tauPosition))
-    // Calculate time-independent alpha for rotation (using tauRotation)
-    let alphaRot = 1.0 - pow(Float(M_E), -Float(deltaTime / tauRotation))
-
-    // Apply blending
-    let blendedPos = prevPose.translation + (currPose.translation - prevPose.translation) * alphaPos
-    let blendedRot = simd_slerp(prevPose.rotation, currPose.rotation, alphaRot)
-    
-    return composePose(translation: blendedPos, rotation: blendedRot)
-}
 
 func decomposePose(_ m: matrix_float4x4) -> (translation: SIMD3<Float>, rotation: simd_quatf) {
     let translation = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
