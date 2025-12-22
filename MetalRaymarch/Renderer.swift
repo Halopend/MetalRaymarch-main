@@ -16,8 +16,8 @@ import simd
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 
-// Allow triple-buffering to better hide GPU latency while keeping memory overhead small.
-let maxBuffersInFlight = 3
+// Reduce buffer count to 1 to minimize latency and swimming/catch artifacts.
+let maxBuffersInFlight = 1
 
 enum RendererError: Error {
     case badVertexDescriptor

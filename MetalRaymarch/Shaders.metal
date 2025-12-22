@@ -1,9 +1,11 @@
 //
 //  Shaders.metal
 //
+// Debug flag for depth visualization (set to 1 to enable)
+#define DEBUG_DEPTH_VISUALIZATION 0
+
 
 // File for Metal kernel and shader functions
-
 #include <metal_stdlib>
 #include <simd/simd.h>
 
