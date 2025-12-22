@@ -16,7 +16,8 @@ import simd
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 
-let maxBuffersInFlight = 1
+// Allow triple-buffering to better hide GPU latency while keeping memory overhead small.
+let maxBuffersInFlight = 3
 
 enum RendererError: Error {
     case badVertexDescriptor
@@ -463,18 +464,15 @@ actor Renderer {
 
         frame.startSubmission()
 
-        let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
+        let presentationTime = drawable.frameTiming.presentationTime
+        let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
 
         drawable.deviceAnchor = deviceAnchor
 
-        // Calculate deltaTime for smoothing
-        let deltaTime: TimeInterval
-        if let last = lastPresentationTime {
-            deltaTime = last.duration(to: drawable.frameTiming.presentationTime).timeInterval
-        } else {
-            deltaTime = 1.0 / 90.0 // Default to 90Hz
-        }
+        // Calculate deltaTime for smoothing; clamp to avoid spikes when more frames are queued
+        let rawDelta = lastPresentationTime.map { $0.duration(to: presentationTime).timeInterval } ?? (1.0 / 90.0)
+        let deltaTime = max(1.0 / 240.0, min(1.0 / 30.0, rawDelta))
 
         if let anchorTransform = deviceAnchor?.originFromAnchorTransform {
             smoothedDeviceTransform = smoothPose(previous: smoothedDeviceTransform,
@@ -486,19 +484,16 @@ actor Renderer {
             smoothedDeviceTransform = matrix_identity_float4x4
         }
 
-        // FPS tracking using predicted presentation interval
-        if let last = lastPresentationTime {
-            let dt = last.duration(to: drawable.frameTiming.presentationTime).timeInterval
-            if dt > 0 {
-                let instantFPS = 1.0 / dt
-                let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * 0.1
-                smoothedFPS = updatedFPS
-                Task { @MainActor in
-                    appModel.fps = updatedFPS
-                }
+        // FPS tracking using clamped interval (stable with triple buffering)
+        if deltaTime > 0 {
+            let instantFPS = 1.0 / deltaTime
+            let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * 0.1
+            smoothedFPS = updatedFPS
+            Task { @MainActor in
+                appModel.fps = updatedFPS
             }
         }
-        lastPresentationTime = drawable.frameTiming.presentationTime
+        lastPresentationTime = presentationTime
 
         let semaphore = inFlightSemaphore
         commandBuffer.addCompletedHandler { (_ commandBuffer)-> Swift.Void in
