@@ -509,6 +509,95 @@ half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
     return powr(max(rgb, half3(kPowEpsilonHalf)), half3(0.47h));
 }
 
+// =============================================================================
+// HUD RENDERING - Simple bar display for parameters
+// =============================================================================
+
+// Draw a horizontal bar showing parameter value within range
+float hudBar(float2 uv, float2 pos, float2 size, float fillAmount) {
+    float2 localUV = (uv - pos) / size;
+    if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0) return 0.0;
+    
+    // Border (2% edge)
+    float border = (localUV.x < 0.02 || localUV.x > 0.98 || localUV.y < 0.08 || localUV.y > 0.92) ? 0.6 : 0.0;
+    
+    // Fill bar
+    float fill = (localUV.x > 0.02 && localUV.x < fillAmount * 0.96 + 0.02 && localUV.y > 0.08 && localUV.y < 0.92) ? 1.0 : 0.0;
+    
+    return max(border, fill);
+}
+
+// Render HUD overlay showing current parameter values
+half3 renderHUD(half3 baseColor, float2 uv, int sceneIndex, int activeGesture,
+                float minDist, float foldLimit, float sphereRad,
+                float ifsScale, float ifsOffset, float ifsGlow) {
+    // HUD in bottom-left corner
+    float2 hudPos = float2(0.02, 0.02);
+    float hudWidth = 0.2;
+    float hudHeight = 0.15;
+    
+    float2 hudUV = (uv - hudPos) / float2(hudWidth, hudHeight);
+    
+    // Only render in HUD area
+    if (hudUV.x < 0.0 || hudUV.x > 1.0 || hudUV.y < 0.0 || hudUV.y > 1.0) {
+        return baseColor;
+    }
+    
+    half3 hudColor = half3(0.0h);
+    float alpha = 0.0;
+    
+    // Semi-transparent background
+    float bg = 0.25;
+    
+    if (sceneIndex == 0) {
+        // Mandelbox: minDistance (0.001-5), foldingLimit (0.1-10), sphereRadius (0.01-2)
+        float fill1 = clamp(minDist / 5.0, 0.0, 1.0);
+        float fill2 = clamp(foldLimit / 10.0, 0.0, 1.0);
+        float fill3 = clamp(sphereRad / 2.0, 0.0, 1.0);
+        
+        float bar1 = hudBar(hudUV, float2(0.05, 0.68), float2(0.9, 0.22), fill1);
+        float bar2 = hudBar(hudUV, float2(0.05, 0.39), float2(0.9, 0.22), fill2);
+        float bar3 = hudBar(hudUV, float2(0.05, 0.10), float2(0.9, 0.22), fill3);
+        
+        // Colors: index=cyan, middle=yellow, ring=magenta
+        // Highlight active gesture
+        float h1 = (activeGesture == 1) ? 1.5 : 1.0;
+        float h2 = (activeGesture == 2) ? 1.5 : 1.0;
+        float h3 = (activeGesture == 3) ? 1.5 : 1.0;
+        
+        hudColor += half3(0.0h, 1.0h, 1.0h) * half(bar1 * h1);   // Cyan - minDistance
+        hudColor += half3(1.0h, 1.0h, 0.0h) * half(bar2 * h2);   // Yellow - foldingLimit
+        hudColor += half3(1.0h, 0.0h, 1.0h) * half(bar3 * h3);   // Magenta - sphereRadius
+        
+        alpha = max(max(bar1, bar2), bar3);
+    } else {
+        // IFS: ifsScale (0.5-5), ifsOffset (0.1-3), ifsGlow (0.01-10)
+        float fill1 = clamp((ifsScale - 0.5) / 4.5, 0.0, 1.0);
+        float fill2 = clamp((ifsOffset - 0.1) / 2.9, 0.0, 1.0);
+        float fill3 = clamp(ifsGlow / 10.0, 0.0, 1.0);
+        
+        float bar1 = hudBar(hudUV, float2(0.05, 0.68), float2(0.9, 0.22), fill1);
+        float bar2 = hudBar(hudUV, float2(0.05, 0.39), float2(0.9, 0.22), fill2);
+        float bar3 = hudBar(hudUV, float2(0.05, 0.10), float2(0.9, 0.22), fill3);
+        
+        float h1 = (activeGesture == 1) ? 1.5 : 1.0;
+        float h2 = (activeGesture == 2) ? 1.5 : 1.0;
+        float h3 = (activeGesture == 3) ? 1.5 : 1.0;
+        
+        hudColor += half3(0.0h, 1.0h, 1.0h) * half(bar1 * h1);
+        hudColor += half3(1.0h, 1.0h, 0.0h) * half(bar2 * h2);
+        hudColor += half3(1.0h, 0.0h, 1.0h) * half(bar3 * h3);
+        
+        alpha = max(max(bar1, bar2), bar3);
+    }
+    
+    // Blend: background + bars
+    alpha = max(alpha, bg);
+    return mix(baseColor, hudColor + half3(0.05h), half(alpha * 0.85));
+}
+
+// =============================================================================
+
 // Ultra-fast shadow with over-relaxation
 float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
 {
@@ -1129,6 +1218,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
     } else {
         col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    }
+
+    // Render HUD overlay if enabled
+    if (uniforms.showHUD != 0) {
+        col = renderHUD(col, float2(in.texCoord), uniforms.sceneIndex, uniforms.activeGesture,
+                        uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius,
+                        uniforms.ifsScale, uniforms.ifsOffset, uniforms.ifsGlow);
     }
 
     output.color = float4(float3(col), 1.0);

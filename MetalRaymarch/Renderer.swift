@@ -478,7 +478,9 @@ actor Renderer {
                             sceneIndex: Int32(settings.sceneIndex),
                             ifsScale: settings.ifsScale,
                             ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow)
+                            ifsGlow: settings.ifsGlow,
+                            showHUD: settings.showHUD ? 1 : 0,
+                            activeGesture: Int32(settings.activeGestureIndex))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)

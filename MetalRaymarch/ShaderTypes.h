@@ -60,6 +60,8 @@ typedef struct
     float ifsScale;          // IFS scaling factor (default 1.74)
     float ifsOffset;         // IFS offset parameter (default 0.98)
     float ifsGlow;           // IFS glow intensity multiplier
+    int showHUD;             // Show in-world HUD overlay (0/1)
+    int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
 } Uniforms;
 
 typedef struct
