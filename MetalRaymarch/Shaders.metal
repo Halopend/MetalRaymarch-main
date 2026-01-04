@@ -345,13 +345,12 @@ struct IFSResult {
     float3 color;
 };
 
-IFSResult MapIFS(float3 p) {
+IFSResult MapIFS(float3 p, float mscale, float offset) {
     // Spatial repetition with offset
     p.xy = fmod(p.xy - 1.0, 2.0) - 1.0;
     p.z = abs(p.z) - 0.8;
     
     float4 q = float4(p, 1.0);
-    float mscale = 1.74;
     
     float3 color = float3(0.0);
     float colorRadius = 0.0;
@@ -360,7 +359,7 @@ IFSResult MapIFS(float3 p) {
         q.xyz = abs(q.xyz) - float3(0.3, 1.0, 0.0) + float3(0.6, 0.0, 0.0);
         float ilength = length(q.xyz);
         q = mscale * q / clamp(powr(max(ilength, kPowEpsilon), 2.0), 0.5, 1.0) 
-            - float4(0.98, 0.01, 0.3, 0.0);
+            - float4(offset, 0.01, 0.3, 0.0);
         
         if (q.x * q.y > colorRadius) { color.x += 1.0; }
         else if (q.y * q.z > colorRadius) { color.y += 1.0; }
@@ -381,7 +380,7 @@ struct IFSMarchResult {
     float3 color;
 };
 
-IFSMarchResult MarchIFS(float3 ro, float3 rd, float3 lightDir, float maxT) {
+IFSMarchResult MarchIFS(float3 ro, float3 rd, float3 lightDir, float maxT, float mscale, float offset) {
     float t = 0.0;
     float eps = 3e-6;
     float distfac = 200.0;
@@ -392,7 +391,7 @@ IFSMarchResult MarchIFS(float3 ro, float3 rd, float3 lightDir, float maxT) {
     
     for(int i = 0; i < 100; i++) {
         float3 pos = ro + rd * t;
-        IFSResult mapResult = MapIFS(pos);
+        IFSResult mapResult = MapIFS(pos, mscale, offset);
         float d = mapResult.distance;
         lastColor = mapResult.color;
         
@@ -420,24 +419,24 @@ IFSMarchResult MarchIFS(float3 ro, float3 rd, float3 lightDir, float maxT) {
     return result;
 }
 
-float3 RenderIFS(float3 ro, float3 rd, float time) {
+float3 RenderIFS(float3 ro, float3 rd, float time, float mscale, float offset, float glowMult) {
     float tt = fmod(time, 7.0);
     float tf = tt * tt;
     
     float3 lightDir = ro;
     lightDir.y += tf;
     
-    IFSMarchResult march = MarchIFS(ro, rd, lightDir, 20.0);
+    IFSMarchResult march = MarchIFS(ro, rd, lightDir, 20.0, mscale, offset);
     
     float3 pos = ro + rd * march.t;
     
     // Glow strength based on light proximity
     float glowStr = exp(-abs(pos.y - lightDir.y) / 4.0);
-    march.glow *= glowStr;
+    march.glow *= glowStr * glowMult;
     
     // Secondary glow strength based on camera proximity  
     float glowStr2 = exp(-length(pos - ro) / 6.0);
-    march.glow2 *= glowStr2;
+    march.glow2 *= glowStr2 * glowMult;
     
     // Color from IFS iterations
     float3 color = cos(march.color * 3.0);
@@ -455,7 +454,7 @@ float3 RenderIFS(float3 ro, float3 rd, float time) {
 }
 
 // Full IFS scene render with camera setup
-half3 SceneIFS(float3 cameraPos, float3 rd, float time) {
+half3 SceneIFS(float3 cameraPos, float3 rd, float time, float mscale, float offset, float glowMult) {
     // Camera animation
     float3 ro = float3(0.0, 0.0, -2.0);
     
@@ -470,7 +469,7 @@ half3 SceneIFS(float3 cameraPos, float3 rd, float time) {
     c = cos(angle); s = sin(angle);
     rd.xy = float2(rd.x * c - rd.y * s, rd.x * s + rd.y * c);
     
-    float3 col = clamp(RenderIFS(ro, rd, time), 1e-6, 1e6);
+    float3 col = clamp(RenderIFS(ro, rd, time, mscale, offset, glowMult), 1e-6, 1e6);
     
     // Tone mapping
     col = 1.0 - exp(-0.4 * col);
@@ -1026,7 +1025,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // === SCENE SWITCHING ===
     if (uniforms.sceneIndex == 1) {
         // Scene 1: Glowy IFS
-        half3 col = SceneIFS(cameraPos, rd, time);
+        half3 col = SceneIFS(cameraPos, rd, time, uniforms.ifsScale, uniforms.ifsOffset, uniforms.ifsGlow);
         col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
         output.color = float4(float3(col), 1.0);
         output.depth = 1e-7;  // No depth for volumetric scene

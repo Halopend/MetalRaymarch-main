@@ -475,7 +475,10 @@ actor Renderer {
                             colorIterations: settings.colorIterations,
                             useHierarchical: settings.useHierarchical ? 1 : 0,
                             limitFlash: settings.limitFlash,
-                            sceneIndex: Int32(settings.sceneIndex))
+                            sceneIndex: Int32(settings.sceneIndex),
+                            ifsScale: settings.ifsScale,
+                            ifsOffset: settings.ifsOffset,
+                            ifsGlow: settings.ifsGlow)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -942,7 +945,10 @@ actor Renderer {
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
             limitFlash: settings.limitFlash,
-            sceneIndex: Int32(settings.sceneIndex)
+            sceneIndex: Int32(settings.sceneIndex),
+            ifsScale: settings.ifsScale,
+            ifsOffset: settings.ifsOffset,
+            ifsGlow: settings.ifsGlow
         )
         
         // Copy uniforms to buffer

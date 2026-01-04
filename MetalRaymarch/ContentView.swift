@@ -86,35 +86,41 @@ struct ContentView: View {
                             }
                         })
                         
-                        Text("Min Distance")
-                        Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...1.0)
-                        
-                        Text("Fractal Scale")
-                        Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
-                        
-                        Text("Fractal Iterations")
-                        Slider(value: Binding(get: { Float(appModel.renderSettings.fractalIterations) }, set: { appModel.renderSettings.fractalIterations = Int($0) }), in: 3...15, step: 1)
-                        
-                        Text("Ray Steps")
-                        Slider(value: Binding(get: { Float(appModel.renderSettings.maxRaySteps) }, set: { appModel.renderSettings.maxRaySteps = Int($0) }), in: 16...128, step: 8)
-                        
-                        // Text("Foveation Intensity")
-                        // Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0.0...2.0)
-                        
-                        // Text("Color Mix")
-                        // Slider(value: Binding(get: { appModel.renderSettings.colorMix }, set: { appModel.renderSettings.colorMix = $0 }), in: 0.0...1.0)
-                        
-                        // Text("Glow Intensity")
-                        // Slider(value: Binding(get: { appModel.renderSettings.glowIntensity }, set: { appModel.renderSettings.glowIntensity = $0 }), in: 0.0...1.0)
-                        
-                        Text("Box Folding Limit")
-                        Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.5...2.0)
-                        
-                        Text("Sphere Radius")
-                        Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.1...1.5)
-                        
-                        // Text("Color Iterations")
-                        // Slider(value: Binding(get: { appModel.renderSettings.colorIterations }, set: { appModel.renderSettings.colorIterations = $0 }), in: 2...12, step: 1)
+                        // Scene-specific controls
+                        if appModel.renderSettings.sceneIndex == 0 {
+                            // Mandelbox controls
+                            Group {
+                                Text("Min Distance")
+                                Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...3.0)
+                                
+                                Text("Fractal Scale")
+                                Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
+                                
+                                Text("Fractal Iterations")
+                                Slider(value: Binding(get: { Float(appModel.renderSettings.fractalIterations) }, set: { appModel.renderSettings.fractalIterations = Int($0) }), in: 3...15, step: 1)
+                                
+                                Text("Ray Steps")
+                                Slider(value: Binding(get: { Float(appModel.renderSettings.maxRaySteps) }, set: { appModel.renderSettings.maxRaySteps = Int($0) }), in: 16...128, step: 8)
+                                
+                                Text("Box Folding Limit")
+                                Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.1...5.0)
+                                
+                                Text("Sphere Radius")
+                                Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.01...2.0)
+                            }
+                        } else {
+                            // IFS controls
+                            Group {
+                                Text("IFS Scale: \(appModel.renderSettings.ifsScale, specifier: "%.2f")")
+                                Slider(value: Binding(get: { appModel.renderSettings.ifsScale }, set: { appModel.renderSettings.ifsScale = $0 }), in: 1.2...2.5)
+                                
+                                Text("IFS Offset: \(appModel.renderSettings.ifsOffset, specifier: "%.2f")")
+                                Slider(value: Binding(get: { appModel.renderSettings.ifsOffset }, set: { appModel.renderSettings.ifsOffset = $0 }), in: 0.5...1.5)
+                                
+                                Text("Glow Intensity: \(appModel.renderSettings.ifsGlow, specifier: "%.2f")")
+                                Slider(value: Binding(get: { appModel.renderSettings.ifsGlow }, set: { appModel.renderSettings.ifsGlow = $0 }), in: 0.1...3.0)
+                            }
+                        }
 
                         Text("FPS: \(appModel.fps, specifier: "%.1f")")
                             .font(.caption)

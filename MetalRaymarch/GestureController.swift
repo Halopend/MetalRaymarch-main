@@ -113,10 +113,15 @@ final class GestureController {
     // Value smoothing (higher = slower/smoother)
     private let valueSmoothingFactor: Float = 0.85
     
-    // Parameter ranges
+    // Mandelbox parameter ranges
     private let minDistanceRange: ClosedRange<Float> = 0.001...3.0
     private let foldingLimitRange: ClosedRange<Float> = 0.1...5.0
     private let sphereRadiusRange: ClosedRange<Float> = 0.01...2.0
+    
+    // IFS parameter ranges
+    private let ifsScaleRange: ClosedRange<Float> = 1.2...2.5
+    private let ifsOffsetRange: ClosedRange<Float> = 0.5...1.5
+    private let ifsGlowRange: ClosedRange<Float> = 0.1...3.0
     
     // Single-hand drag sensitivity
     private let translateSensitivity: Float = 1.0
@@ -126,19 +131,25 @@ final class GestureController {
     private var rightHand: HandData = .zero
     
     // Two-hand gesture states (one per finger pair)
-    private var indexGestureState = TwoHandGestureState()    // minDistance
-    private var middleGestureState = TwoHandGestureState()   // foldingLimit  
-    private var ringGestureState = TwoHandGestureState()     // sphereRadius
+    private var indexGestureState = TwoHandGestureState()    // minDistance / ifsScale
+    private var middleGestureState = TwoHandGestureState()   // foldingLimit / ifsOffset
+    private var ringGestureState = TwoHandGestureState()     // sphereRadius / ifsGlow
     
     // Single-hand drag state
     private var rightIndexDragActive: Bool = false
     private var rightIndexDragStartPos: SIMD3<Float> = .zero
     private var rightIndexPrevPos: SIMD3<Float> = .zero
     
-    // Smoothed output values
+    // Smoothed output values - Mandelbox
     private var smoothedMinDistance: SmoothedValue!
     private var smoothedFoldingLimit: SmoothedValue!
     private var smoothedSphereRadius: SmoothedValue!
+    
+    // Smoothed output values - IFS
+    private var smoothedIFSScale: SmoothedValue!
+    private var smoothedIFSOffset: SmoothedValue!
+    private var smoothedIFSGlow: SmoothedValue!
+    
     private var smoothedPosition: SIMD3<Float> = .zero
     
     // Reference to render settings
@@ -147,10 +158,16 @@ final class GestureController {
     init(renderSettings: RenderSettings) {
         self.renderSettings = renderSettings
         
-        // Initialize smoothed values from current settings
+        // Initialize Mandelbox smoothed values
         smoothedMinDistance = SmoothedValue(initial: renderSettings.minDistance, smoothing: valueSmoothingFactor)
         smoothedFoldingLimit = SmoothedValue(initial: renderSettings.foldingLimit, smoothing: valueSmoothingFactor)
         smoothedSphereRadius = SmoothedValue(initial: renderSettings.sphereRadius, smoothing: valueSmoothingFactor)
+        
+        // Initialize IFS smoothed values
+        smoothedIFSScale = SmoothedValue(initial: renderSettings.ifsScale, smoothing: valueSmoothingFactor)
+        smoothedIFSOffset = SmoothedValue(initial: renderSettings.ifsOffset, smoothing: valueSmoothingFactor)
+        smoothedIFSGlow = SmoothedValue(initial: renderSettings.ifsGlow, smoothing: valueSmoothingFactor)
+        
         smoothedPosition = renderSettings.position
     }
     
@@ -222,40 +239,69 @@ final class GestureController {
     // MARK: - Gesture Processing
     
     private func processGestures() {
+        guard let settings = renderSettings else { return }
+        
+        let isIFS = settings.sceneIndex == 1
+        
         // TWO-HAND gestures (both hands pinching same finger)
         // Pass startParameterValue INTO closure to avoid exclusive access conflict
         // Closure returns true if limit was hit
+        
+        // INDEX FINGER: minDistance (Mandelbox) / ifsScale (IFS)
         processTwoHandGesture(digit: 1, state: &indexGestureState, parameterUpdate: { [weak self] ratio, startValue in
             guard let self = self else { return false }
             let newValue = startValue * ratio
-            let clamped = simd_clamp(newValue, self.minDistanceRange.lowerBound, self.minDistanceRange.upperBound)
-            self.smoothedMinDistance.target = clamped
-            return newValue != clamped  // Hit limit
+            if isIFS {
+                let clamped = simd_clamp(newValue, self.ifsScaleRange.lowerBound, self.ifsScaleRange.upperBound)
+                self.smoothedIFSScale.target = clamped
+                return newValue != clamped
+            } else {
+                let clamped = simd_clamp(newValue, self.minDistanceRange.lowerBound, self.minDistanceRange.upperBound)
+                self.smoothedMinDistance.target = clamped
+                return newValue != clamped
+            }
         })
         
+        // MIDDLE FINGER: foldingLimit (Mandelbox) / ifsOffset (IFS)
         processTwoHandGesture(digit: 2, state: &middleGestureState, parameterUpdate: { [weak self] ratio, startValue in
             guard let self = self else { return false }
             let newValue = startValue * ratio
-            let clamped = simd_clamp(newValue, self.foldingLimitRange.lowerBound, self.foldingLimitRange.upperBound)
-            self.smoothedFoldingLimit.target = clamped
-            return newValue != clamped
+            if isIFS {
+                let clamped = simd_clamp(newValue, self.ifsOffsetRange.lowerBound, self.ifsOffsetRange.upperBound)
+                self.smoothedIFSOffset.target = clamped
+                return newValue != clamped
+            } else {
+                let clamped = simd_clamp(newValue, self.foldingLimitRange.lowerBound, self.foldingLimitRange.upperBound)
+                self.smoothedFoldingLimit.target = clamped
+                return newValue != clamped
+            }
         })
         
+        // RING FINGER: sphereRadius (Mandelbox) / ifsGlow (IFS)
         processTwoHandGesture(digit: 3, state: &ringGestureState, parameterUpdate: { [weak self] ratio, startValue in
             guard let self = self else { return false }
             let newValue = startValue * ratio
-            let clamped = simd_clamp(newValue, self.sphereRadiusRange.lowerBound, self.sphereRadiusRange.upperBound)
-            self.smoothedSphereRadius.target = clamped
-            return newValue != clamped
+            if isIFS {
+                let clamped = simd_clamp(newValue, self.ifsGlowRange.lowerBound, self.ifsGlowRange.upperBound)
+                self.smoothedIFSGlow.target = clamped
+                return newValue != clamped
+            } else {
+                let clamped = simd_clamp(newValue, self.sphereRadiusRange.lowerBound, self.sphereRadiusRange.upperBound)
+                self.smoothedSphereRadius.target = clamped
+                return newValue != clamped
+            }
         })
         
         // SINGLE-HAND gesture: Right index pinch drag → translate
         processRightIndexDrag()
         
-        // Update smoothing
+        // Update smoothing for all values
         smoothedMinDistance.update()
         smoothedFoldingLimit.update()
         smoothedSphereRadius.update()
+        smoothedIFSScale.update()
+        smoothedIFSOffset.update()
+        smoothedIFSGlow.update()
     }
     
     /// Process a two-hand scale gesture for a specific finger
@@ -290,16 +336,19 @@ final class GestureController {
             let rightPos = rightHand.pinchPosition(digit: digit)
             state.startDistance = simd_length(leftPos - rightPos)
             
-            // Store starting parameter value
+            // Store starting parameter value based on scene
+            let isIFS = settings.sceneIndex == 1
             switch digit {
-            case 1: state.startParameterValue = settings.minDistance
-            case 2: state.startParameterValue = settings.foldingLimit
-            case 3: state.startParameterValue = settings.sphereRadius
+            case 1: state.startParameterValue = isIFS ? settings.ifsScale : settings.minDistance
+            case 2: state.startParameterValue = isIFS ? settings.ifsOffset : settings.foldingLimit
+            case 3: state.startParameterValue = isIFS ? settings.ifsGlow : settings.sphereRadius
             default: state.startParameterValue = 1.0
             }
             
             #if DEBUG
-            let paramName = ["", "minDistance", "foldingLimit", "sphereRadius"][min(digit, 3)]
+            let mandelboxNames = ["", "minDistance", "foldingLimit", "sphereRadius"]
+            let ifsNames = ["", "ifsScale", "ifsOffset", "ifsGlow"]
+            let paramName = isIFS ? ifsNames[min(digit, 3)] : mandelboxNames[min(digit, 3)]
             print("🤲 Two-hand \(paramName) gesture STARTED (value: \(state.startParameterValue), distance: \(String(format: "%.2f", state.startDistance * 100))cm)")
             #endif
         }
@@ -394,9 +443,15 @@ final class GestureController {
     private func applySmoothedValues() {
         guard let settings = renderSettings else { return }
         
+        // Mandelbox parameters
         settings.minDistance = smoothedMinDistance.current
         settings.foldingLimit = smoothedFoldingLimit.current
         settings.sphereRadius = smoothedSphereRadius.current
+        
+        // IFS parameters
+        settings.ifsScale = smoothedIFSScale.current
+        settings.ifsOffset = smoothedIFSOffset.current
+        settings.ifsGlow = smoothedIFSGlow.current
         
         // Position smoothing (simple exponential)
         let posSmoothing: Float = 0.8

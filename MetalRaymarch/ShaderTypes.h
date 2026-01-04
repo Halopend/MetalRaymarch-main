@@ -57,6 +57,9 @@ typedef struct
     int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int sceneIndex;          // 0 = Mandelbox, 1 = Glowy IFS
+    float ifsScale;          // IFS scaling factor (default 1.74)
+    float ifsOffset;         // IFS offset parameter (default 0.98)
+    float ifsGlow;           // IFS glow intensity multiplier
 } Uniforms;
 
 typedef struct
@@ -86,6 +89,9 @@ typedef struct
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
     int sceneIndex;              // 0 = Mandelbox, 1 = Glowy IFS
+    float ifsScale;              // IFS scaling factor
+    float ifsOffset;             // IFS offset parameter
+    float ifsGlow;               // IFS glow intensity
 } TileUniforms;
 
 #endif /* ShaderTypes_h */

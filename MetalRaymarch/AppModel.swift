@@ -66,6 +66,11 @@ class RenderSettings {
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     private var _sceneIndex: Int = 0                 // 0 = Mandelbox, 1 = Glowy IFS
+    
+    // IFS Scene parameters
+    private var _ifsScale: Float = 1.74              // IFS scaling factor (default 1.74)
+    private var _ifsOffset: Float = 0.98             // IFS offset parameter (default 0.98)
+    private var _ifsGlow: Float = 1.0                // IFS glow intensity multiplier
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -182,6 +187,22 @@ class RenderSettings {
     var sceneIndex: Int {
         get { lock.withLock { _sceneIndex } }
         set { lock.withLock { _sceneIndex = newValue } }
+    }
+    
+    // IFS Scene parameters
+    var ifsScale: Float {
+        get { lock.withLock { _ifsScale } }
+        set { lock.withLock { _ifsScale = newValue } }
+    }
+    
+    var ifsOffset: Float {
+        get { lock.withLock { _ifsOffset } }
+        set { lock.withLock { _ifsOffset = newValue } }
+    }
+    
+    var ifsGlow: Float {
+        get { lock.withLock { _ifsGlow } }
+        set { lock.withLock { _ifsGlow = newValue } }
     }
 }
 
