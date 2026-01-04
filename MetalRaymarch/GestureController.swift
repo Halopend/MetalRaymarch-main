@@ -2,7 +2,15 @@
 //  GestureController.swift
 //  MetalRaymarch
 //
-//  Hand gesture controls for fractal parameters
+//  Two-hand gesture controls for fractal parameters
+//
+//  Usage:
+//  - TWO-HAND PINCH: Pinch with both hands simultaneously
+//    * Index fingers = minDistance (pull apart = increase)
+//    * Middle fingers = foldingLimit
+//    * Ring fingers = sphereRadius
+//  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
+//    * Right hand index = translate position
 //
 
 import Foundation
@@ -27,62 +35,123 @@ struct HandData {
     var ringPinch: Float = 0
     var pinkyPinch: Float = 0
     
+    /// Get pinch position (midpoint between thumb and finger)
+    func pinchPosition(digit: Int) -> SIMD3<Float> {
+        let fingerTip: SIMD3<Float>
+        switch digit {
+        case 1: fingerTip = indexTip
+        case 2: fingerTip = middleTip
+        case 3: fingerTip = ringTip
+        case 4: fingerTip = pinkyTip
+        default: fingerTip = indexTip
+        }
+        return (thumbTip + fingerTip) * 0.5
+    }
+    
+    func pinchStrength(digit: Int) -> Float {
+        switch digit {
+        case 1: return indexPinch
+        case 2: return middlePinch
+        case 3: return ringPinch
+        case 4: return pinkyPinch
+        default: return indexPinch
+        }
+    }
+    
     static var zero: HandData { HandData() }
 }
 
-// MARK: - Gesture State
+// MARK: - Smoothed Value
 
-/// Tracks active gesture state for delta calculations
-struct GestureState {
+/// Value with exponential smoothing - smooth transitions, no jitter
+final class SmoothedValue {
+    var target: Float
+    private(set) var current: Float
+    let smoothing: Float  // 0 = instant, 0.9 = very slow
+    
+    init(initial: Float, smoothing: Float = 0.85) {
+        self.target = initial
+        self.current = initial
+        self.smoothing = smoothing
+    }
+    
+    /// Update current value towards target. Call once per frame.
+    func update() {
+        current = current * smoothing + target * (1 - smoothing)
+    }
+    
+    /// Snap immediately to target (no smoothing)
+    func snap() {
+        current = target
+    }
+}
+
+// MARK: - Two-Hand Gesture State
+
+/// State for a two-hand scale gesture
+struct TwoHandGestureState {
     var isActive: Bool = false
-    var startDistance: Float = 0   // Finger spread distance when gesture started
-    var previousDistance: Float = 0
+    var startDistance: Float = 0      // Distance between hands when gesture started
+    var startParameterValue: Float = 0  // Parameter value when gesture started
 }
 
 // MARK: - Gesture Controller
 
 /// Processes hand tracking data and maps gestures to render parameters
+/// 
+/// TWO-HAND DESIGN:
+/// - Both hands must pinch with the SAME finger to activate a gesture
+/// - Parameter scales RELATIVELY: if hands move 2× apart, parameter doubles
+/// - Smoothing prevents jitter and provides natural feel
 @MainActor
 final class GestureController {
     
-    // Pinch thresholds with hysteresis to prevent flickering
-    private let pinchActivateThreshold: Float = 0.85   // Must exceed to start gesture
-    private let pinchReleaseThreshold: Float = 0.70    // Must fall below to end gesture
+    // Pinch thresholds with hysteresis (slightly higher than FractalVision for reliability)
+    private let pinchActivateThreshold: Float = 0.90   // Must exceed to start gesture
+    private let pinchReleaseThreshold: Float = 0.75    // Must fall below to end gesture
     
-    // Spread gesture sensitivity (meters of finger spread to parameter range)
-    private let spreadSensitivity: Float = 0.1  // 10cm spread = full parameter range
-    private let spreadSmoothing: Float = 0.35   // 0..1; smaller = slower changes
-
-    // Value ranges (wider than before to reduce clamping)
-    private let minDistanceRange: ClosedRange<Float> = 0.0...3.0
-    private let foldingLimitRange: ClosedRange<Float> = 0.0...3.0
-
-    private let pinkySensitivity: Float = 0.1   // Spread thumb–pinky to adjust sphere radius
-    private let pinkySmoothing: Float = 0.35
-
-    private let ringSensitivity: Float = 0.1    // Spread thumb–ring to adjust folding limit
-    private let ringSmoothing: Float = 0.35
-
-    private let translateSensitivity: Float = 1.2 // meters per meter of palm drag (middle pinch)
-    private let translateSmoothing: Float = 0.35
+    // Value smoothing (higher = slower/smoother)
+    private let valueSmoothingFactor: Float = 0.85
+    
+    // Parameter ranges
+    private let minDistanceRange: ClosedRange<Float> = 0.001...3.0
+    private let foldingLimitRange: ClosedRange<Float> = 0.1...5.0
+    private let sphereRadiusRange: ClosedRange<Float> = 0.01...2.0
+    
+    // Single-hand drag sensitivity
+    private let translateSensitivity: Float = 1.0
     
     // Hand tracking state
     private var leftHand: HandData = .zero
     private var rightHand: HandData = .zero
     
-    // Gesture states for each mapping
-    private var middleFingerSpreadState = GestureState()
-    private var pinkySpreadState = GestureState()
-    private var ringSpreadState = GestureState()
-    private var rightMiddleDragActive: Bool = false
-    private var rightMiddleDragStart: SIMD3<Float> = .zero
-    private var rightMiddlePrevPalm: SIMD3<Float> = .zero
+    // Two-hand gesture states (one per finger pair)
+    private var indexGestureState = TwoHandGestureState()    // minDistance
+    private var middleGestureState = TwoHandGestureState()   // foldingLimit  
+    private var ringGestureState = TwoHandGestureState()     // sphereRadius
+    
+    // Single-hand drag state
+    private var rightIndexDragActive: Bool = false
+    private var rightIndexDragStartPos: SIMD3<Float> = .zero
+    private var rightIndexPrevPos: SIMD3<Float> = .zero
+    
+    // Smoothed output values
+    private var smoothedMinDistance: SmoothedValue!
+    private var smoothedFoldingLimit: SmoothedValue!
+    private var smoothedSphereRadius: SmoothedValue!
+    private var smoothedPosition: SIMD3<Float> = .zero
     
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
     
     init(renderSettings: RenderSettings) {
         self.renderSettings = renderSettings
+        
+        // Initialize smoothed values from current settings
+        smoothedMinDistance = SmoothedValue(initial: renderSettings.minDistance, smoothing: valueSmoothingFactor)
+        smoothedFoldingLimit = SmoothedValue(initial: renderSettings.foldingLimit, smoothing: valueSmoothingFactor)
+        smoothedSphereRadius = SmoothedValue(initial: renderSettings.sphereRadius, smoothing: valueSmoothingFactor)
+        smoothedPosition = renderSettings.position
     }
     
     // MARK: - Hand Tracking Updates
@@ -95,6 +164,9 @@ final class GestureController {
         
         // Process all gesture mappings
         processGestures()
+        
+        // Apply smoothed values to settings
+        applySmoothedValues()
     }
     
     @available(visionOS 2.0, *)
@@ -150,212 +222,188 @@ final class GestureController {
     // MARK: - Gesture Processing
     
     private func processGestures() {
-        // Middle finger spread → minDistance
-        processMiddleFingerSpread()
-
-        // Pinky spread → sphereRadius
-        processPinkySpread()
-
-        // Ring spread → foldingLimit
-        processRingSpread()
-
-        // Right middle pinch drag → position translate
-        processRightMiddleDrag()
+        // TWO-HAND gestures (both hands pinching same finger)
+        // Pass startParameterValue INTO closure to avoid exclusive access conflict
+        // Closure returns true if limit was hit
+        processTwoHandGesture(digit: 1, state: &indexGestureState, parameterUpdate: { [weak self] ratio, startValue in
+            guard let self = self else { return false }
+            let newValue = startValue * ratio
+            let clamped = simd_clamp(newValue, self.minDistanceRange.lowerBound, self.minDistanceRange.upperBound)
+            self.smoothedMinDistance.target = clamped
+            return newValue != clamped  // Hit limit
+        })
         
-        // Add more gesture mappings here...
+        processTwoHandGesture(digit: 2, state: &middleGestureState, parameterUpdate: { [weak self] ratio, startValue in
+            guard let self = self else { return false }
+            let newValue = startValue * ratio
+            let clamped = simd_clamp(newValue, self.foldingLimitRange.lowerBound, self.foldingLimitRange.upperBound)
+            self.smoothedFoldingLimit.target = clamped
+            return newValue != clamped
+        })
+        
+        processTwoHandGesture(digit: 3, state: &ringGestureState, parameterUpdate: { [weak self] ratio, startValue in
+            guard let self = self else { return false }
+            let newValue = startValue * ratio
+            let clamped = simd_clamp(newValue, self.sphereRadiusRange.lowerBound, self.sphereRadiusRange.upperBound)
+            self.smoothedSphereRadius.target = clamped
+            return newValue != clamped
+        })
+        
+        // SINGLE-HAND gesture: Right index pinch drag → translate
+        processRightIndexDrag()
+        
+        // Update smoothing
+        smoothedMinDistance.update()
+        smoothedFoldingLimit.update()
+        smoothedSphereRadius.update()
     }
     
-    /// Middle finger pinch + spread apart → controls minDistance
-    /// Start: Pinch middle finger to thumb on EITHER hand
-    /// Control: While holding pinch, spread thumb and middle finger apart to increase minDistance
-    private func processMiddleFingerSpread() {
+    /// Process a two-hand scale gesture for a specific finger
+    /// - Parameters:
+    ///   - digit: 1=index, 2=middle, 3=ring, 4=pinky
+    ///   - state: The gesture state to track
+    ///   - parameterUpdate: Closure called with (scale ratio, start parameter value), returns true if limit hit
+    private func processTwoHandGesture(digit: Int, state: inout TwoHandGestureState, parameterUpdate: (Float, Float) -> Bool) {
         guard let settings = renderSettings else { return }
         
-        // Check if either hand has middle finger pinch active
-        let leftActive = isPinchActive(value: leftHand.middlePinch, wasActive: middleFingerSpreadState.isActive && leftHand.isTracked)
-        let rightActive = isPinchActive(value: rightHand.middlePinch, wasActive: middleFingerSpreadState.isActive && rightHand.isTracked)
+        let leftPinch = leftHand.pinchStrength(digit: digit)
+        let rightPinch = rightHand.pinchStrength(digit: digit)
         
-        // Use whichever hand is active (prefer left if both)
-        let activeHand: HandData?
-        if leftActive && leftHand.isTracked {
-            activeHand = leftHand
-        } else if rightActive && rightHand.isTracked {
-            activeHand = rightHand
+        // Check if BOTH hands are pinching (with hysteresis)
+        let bothActive: Bool
+        if state.isActive {
+            // Already active - use release threshold
+            bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         leftPinch >= pinchReleaseThreshold &&
+                         rightPinch >= pinchReleaseThreshold
         } else {
-            activeHand = nil
+            // Not active - use activate threshold
+            bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         leftPinch >= pinchActivateThreshold &&
+                         rightPinch >= pinchActivateThreshold
         }
         
-        let isActive = activeHand != nil
-        
         // Gesture just started
-        if isActive && !middleFingerSpreadState.isActive {
-            middleFingerSpreadState.isActive = true
-            if let hand = activeHand {
-                middleFingerSpreadState.startDistance = simd_length(hand.thumbTip - hand.middleTip)
-                middleFingerSpreadState.previousDistance = middleFingerSpreadState.startDistance
+        if bothActive && !state.isActive {
+            state.isActive = true
+            let leftPos = leftHand.pinchPosition(digit: digit)
+            let rightPos = rightHand.pinchPosition(digit: digit)
+            state.startDistance = simd_length(leftPos - rightPos)
+            
+            // Store starting parameter value
+            switch digit {
+            case 1: state.startParameterValue = settings.minDistance
+            case 2: state.startParameterValue = settings.foldingLimit
+            case 3: state.startParameterValue = settings.sphereRadius
+            default: state.startParameterValue = 1.0
             }
+            
             #if DEBUG
-            print("🤏 Middle finger spread gesture STARTED (minDistance: \(settings.minDistance))")
+            let paramName = ["", "minDistance", "foldingLimit", "sphereRadius"][min(digit, 3)]
+            print("🤲 Two-hand \(paramName) gesture STARTED (value: \(state.startParameterValue), distance: \(String(format: "%.2f", state.startDistance * 100))cm)")
             #endif
         }
         
-        // Gesture active - update parameter
-        if isActive, let hand = activeHand {
-            let currentDistance = simd_length(hand.thumbTip - hand.middleTip)
-            let deltaDistance = currentDistance - middleFingerSpreadState.previousDistance
-
-            // Map spread movement to relative parameter change
-            let parameterDelta = deltaDistance / spreadSensitivity
-            // Smooth the per-frame change to avoid jittery jumps
-            let smoothedStep = parameterDelta * spreadSmoothing
-            let newValue = simd_clamp(
-                settings.minDistance + smoothedStep,
-                minDistanceRange.lowerBound,
-                minDistanceRange.upperBound
-            )
-
-            settings.minDistance = newValue
-            middleFingerSpreadState.previousDistance = currentDistance
+        // Gesture active - calculate relative scale
+        if bothActive {
+            let leftPos = leftHand.pinchPosition(digit: digit)
+            let rightPos = rightHand.pinchPosition(digit: digit)
+            let currentDistance = simd_length(leftPos - rightPos)
+            
+            // Calculate ratio: how much has distance changed relative to start?
+            // Avoid division by zero
+            let ratio = state.startDistance > 0.01 ? currentDistance / state.startDistance : 1.0
+            
+            // Pass both ratio AND start value to avoid exclusive access conflict
+            // Returns true if we hit a limit
+            let hitLimit = parameterUpdate(ratio, state.startParameterValue)
+            
+            // Trigger screen flash when hitting limits
+            if hitLimit {
+                settings.triggerLimitFlash()
+            }
             
             #if DEBUG
-            // Throttled logging
             struct DebugState { static var counter = 0 }
             DebugState.counter += 1
-            if DebugState.counter % 30 == 0 {
-                print("🤏 minDistance: \(String(format: "%.3f", newValue)) (delta: \(String(format: "%.3f", deltaDistance * 100))cm)")
+            if DebugState.counter % 60 == 0 {
+                print("🤲 ratio: \(String(format: "%.2f", ratio))× (distance: \(String(format: "%.1f", currentDistance * 100))cm)")
             }
             #endif
         }
         
         // Gesture ended
-        if !isActive && middleFingerSpreadState.isActive {
-            middleFingerSpreadState.isActive = false
+        if !bothActive && state.isActive {
+            state.isActive = false
             #if DEBUG
-            print("🤏 Middle finger spread gesture ENDED (minDistance: \(settings.minDistance))")
+            let paramName = ["", "minDistance", "foldingLimit", "sphereRadius"][min(digit, 3)]
+            print("🤲 Two-hand \(paramName) gesture ENDED")
             #endif
         }
     }
-
-    /// Pinky pinch + spread → controls sphereRadius
-    private func processPinkySpread() {
+    
+    /// Right-hand index pinch drag → position translate
+    private func processRightIndexDrag() {
         guard let settings = renderSettings else { return }
-
-        let leftActive = isPinchActive(value: leftHand.pinkyPinch, wasActive: pinkySpreadState.isActive && leftHand.isTracked)
-        let rightActive = isPinchActive(value: rightHand.pinkyPinch, wasActive: pinkySpreadState.isActive && rightHand.isTracked)
-
-        let activeHand: HandData?
-        if leftActive && leftHand.isTracked {
-            activeHand = leftHand
-        } else if rightActive && rightHand.isTracked {
-            activeHand = rightHand
+        
+        // Only if NOT doing a two-hand gesture with index fingers
+        guard !indexGestureState.isActive else {
+            rightIndexDragActive = false
+            return
+        }
+        
+        let rightPinch = rightHand.indexPinch
+        let active: Bool
+        if rightIndexDragActive {
+            active = rightHand.isTracked && rightPinch >= pinchReleaseThreshold
         } else {
-            activeHand = nil
+            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold && !leftHand.isTracked
         }
-
-        let isActive = activeHand != nil
-
-        if isActive && !pinkySpreadState.isActive {
-            pinkySpreadState.isActive = true
-            if let hand = activeHand {
-                let d = simd_length(hand.thumbTip - hand.pinkyTip)
-                pinkySpreadState.startDistance = d
-                pinkySpreadState.previousDistance = d
-            }
+        
+        // Gesture started
+        if active && !rightIndexDragActive {
+            rightIndexDragActive = true
+            rightIndexDragStartPos = settings.position
+            rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
+            #if DEBUG
+            print("👆 Right index drag STARTED")
+            #endif
         }
-
-        if isActive, let hand = activeHand {
-            let currentDistance = simd_length(hand.thumbTip - hand.pinkyTip)
-            let deltaDistance = currentDistance - pinkySpreadState.previousDistance
-
-            let parameterDelta = deltaDistance / pinkySensitivity
-            let smoothedStep = parameterDelta * pinkySmoothing
-            let newValue = max(0.01, settings.sphereRadius + smoothedStep)
-
-            settings.sphereRadius = newValue
-            pinkySpreadState.previousDistance = currentDistance
-        }
-
-        if !isActive && pinkySpreadState.isActive {
-            pinkySpreadState.isActive = false
-        }
-    }
-
-    /// Ring pinch + spread → controls foldingLimit
-    private func processRingSpread() {
-        guard let settings = renderSettings else { return }
-
-        let leftActive = isPinchActive(value: leftHand.ringPinch, wasActive: ringSpreadState.isActive && leftHand.isTracked)
-        let rightActive = isPinchActive(value: rightHand.ringPinch, wasActive: ringSpreadState.isActive && rightHand.isTracked)
-
-        let activeHand: HandData?
-        if leftActive && leftHand.isTracked {
-            activeHand = leftHand
-        } else if rightActive && rightHand.isTracked {
-            activeHand = rightHand
-        } else {
-            activeHand = nil
-        }
-
-        let isActive = activeHand != nil
-
-        if isActive && !ringSpreadState.isActive {
-            ringSpreadState.isActive = true
-            if let hand = activeHand {
-                let d = simd_length(hand.thumbTip - hand.ringTip)
-                ringSpreadState.startDistance = d
-                ringSpreadState.previousDistance = d
-            }
-        }
-
-        if isActive, let hand = activeHand {
-            let currentDistance = simd_length(hand.thumbTip - hand.ringTip)
-            let deltaDistance = currentDistance - ringSpreadState.previousDistance
-
-            let parameterDelta = deltaDistance / ringSensitivity
-            let smoothedStep = parameterDelta * ringSmoothing
-            let newValue = simd_clamp(
-                settings.foldingLimit + smoothedStep,
-                foldingLimitRange.lowerBound,
-                foldingLimitRange.upperBound
-            )
-
-            settings.foldingLimit = newValue
-            ringSpreadState.previousDistance = currentDistance
-        }
-
-        if !isActive && ringSpreadState.isActive {
-            ringSpreadState.isActive = false
-        }
-    }
-
-    /// Right-hand middle pinch drag → position (x/z/y via palm movement)
-    private func processRightMiddleDrag() {
-        guard let settings = renderSettings else { return }
-
-        // Only right hand for translation
-        let active = isPinchActive(value: rightHand.middlePinch, wasActive: rightMiddleDragActive && rightHand.isTracked)
-
-        if active && !rightMiddleDragActive {
-            rightMiddleDragActive = true
-            rightMiddleDragStart = settings.position
-            rightMiddlePrevPalm = rightHand.palmPosition
-        }
-
+        
+        // Gesture active - move position
         if active {
-            let currentPalm = rightHand.palmPosition
-            let delta = currentPalm - rightMiddlePrevPalm
-
-            // Map palm movement to world translation (x,y,z)
-            let step = delta * translateSensitivity * translateSmoothing
-            settings.position = rightMiddleDragStart + step
-            rightMiddleDragStart = settings.position
-            rightMiddlePrevPalm = currentPalm
+            let currentPos = rightHand.pinchPosition(digit: 1)
+            let delta = currentPos - rightIndexPrevPos
+            
+            // Apply translation (world space)
+            smoothedPosition = smoothedPosition + delta * translateSensitivity
+            rightIndexPrevPos = currentPos
         }
-
-        if !active && rightMiddleDragActive {
-            rightMiddleDragActive = false
+        
+        // Gesture ended
+        if !active && rightIndexDragActive {
+            rightIndexDragActive = false
+            #if DEBUG
+            print("👆 Right index drag ENDED")
+            #endif
         }
     }
+    
+    // MARK: - Apply to Settings
+    
+    private func applySmoothedValues() {
+        guard let settings = renderSettings else { return }
+        
+        settings.minDistance = smoothedMinDistance.current
+        settings.foldingLimit = smoothedFoldingLimit.current
+        settings.sphereRadius = smoothedSphereRadius.current
+        
+        // Position smoothing (simple exponential)
+        let posSmoothing: Float = 0.8
+        settings.position = settings.position * posSmoothing + smoothedPosition * (1 - posSmoothing)
+    }
+    
+    // MARK: - Pinch Detection
     
     /// Check if pinch is active with hysteresis
     private func isPinchActive(value: Float, wasActive: Bool) -> Bool {

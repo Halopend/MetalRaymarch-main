@@ -64,6 +64,8 @@ class RenderSettings {
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
+    private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
+    private var _sceneIndex: Int = 0                 // 0 = Mandelbox, 1 = Glowy IFS
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -152,6 +154,34 @@ class RenderSettings {
     var debugHierarchical: Bool {
         get { lock.withLock { _debugHierarchical } }
         set { lock.withLock { _debugHierarchical = newValue } }
+    }
+    
+    /// Flash intensity for limit feedback (0-1). Set to 1.0 to trigger flash, decays automatically.
+    var limitFlash: Float {
+        get { lock.withLock { _limitFlash } }
+        set { lock.withLock { _limitFlash = newValue } }
+    }
+    
+    /// Decay the limit flash. Call once per frame.
+    func updateLimitFlash(deltaTime: Float) {
+        lock.withLock {
+            if _limitFlash > 0 {
+                _limitFlash = max(0, _limitFlash - deltaTime * 4.0) // Fade over ~0.25s
+            }
+        }
+    }
+    
+    /// Trigger a limit flash
+    func triggerLimitFlash() {
+        lock.withLock {
+            _limitFlash = 1.0
+        }
+    }
+    
+    /// Current scene: 0 = Mandelbox, 1 = Glowy IFS
+    var sceneIndex: Int {
+        get { lock.withLock { _sceneIndex } }
+        set { lock.withLock { _sceneIndex = newValue } }
     }
 }
 

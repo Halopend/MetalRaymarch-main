@@ -64,6 +64,10 @@ actor Renderer {
     var tileRaymarchPipeline2x2: MTLComputePipelineState?
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
+    
+    // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
+    var computeOutputTexture: MTLTexture?
+    var computeOutputSize: SIMD2<Int> = .zero
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -426,6 +430,9 @@ actor Renderer {
 
         let settings = appModel.renderSettings
         
+        // Decay the limit flash effect
+        settings.updateLimitFlash(deltaTime: 1.0 / 90.0)  // Assume 90fps
+        
         // Smoothing
         let t: Float = 0.1
         smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
@@ -466,7 +473,9 @@ actor Renderer {
                             foldingLimit: settings.foldingLimit,
                             sphereRadius: settings.sphereRadius,
                             colorIterations: settings.colorIterations,
-                            useHierarchical: settings.useHierarchical ? 1 : 0)
+                            useHierarchical: settings.useHierarchical ? 1 : 0,
+                            limitFlash: settings.limitFlash,
+                            sceneIndex: Int32(settings.sceneIndex))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -893,17 +902,30 @@ actor Renderer {
         let settings = appModel.renderSettings
         let view = drawable.views[viewIndex]
         
-        // Build TileUniforms for this eye
+        // Build model matrix (must match fragment shader exactly!)
+        let t: Float = 0.1
+        let currentSmoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
+        let currentSmoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
+        
+        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
+        let translationMatrix = matrix4x4_translation(currentSmoothedPosition.x, currentSmoothedPosition.y, currentSmoothedPosition.z)
+        let scaleMatrix = matrix4x4_scale(currentSmoothedScale, currentSmoothedScale, currentSmoothedScale)
+        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        
+        // Build view matrix (same as fragment shader)
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         let viewMatrix = (deviceTransform * view.transform).inverse
         let projection = drawable.computeProjection(viewIndex: viewIndex)
         
-        // Get camera position from inverse view matrix
-        let invViewMatrix = viewMatrix.inverse
-        let cameraPos = SIMD3<Float>(invViewMatrix.columns.3.x, invViewMatrix.columns.3.y, invViewMatrix.columns.3.z)
+        // Model-view matrix and its inverse (THIS WAS MISSING!)
+        let modelView = viewMatrix * modelMatrix
+        let inverseModelView = modelView.inverse
+        
+        // Get camera position from inverse model-view matrix (in model space)
+        let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
         
         var tileUniforms = TileUniforms(
-            invViewMatrix: invViewMatrix,
+            invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
             cameraPos: cameraPos,
             time: Float(appModel.clock.time),
@@ -918,7 +940,9 @@ actor Renderer {
             colorIterations: Int32(settings.colorIterations),
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
-            debugHierarchical: settings.debugHierarchical ? 1 : 0
+            debugHierarchical: settings.debugHierarchical ? 1 : 0,
+            limitFlash: settings.limitFlash,
+            sceneIndex: Int32(settings.sceneIndex)
         )
         
         // Copy uniforms to buffer
@@ -949,6 +973,81 @@ actor Renderer {
         computeEncoder.endEncoding()
     }
     
+    /// Creates or resizes the compute output texture to match drawable dimensions
+    private func ensureComputeOutputTexture(for drawable: LayerRenderer.Drawable) -> MTLTexture? {
+        let width = drawable.colorTextures[0].width
+        let height = drawable.colorTextures[0].height
+        let viewCount = drawable.views.count
+        
+        // Check if existing texture matches
+        if let existing = computeOutputTexture,
+           existing.width == width,
+           existing.height == height,
+           existing.arrayLength == viewCount {
+            return existing
+        }
+        
+        // Create new texture with .shaderWrite flag
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2DArray
+        descriptor.pixelFormat = drawable.colorTextures[0].pixelFormat
+        descriptor.width = width
+        descriptor.height = height
+        descriptor.arrayLength = viewCount
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderWrite, .shaderRead]  // Key: has shaderWrite!
+        
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            print("⚠️ Failed to create compute output texture")
+            return nil
+        }
+        texture.label = "Adaptive Compute Output"
+        
+        computeOutputTexture = texture
+        computeOutputSize = SIMD2(width, height)
+        print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers")
+        return texture
+    }
+    
+    /// Copies compute output texture to drawable using blit encoder
+    private func blitComputeOutputToDrawable(
+        commandBuffer: MTLCommandBuffer,
+        drawable: LayerRenderer.Drawable
+    ) {
+        guard let sourceTexture = computeOutputTexture else { return }
+        guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { return }
+        blitEncoder.label = "Copy Compute Output to Drawable"
+        
+        for eye in 0..<drawable.views.count {
+            let destinationTexture: MTLTexture
+            let destinationSlice: Int
+            
+            if drawable.colorTextures.count > eye {
+                // Dedicated layout - separate texture per eye
+                destinationTexture = drawable.colorTextures[eye]
+                destinationSlice = 0
+            } else {
+                // Layered layout - single 2D array texture
+                destinationTexture = drawable.colorTextures[0]
+                destinationSlice = eye
+            }
+            
+            blitEncoder.copy(
+                from: sourceTexture,
+                sourceSlice: eye,
+                sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: sourceTexture.width, height: sourceTexture.height, depth: 1),
+                to: destinationTexture,
+                destinationSlice: destinationSlice,
+                destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+            )
+        }
+        
+        blitEncoder.endEncoding()
+    }
+    
     /// Renders using the adaptive 8x8 compute pipeline instead of fragment shaders
     /// Returns true if compute rendering was used
     private func renderWithAdaptiveCompute(
@@ -958,18 +1057,30 @@ actor Renderer {
     ) -> Bool {
         guard adaptiveHierarchicalPipeline8x8 != nil else { return false }
         
-        // Determine output texture
+        // Determine output texture based on whether MetalFX upscaling is active
         let outputTexture: MTLTexture
+        let needsBlit: Bool
         
         #if canImport(MetalFX)
         if upscalingEnabled, let fx = metalFXManager, let inputTex = fx.inputTexture {
+            // Use MetalFX input texture (already has .shaderWrite)
             outputTexture = inputTex
+            needsBlit = false  // MetalFX will handle the upscale to drawable
         } else {
-            // Use drawable color texture directly
-            outputTexture = drawable.colorTextures[0]
+            // Create our own compute-writable texture and blit to drawable
+            guard let computeTex = ensureComputeOutputTexture(for: drawable) else {
+                return false
+            }
+            outputTexture = computeTex
+            needsBlit = true
         }
         #else
-        outputTexture = drawable.colorTextures[0]
+        // Without MetalFX, use our own compute texture
+        guard let computeTex = ensureComputeOutputTexture(for: drawable) else {
+            return false
+        }
+        outputTexture = computeTex
+        needsBlit = true
         #endif
         
         // Render each eye
@@ -980,6 +1091,11 @@ actor Renderer {
                 drawable: drawable,
                 viewIndex: viewIndex
             )
+        }
+        
+        // If not using MetalFX, blit our compute output to drawable
+        if needsBlit {
+            blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable)
         }
         
         return true

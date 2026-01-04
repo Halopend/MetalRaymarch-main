@@ -55,6 +55,8 @@ typedef struct
     float sphereRadius;      // Sphere folding radius (default 0.5)
     float colorIterations;   // How many iterations contribute to color
     int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
+    float limitFlash;        // Edge flash when gesture hits limit (0-1)
+    int sceneIndex;          // 0 = Mandelbox, 1 = Glowy IFS
 } Uniforms;
 
 typedef struct
@@ -82,6 +84,8 @@ typedef struct
     int maxRaySteps;
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
+    float limitFlash;            // Edge flash when gesture hits limit (0-1)
+    int sceneIndex;              // 0 = Mandelbox, 1 = Glowy IFS
 } TileUniforms;
 
 #endif /* ShaderTypes_h */

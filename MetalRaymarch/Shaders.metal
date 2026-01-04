@@ -334,8 +334,153 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     return float2(1000.0, saturate(glow * 0.25));
 }
 
+// =============================================================================
+// SCENE 1: GLOWY IFS (Iterated Function System with volumetric glow)
+// =============================================================================
+// Port of "rendering with just glowy goodness" Shadertoy
+
+// Thread-local color for IFS iteration coloring
+struct IFSResult {
+    float distance;
+    float3 color;
+};
+
+IFSResult MapIFS(float3 p) {
+    // Spatial repetition with offset
+    p.xy = fmod(p.xy - 1.0, 2.0) - 1.0;
+    p.z = abs(p.z) - 0.8;
+    
+    float4 q = float4(p, 1.0);
+    float mscale = 1.74;
+    
+    float3 color = float3(0.0);
+    float colorRadius = 0.0;
+    
+    for(int i = 0; i < 20; i++) {
+        q.xyz = abs(q.xyz) - float3(0.3, 1.0, 0.0) + float3(0.6, 0.0, 0.0);
+        float ilength = length(q.xyz);
+        q = mscale * q / clamp(powr(max(ilength, kPowEpsilon), 2.0), 0.5, 1.0) 
+            - float4(0.98, 0.01, 0.3, 0.0);
+        
+        if (q.x * q.y > colorRadius) { color.x += 1.0; }
+        else if (q.y * q.z > colorRadius) { color.y += 1.0; }
+        else if (q.z * q.x > colorRadius) { color.z += 1.0; }
+    }
+    
+    IFSResult result;
+    result.distance = length(q.xyz) / q.w;
+    result.color = color;
+    return result;
+}
+
+// IFS raymarch with volumetric glow accumulation
+struct IFSMarchResult {
+    float t;
+    float glow;
+    float glow2;
+    float3 color;
+};
+
+IFSMarchResult MarchIFS(float3 ro, float3 rd, float3 lightDir, float maxT) {
+    float t = 0.0;
+    float eps = 3e-6;
+    float distfac = 200.0;
+    float hitThreshold = eps;
+    float glow = 0.0;
+    float glow2 = 0.0;
+    float3 lastColor = float3(0.0);
+    
+    for(int i = 0; i < 100; i++) {
+        float3 pos = ro + rd * t;
+        IFSResult mapResult = MapIFS(pos);
+        float d = mapResult.distance;
+        lastColor = mapResult.color;
+        
+        if (d < hitThreshold || t >= maxT) break;
+        
+        t += d;
+        hitThreshold = eps * (1.0 + t * t * distfac);
+        
+        // Glow based on proximity to light plane
+        float zz = pos.y - lightDir.y;
+        zz *= zz;
+        glow += exp(-max(8.0 * (1.0 - exp(-zz * 4.0)) - d, 0.0) / 10.0);
+        
+        // Secondary glow based on camera distance
+        float zz2 = ro.z - pos.z;
+        zz2 *= zz2;
+        glow2 += exp(-max(1.0 - d, 0.0) / 300.0);
+    }
+    
+    IFSMarchResult result;
+    result.t = t;
+    result.glow = glow;
+    result.glow2 = glow2;
+    result.color = lastColor;
+    return result;
+}
+
+float3 RenderIFS(float3 ro, float3 rd, float time) {
+    float tt = fmod(time, 7.0);
+    float tf = tt * tt;
+    
+    float3 lightDir = ro;
+    lightDir.y += tf;
+    
+    IFSMarchResult march = MarchIFS(ro, rd, lightDir, 20.0);
+    
+    float3 pos = ro + rd * march.t;
+    
+    // Glow strength based on light proximity
+    float glowStr = exp(-abs(pos.y - lightDir.y) / 4.0);
+    march.glow *= glowStr;
+    
+    // Secondary glow strength based on camera proximity  
+    float glowStr2 = exp(-length(pos - ro) / 6.0);
+    march.glow2 *= glowStr2;
+    
+    // Color from IFS iterations
+    float3 color = cos(march.color * 3.0);
+    color *= color;
+    float3 glowCol = 0.5 * (color * color);
+    
+    // Combine glows for final color
+    float3 result = 
+        3e-11 * powr(max(march.glow2, kPowEpsilon), 9.0) * glowCol 
+        + 1e-10 * powr(max(march.glow, kPowEpsilon), 11.0) * float3(0.05, 0.03, 0.001) * glowCol
+        + 0.01 * cos(pos.x / 15.0 + time * 1.7) * 1e-9 * glowCol
+          * (pos.z < -0.2 ? powr(max(march.glow2, kPowEpsilon), 11.0) : 0.0);
+    
+    return result;
+}
+
+// Full IFS scene render with camera setup
+half3 SceneIFS(float3 cameraPos, float3 rd, float time) {
+    // Camera animation
+    float3 ro = float3(0.0, 0.0, -2.0);
+    
+    // Apply camera transforms
+    float angle = -1.0;  // Pitch
+    float c = cos(angle), s = sin(angle);
+    rd.yz = float2(rd.y * c - rd.z * s, rd.y * s + rd.z * c);
+    
+    ro.y += time / 5.0;  // Move up over time
+    
+    angle = 0.8;  // Roll
+    c = cos(angle); s = sin(angle);
+    rd.xy = float2(rd.x * c - rd.y * s, rd.x * s + rd.y * c);
+    
+    float3 col = clamp(RenderIFS(ro, rd, time), 1e-6, 1e6);
+    
+    // Tone mapping
+    col = 1.0 - exp(-0.4 * col);
+    
+    return half3(col);
+}
+// =============================================================================
+
 // Simplified post effects using half precision
-half3 PostEffects(half3 rgb, half2 xy)
+half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
 {
     // Combined contrast/saturation/brightness in fewer ops
     half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
@@ -346,6 +491,20 @@ half3 PostEffects(half3 rgb, half2 xy)
     half2 q = xy * (1.0h - xy);
     half vignetteBase = max(16.0h * q.x * q.y, kPowEpsilonHalf);
     rgb *= 0.5h + 0.5h * powr(vignetteBase, 0.2h);
+    
+    // Limit flash effect - bright edge glow when parameter hits min/max
+    if (limitFlash > 0.01h) {
+        // Edge distance (0 at center, 1 at edge)
+        half2 edgeDist = abs(xy - 0.5h) * 2.0h;
+        half edge = max(edgeDist.x, edgeDist.y);
+        
+        // Glow strongest at edges, using smooth falloff
+        half edgeGlow = powr(edge, 2.0h) * limitFlash;
+        
+        // Orange/red warning color
+        half3 flashColor = half3(1.0h, 0.4h, 0.1h);
+        rgb = mix(rgb, flashColor, edgeGlow * 0.8h);
+    }
     
     // Gamma
     return powr(max(rgb, half3(kPowEpsilonHalf)), half3(0.47h));
@@ -721,196 +880,108 @@ kernel void adaptiveHierarchical8x8(
     constant TileUniforms& uniforms [[buffer(0)]],
     texture2d_array<float, access::write> outputTexture [[texture(0)]]
 ) {
-    const uint ADAPTIVE_TILE_SIZE = 8;  // 8x8 adaptive hierarchical tile
+    const uint ADAPTIVE_TILE_SIZE = 8;
     uint2 pixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
     
     if (pixelCoord.x >= uint(uniforms.resolution.x) || pixelCoord.y >= uint(uniforms.resolution.y)) {
         return;
     }
     
-    // Shared memory for hierarchical cascade
-    threadgroup float sharedSuperCoarseT;           // Level 0: one distance for entire 8x8
-    threadgroup float sharedCoarseT[4];             // Level 1: one distance per 4x4 quadrant
-    threadgroup float3 sharedCenterRayDir;          // For ray coherence adjustment
-    threadgroup int sharedAdaptiveLevel;            // Which hierarchy level to use
-    threadgroup float sharedBoundingT;              // Bounding sphere entry distance
-    threadgroup FractalParams sharedFractalParams;
-    threadgroup float3 sharedCameraPos;
-    threadgroup float4x4 sharedInvProjMatrix;
-    threadgroup float4x4 sharedInvViewMatrix;
+    // Compute ray direction in MODEL SPACE (matching fragment shader exactly)
+    // Fragment shader does: rd = normalize(in.modelPos - cameraPos)
+    // where modelPos comes from vertex positions and cameraPos is (invModelView * (0,0,0,1)).xyz
+    //
+    // For compute, we need to:
+    // 1. Unproject pixel to clip space
+    // 2. Transform through inverse projection to get view-space point
+    // 3. Transform through inverse model-view to get model-space point
+    // 4. Compute direction from camera to that point (both in model space)
     
-    // Compute ray direction for this pixel
     float2 pixelCenter = float2(pixelCoord) + 0.5;
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
-    float4 viewPos = uniforms.invProjMatrix * float4(ndc, -1.0, 1.0);
+    
+    // Unproject to view space at far plane (z = 1 in NDC)
+    float4 clipPos = float4(ndc, 1.0, 1.0);  // Far plane in clip space
+    float4 viewPos = uniforms.invProjMatrix * clipPos;
     viewPos /= viewPos.w;
-    float3 rd = normalize((uniforms.invViewMatrix * float4(viewPos.xyz, 0.0)).xyz);
+    
+    // Transform to model space (inverse model-view)
+    // invViewMatrix here is actually inverse MODEL-VIEW matrix (set in Swift)
+    float4 modelPos4 = uniforms.invViewMatrix * viewPos;
+    float3 modelPos = modelPos4.xyz / modelPos4.w;
+    
+    // Camera position in model space (same as fragment shader)
+    float3 cameraPos = uniforms.cameraPos;
+    
+    // Ray direction in model space (exactly like fragment shader)
+    float3 rd = normalize(modelPos - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
     
-    // Thread 0: Load shared data and do level 0 (super-coarse) pass
-    if (localIndex == 0) {
-        sharedFractalParams = fractalParams;
-        sharedCameraPos = uniforms.cameraPos;
-        sharedInvProjMatrix = uniforms.invProjMatrix;
-        sharedInvViewMatrix = uniforms.invViewMatrix;
-        
-        // Compute center ray for 8x8 tile
-        float2 centerPixel = float2(tileId * ADAPTIVE_TILE_SIZE) + 4.0;
-        float2 centerNdc = (centerPixel / uniforms.resolution) * 2.0 - 1.0;
-        centerNdc.y = -centerNdc.y;
-        float4 centerViewPos = uniforms.invProjMatrix * float4(centerNdc, -1.0, 1.0);
-        centerViewPos /= centerViewPos.w;
-        float3 centerRd = normalize((uniforms.invViewMatrix * float4(centerViewPos.xyz, 0.0)).xyz);
-        sharedCenterRayDir = centerRd;
-        
-        // Bounding sphere check - skip entire tile if it misses
-        float boundingT = rayIntersectBoundingSphere(uniforms.cameraPos, centerRd, float3(0), BOUNDING_SPHERE_RADIUS);
-        sharedBoundingT = boundingT;
-        
-        if (boundingT < 0.0) {
-            // Tile misses bounding sphere entirely
-            sharedSuperCoarseT = 1000.0;
-            sharedAdaptiveLevel = 0;
-        } else {
-            // Super-coarse raymarch from bounding sphere entry
-            float superCoarseT = SceneSuperCoarse(uniforms.cameraPos, centerRd, boundingT, 
-                                                   uniforms.foldingLimit, fractalParams, lodIterations);
-            sharedSuperCoarseT = superCoarseT;
-            sharedAdaptiveLevel = selectAdaptiveLevel(superCoarseT);
-        }
-    }
-    
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    
-    float superCoarseT = sharedSuperCoarseT;
-    int adaptiveLevel = sharedAdaptiveLevel;
-    float3 centerRayDir = sharedCenterRayDir;
-    
-    // Early exit for tiles that clearly miss
-    if (superCoarseT >= 900.0 && adaptiveLevel == 0) {
-        // Sky - write background and exit
-        half3 col = half3(0.02h, 0.03h, 0.04h);
-        
-        // Debug: red tint for missed tiles
-        if (uniforms.debugHierarchical == 1) {
-            col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);
-        }
-        
-        outputTexture.write(float4(float3(col), 1.0), pixelCoord, uniforms.eyeIndex);
-        return;
-    }
-    
-    // Level 1: Coarse pass (4 threads for 4 quadrants)
-    // Each thread handles one 4x4 sub-tile
-    if (adaptiveLevel >= 1 && localIndex < 4) {
-        uint quadrantX = localIndex % 2;
-        uint quadrantY = localIndex / 2;
-        
-        // Center of 4x4 quadrant
-        float2 quadrantCenter = float2(tileId * ADAPTIVE_TILE_SIZE) + float2(quadrantX * 4 + 2, quadrantY * 4 + 2);
-        float2 quadrantNdc = (quadrantCenter / uniforms.resolution) * 2.0 - 1.0;
-        quadrantNdc.y = -quadrantNdc.y;
-        float4 quadrantViewPos = sharedInvProjMatrix * float4(quadrantNdc, -1.0, 1.0);
-        quadrantViewPos /= quadrantViewPos.w;
-        float3 quadrantRd = normalize((sharedInvViewMatrix * float4(quadrantViewPos.xyz, 0.0)).xyz);
-        
-        // Start from super-coarse distance, adjusted for ray direction difference
-        float rayDot = max(dot(quadrantRd, centerRayDir), 0.95);
-        (void)rayDot;  // Used only in potential future optimization
-        
-        float coarseT = SceneCoarse(sharedCameraPos, quadrantRd, uniforms.foldingLimit, sharedFractalParams, lodIterations);
-        sharedCoarseT[localIndex] = coarseT;
-    }
-    
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    
-    // Determine which quadrant this pixel belongs to
-    uint myQuadrantX = (localId.x >= 4) ? 1 : 0;
-    uint myQuadrantY = (localId.y >= 4) ? 1 : 0;
-    uint myQuadrant = myQuadrantY * 2 + myQuadrantX;
-    
-    // Get starting distance based on adaptive level
-    float startT;
-    if (adaptiveLevel == 0) {
-        startT = superCoarseT;
-    } else {
-        startT = sharedCoarseT[myQuadrant];
-    }
-    
-    // Adjust for ray coherence
-    float rayDot = max(dot(rd, centerRayDir), 0.9);
-    float myStartT = max(startT * rayDot - 0.2, 0.01);
-    
-    // === LEVEL 2/3: Fine raymarch (all 64 threads) ===
-    half3 col = half3(0.0h);
     float gTime = uniforms.time * 0.01 + 15.00;
-    float adjustedDist = 1000.0;
-    float glow = 0.0;
     
-    if (startT < 900.0) {
-        // Fine raymarch from hierarchical starting point
-        float2 ret = SceneFromStart(uniforms.cameraPos, rd, myStartT, pixelCenter, 1.0, uniforms.maxRaySteps,
-                                    uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+    // Use the SAME Scene() function as fragment shader for correctness
+    float2 ret = Scene(cameraPos, rd, pixelCenter, 1.0, uniforms.maxRaySteps, 
+                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+    
+    float adjustedDist = ret.x;
+    float glow = ret.y;
+    half3 col = half3(0.0h);
+    
+    if (ret.x < 900.0) {
+        float3 p = cameraPos + adjustedDist * rd;
+        float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
         
-        adjustedDist = ret.x;
-        glow = ret.y;
+        // Lighting (same as fragment shader)
+        float3 spotLight = CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+        float3 spot = spotLight - p;
+        float atten = length(spot);
+        spot /= atten;
         
-        if (ret.x < 900.0) {
-            float3 p = uniforms.cameraPos + adjustedDist * rd;
-            float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
-            
-            // Lighting
-            float3 spotLight = CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
-            float3 spot = spotLight - p;
-            float atten = length(spot);
-            spot /= atten;
-            
-            int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
-            
-            half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-            
-            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
-            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
-            half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
-            
-            col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
-                        uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
-            col = (col * bri * shaSpot) + (col * briSun * shaSun);
-            
-            // Specular
-            float3 ref = reflect(rd, nor);
-            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-            col += half3(specSpot) * shaSpot * bri;
-            col += half3(specSun) * shaSun * briSun;
-            
-            // Fog
-            half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
-            col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
-        }
+        int shadowIterations = max(lodIterations - 2, 2);
+        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        
+        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        
+        float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+        half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+        
+        col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
+                    uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
+        col = (col * bri * shaSpot) + (col * briSun * shaSun);
+        
+        // Specular
+        float3 ref = reflect(rd, nor);
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        col += half3(specSpot) * shaSpot * bri;
+        col += half3(specSun) * shaSun * briSun;
     }
+    
+    // Fog (applied regardless of hit, same as fragment shader)
+    half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
+    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
     
     // Add glow
     half glowH = half(glow);
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     col = clamp(col, half3(0.0h), half3(2.0h));
-    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
     
-    // Debug visualization for adaptive kernel
+    // Apply PostEffects to match fragment shader exactly
+    // (saturation, contrast, vignette, gamma)
+    // Compute approximate texCoord for vignette (0-1 range)
+    half2 texCoord = half2(pixelCenter / uniforms.resolution);
+    col = PostEffects(col, texCoord, half(uniforms.limitFlash));
+    
+    // Debug visualization
     if (uniforms.debugHierarchical == 1) {
-        if (adaptiveLevel == 0) {
-            col = mix(col, half3(0.0h, 0.0h, 1.0h), 0.25h);  // Blue = 8x8 (super-coarse only)
-        } else if (adaptiveLevel == 1) {
-            col = mix(col, half3(0.0h, 1.0h, 1.0h), 0.25h);  // Cyan = 4x4 (coarse)
-        } else if (adaptiveLevel == 2) {
-            col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.25h);  // Green = 2x2 (fine)
-        } else {
-            col = mix(col, half3(1.0h, 1.0h, 0.0h), 0.25h);  // Yellow = per-pixel
+        // Show tile boundaries
+        if (localId.x == 0 || localId.y == 0) {
+            col = mix(col, half3(1.0h, 1.0h, 0.0h), 0.5h);
         }
     }
     
@@ -952,6 +1023,17 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
+    // === SCENE SWITCHING ===
+    if (uniforms.sceneIndex == 1) {
+        // Scene 1: Glowy IFS
+        half3 col = SceneIFS(cameraPos, rd, time);
+        col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
+        output.color = float4(float3(col), 1.0);
+        output.depth = 1e-7;  // No depth for volumetric scene
+        return output;
+    }
+    
+    // === SCENE 0: Mandelbox (default) ===
     // NOTE: Disable shader-side foveation/LOD. The current heuristic uses mesh UVs
     // (`in.texCoord`), which are not screen-space and can behave incorrectly.
     float quality = 1.0;
@@ -1045,7 +1127,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     col = clamp(col, half3(0.0h), half3(2.0h));
 
     if (quality > 0.5) {
-        col = PostEffects(col, half2(in.texCoord));
+        col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
     } else {
         col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
     }
@@ -1160,7 +1242,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     col = clamp(col, half3(0.0h), half3(2.0h));
     
-    col = PostEffects(col, half2(in.texCoord));
+    col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
     
     output.color = float4(float3(col), 1.0);
     return output;

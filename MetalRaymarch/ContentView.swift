@@ -55,6 +55,19 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                
+                // Scene selector
+                HStack {
+                    Text("Scene:")
+                    Picker("", selection: Binding(
+                        get: { appModel.renderSettings.sceneIndex },
+                        set: { appModel.renderSettings.sceneIndex = $0 }
+                    )) {
+                        Text("Mandelbox").tag(0)
+                        Text("Glowy IFS").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                }
             }
             .padding(.bottom, 20)
 
