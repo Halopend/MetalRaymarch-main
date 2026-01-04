@@ -40,7 +40,8 @@ struct ContentView: View {
                         set: { appModel.renderSettings.tileSize = $0 }
                     )) {
                         Text("Off").tag(0)
-                        Text("2×2 (Shared Shadows)").tag(2)
+                        Text("2×2").tag(2)
+                        Text("8×8 Adaptive").tag(8)
                     }
                     .pickerStyle(.segmented)
                 }

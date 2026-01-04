@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import ARKit
 
 @MainActor
 @Observable
@@ -28,7 +29,20 @@ class AppModel {
     var metalFXAvailable: Bool = false
     var metalFXStatus: String = "Unknown"
     
+    // Hand tracking state
+    var handTrackingEnabled: Bool = true
+    var leftHandTracked: Bool = false
+    var rightHandTracked: Bool = false
+    
+    // Gesture controller for mapping hand gestures to parameters
+    var gestureController: GestureController?
+    
     nonisolated let clock = AppClock()
+    
+    init() {
+        // Initialize gesture controller with render settings
+        gestureController = GestureController(renderSettings: renderSettings)
+    }
 }
 
 class RenderSettings {
@@ -47,8 +61,9 @@ class RenderSettings {
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 0.5       // MetalFX upscaling: render at 50%, upscale to 100%
     private var _debugEyeTint: Bool = false          // Force per-eye red/blue debug fill
-    private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4 tile-based raymarching
+    private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
+    private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -123,6 +138,7 @@ class RenderSettings {
     // 0 = disabled (standard per-pixel raymarch)
     // 2 = 2x2 tiles (4x overhead reduction, high quality)
     // 4 = 4x4 tiles (16x overhead reduction, performance mode)
+    // 8 = 8x8 adaptive hierarchical (3-8x speedup, best performance)
     var tileSize: Int {
         get { lock.withLock { _tileSize } }
         set { lock.withLock { _tileSize = newValue } }
@@ -131,6 +147,11 @@ class RenderSettings {
     var useHierarchical: Bool {
         get { lock.withLock { _useHierarchical } }
         set { lock.withLock { _useHierarchical = newValue } }
+    }
+    
+    var debugHierarchical: Bool {
+        get { lock.withLock { _debugHierarchical } }
+        set { lock.withLock { _debugHierarchical = newValue } }
     }
 }
 

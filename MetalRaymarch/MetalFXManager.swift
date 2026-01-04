@@ -101,8 +101,8 @@ final class MetalFXManager {
         inputDescriptor.height = configuration.inputHeight
         inputDescriptor.pixelFormat = configuration.colorFormat
         inputDescriptor.storageMode = .private
-        // Explicitly set renderTarget first, then add shaderRead
-        inputDescriptor.usage = MTLTextureUsage(rawValue: MTLTextureUsage.renderTarget.rawValue | MTLTextureUsage.shaderRead.rawValue)
+        // Needs renderTarget for fragment shaders, shaderWrite for compute, shaderRead for MetalFX
+        inputDescriptor.usage = [.renderTarget, .shaderRead, .shaderWrite]
 
         guard let input = device.makeTexture(descriptor: inputDescriptor) else {
             throw Error.textureCreationFailed("input")
