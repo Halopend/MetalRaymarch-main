@@ -8,6 +8,7 @@
 import SwiftUI
 import ARKit
 import os  // For os_unfair_lock - fastest available lock primitive
+import Darwin
 
 /// Quality preset that bundles fractal iterations and ray steps
 enum QualityPreset: String, CaseIterable {
@@ -324,12 +325,13 @@ final class RenderSettings: @unchecked Sendable {
     /// Uses frame-rate independent exponential decay for consistent feel at any FPS.
     /// - Parameter deltaTime: Time since last frame in seconds
     func interpolateToTargets(deltaTime: Float) {
+        // Compute outside the lock to keep the critical section tiny.
+        // Exponential decay: factor = 1 - e^(-speed * dt)
+        // At speed=18, dt=1/90: factor ≈ 0.18 (smooth 90fps)
+        // At speed=18, dt=1/45: factor ≈ 0.33 (catches up on slow frames)
+        let factor: Float = 1.0 - expf(-gestureInterpolationSpeed * deltaTime)
+
         withLock {
-            // Exponential decay: factor = 1 - e^(-speed * dt)
-            // At speed=18, dt=1/90: factor ≈ 0.18 (smooth 90fps)
-            // At speed=18, dt=1/45: factor ≈ 0.33 (catches up on slow frames)
-            let factor = 1.0 - exp(-gestureInterpolationSpeed * deltaTime)
-            
             _minDistance += (_targetMinDistance - _minDistance) * factor
             _foldingLimit += (_targetFoldingLimit - _foldingLimit) * factor
             _sphereRadius += (_targetSphereRadius - _sphereRadius) * factor

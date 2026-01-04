@@ -13,6 +13,7 @@ import MetalFX
 #endif
 import simd
 import ARKit
+import Darwin
 
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
@@ -130,6 +131,10 @@ actor Renderer {
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
 
+    // Cached per-frame transforms (computed once in updateGameState, reused by fragment+compute paths)
+    private var currentModelMatrix: matrix_float4x4 = matrix_identity_float4x4
+    private var currentDeviceTransform: matrix_float4x4 = matrix_identity_float4x4
+
     var mesh: MTKMesh
 
     let arSession: ARKitSession
@@ -155,6 +160,8 @@ actor Renderer {
     private var lastMetalFXOutputSize = SIMD2<Int>(repeating: 0)
     private var lastMetalFXConfig: MetalFXManager.Configuration?
     private var lastMetalFXViewCount: Int = 0
+    private var lastReportedMetalFXAvailable: Bool?
+    private var lastReportedMetalFXStatus: String = ""
     #endif
 
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
@@ -382,15 +389,22 @@ actor Renderer {
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
         
-        // Setup screenshot capture pipeline
-        setupScreenshotCapture()
+        // Setup screenshot capture pipeline (safe during init)
+        let screenshotResources = Renderer.makeScreenshotCaptureResources(device: device)
+        screenshotTexture = screenshotResources.color
+        screenshotDepthTexture = screenshotResources.depth
+        screenshotPipeline = screenshotResources.pipeline
     }
     
-    /// Setup screenshot capture resources
-    private func setupScreenshotCapture() {
+    /// Build screenshot capture resources.
+    /// Static so it can be used during actor initialization without crossing isolation.
+    private static func makeScreenshotCaptureResources(
+        device: MTLDevice,
+        screenshotSize: Int = 512
+    ) -> (color: MTLTexture?, depth: MTLTexture?, pipeline: MTLRenderPipelineState?) {
         // Create a standard render pipeline for screenshot capture (no vertex amplification)
         // We'll render a single view at 512x512 for preset thumbnails
-        let screenshotSize = 512
+        let screenshotSize = screenshotSize
         
         // Create screenshot color texture
         let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -401,7 +415,7 @@ actor Renderer {
         )
         colorDescriptor.usage = [.renderTarget, .shaderRead]
         colorDescriptor.storageMode = .shared  // Allows CPU read
-        screenshotTexture = device.makeTexture(descriptor: colorDescriptor)
+        let screenshotTexture = device.makeTexture(descriptor: colorDescriptor)
         screenshotTexture?.label = "Screenshot Color"
         
         // Create screenshot depth texture
@@ -413,11 +427,12 @@ actor Renderer {
         )
         depthDescriptor.usage = [.renderTarget]
         depthDescriptor.storageMode = .private
-        screenshotDepthTexture = device.makeTexture(descriptor: depthDescriptor)
+        let screenshotDepthTexture = device.makeTexture(descriptor: depthDescriptor)
         screenshotDepthTexture?.label = "Screenshot Depth"
         
         // Create render pipeline for screenshot (single view, no amplification)
         // Must use function constants because fragmentShader declares them
+        var screenshotPipeline: MTLRenderPipelineState?
         do {
             let library = device.makeDefaultLibrary()!
             let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
@@ -439,6 +454,8 @@ actor Renderer {
         } catch {
             print("⚠️ Failed to create screenshot pipeline: \(error)")
         }
+
+        return (screenshotTexture, screenshotDepthTexture, screenshotPipeline)
     }
 
     private func startARSession() async {
@@ -951,7 +968,7 @@ actor Renderer {
         // Use already-smoothed position from settings (interpolated above)
         // Scale gets its own smoothing since it's not gesture-controlled
         let smoothSpeed: Float = 15.0
-        let smoothFactor = 1.0 - exp(-smoothSpeed * cachedDeltaTime)
+        let smoothFactor: Float = 1.0 - expf(-smoothSpeed * cachedDeltaTime)
         smoothedPosition = settings.position  // Already smoothed by interpolateToTargets
         smoothedScale = smoothedScale + (settings.scale - smoothedScale) * smoothFactor
         
@@ -963,6 +980,10 @@ actor Renderer {
         
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+
+        // Cache for compute path (and any other pass) to keep transforms consistent within a frame.
+        currentModelMatrix = modelMatrix
+        currentDeviceTransform = deviceTransform
         
         // One-time logging of device anchor to verify position tracking is working
         if !hasLoggedDeviceAnchorInfo, let anchor = drawable.deviceAnchor {
@@ -1298,21 +1319,27 @@ actor Renderer {
     }
     
     #if canImport(MetalFX)
+    private func updateMetalFXUI(available: Bool, status: String) {
+        if lastReportedMetalFXAvailable == available && lastReportedMetalFXStatus == status {
+            return
+        }
+        lastReportedMetalFXAvailable = available
+        lastReportedMetalFXStatus = status
+        Task { @MainActor in
+            appModel.metalFXAvailable = available
+            appModel.metalFXStatus = status
+        }
+    }
+
     private func configureMetalFXIfNeeded(for drawable: LayerRenderer.Drawable) -> Bool {
         guard metalFXAmplificationPipelineState != nil else {
-            Task { @MainActor in
-                appModel.metalFXAvailable = false
-                appModel.metalFXStatus = "MetalFX pipeline not available"
-            }
+            updateMetalFXUI(available: false, status: "MetalFX pipeline not available")
             return false
         }
         
         let hasFamilySupport = device.supportsFamily(.apple7) || device.supportsFamily(.metal3)
         if !hasFamilySupport {
-            Task { @MainActor in
-                appModel.metalFXAvailable = false
-                appModel.metalFXStatus = "GPU family not supported"
-            }
+            updateMetalFXUI(available: false, status: "GPU family not supported")
             return false
         }
         
@@ -1320,10 +1347,7 @@ actor Renderer {
         
         // If scale is 1.0, don't use MetalFX (render at full resolution directly)
         if metalFXScale >= 0.99 {
-            Task { @MainActor in
-                appModel.metalFXAvailable = true
-                appModel.metalFXStatus = "Disabled (scale=1.0)"
-            }
+            updateMetalFXUI(available: true, status: "Disabled (scale=1.0)")
             return false
         }
 
@@ -1359,8 +1383,20 @@ actor Renderer {
         // 3. The copy to drawable uses rate map transformation as needed
         
         // Output at screen resolution (MetalFX will upscale to this)
-        let outputWidth = screenWidth
-        let outputHeight = screenHeight
+        // Stabilize against tiny viewport jitter to avoid texture reallocation churn.
+        let churnThresholdPx = 8
+        let outputWidth: Int
+        let outputHeight: Int
+        if lastMetalFXOutputSize.x > 0 && abs(screenWidth - lastMetalFXOutputSize.x) < churnThresholdPx {
+            outputWidth = lastMetalFXOutputSize.x
+        } else {
+            outputWidth = screenWidth
+        }
+        if lastMetalFXOutputSize.y > 0 && abs(screenHeight - lastMetalFXOutputSize.y) < churnThresholdPx {
+            outputHeight = lastMetalFXOutputSize.y
+        } else {
+            outputHeight = screenHeight
+        }
         
         // Input at scaled resolution (what we actually render to)
         let inputWidth = alignTo16(max(16, Int(round(Double(screenWidth) * Double(metalFXScale)))))
@@ -1408,18 +1444,13 @@ actor Renderer {
             }
             
             let available = (metalFXManager?.inputTexture != nil)
-            Task { @MainActor in
-                appModel.metalFXAvailable = available
-                appModel.metalFXStatus = available ? "Active (scale \(metalFXScale))" : "Textures not ready"
-            }
+            updateMetalFXUI(available: available,
+                            status: available ? "Active (scale \(metalFXScale))" : "Textures not ready")
             return available
         } catch {
             print("⚠️ MetalFX configuration failed: \(error)")
             metalFXManager = nil
-            Task { @MainActor in
-                appModel.metalFXAvailable = false
-                appModel.metalFXStatus = "Failed: \(error)"
-            }
+            updateMetalFXUI(available: false, status: "Failed: \(error)")
             return false
         }
     }
@@ -1442,31 +1473,20 @@ actor Renderer {
             return
         }
         
-        let settings = appModel.renderSettings
         let view = drawable.views[viewIndex]
-        
-        // Build model matrix (must match fragment shader exactly!)
-        let t: Float = 0.1
-        let currentSmoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
-        let currentSmoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
-        
-        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
-        let translationMatrix = matrix4x4_translation(currentSmoothedPosition.x, currentSmoothedPosition.y, currentSmoothedPosition.z)
-        let scaleMatrix = matrix4x4_scale(currentSmoothedScale, currentSmoothedScale, currentSmoothedScale)
-        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
-        
-        // Build view matrix (same as fragment shader)
-        let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
-        let viewMatrix = (deviceTransform * view.transform).inverse
+
+        // Use the exact same transforms as the fragment path for consistency.
+        let viewMatrix = (currentDeviceTransform * view.transform).inverse
         let projection = drawable.computeProjection(viewIndex: viewIndex)
-        
-        // Model-view matrix and its inverse (THIS WAS MISSING!)
-        let modelView = viewMatrix * modelMatrix
+
+        // Model-view matrix and its inverse
+        let modelView = viewMatrix * currentModelMatrix
         let inverseModelView = modelView.inverse
         
         // Get camera position from inverse model-view matrix (in model space)
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
         
+        let settings = appModel.renderSettings
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
@@ -1667,8 +1687,9 @@ actor Renderer {
         let drawableFormat = drawable.colorTextures[0].pixelFormat
         let outputFormat = output.pixelFormat
         
-        // Use direct blit when formats match (screen-sized output to drawable viewport)
-        if drawableFormat == outputFormat {
+        // Use direct blit only when formats match AND there's no rate map.
+        // With a rate map (foveation), a render pass is the reliable way to apply the transform.
+        if drawableFormat == outputFormat && drawable.rasterizationRateMaps.first == nil {
             // Direct blit when formats match
             guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
             
@@ -1691,8 +1712,12 @@ actor Renderer {
                 let destOriginY = max(0, Int(drawableViewport.originY.rounded()))
                 let maxWidth = max(0, destinationTexture.width - destOriginX)
                 let maxHeight = max(0, destinationTexture.height - destOriginY)
-                let copyWidth = min(output.width, maxWidth)
-                let copyHeight = min(output.height, maxHeight)
+
+                // Respect the drawable viewport bounds (avoid copying outside the view region).
+                let vpWidth = max(0, Int(drawableViewport.width.rounded()))
+                let vpHeight = max(0, Int(drawableViewport.height.rounded()))
+                let copyWidth = min(output.width, maxWidth, vpWidth)
+                let copyHeight = min(output.height, maxHeight, vpHeight)
 
                 if copyWidth <= 0 || copyHeight <= 0 { continue }
 
