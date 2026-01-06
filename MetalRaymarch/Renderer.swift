@@ -68,6 +68,11 @@ actor Renderer {
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
+    
+    // Fur hand rendering
+    var furHandUniformBuffer: MTLBuffer?
+    var cachedLeftHandAnchor: HandAnchor?
+    var cachedRightHandAnchor: HandAnchor?
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -232,6 +237,11 @@ actor Renderer {
             let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
+            
+            // Fur hand uniform buffer
+            let furHandUniformSize = MemoryLayout<FurHandUniforms>.stride
+            furHandUniformBuffer = device.makeBuffer(length: furHandUniformSize, options: .storageModeShared)
+            furHandUniformBuffer?.label = "FurHandUniforms"
             
             print("✓ Tile-based compute pipelines ready (4x4, 2x2, and adaptive 8x8)")
         } catch {
@@ -409,6 +419,10 @@ actor Renderer {
         // Get hand anchors at the current time
         let anchors = ht.handAnchors(at: time)
         
+        // Cache anchors for fur hand rendering
+        cachedLeftHandAnchor = anchors.leftHand
+        cachedRightHandAnchor = anchors.rightHand
+        
         // Update gesture controller on main actor
         Task { @MainActor in
             // Update tracking state for UI
@@ -421,6 +435,112 @@ actor Renderer {
                     leftAnchor: anchors.leftHand,
                     rightAnchor: anchors.rightHand
                 )
+            }
+        }
+    }
+    
+    /// Update fur hand uniforms from cached hand anchors
+    private func updateFurHandUniforms(time: Float) {
+        guard let buffer = furHandUniformBuffer else { return }
+        
+        let furUniforms = buffer.contents().bindMemory(to: FurHandUniforms.self, capacity: 1)
+        
+        // Configure fur parameters
+        furUniforms.pointee.time = time
+        furUniforms.pointee.showFurHands = appModel.renderSettings.showFurHands ? 1 : 0
+        
+        // Default fur properties
+        let defaultFurDensity: Float = 1.0
+        let defaultFurLength: Float = 0.012  // 12mm fur
+        let defaultFurNoiseScale: Float = 80.0
+        
+        // Update left hand
+        if let leftAnchor = cachedLeftHandAnchor, leftAnchor.isTracked {
+            furUniforms.pointee.leftHand.isTracked = 1
+            furUniforms.pointee.leftHand.furDensity = defaultFurDensity
+            furUniforms.pointee.leftHand.furLength = defaultFurLength
+            furUniforms.pointee.leftHand.furNoiseScale = defaultFurNoiseScale
+            populateHandJoints(from: leftAnchor, into: &furUniforms.pointee.leftHand)
+        } else {
+            furUniforms.pointee.leftHand.isTracked = 0
+        }
+        
+        // Update right hand
+        if let rightAnchor = cachedRightHandAnchor, rightAnchor.isTracked {
+            furUniforms.pointee.rightHand.isTracked = 1
+            furUniforms.pointee.rightHand.furDensity = defaultFurDensity
+            furUniforms.pointee.rightHand.furLength = defaultFurLength
+            furUniforms.pointee.rightHand.furNoiseScale = defaultFurNoiseScale
+            populateHandJoints(from: rightAnchor, into: &furUniforms.pointee.rightHand)
+        } else {
+            furUniforms.pointee.rightHand.isTracked = 0
+        }
+    }
+    
+    /// Populate joint positions from an ARKit hand anchor
+    private func populateHandJoints(from anchor: HandAnchor, into handData: inout FurHandData) {
+        guard let skeleton = anchor.handSkeleton else { return }
+        
+        let transform = anchor.originFromAnchorTransform
+        
+        // Joint name to index mapping (ARKit HandSkeleton order)
+        // We'll map the 26 ARKit joints to our FurHandData.joints array
+        let jointMappings: [(index: Int, name: HandSkeleton.JointName, radiusScale: Float)] = [
+            (0, .wrist, 2.5),
+            (1, .thumbKnuckle, 1.8),
+            (2, .thumbIntermediateBase, 1.4),
+            (3, .thumbIntermediateTip, 1.0),
+            (4, .thumbTip, 0.8),
+            (5, .indexFingerKnuckle, 1.4),
+            (6, .indexFingerIntermediateBase, 1.0),
+            (7, .indexFingerIntermediateTip, 1.0),
+            (8, .indexFingerTip, 0.8),
+            (9, .middleFingerKnuckle, 1.4),
+            (10, .middleFingerIntermediateBase, 1.0),
+            (11, .middleFingerIntermediateTip, 1.0),
+            (12, .middleFingerTip, 0.8),
+            (13, .ringFingerKnuckle, 1.4),
+            (14, .ringFingerIntermediateBase, 1.0),
+            (15, .ringFingerIntermediateTip, 1.0),
+            (16, .ringFingerTip, 0.8),
+            (17, .littleFingerKnuckle, 1.2),
+            (18, .littleFingerIntermediateBase, 0.9),
+            (19, .littleFingerIntermediateTip, 0.9),
+            (20, .littleFingerTip, 0.7),
+            (21, .forearmWrist, 3.0),
+            (22, .indexFingerMetacarpal, 1.6),
+            (23, .middleFingerMetacarpal, 1.6),
+            (24, .ringFingerMetacarpal, 1.5),
+            (25, .littleFingerMetacarpal, 1.4)
+        ]
+        
+        let baseRadius: Float = 0.008  // 8mm base radius
+        
+        // Access the fixed-size joints array through pointer
+        withUnsafeMutablePointer(to: &handData.joints) { jointsPtr in
+            let joints = UnsafeMutableRawPointer(jointsPtr).bindMemory(to: FurHandJoint.self, capacity: 26)
+            
+            for mapping in jointMappings {
+                let index = mapping.index
+                guard index < 26 else { continue }
+                
+                let joint = skeleton.joint(mapping.name)
+                if joint.isTracked {
+                    let localTransform = joint.anchorFromJointTransform
+                    let worldTransform = transform * localTransform
+                    
+                    let position = SIMD3<Float>(
+                        worldTransform.columns.3.x,
+                        worldTransform.columns.3.y,
+                        worldTransform.columns.3.z
+                    )
+                    
+                    joints[index].position = position
+                    joints[index].radius = baseRadius * mapping.radiusScale
+                } else {
+                    joints[index].position = .zero
+                    joints[index].radius = 0
+                }
             }
         }
     }
@@ -551,6 +671,9 @@ actor Renderer {
 
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
+        
+        // Update fur hand uniforms
+        self.updateFurHandUniforms(time: Float(time))
 
         self.updateGameState(drawable: drawable)
 
@@ -654,6 +777,11 @@ actor Renderer {
         
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        
+        // Bind fur hand uniforms for fur hand rendering
+        if let furBuffer = furHandUniformBuffer {
+            renderEncoder.setFragmentBuffer(furBuffer, offset: 0, index: BufferIndex.furHands.rawValue)
+        }
 
         // When rendering to MetalFX input, use FULL input texture as viewport.
         // MetalFX input is now physical-sized for performance.

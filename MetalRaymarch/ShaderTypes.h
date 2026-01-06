@@ -22,7 +22,8 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
 {
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
-    BufferIndexUniforms      = 2
+    BufferIndexUniforms      = 2,
+    BufferIndexFurHands      = 3
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)
@@ -95,6 +96,33 @@ typedef struct
     float ifsOffset;             // IFS offset parameter
     float ifsGlow;               // IFS glow intensity
 } TileUniforms;
+
+// Hand joint data for fur rendering
+// 26 joints per hand (ARKit HandSkeleton)
+#define HAND_JOINT_COUNT 26
+
+typedef struct
+{
+    vector_float3 position;
+    float radius;              // Joint sphere radius for SDF
+} FurHandJoint;
+
+typedef struct
+{
+    FurHandJoint joints[HAND_JOINT_COUNT];
+    int isTracked;             // 0 = not tracked, 1 = tracked
+    float furDensity;          // Fur strand density (0.5 - 2.0)
+    float furLength;           // Fur strand length in meters (0.005 - 0.02)
+    float furNoiseScale;       // Noise frequency for fur variation
+} FurHandData;
+
+typedef struct
+{
+    FurHandData leftHand;
+    FurHandData rightHand;
+    float time;
+    int showFurHands;          // 0 = hidden, 1 = show fur hands
+} FurHandUniforms;
 
 #endif /* ShaderTypes_h */
 

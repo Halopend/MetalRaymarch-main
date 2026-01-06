@@ -110,9 +110,9 @@ final class GestureController {
     private let pinchActivateThreshold: Float = 0.65   // Must exceed to start gesture
     private let pinchReleaseThreshold: Float = 0.45    // Must fall below to end gesture
     
-    // Ring finger needs lower thresholds (harder to pinch)
-    private let ringPinchActivateThreshold: Float = 0.55
-    private let ringPinchReleaseThreshold: Float = 0.35
+    // Ring finger needs lower thresholds (anatomically harder to pinch with thumb)
+    private let ringPinchActivateThreshold: Float = 0.50
+    private let ringPinchReleaseThreshold: Float = 0.30
     
     // Value smoothing (higher = slower/smoother)
     private let valueSmoothingFactor: Float = 0.75
@@ -228,19 +228,20 @@ final class GestureController {
         data.palmPosition = jointPosition(.middleFingerMetacarpal)
         
         // Calculate pinch values based on distance between thumb and each finger
-        let pinchMaxDist: Float = 0.08  // 8cm = no pinch
-        let pinchMinDist: Float = 0.02  // 2cm = full pinch
+        // Ring finger has shorter reach to thumb anatomically, so use tighter range
+        let pinchMinDist: Float = 0.02  // 2cm = full pinch (same for all)
         
-        func calculatePinch(fingerTip: SIMD3<Float>) -> Float {
+        func calculatePinch(fingerTip: SIMD3<Float>, maxDist: Float) -> Float {
             let distance = simd_length(data.thumbTip - fingerTip)
-            let normalized = 1.0 - ((distance - pinchMinDist) / (pinchMaxDist - pinchMinDist))
+            let normalized = 1.0 - ((distance - pinchMinDist) / (maxDist - pinchMinDist))
             return simd_clamp(normalized, 0, 1)
         }
         
-        data.indexPinch = calculatePinch(fingerTip: data.indexTip)
-        data.middlePinch = calculatePinch(fingerTip: data.middleTip)
-        data.ringPinch = calculatePinch(fingerTip: data.ringTip)
-        data.pinkyPinch = calculatePinch(fingerTip: data.pinkyTip)
+        // Index/middle have longer reach (8cm range), ring/pinky have shorter reach (6cm range)
+        data.indexPinch = calculatePinch(fingerTip: data.indexTip, maxDist: 0.08)
+        data.middlePinch = calculatePinch(fingerTip: data.middleTip, maxDist: 0.08)
+        data.ringPinch = calculatePinch(fingerTip: data.ringTip, maxDist: 0.06)   // Tighter range for ring
+        data.pinkyPinch = calculatePinch(fingerTip: data.pinkyTip, maxDist: 0.055) // Even tighter for pinky
         
         return data
     }

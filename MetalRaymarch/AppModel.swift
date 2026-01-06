@@ -75,6 +75,7 @@ class RenderSettings {
     // HUD display
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
+    private var _showFurHands: Bool = true           // Render hands as fur (default on)
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -217,6 +218,11 @@ class RenderSettings {
     var activeGestureIndex: Int {
         get { lock.withLock { _activeGestureIndex } }
         set { lock.withLock { _activeGestureIndex = newValue } }
+    }
+    
+    var showFurHands: Bool {
+        get { lock.withLock { _showFurHands } }
+        set { lock.withLock { _showFurHands = newValue } }
     }
 }
 
