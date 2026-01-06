@@ -989,21 +989,21 @@ kernel void adaptiveHierarchical8x8(
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     
-    // Unproject to view space at far plane (z = 1 in NDC)
-    float4 clipPos = float4(ndc, 1.0, 1.0);  // Far plane in clip space
+    // Unproject to view space - use z = -1 (view-space convention: -Z is forward)
+    // This matches how the vertex shader projects positions and ensures consistency
+    // with wide FOV projections
+    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);  // Near plane in clip space
     float4 viewPos = uniforms.invProjMatrix * clipPos;
-    viewPos /= viewPos.w;
+    // For perspective projection, we need the direction, not normalized position
+    // viewPos.w will be 1 after inverse projection of a point at z=0
+    float3 viewDir = normalize(viewPos.xyz);
     
-    // Transform to model space (inverse model-view)
-    // invViewMatrix here is actually inverse MODEL-VIEW matrix (set in Swift)
-    float4 modelPos4 = uniforms.invViewMatrix * viewPos;
-    float3 modelPos = modelPos4.xyz / modelPos4.w;
+    // Transform direction to model space (inverse model-view matrix)
+    // Use w=0 for direction transformation (no translation)
+    float3 rd = normalize((uniforms.invViewMatrix * float4(viewDir, 0.0)).xyz);
     
     // Camera position in model space (same as fragment shader)
     float3 cameraPos = uniforms.cameraPos;
-    
-    // Ray direction in model space (exactly like fragment shader)
-    float3 rd = normalize(modelPos - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
