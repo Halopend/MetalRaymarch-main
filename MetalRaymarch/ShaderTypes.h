@@ -43,6 +43,8 @@ typedef struct
     matrix_float4x4 modelViewMatrix;
     matrix_float4x4 inverseModelViewMatrix;
     matrix_float4x4 inverseProjectionMatrix;
+    matrix_float4x4 viewMatrix;           // Pure view matrix (no model transform)
+    matrix_float4x4 inverseViewMatrix;    // For world-space ray origin
     float time;
     float minDistance;
     vector_float2 foveaCenter;

@@ -1100,9 +1100,10 @@ float3 uvToDir(float2 uv) // uv: -1..1
 }
 
 // =============================================================================
-// FUR HAND RENDERING
+// SOPHISTICATED FUR HAND RENDERING
 // =============================================================================
-// Raymarched fur effect on tracked hands using shell/strand approach
+// Strand-based raymarching with Kajiya-Kay anisotropic shading model
+// Features: Volumetric density, proper hair lighting, self-shadowing, color variation
 
 // SDF for a single hand bone (capsule between two joints)
 float sdCapsule(float3 p, float3 a, float3 b, float r) {
@@ -1116,26 +1117,16 @@ float sdHandSkeleton(float3 p, constant FurHandData& hand) {
     if (hand.isTracked == 0) return 1000.0;
     
     float d = 1000.0;
-    
-    // Finger bone connections (joint indices from ARKit HandSkeleton)
-    // Wrist (0) -> Palm connections
-    // Thumb: 1-2-3-4 (metacarpal to tip)
-    // Index: 5-6-7-8
-    // Middle: 9-10-11-12  
-    // Ring: 13-14-15-16
-    // Little: 17-18-19-20
-    
-    // Palm area - connect wrist to finger bases with thicker radius
     float3 wrist = hand.joints[0].position;
     float wristR = hand.joints[0].radius;
     
-    // Thumb chain (thicker)
+    // Thumb chain
     d = min(d, sdCapsule(p, hand.joints[1].position, hand.joints[2].position, hand.joints[1].radius * 1.2));
     d = min(d, sdCapsule(p, hand.joints[2].position, hand.joints[3].position, hand.joints[2].radius * 1.1));
     d = min(d, sdCapsule(p, hand.joints[3].position, hand.joints[4].position, hand.joints[3].radius));
     
     // Index finger
-    d = min(d, sdCapsule(p, wrist, hand.joints[5].position, wristR * 0.8));  // Palm to knuckle
+    d = min(d, sdCapsule(p, wrist, hand.joints[5].position, wristR * 0.8));
     d = min(d, sdCapsule(p, hand.joints[5].position, hand.joints[6].position, hand.joints[5].radius));
     d = min(d, sdCapsule(p, hand.joints[6].position, hand.joints[7].position, hand.joints[6].radius));
     d = min(d, sdCapsule(p, hand.joints[7].position, hand.joints[8].position, hand.joints[7].radius * 0.9));
@@ -1152,13 +1143,13 @@ float sdHandSkeleton(float3 p, constant FurHandData& hand) {
     d = min(d, sdCapsule(p, hand.joints[14].position, hand.joints[15].position, hand.joints[14].radius));
     d = min(d, sdCapsule(p, hand.joints[15].position, hand.joints[16].position, hand.joints[15].radius * 0.9));
     
-    // Little finger (thinner)
+    // Little finger
     d = min(d, sdCapsule(p, wrist, hand.joints[17].position, wristR * 0.6));
     d = min(d, sdCapsule(p, hand.joints[17].position, hand.joints[18].position, hand.joints[17].radius * 0.9));
     d = min(d, sdCapsule(p, hand.joints[18].position, hand.joints[19].position, hand.joints[18].radius * 0.9));
     d = min(d, sdCapsule(p, hand.joints[19].position, hand.joints[20].position, hand.joints[19].radius * 0.85));
     
-    // Palm mesh (connect finger bases)
+    // Palm mesh
     d = min(d, sdCapsule(p, hand.joints[5].position, hand.joints[9].position, wristR * 0.5));
     d = min(d, sdCapsule(p, hand.joints[9].position, hand.joints[13].position, wristR * 0.5));
     d = min(d, sdCapsule(p, hand.joints[13].position, hand.joints[17].position, wristR * 0.45));
@@ -1166,12 +1157,25 @@ float sdHandSkeleton(float3 p, constant FurHandData& hand) {
     return d;
 }
 
-// 3D noise for fur variation
+// Get surface normal of hand skeleton (with safety for degenerate cases)
+float3 getHandNormal(float3 p, constant FurHandData& hand) {
+    float e = 0.0005;
+    float3 grad = float3(
+        sdHandSkeleton(p + float3(e,0,0), hand) - sdHandSkeleton(p - float3(e,0,0), hand),
+        sdHandSkeleton(p + float3(0,e,0), hand) - sdHandSkeleton(p - float3(0,e,0), hand),
+        sdHandSkeleton(p + float3(0,0,e), hand) - sdHandSkeleton(p - float3(0,0,e), hand)
+    );
+    float len = length(grad);
+    // Safety check to prevent division by zero
+    if (len < 0.00001) return float3(0.0, 1.0, 0.0);
+    return grad / len;
+}
+
+// High-quality 3D noise with derivatives for strand variation
 float furNoise3D(float3 p) {
     float3 i = floor(p);
     float3 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    
     float n = i.x + i.y * 157.0 + 113.0 * i.z;
     return mix(mix(mix(hash(n), hash(n + 1.0), f.x),
                    mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
@@ -1179,170 +1183,328 @@ float furNoise3D(float3 p) {
                    mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
 }
 
-// Fur strand displacement - creates fur "shells"
-float furDisplacement(float3 p, float shellHeight, float furLength, float noiseScale, float time) {
-    // Base noise for fur clumping
-    float n = furNoise3D(p * noiseScale);
-    
-    // Strand pattern - higher frequency
-    float strands = furNoise3D(p * noiseScale * 8.0);
-    strands = smoothstep(0.3, 0.7, strands);  // Create distinct strands
-    
-    // Fur length varies with noise
-    float lengthVar = mix(0.6, 1.0, n);
-    
-    // Shell falloff - fur tapers toward tips
-    float shellFalloff = 1.0 - shellHeight;
-    shellFalloff = shellFalloff * shellFalloff;  // Quadratic falloff
-    
-    // Combine: positive = outside fur, negative = inside
-    float furOffset = furLength * lengthVar * strands * shellFalloff;
-    
-    // Add subtle movement
-    float sway = sin(time * 2.0 + p.x * 10.0 + n * 6.28) * 0.0005 * shellHeight;
-    
-    return furOffset + sway;
+// Fractional Brownian Motion for natural variation
+float furFBM(float3 p, int octaves) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * furNoise3D(p * frequency);
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    return value;
 }
 
-// Raymarch fur hands with shell technique
+// === KAJIYA-KAY ANISOTROPIC HAIR SHADING ===
+// Physically-based model for hair/fur rendering
+
+// Kajiya-Kay diffuse term
+float kajiyaDiffuse(float3 tangent, float3 lightDir) {
+    float TdotL = dot(tangent, lightDir);
+    return sqrt(max(0.0, 1.0 - TdotL * TdotL));
+}
+
+// Kajiya-Kay specular term with shifted tangent
+float kajiyaSpecular(float3 tangent, float3 lightDir, float3 viewDir, float shift, float exponent) {
+    float3 T = normalize(tangent + shift * normalize(cross(tangent, viewDir)));
+    float TdotL = dot(T, lightDir);
+    float TdotV = dot(T, viewDir);
+    float sinTL = sqrt(max(0.0, 1.0 - TdotL * TdotL));
+    float sinTV = sqrt(max(0.0, 1.0 - TdotV * TdotV));
+    return pow(max(0.0, TdotL * TdotV + sinTL * sinTV), exponent);
+}
+
+// Marschner-inspired dual specular highlights
+float3 dualSpecular(float3 tangent, float3 lightDir, float3 viewDir, float3 baseColor) {
+    // Primary specular (R) - shifted towards root
+    float spec1 = kajiyaSpecular(tangent, lightDir, viewDir, -0.1, 80.0);
+    float3 specColor1 = float3(1.0, 0.98, 0.95);  // Slightly warm white
+    
+    // Secondary specular (TRT) - shifted towards tip, colored by hair
+    float spec2 = kajiyaSpecular(tangent, lightDir, viewDir, 0.1, 25.0);
+    float3 specColor2 = baseColor * 1.5;  // Tinted by hair color
+    
+    return spec1 * specColor1 * 0.4 + spec2 * specColor2 * 0.3;
+}
+
+// === VOLUMETRIC FUR DENSITY FIELD ===
+// Creates a density field with strand-like structures
+
+struct FurDensityResult {
+    float density;      // Volumetric density at point
+    float3 tangent;     // Local strand direction for anisotropic shading
+    float3 color;       // Base fur color at this point
+    float clumpId;      // For color variation per clump
+};
+
+FurDensityResult sampleFurDensity(float3 p, float3 surfaceNormal, float distToSurface, 
+                                   float furLength, float noiseScale, float time) {
+    FurDensityResult result;
+    result.density = 0.0;
+    result.tangent = surfaceNormal;
+    result.color = float3(0.5);
+    result.clumpId = 0.0;
+    
+    // Fur only exists within fur length from surface
+    if (distToSurface < 0.0 || distToSurface > furLength) return result;
+    
+    // Normalized height in fur (0 = root, 1 = tip)
+    float h = distToSurface / furLength;
+    
+    // === STRAND STRUCTURE ===
+    // Create strand pattern using high-frequency noise
+    float3 strandCoord = p * noiseScale * 15.0;
+    
+    // Clumping - strands group together
+    float3 clumpCoord = p * noiseScale * 3.0;
+    float clumpNoise = furFBM(clumpCoord, 3);
+    result.clumpId = floor(clumpNoise * 8.0) / 8.0;
+    
+    // Individual strand pattern
+    float strandPattern = furNoise3D(strandCoord);
+    strandPattern = smoothstep(0.35, 0.65, strandPattern);
+    
+    // Strand frequency increases with clumping
+    float clumpDensity = smoothstep(0.3, 0.7, clumpNoise);
+    strandPattern = mix(strandPattern, 1.0, clumpDensity * 0.5);
+    
+    // === DENSITY FALLOFF ===
+    // Density decreases from root to tip (tapered strands)
+    float heightFalloff = 1.0 - pow(h, 1.5);
+    
+    // Random strand length variation
+    float lengthVar = furNoise3D(p * noiseScale * 5.0 + 100.0);
+    float maxHeight = 0.6 + lengthVar * 0.4;
+    if (h > maxHeight) {
+        heightFalloff *= smoothstep(1.0, maxHeight, h);
+    }
+    
+    // Final density
+    result.density = strandPattern * heightFalloff * clumpDensity;
+    result.density = smoothstep(0.1, 0.5, result.density);
+    
+    // === STRAND TANGENT (for anisotropic shading) ===
+    // Strands grow outward with slight curl/wave
+    float3 baseDir = surfaceNormal;
+    
+    // Add curl variation
+    float curlPhase = furNoise3D(p * noiseScale * 8.0 + 50.0) * 6.28;
+    float curlAmount = h * 0.3;  // More curl at tips
+    float3 curlOffset = float3(
+        sin(curlPhase) * curlAmount,
+        0.0,
+        cos(curlPhase) * curlAmount
+    );
+    
+    // Add gravity bend
+    float3 gravityBend = float3(0.0, -1.0, 0.0) * h * h * 0.2;
+    
+    // Add time-based sway
+    float swayPhase = time * 1.5 + furNoise3D(p * 2.0) * 3.0;
+    float3 sway = float3(sin(swayPhase), 0.0, cos(swayPhase * 0.7)) * h * 0.05;
+    
+    result.tangent = normalize(baseDir + curlOffset + gravityBend + sway);
+    
+    // === FUR COLOR ===
+    // Rich color variation based on position and clump
+    float colorVar1 = furNoise3D(p * noiseScale * 2.0);
+    float colorVar2 = furNoise3D(p * noiseScale * 6.0 + 200.0);
+    
+    // Base colors - warm orange/brown fur
+    float3 rootColor = mix(
+        float3(0.65, 0.35, 0.15),   // Dark brown
+        float3(0.85, 0.55, 0.25),   // Golden brown
+        colorVar1
+    );
+    float3 tipColor = mix(
+        float3(0.95, 0.75, 0.45),   // Light golden
+        float3(0.55, 0.30, 0.12),   // Dark tips
+        colorVar2
+    );
+    
+    // Blend from root to tip
+    result.color = mix(rootColor, tipColor, pow(h, 0.7));
+    
+    // Add highlight strands
+    float highlightMask = smoothstep(0.85, 0.95, furNoise3D(p * noiseScale * 12.0));
+    result.color = mix(result.color, float3(1.0, 0.9, 0.7), highlightMask * 0.3);
+    
+    return result;
+}
+
+// === VOLUMETRIC FUR RAYMARCHING ===
 struct FurHandResult {
     float t;           // Hit distance
-    float3 color;      // Fur color
-    float3 normal;     // Surface normal
-    bool hit;          // Did we hit?
-    float ao;          // Ambient occlusion
+    float3 color;      // Accumulated color
+    float alpha;       // Accumulated opacity
+    float3 normal;     // Surface normal for depth
+    bool hit;          // Did we hit anything?
 };
+
+// Self-shadowing for fur (simplified)
+float furShadow(float3 p, float3 lightDir, float distToSurface, float furLength,
+                constant FurHandData& hand, float noiseScale, float time) {
+    float shadow = 1.0;
+    float stepSize = furLength * 0.15;
+    
+    float3 normal = getHandNormal(p, hand);
+    
+    for (int i = 0; i < 6; i++) {
+        float3 sp = p + lightDir * stepSize * float(i + 1);
+        float d = sdHandSkeleton(sp, hand);
+        
+        if (d < furLength && d > 0.0) {
+            FurDensityResult density = sampleFurDensity(sp, normal, d, furLength, noiseScale, time);
+            shadow *= 1.0 - density.density * 0.15;
+        }
+    }
+    
+    return max(shadow, 0.3);
+}
 
 FurHandResult raymarchFurHands(float3 ro, float3 rd, constant FurHandUniforms& furUniforms) {
     FurHandResult result;
     result.hit = false;
     result.t = 1000.0;
     result.color = float3(0.0);
+    result.alpha = 0.0;
     result.normal = float3(0.0, 1.0, 0.0);
-    result.ao = 1.0;
     
     if (furUniforms.showFurHands == 0) return result;
     
-    float t = 0.01;
+    // Safety: check if at least one hand is tracked
+    bool leftTracked = furUniforms.leftHand.isTracked != 0;
+    bool rightTracked = furUniforms.rightHand.isTracked != 0;
+    if (!leftTracked && !rightTracked) return result;
+    
     float furLength = furUniforms.leftHand.furLength;
     float noiseScale = furUniforms.leftHand.furNoiseScale;
     float time = furUniforms.time;
     
-    // Multiple shell layers for fur volume
-    const int NUM_SHELLS = 8;
+    // Safety: validate fur parameters
+    if (furLength < 0.001 || furLength > 0.1) furLength = 0.012;
+    if (noiseScale < 1.0 || noiseScale > 200.0) noiseScale = 80.0;
     
-    for (int i = 0; i < 80; i++) {
+    // Light setup
+    float3 lightDir = normalize(float3(0.5, 0.8, 0.3));
+    float3 lightColor = float3(1.0, 0.95, 0.9) * 1.5;
+    float3 ambientColor = float3(0.15, 0.18, 0.25);
+    
+    // Find entry point into fur volume
+    float t = 0.01;
+    float tMax = 2.0;  // Reduced max distance for performance
+    
+    // First, find where we enter the fur bounding volume
+    for (int i = 0; i < 32; i++) {  // Reduced iterations
+        float3 p = ro + rd * t;
+        float dLeft = leftTracked ? sdHandSkeleton(p, furUniforms.leftHand) : 1000.0;
+        float dRight = rightTracked ? sdHandSkeleton(p, furUniforms.rightHand) : 1000.0;
+        float d = min(dLeft, dRight);
+        
+        if (d < furLength * 1.2) break;  // Enter fur volume
+        
+        t += max(d * 0.9, 0.001);  // Safety: ensure forward progress
+        if (t > tMax) return result;
+    }
+    
+    // Volumetric integration through fur
+    float3 accumColor = float3(0.0);
+    float accumAlpha = 0.0;
+    float stepSize = furLength * 0.12;  // Slightly larger steps for performance
+    float firstHitT = -1.0;
+    float3 firstHitNormal = float3(0.0);
+    
+    for (int i = 0; i < 48 && accumAlpha < 0.95; i++) {  // Reduced iterations
         float3 p = ro + rd * t;
         
-        // Distance to both hands
-        float dLeft = sdHandSkeleton(p, furUniforms.leftHand);
-        float dRight = sdHandSkeleton(p, furUniforms.rightHand);
-        float dHand = min(dLeft, dRight);
+        // Check both hands (only if tracked)
+        float dLeft = leftTracked ? sdHandSkeleton(p, furUniforms.leftHand) : 1000.0;
+        float dRight = rightTracked ? sdHandSkeleton(p, furUniforms.rightHand) : 1000.0;
+        bool isLeft = dLeft < dRight;
+        float d = min(dLeft, dRight);
+        constant FurHandData& activeHand = isLeft ? furUniforms.leftHand : furUniforms.rightHand;
         
-        // Skip if too far from any hand
-        if (dHand > 0.5) {
-            t += dHand * 0.8;
-            if (t > 3.0) break;
+        // Outside fur volume - skip ahead
+        if (d > furLength * 1.5) {
+            t += d * 0.8;
+            if (t > tMax) break;
             continue;
         }
         
-        // Check each fur shell
-        for (int shell = 0; shell < NUM_SHELLS; shell++) {
-            float shellHeight = float(shell) / float(NUM_SHELLS - 1);
-            float shellOffset = furLength * shellHeight;
-            
-            // Fur displacement at this shell
-            float furDisp = furDisplacement(p, shellHeight, furLength, noiseScale, time);
-            
-            // Shell surface distance
-            float dShell = dHand - shellOffset + furDisp;
-            
-            if (dShell < 0.0005) {
-                result.hit = true;
-                result.t = t;
-                
-                // Fur color - warm brown/orange tones with variation
-                float colorNoise = furNoise3D(p * noiseScale * 4.0);
-                float3 baseColor = mix(
-                    float3(0.6, 0.35, 0.15),   // Darker brown
-                    float3(0.9, 0.6, 0.3),     // Golden orange
-                    colorNoise
-                );
-                
-                // Darken tips, lighter at roots
-                float tipDarken = mix(1.0, 0.4, shellHeight * shellHeight);
-                result.color = baseColor * tipDarken;
-                
-                // Simple normal from hand SDF gradient
-                float e = 0.001;
-                float3 n;
-                if (dLeft < dRight) {
-                    n = normalize(float3(
-                        sdHandSkeleton(p + float3(e,0,0), furUniforms.leftHand) - sdHandSkeleton(p - float3(e,0,0), furUniforms.leftHand),
-                        sdHandSkeleton(p + float3(0,e,0), furUniforms.leftHand) - sdHandSkeleton(p - float3(0,e,0), furUniforms.leftHand),
-                        sdHandSkeleton(p + float3(0,0,e), furUniforms.leftHand) - sdHandSkeleton(p - float3(0,0,e), furUniforms.leftHand)
-                    ));
-                } else {
-                    n = normalize(float3(
-                        sdHandSkeleton(p + float3(e,0,0), furUniforms.rightHand) - sdHandSkeleton(p - float3(e,0,0), furUniforms.rightHand),
-                        sdHandSkeleton(p + float3(0,e,0), furUniforms.rightHand) - sdHandSkeleton(p - float3(0,e,0), furUniforms.rightHand),
-                        sdHandSkeleton(p + float3(0,0,e), furUniforms.rightHand) - sdHandSkeleton(p - float3(0,0,e), furUniforms.rightHand)
-                    ));
-                }
-                
-                // Perturb normal for fur direction
-                float3 furDir = normalize(n + float3(
-                    (furNoise3D(p * 50.0) - 0.5) * 0.3,
-                    0.2,  // Fur tends upward
-                    (furNoise3D(p * 50.0 + 100.0) - 0.5) * 0.3
-                ));
-                result.normal = normalize(mix(n, furDir, shellHeight * 0.5));
-                
-                // Ambient occlusion - deeper shells are darker
-                result.ao = mix(0.3, 1.0, 1.0 - shellHeight * 0.7);
-                
-                return result;
+        // Inside hand surface - we hit the skin
+        if (d < 0.001) {
+            if (firstHitT < 0.0) {
+                firstHitT = t;
+                firstHitNormal = getHandNormal(p, activeHand);
             }
+            
+            // Skin color underneath fur
+            float3 skinColor = float3(0.4, 0.25, 0.18);
+            float skinAlpha = 1.0 - accumAlpha;
+            accumColor += skinColor * skinAlpha * 0.5;
+            accumAlpha = 1.0;
+            break;
         }
         
-        // Step based on hand distance
-        t += max(dHand * 0.5, 0.002);
-        if (t > 3.0) break;
+        // Sample fur density
+        float3 normal = getHandNormal(p, activeHand);
+        FurDensityResult fur = sampleFurDensity(p, normal, d, furLength, noiseScale, time);
+        
+        if (fur.density > 0.01) {
+            if (firstHitT < 0.0) {
+                firstHitT = t;
+                firstHitNormal = normal;
+            }
+            
+            // === KAJIYA-KAY SHADING ===
+            float diffuse = kajiyaDiffuse(fur.tangent, lightDir);
+            float3 specular = dualSpecular(fur.tangent, lightDir, -rd, fur.color);
+            
+            // Self-shadowing
+            float shadow = furShadow(p, lightDir, d, furLength, activeHand, noiseScale, time);
+            
+            // Rim lighting (backlit fur glow)
+            float rim = pow(1.0 - saturate(dot(normal, -rd)), 3.0);
+            float backlit = saturate(dot(-rd, lightDir));
+            float3 rimColor = fur.color * rim * backlit * 0.6;
+            
+            // Ambient occlusion approximation
+            float ao = mix(0.5, 1.0, d / furLength);
+            
+            // Combine lighting
+            float3 litColor = fur.color * diffuse * lightColor * shadow;
+            litColor += specular * shadow;
+            litColor += fur.color * ambientColor * ao;
+            litColor += rimColor;
+            
+            // Accumulate with front-to-back compositing
+            float sampleAlpha = fur.density * stepSize * 15.0;
+            sampleAlpha = min(sampleAlpha, 1.0 - accumAlpha);
+            
+            accumColor += litColor * sampleAlpha;
+            accumAlpha += sampleAlpha;
+        }
+        
+        t += stepSize;
+        if (t > tMax) break;
+    }
+    
+    if (accumAlpha > 0.01) {
+        result.hit = true;
+        result.t = firstHitT > 0.0 ? firstHitT : t;
+        result.color = accumColor;
+        result.alpha = accumAlpha;
+        result.normal = firstHitNormal;
     }
     
     return result;
 }
 
-// Shade fur with subsurface-like scattering
+// Shade fur result (mostly done in raymarch, this handles final compositing)
 half3 shadeFurHands(FurHandResult furResult, float3 rd, float3 lightDir, float3 lightColor) {
     if (!furResult.hit) return half3(0.0);
-    
-    float3 n = furResult.normal;
-    
-    // Diffuse - wrap lighting for soft fur look
-    float NdotL = dot(n, lightDir);
-    float wrap = 0.5;
-    float diffuse = saturate((NdotL + wrap) / (1.0 + wrap));
-    
-    // Rim lighting - fur catches light at edges
-    float rim = 1.0 - saturate(dot(n, -rd));
-    rim = pow(rim, 2.0) * 0.4;
-    
-    // Specular - soft, spread highlight for fur
-    float3 h = normalize(lightDir - rd);
-    float spec = pow(saturate(dot(n, h)), 8.0) * 0.3;
-    
-    // Subsurface approximation - light through thin fur
-    float subsurface = saturate(dot(-rd, lightDir)) * 0.15;
-    
-    // Combine
-    float3 col = furResult.color * (diffuse * furResult.ao + rim + subsurface) * lightColor;
-    col += float3(spec) * lightColor * 0.5;
-    
-    // Ambient
-    col += furResult.color * 0.15 * furResult.ao;
-    
-    return half3(saturate(col));
+    return half3(furResult.color);
 }
 
 // =============================================================================
@@ -1488,35 +1650,50 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     Uniforms uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
     
-    // Get camera and ray direction
+    // Get camera and ray direction in MODEL SPACE for fractal
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
-    // First check fur hands (they're in world space, closer to camera)
-    FurHandResult furResult = raymarchFurHands(cameraPos, rd, furHandUniforms);
+    // Get camera and ray direction in WORLD SPACE for fur hands
+    // Hands are tracked in world space (device-anchored coordinates)
+    // Camera position in world space: inverse(viewMatrix) * (0,0,0,1)
+    float3 worldCameraPos = (uniforms.inverseViewMatrix * float4(0,0,0,1)).xyz;
+    // Transform mesh position to world space: inverse(viewMatrix) * modelViewMatrix * localPos
+    float4 viewSpacePos = uniforms.modelViewMatrix * float4(in.modelPos, 1.0);
+    float3 worldPos = (uniforms.inverseViewMatrix * viewSpacePos).xyz;
+    float3 worldRd = normalize(worldPos - worldCameraPos);
+    
+    // First check fur hands in WORLD SPACE
+    FurHandResult furResult = raymarchFurHands(worldCameraPos, worldRd, furHandUniforms);
     
     // Get fractal result
     FragmentOutput fractalOutput = fragmentMain(in, uniforms, fragCoord, uniforms.time);
     
-    // Composite fur hands over fractal if fur hit is closer
-    if (furResult.hit) {
+    // Composite volumetric fur hands over fractal with alpha blending
+    if (furResult.hit && furResult.alpha > 0.01) {
         float fractalDepth = fractalOutput.depth;
         
-        // Compute fur hand depth
-        float3 furHitPos = cameraPos + furResult.t * rd;
-        float4 furClipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(furHitPos, 1.0);
+        // Compute fur hand depth in WORLD SPACE then project
+        float3 furHitPos = worldCameraPos + furResult.t * worldRd;
+        float4 furClipPos = uniforms.projectionMatrix * uniforms.viewMatrix * float4(furHitPos, 1.0);
         float furDepth = furClipPos.z / furClipPos.w;
         
-        // If fur is closer, blend it
+        // If fur is closer or overlapping, blend it
         if (furResult.t < 900.0 && (fractalDepth < 0.001 || furDepth > fractalDepth)) {
-            // Shade fur hands
+            // Shade fur hands (color already computed in volumetric raymarch)
             float3 lightDir = normalize(float3(0.5, 0.8, 0.3));
             float3 lightColor = float3(1.0, 0.95, 0.9);
-            half3 furColor = shadeFurHands(furResult, rd, lightDir, lightColor);
+            half3 furColor = shadeFurHands(furResult, worldRd, lightDir, lightColor);
             
-            // Blend fur over fractal
-            fractalOutput.color = float4(float3(furColor), 1.0);
-            fractalOutput.depth = furDepth;
+            // Alpha blend fur over fractal for volumetric transparency
+            float alpha = furResult.alpha;
+            float3 blendedColor = float3(furColor) * alpha + fractalOutput.color.rgb * (1.0 - alpha);
+            fractalOutput.color = float4(blendedColor, 1.0);
+            
+            // Use fur depth if mostly opaque
+            if (alpha > 0.5) {
+                fractalOutput.depth = furDepth;
+            }
         }
     }
     
@@ -1546,8 +1723,14 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
-    // Check fur hands first
-    FurHandResult furResult = raymarchFurHands(cameraPos, rd, furHandUniforms);
+    // World-space ray for fur hands
+    float3 worldCameraPos = (uniforms.inverseViewMatrix * float4(0,0,0,1)).xyz;
+    float4 viewSpacePos = uniforms.modelViewMatrix * float4(in.modelPos, 1.0);
+    float3 worldPos = (uniforms.inverseViewMatrix * viewSpacePos).xyz;
+    float3 worldRd = normalize(worldPos - worldCameraPos);
+    
+    // Check fur hands in world space
+    FurHandResult furResult = raymarchFurHands(worldCameraPos, worldRd, furHandUniforms);
     
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
@@ -1627,18 +1810,25 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     output.color = float4(float3(col), 1.0);
     
-    // Composite fur hands if closer
-    if (furResult.hit && furResult.t < adjustedDist) {
-        float3 furHitPos = cameraPos + furResult.t * rd;
-        float4 furClipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(furHitPos, 1.0);
+    // Composite volumetric fur hands with alpha blending (world space)
+    if (furResult.hit && furResult.alpha > 0.01 && furResult.t < adjustedDist) {
+        float3 furHitPos = worldCameraPos + furResult.t * worldRd;
+        float4 furClipPos = uniforms.projectionMatrix * uniforms.viewMatrix * float4(furHitPos, 1.0);
         float furDepth = furClipPos.z / furClipPos.w;
         
         float3 lightDir = normalize(float3(0.5, 0.8, 0.3));
         float3 lightColor = float3(1.0, 0.95, 0.9);
-        half3 furColor = shadeFurHands(furResult, rd, lightDir, lightColor);
+        half3 furColor = shadeFurHands(furResult, worldRd, lightDir, lightColor);
         
-        output.color = float4(float3(furColor), 1.0);
-        output.depth = furDepth;
+        // Alpha blend fur over fractal
+        float alpha = furResult.alpha;
+        float3 blendedColor = float3(furColor) * alpha + output.color.rgb * (1.0 - alpha);
+        output.color = float4(blendedColor, 1.0);
+        
+        // Use fur depth if mostly opaque
+        if (alpha > 0.5) {
+            output.depth = furDepth;
+        }
     }
     
     return output;

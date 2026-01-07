@@ -575,12 +575,15 @@ actor Renderer {
             
             let modelView = viewMatrix * modelMatrix
             let inverseModelView = modelView.inverse
+            let inverseView = viewMatrix.inverse
             
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
                             inverseProjectionMatrix: inverseProjection,
+                            viewMatrix: viewMatrix,
+                            inverseViewMatrix: inverseView,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
