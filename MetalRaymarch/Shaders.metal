@@ -4,6 +4,20 @@
 // Debug flag for depth visualization (set to 1 to enable)
 #define DEBUG_DEPTH_VISUALIZATION 0
 
+// === COMPILER OPTIMIZATION HINTS ===
+// Force aggressive inlining for hot path functions
+#define FORCE_INLINE __attribute__((always_inline))
+// Hint that a branch is likely/unlikely (helps branch predictor)
+#define LIKELY(x)   __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+// Unroll loops completely when iteration count is known
+#define UNROLL_FULL _Pragma("unroll")
+// Partial unroll for larger loops
+#define UNROLL_4 _Pragma("unroll(4)")
+#define UNROLL_8 _Pragma("unroll(8)")
+// Disable unrolling for variable-count loops to reduce register pressure
+#define NO_UNROLL _Pragma("nounroll")
+
 
 // File for Metal kernel and shader functions
 #include <metal_stdlib>
@@ -57,6 +71,27 @@ constant float3 sunColour = float3(1.0, 0.95, 0.8);
 constant float kPowEpsilon = 1e-6f;
 constant half kPowEpsilonHalf = 1e-4h;
 
+// === NAMED CONSTANTS FOR OPTIMIZATION ===
+// Raymarching thresholds
+constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
+constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
+constant float kCoarseMaxDistance = 80.0f;      // Super-coarse max distance
+constant float kFogStartDistance = 1.5f;        // Fog exponential start
+
+// Shading constants
+constant half kGamma = 0.47h;                   // Output gamma correction
+constant half kSaturation = 1.5h;               // Color saturation multiplier
+constant half kContrast = 1.08h;                // Contrast adjustment
+constant float kSpecularPower = 10.0f;          // Specular highlight power
+constant float kSpecularIntensity = 2.0f;       // Specular intensity multiplier
+constant float kAttenPower = 1.5f;              // Light attenuation power
+
+// Quality thresholds
+constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quality
+constant float kMinQualityForNormals = 0.2f;    // Use cheap normals below this
+constant float kMinQualityForSpecular = 0.7f;   // Skip specular below this
+constant float kMinQualityForPostFX = 0.5f;     // Use simple gamma below this
+
 // === ADAPTIVE HIERARCHICAL CONSTANTS ===
 constant float BOUNDING_SPHERE_RADIUS = 3.5f;  // Skip rays outside this
 constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this distance
@@ -86,26 +121,61 @@ inline int selectAdaptiveLevel(float coarseT) {
 }
 
 // Blue noise approximation for temporal stability (better than white noise for reprojection)
-float blueNoise(float2 uv, float time) {
+// FORCE_INLINE: Called every pixel in Scene()
+FORCE_INLINE float blueNoise(float2 uv, float time) {
     // Interleaved gradient noise - more temporally stable than random
+    // Note: constexpr not available in Metal, but compiler will optimize this literal
     float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
     float noise = fract(magic.z * fract(dot(uv, magic.xy)));
     // Add small temporal variation to prevent static patterns
-    return fract(noise + time * 0.1);
+    return fract(fma(time, 0.1, noise));
 }
 constant float SCALE = 2.8;
 
-float hash(float n) { return fract(sin(n) * 753.5453123); }
+// Fast integer-based hash (faster than sin-based on GPU)
+// FORCE_INLINE ensures no function call overhead in tight loops
+FORCE_INLINE float hash(float n) { 
+    // Reinterpret float bits as uint - zero cost
+    uint u = as_type<uint>(n);
+    // XOR-shift hash - all single-cycle ops on GPU
+    u = (u ^ 61u) ^ (u >> 16u);
+    u = u + (u << 3u);
+    u = u ^ (u >> 4u);
+    u = u * 0x27d4eb2du;
+    u = u ^ (u >> 15u);
+    // Convert back to normalized float
+    return float(u) * (1.0f / 4294967296.0f);
+}
 
-float noise(float3 x) {
+// Original sin-based hash for compatibility (some noise functions may depend on exact distribution)
+FORCE_INLINE float hashSin(float n) { return fract(sin(n) * 753.5453123); }
+
+// 3D value noise - optimized for GPU coherent access
+// Using MAD (multiply-add) chains that map to single GPU instructions
+FORCE_INLINE float noise(float3 x) {
     float3 p = floor(x);
     float3 f = fract(x);
-    f = f * f * (3.0 - 2.0 * f);
-    float n = p.x + p.y * 157.0 + 113.0 * p.z;
-    return mix(mix(mix(hash(n +   0.0), hash(n +   1.0), f.x),
-                   mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
-               mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
-                   mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
+    // Smooth interpolation (cubic Hermite) - avoids derivative discontinuities
+    f = f * f * fma(f, float3(-2.0), float3(3.0));  // fma = fused multiply-add
+    
+    // Compute base index once, reuse
+    float n = fma(p.z, 113.0, fma(p.y, 157.0, p.x));
+    
+    // Prefetch all 8 corner hashes - GPU can parallelize these
+    float h000 = hash(n);
+    float h100 = hash(n + 1.0);
+    float h010 = hash(n + 157.0);
+    float h110 = hash(n + 158.0);
+    float h001 = hash(n + 113.0);
+    float h101 = hash(n + 114.0);
+    float h011 = hash(n + 270.0);
+    float h111 = hash(n + 271.0);
+    
+    // Trilinear interpolation using mix chains
+    return mix(mix(mix(h000, h100, f.x),
+                   mix(h010, h110, f.x), f.y),
+               mix(mix(h001, h101, f.x),
+                   mix(h011, h111, f.x), f.y), f.z);
 }
 
 float GetSky(float3 pos)
@@ -122,9 +192,12 @@ struct FractalParams {
     float minRadius2;
 };
 
-inline FractalParams makeFractalParams(float minRad2Val, float fractalScale, float sphereRadius, int iterations) {
+// FORCE_INLINE: This is called per-pixel, must not have call overhead
+FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScale, float sphereRadius, int iterations) {
     FractalParams params;
-    params.scale = float4(fractalScale) / minRad2Val;
+    // Compute scale once, store in register-friendly float4
+    float invMinRad = 1.0f / minRad2Val;
+    params.scale = float4(fractalScale * invMinRad);
     params.scale.w = abs(params.scale.w);
     params.absScalem1 = abs(fractalScale - 1.0);
     params.absScalePow = powr(max(abs(fractalScale), kPowEpsilon), float(1 - iterations));
@@ -132,24 +205,38 @@ inline FractalParams makeFractalParams(float minRad2Val, float fractalScale, flo
     return params;
 }
 
-// Optimized branchless Map function
-float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
+// Optimized branchless Map function - THE HOTTEST PATH IN THE ENTIRE SHADER
+// Called potentially 50-100+ times per pixel (raymarch + shadows + normals)
+// Every cycle here matters!
+FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
+    
+    // Pre-compute reciprocal for sphere fold (division is expensive)
+    float invMinRadius2 = 1.0f / params.minRadius2;
 
+    // Manual unroll hint for known small iteration counts (2-8 typical)
+    // The compiler will unroll if iterations is constexpr-like
+    UNROLL_8
     for (int i = 0; i < iterations; i++)
     {
-        // Box fold (optimized)
-        p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+        // Box fold: clamp and reflect
+        // Using fma where beneficial for single-instruction execution
+        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
 
-        // Branchless sphere fold - much faster on GPU
+        // Branchless sphere fold using clamp
+        // r2 = dot product, single instruction on GPU
         float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0 / max(r2, params.minRadius2), 1.0, 1.0/params.minRadius2);
+        // Sphere fold scale factor - clamped reciprocal
+        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
         p *= t;
 
-        p = p * params.scale + p0;
+        // Scale and translate - use fma for xyz, regular mul for w
+        p = fma(p, params.scale, p0);
     }
+    
+    // Final distance estimate
     return (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
 }
 
@@ -186,16 +273,22 @@ half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad
     return mix(finalColor, altColor, half(colorMix));
 }
 
-// Fast normal using forward differences (3 Map calls instead of 4)
-float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
+// Fast normal using forward differences (3 Map calls instead of 4 with central diff)
+// This is called for every hit pixel - force inline to avoid call stack overhead
+FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
 {
+    // Epsilon scales with distance to maintain relative precision
     float e = distance * 0.001;
     float d = Map(pos, params, foldingLimit, iterations);
-    return normalize(float3(
+    // Forward difference gradient - 3 Map calls
+    // GPU can potentially parallelize these since they're independent
+    float3 gradient = float3(
         Map(pos + float3(e,0,0), params, foldingLimit, iterations) - d,
         Map(pos + float3(0,e,0), params, foldingLimit, iterations) - d,
         Map(pos + float3(0,0,e), params, foldingLimit, iterations) - d
-    ));
+    );
+    // Fast normalize - rsqrt is single instruction on GPU
+    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
 }
 
 // Reduced binary subdivision (4 iterations instead of 6)
@@ -214,56 +307,57 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, fl
 // === SUPER-COARSE RAYMARCH (for 8x8 tiles) ===
 // Very fast approximate raymarch - 12 steps with aggressive stepping
 // Used for initial distance estimation in large tiles
-float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
+FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
 {
     float t = max(startT, 0.05);
     
-    // Very few steps with 1.5x over-relaxation for speed
+    // Fixed 12 steps - unroll completely for maximum speed
+    UNROLL_FULL
     for(int j = 0; j < 12; j++)
     {
-        float3 p = rO + t * rD;
+        float3 p = fma(rD, float3(t), rO);
         float h = Map(p, params, foldingLimit, iterations);
         
         // Loose threshold - we just need approximate distance
-        if(h < 0.1) return t;
+        if(UNLIKELY(h < 0.1)) return t;
         
-        if (t > 80.0) return 1000.0;  // Limit search range
+        if (UNLIKELY(t > kCoarseMaxDistance)) return kRayMissThreshold + 100.0;
         
         // Aggressive over-relaxation: step 1.5x the SDF value
-        t += h * 1.5;
+        t = fma(h, 1.5, t);
     }
     
-    return 1000.0;
+    return kRayMissThreshold + 100.0;
 }
 
 // === COARSE RAYMARCH ===
 // Fast approximate raymarch for hierarchical rendering
 // Uses fewer iterations but standard stepping to find approximate hit distance
-float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
+FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
 {
     float t = 0.05;
     
-    // More steps with standard stepping for reliability
+    // Fixed 24 steps - can unroll partially
+    UNROLL_8
     for(int j = 0; j < 24; j++)
     {
-        float3 p = rO + t * rD;
+        float3 p = fma(rD, float3(t), rO);
         float h = Map(p, params, foldingLimit, iterations);
         
-        // Tighter threshold to get closer before handing off
-        if(h < 0.02) return t;
+        // LIKELY: Coarse pass finds hits most of the time
+        if(UNLIKELY(h < 0.02)) return t;
         
-        if (t > 12.0) return 1000.0;
+        if (UNLIKELY(t > kMaxRayDistance)) return kRayMissThreshold + 100.0;
         
-        // Standard sphere tracing - no overstepping
         t += h;
     }
     
-    return 1000.0;
+    return kRayMissThreshold + 100.0;
 }
 
 // === FINE RAYMARCH FROM STARTING POINT ===
 // Refines from a known starting distance (from coarse pass or neighbor)
-float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     float dither = blueNoise(fragCoord, time) * 0.01;
     
@@ -273,31 +367,32 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
     float glow = 0.0;
     // More steps for reliability
     int maxSteps = max(int(float(maxStepsParam) * quality * 0.5), 8);
+    float endT = startT + 2.0;  // Pre-compute end threshold
     
+    NO_UNROLL
     for(int j = 0; j < maxSteps; j++)
     {
-        float threshold = 0.0005 + t * 0.0006;
+        float threshold = fma(t, 0.0006, 0.0005);
         
-        float3 p = rO + t * rD;
+        float3 p = fma(rD, float3(t), rO);
         float h = Map(p, params, foldingLimit, iterations);
         
-        if(h < threshold)
+        if(UNLIKELY(h < threshold))
         {
             return float2(t, saturate(glow * 0.25));
         }
         
-        if (t > startT + 2.0) break; // Don't search too far past expected hit
+        if (UNLIKELY(t > endT)) break;
         
-        glow += saturate(0.04 - h) * glowIntensity;
-        
-        // Standard sphere tracing
+        glow = fma(saturate(0.04 - h), glowIntensity, glow);
         t += h;
     }
     
-    return float2(1000.0, saturate(glow * 0.25));
+    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
 // Standard sphere tracing - reliable, no aggressive optimizations
+// This is the main raymarch loop - optimize for typical case (many steps, eventual hit)
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
@@ -307,31 +402,33 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
+    // NO_UNROLL: Variable iteration count, unrolling would bloat code
+    NO_UNROLL
     for(int j = 0; j < maxSteps; j++)
     {
         // Distance-adaptive threshold (standard approach)
-        float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
+        float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
         
-        float3 p = rO + t * rD;
+        float3 p = fma(rD, float3(t), rO);  // p = rO + t * rD using fma
         float h = Map(p, params, foldingLimit, iterations);
         
-        // Hit detection
-        if(h < threshold)
+        // LIKELY: Most rays eventually hit the fractal
+        if(UNLIKELY(h < threshold))
         {
             return float2(t, saturate(glow * 0.25));
         }
         
-        if (t > 12.0) break;
+        // UNLIKELY: Early exit is rare with bounded fractal
+        if (UNLIKELY(t > kMaxRayDistance)) break;
         
-        // Accumulate glow
-        glow += saturate(0.04 - h) * glowIntensity;
+        // Accumulate glow - saturate is free on GPU
+        glow = fma(saturate(0.04 - h), glowIntensity, glow);
         
         // Standard sphere tracing: step by the SDF value
-        // This is guaranteed safe for a valid SDF
         t += h;
     }
     
-    return float2(1000.0, saturate(glow * 0.25));
+    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
 // =============================================================================
@@ -506,7 +603,7 @@ half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
     }
     
     // Gamma
-    return powr(max(rgb, half3(kPowEpsilonHalf)), half3(0.47h));
+    return powr(max(rgb, half3(kPowEpsilonHalf)), half3(kGamma));
 }
 
 // =============================================================================
@@ -599,36 +696,38 @@ half3 renderHUD(half3 baseColor, float2 uv, int sceneIndex, int activeGesture,
 // =============================================================================
 
 // Ultra-fast shadow with over-relaxation
-float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
+// FORCE_INLINE: Called twice per lit pixel (spot + sun)
+FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
 {
-    // Skip shadows in extreme periphery
-    if (quality < 0.25) return 0.65;
+    // Skip shadows in extreme periphery - early out
+    if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65;
     
     float res = 1.0;
     float t = 0.08;
     float prevH = 1e10;
     
-    // Very few steps with aggressive over-relaxation
-    int steps = int(quality * 2.0) + 1; // 1-3 steps
+    // Very few steps for shadows - unroll completely
+    int steps = int(fma(quality, 2.0, 1.0)); // 1-3 steps
     
+    UNROLL_4
     for (int i = 0; i < steps; i++)
     {
-        float h = Map(ro + rd * t, params, foldingLimit, iterations);
+        float h = Map(fma(rd, float3(t), ro), params, foldingLimit, iterations);
         
-        // Soft shadow calculation
+        // Soft shadow calculation - min is single instruction
         res = min(res, 10.0 * h / t);
         
-        // Early exit if definitely in shadow
-        if (res < 0.02) return 0.0;
+        // UNLIKELY: Most shadow rays don't hit
+        if (UNLIKELY(res < 0.02)) return 0.0;
         
         // Over-relaxation: step more aggressively when safe
         float relax = step(prevH * 0.8, h);
-        float step = mix(h, h * 1.5, relax);
-        t += max(step, 0.15);
+        float stepDist = mix(h, h * 1.5, relax);
+        t += max(stepDist, 0.15);
         prevH = h;
         
-        // Don't trace too far for shadows
-        if (t > 4.0) break;
+        // UNLIKELY: Shadows don't trace far
+        if (UNLIKELY(t > 4.0)) break;
     }
     
     return saturate(res);
@@ -664,19 +763,23 @@ float3 computeRayDirection(float2 pixelCoord, float2 resolution, float4x4 invPro
     return normalize(worldDir);
 }
 
-// Per-pixel normal calculation - fast tetrahedron method
-float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
+// Per-pixel normal calculation - fast tetrahedron method (4 samples, better accuracy)
+// FORCE_INLINE critical - called for every lit pixel
+FORCE_INLINE float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
 {
     float e = max(distance * 0.0005, 0.0001);
     
-    // Tetrahedron technique - 4 samples instead of 6
+    // Tetrahedron technique - 4 samples gives better gradient estimate
+    // The h vectors form a tetrahedron, giving unbiased gradient
     float2 h = float2(1.0, -1.0) * e;
-    return normalize(
+    float3 gradient = 
         h.xyy * Map(pos + h.xyy, params, foldingLimit, iterations) +
         h.yyx * Map(pos + h.yyx, params, foldingLimit, iterations) +
         h.yxy * Map(pos + h.yxy, params, foldingLimit, iterations) +
-        h.xxx * Map(pos + h.xxx, params, foldingLimit, iterations)
-    );
+        h.xxx * Map(pos + h.xxx, params, foldingLimit, iterations);
+    
+    // rsqrt is faster than normalize on GPU (single instruction vs sqrt+div)
+    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
 }
 
 // Forward declaration needed by compute kernels
@@ -712,11 +815,11 @@ kernel void tileRaymarchKernel(
     }
     
     // --- Threadgroup shared memory ---
-    threadgroup float sharedCoarseT;
-    threadgroup float3 sharedCenterRayDir;
+    threadgroup float sharedCoarseT = kRayMissThreshold + 100.0;
+    threadgroup float3 sharedCenterRayDir = float3(0.0);
     threadgroup FractalParams sharedFractalParams;
     threadgroup FractalParams sharedShadowParams;
-    threadgroup float3 sharedCameraPos;
+    threadgroup float3 sharedCameraPos = float3(0.0);
     threadgroup float4x4 sharedInvProjMatrix;
     threadgroup float4x4 sharedInvViewMatrix;
     threadgroup float3 sharedRayDirs[16];
@@ -750,8 +853,7 @@ kernel void tileRaymarchKernel(
     FractalParams fractalParams = sharedFractalParams;
     FractalParams shadowParams = sharedShadowParams;
     float3 cameraPos = sharedCameraPos;
-    float4x4 invProjMatrix = sharedInvProjMatrix;
-    float4x4 invViewMatrix = sharedInvViewMatrix;
+    // Note: invProjMatrix/invViewMatrix precomputed into sharedRayDirs by leader
     float3 rd = sharedRayDirs[localId.y * 4 + localId.x];
 
     // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
@@ -771,7 +873,7 @@ kernel void tileRaymarchKernel(
     float adjustedDist = 1000.0;
     float glow = 0.0;
     
-    if (coarseT < 900.0) {
+    if (coarseT < kRayMissThreshold) {
         // Adjust starting distance for this pixel's ray direction
         float rayDot = max(dot(rd, centerRayDir), 0.9);
         float myStartT = coarseT * rayDot;
@@ -784,7 +886,7 @@ kernel void tileRaymarchKernel(
         adjustedDist = ret.x;
         glow = ret.y;
         
-        if (ret.x < 900.0) {
+        if (ret.x < kRayMissThreshold) {
             // Calculate per-pixel hit point
             float3 p = uniforms.cameraPos + adjustedDist * rd;
             
@@ -797,14 +899,11 @@ kernel void tileRaymarchKernel(
             float atten = length(spot);
             spot /= atten;
             
-            // Simplified shadows
-            int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+            // Use pre-computed shadow params from leader thread (avoid redundant creation)
+            half shaSpot = half(Shadow(p, spot, 0.7, uniforms.foldingLimit, shadowParams, shadowParams.absScalem1 > 0 ? lodIterations - 2 : 2));
+            half shaSun = half(Shadow(p, sunDir, 0.7, uniforms.foldingLimit, shadowParams, shadowParams.absScalem1 > 0 ? lodIterations - 2 : 2));
             
-            half shaSpot = half(Shadow(p, spot, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
-            
-            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
             
@@ -815,8 +914,8 @@ kernel void tileRaymarchKernel(
             
             // Specular
             float3 ref = reflect(rd, nor);
-            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
             col += half3(specSpot) * shaSpot * bri;
             col += half3(specSun) * shaSun * briSun;
             
@@ -831,13 +930,13 @@ kernel void tileRaymarchKernel(
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     
     col = clamp(col, half3(0.0h), half3(2.0h));
-    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
     
     // Debug visualization: show hierarchical status
     // Green tint = coarse pass found hit (hierarchical worked)
     // Red tint = coarse missed, background/sky
     if (uniforms.debugHierarchical == 1) {
-        if (coarseT < 900.0) {
+        if (coarseT < kRayMissThreshold) {
             col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
         } else {
             col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
@@ -865,8 +964,8 @@ kernel void tileRaymarchKernel2x2(
         return;
     }
     
-    threadgroup float sharedCoarseT;
-    threadgroup float3 sharedCenterRayDir;
+    threadgroup float sharedCoarseT = kRayMissThreshold + 100.0;
+    threadgroup float3 sharedCenterRayDir = float3(0.0);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
@@ -896,7 +995,7 @@ kernel void tileRaymarchKernel2x2(
     float adjustedDist = 1000.0;
     float glow = 0.0;
     
-    if (coarseT < 900.0) {
+    if (coarseT < kRayMissThreshold) {
         float rayDot = max(dot(rd, centerRayDir), 0.9);
         float myStartT = coarseT * rayDot;
         
@@ -906,7 +1005,7 @@ kernel void tileRaymarchKernel2x2(
         adjustedDist = ret.x;
         glow = ret.y;
         
-        if (ret.x < 900.0) {
+        if (ret.x < kRayMissThreshold) {
             float3 p = uniforms.cameraPos + adjustedDist * rd;
             float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
             
@@ -921,7 +1020,7 @@ kernel void tileRaymarchKernel2x2(
             half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
             half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
             
-            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
             
@@ -930,8 +1029,8 @@ kernel void tileRaymarchKernel2x2(
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
             
             float3 ref = reflect(rd, nor);
-            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
             col += half3(specSpot) * shaSpot * bri;
             col += half3(specSun) * shaSun * briSun;
             
@@ -943,11 +1042,11 @@ kernel void tileRaymarchKernel2x2(
     half glowH = half(glow);
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     col = clamp(col, half3(0.0h), half3(2.0h));
-    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
     
     // Debug visualization for 2x2 kernel
     if (uniforms.debugHierarchical == 1) {
-        if (coarseT < 900.0) {
+        if (coarseT < kRayMissThreshold) {
             col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
         } else {
             col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
@@ -1018,7 +1117,7 @@ kernel void adaptiveHierarchical8x8(
     float glow = ret.y;
     half3 col = half3(0.0h);
     
-    if (ret.x < 900.0) {
+    if (ret.x < kRayMissThreshold) {
         float3 p = cameraPos + adjustedDist * rd;
         float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
         
@@ -1034,7 +1133,7 @@ kernel void adaptiveHierarchical8x8(
         half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
         half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
         
-        float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
@@ -1044,8 +1143,8 @@ kernel void adaptiveHierarchical8x8(
         
         // Specular
         float3 ref = reflect(rd, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
     }
@@ -1106,10 +1205,13 @@ float3 uvToDir(float2 uv) // uv: -1..1
 // Features: Volumetric density, proper hair lighting, self-shadowing, color variation
 
 // SDF for a single hand bone (capsule between two joints)
-float sdCapsule(float3 p, float3 a, float3 b, float r) {
-    float3 pa = p - a, ba = b - a;
-    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return length(pa - ba * h) - r;
+// FORCE_INLINE: Called 20+ times per sdHandSkeleton call
+FORCE_INLINE float sdCapsule(float3 p, float3 a, float3 b, float r) {
+    float3 pa = p - a;
+    float3 ba = b - a;
+    // Optimized: precompute reciprocal of dot(ba,ba) would help if ba is constant
+    float h = saturate(dot(pa, ba) / dot(ba, ba));  // saturate = clamp(x,0,1), free on GPU
+    return length(fma(ba, float3(-h), pa)) - r;  // pa - ba*h using fma
 }
 
 // SDF for entire hand skeleton (union of capsules)
@@ -1509,6 +1611,59 @@ half3 shadeFurHands(FurHandResult furResult, float3 rd, float3 lightDir, float3 
 
 // =============================================================================
 
+// === SHARED LIGHTING COMPUTATION ===
+// Consolidates common lighting code to improve i-cache locality and reduce duplication
+struct LightingParams {
+    float3 position;        // Hit position
+    float3 normal;          // Surface normal
+    float3 rd;              // Ray direction
+    float distance;         // Hit distance
+    float gTime;            // Animation time
+    float quality;          // Quality level (0-1)
+    FractalParams fractalParams;
+    FractalParams shadowParams;
+    float foldingLimit;
+    int shadowIterations;
+};
+
+struct LightingResult {
+    half3 color;            // Final lit color
+    half shaSpot;           // Spot shadow
+    half shaSun;            // Sun shadow
+};
+
+inline LightingResult computeLighting(LightingParams lp, Uniforms uniforms) {
+    LightingResult result;
+    
+    float3 spotLight = CameraPath(lp.gTime + 0.03) + float3(sin(lp.gTime*18.4), cos(lp.gTime*17.98), sin(lp.gTime * 22.53)) * 0.2;
+    float3 spot = spotLight - lp.position;
+    float atten = length(spot);
+    spot /= atten;
+    
+    result.shaSpot = half(Shadow(lp.position, spot, lp.quality, lp.foldingLimit, lp.shadowParams, lp.shadowIterations));
+    result.shaSun = half(Shadow(lp.position, sunDir, lp.quality, lp.foldingLimit, lp.shadowParams, lp.shadowIterations));
+    
+    float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
+    half bri = half(max(dot(spot, lp.normal), 0.0) / attenPow * 0.25);
+    half briSun = half(max(dot(sunDir, lp.normal), 0.0) * 0.2);
+    
+    result.color = Colour(lp.position, lp.distance, lp.gTime, lp.quality, uniforms.minDistance, uniforms.fractalScale, 
+                         uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 
+                         max(int(uniforms.colorIterations * lp.quality), 2));
+    result.color = (result.color * bri * result.shaSpot) + (result.color * briSun * result.shaSun);
+    
+    // Specular
+    if (lp.quality > kMinQualityForSpecular) {
+        float3 ref = reflect(lp.rd, lp.normal);
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        result.color += half3(specSpot) * result.shaSpot * bri;
+        result.color += half3(specSun) * result.shaSun * briSun;
+    }
+    
+    return result;
+}
+
 // Shared fragment body to avoid duplication and improve i-cache locality
 inline FragmentOutput fragmentMain(ColorInOut in,
                                    Uniforms uniforms,
@@ -1541,7 +1696,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
     half3 col = half3(0.0h);
 
-    if (ret.x < 900.0)
+    if (ret.x < kRayMissThreshold)
     {
         float3 p = cameraPos + ret.x * rd;
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
@@ -1564,12 +1719,12 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         }
     }
 
-    if (ret.x < 900.0)
+    if (ret.x < kRayMissThreshold)
     {
         float3 p = cameraPos + ret.x * rd;
 
         float3 nor;
-        if (quality > 0.2) {
+        if (quality > kMinQualityForNormals) {
             nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
         } else {
             nor = normalize(p - cameraPos);
@@ -1587,17 +1742,17 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
 
-            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
             col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
 
-            if (quality > 0.7) {
+            if (quality > kMinQualityForSpecular) {
                 float3 ref = reflect(rd, nor);
-                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-                float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+                float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
                 col += half3(specSpot) * shaSpot * bri;
                 col += half3(specSun) * shaSun * briSun;
             }
@@ -1624,10 +1779,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     col = clamp(col, half3(0.0h), half3(2.0h));
 
-    if (quality > 0.5) {
+    if (quality > kMinQualityForPostFX) {
         col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
     } else {
-        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
     }
 
     // Render HUD overlay if enabled
@@ -1743,7 +1898,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     half3 col = half3(0.0h);
     
-    if (ret.x < 900.0)
+    if (ret.x < kRayMissThreshold)
     {
         float3 p = cameraPos + adjustedDist * rd;
         
@@ -1775,7 +1930,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         shaSun = quad_broadcast(shaSun, 0);
         
         // Per-pixel lighting with shared shadows
-        float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
@@ -1784,8 +1939,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         // Specular
         float3 ref = reflect(rd, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
 

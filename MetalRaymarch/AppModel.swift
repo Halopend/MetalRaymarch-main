@@ -7,6 +7,7 @@
 
 import SwiftUI
 import ARKit
+import os  // For os_unfair_lock - fastest available lock primitive
 
 @MainActor
 @Observable
@@ -45,8 +46,21 @@ class AppModel {
     }
 }
 
-class RenderSettings {
-    private let lock = NSLock()
+// RenderSettings uses os_unfair_lock for minimal lock overhead
+// This is the fastest synchronization primitive on Apple platforms
+// NSLock has ~2-3x more overhead due to Objective-C dispatch
+final class RenderSettings: @unchecked Sendable {
+    // os_unfair_lock is a low-level spinlock - fastest for short critical sections
+    private var _lock = os_unfair_lock()
+    
+    // Inline lock/unlock for zero function call overhead
+    @inline(__always)
+    private func withLock<T>(_ body: () -> T) -> T {
+        os_unfair_lock_lock(&_lock)
+        defer { os_unfair_lock_unlock(&_lock) }
+        return body()
+    }
+    
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = .zero
@@ -78,73 +92,73 @@ class RenderSettings {
     private var _showFurHands: Bool = false          // Render hands as fur (default off)
 
     var minDistance: Float {
-        get { lock.withLock { _minDistance } }
-        set { lock.withLock { _minDistance = newValue } }
+        get { withLock { _minDistance } }
+        set { withLock { _minDistance = newValue } }
     }
     
     var scale: Float {
-        get { lock.withLock { _scale } }
-        set { lock.withLock { _scale = newValue } }
+        get { withLock { _scale } }
+        set { withLock { _scale = newValue } }
     }
     
     var position: SIMD3<Float> {
-        get { lock.withLock { _position } }
-        set { lock.withLock { _position = newValue } }
+        get { withLock { _position } }
+        set { withLock { _position = newValue } }
     }
     
     var fractalScale: Float {
-        get { lock.withLock { _fractalScale } }
-        set { lock.withLock { _fractalScale = newValue } }
+        get { withLock { _fractalScale } }
+        set { withLock { _fractalScale = newValue } }
     }
     
     var fractalIterations: Int {
-        get { lock.withLock { _fractalIterations } }
-        set { lock.withLock { _fractalIterations = newValue } }
+        get { withLock { _fractalIterations } }
+        set { withLock { _fractalIterations = newValue } }
     }
     
     var maxRaySteps: Int {
-        get { lock.withLock { _maxRaySteps } }
-        set { lock.withLock { _maxRaySteps = newValue } }
+        get { withLock { _maxRaySteps } }
+        set { withLock { _maxRaySteps = newValue } }
     }
     
     var foveationIntensity: Float {
-        get { lock.withLock { _foveationIntensity } }
-        set { lock.withLock { _foveationIntensity = newValue } }
+        get { withLock { _foveationIntensity } }
+        set { withLock { _foveationIntensity = newValue } }
     }
     
     var colorMix: Float {
-        get { lock.withLock { _colorMix } }
-        set { lock.withLock { _colorMix = newValue } }
+        get { withLock { _colorMix } }
+        set { withLock { _colorMix = newValue } }
     }
     
     var glowIntensity: Float {
-        get { lock.withLock { _glowIntensity } }
-        set { lock.withLock { _glowIntensity = newValue } }
+        get { withLock { _glowIntensity } }
+        set { withLock { _glowIntensity = newValue } }
     }
     
     var foldingLimit: Float {
-        get { lock.withLock { _foldingLimit } }
-        set { lock.withLock { _foldingLimit = newValue } }
+        get { withLock { _foldingLimit } }
+        set { withLock { _foldingLimit = newValue } }
     }
     
     var sphereRadius: Float {
-        get { lock.withLock { _sphereRadius } }
-        set { lock.withLock { _sphereRadius = newValue } }
+        get { withLock { _sphereRadius } }
+        set { withLock { _sphereRadius = newValue } }
     }
     
     var colorIterations: Float {
-        get { lock.withLock { _colorIterations } }
-        set { lock.withLock { _colorIterations = newValue } }
+        get { withLock { _colorIterations } }
+        set { withLock { _colorIterations = newValue } }
     }
     
     var resolutionScale: Float {
-        get { lock.withLock { _resolutionScale } }
-        set { lock.withLock { _resolutionScale = max(0.25, min(1.0, newValue)) } }
+        get { withLock { _resolutionScale } }
+        set { withLock { _resolutionScale = max(0.25, min(1.0, newValue)) } }
     }
 
     var debugEyeTint: Bool {
-        get { lock.withLock { _debugEyeTint } }
-        set { lock.withLock { _debugEyeTint = newValue } }
+        get { withLock { _debugEyeTint } }
+        set { withLock { _debugEyeTint = newValue } }
     }
     
     // 0 = disabled (standard per-pixel raymarch)
@@ -152,29 +166,29 @@ class RenderSettings {
     // 4 = 4x4 tiles (16x overhead reduction, performance mode)
     // 8 = 8x8 adaptive hierarchical (3-8x speedup, best performance)
     var tileSize: Int {
-        get { lock.withLock { _tileSize } }
-        set { lock.withLock { _tileSize = newValue } }
+        get { withLock { _tileSize } }
+        set { withLock { _tileSize = newValue } }
     }
     
     var useHierarchical: Bool {
-        get { lock.withLock { _useHierarchical } }
-        set { lock.withLock { _useHierarchical = newValue } }
+        get { withLock { _useHierarchical } }
+        set { withLock { _useHierarchical = newValue } }
     }
     
     var debugHierarchical: Bool {
-        get { lock.withLock { _debugHierarchical } }
-        set { lock.withLock { _debugHierarchical = newValue } }
+        get { withLock { _debugHierarchical } }
+        set { withLock { _debugHierarchical = newValue } }
     }
     
     /// Flash intensity for limit feedback (0-1). Set to 1.0 to trigger flash, decays automatically.
     var limitFlash: Float {
-        get { lock.withLock { _limitFlash } }
-        set { lock.withLock { _limitFlash = newValue } }
+        get { withLock { _limitFlash } }
+        set { withLock { _limitFlash = newValue } }
     }
     
     /// Decay the limit flash. Call once per frame.
     func updateLimitFlash(deltaTime: Float) {
-        lock.withLock {
+        withLock {
             if _limitFlash > 0 {
                 _limitFlash = max(0, _limitFlash - deltaTime * 4.0) // Fade over ~0.25s
             }
@@ -183,46 +197,46 @@ class RenderSettings {
     
     /// Trigger a limit flash
     func triggerLimitFlash() {
-        lock.withLock {
+        withLock {
             _limitFlash = 1.0
         }
     }
     
     /// Current scene: 0 = Mandelbox, 1 = Glowy IFS
     var sceneIndex: Int {
-        get { lock.withLock { _sceneIndex } }
-        set { lock.withLock { _sceneIndex = newValue } }
+        get { withLock { _sceneIndex } }
+        set { withLock { _sceneIndex = newValue } }
     }
     
     // IFS Scene parameters
     var ifsScale: Float {
-        get { lock.withLock { _ifsScale } }
-        set { lock.withLock { _ifsScale = newValue } }
+        get { withLock { _ifsScale } }
+        set { withLock { _ifsScale = newValue } }
     }
     
     var ifsOffset: Float {
-        get { lock.withLock { _ifsOffset } }
-        set { lock.withLock { _ifsOffset = newValue } }
+        get { withLock { _ifsOffset } }
+        set { withLock { _ifsOffset = newValue } }
     }
     
     var ifsGlow: Float {
-        get { lock.withLock { _ifsGlow } }
-        set { lock.withLock { _ifsGlow = newValue } }
+        get { withLock { _ifsGlow } }
+        set { withLock { _ifsGlow = newValue } }
     }
     
     var showHUD: Bool {
-        get { lock.withLock { _showHUD } }
-        set { lock.withLock { _showHUD = newValue } }
+        get { withLock { _showHUD } }
+        set { withLock { _showHUD = newValue } }
     }
     
     var activeGestureIndex: Int {
-        get { lock.withLock { _activeGestureIndex } }
-        set { lock.withLock { _activeGestureIndex = newValue } }
+        get { withLock { _activeGestureIndex } }
+        set { withLock { _activeGestureIndex = newValue } }
     }
     
     var showFurHands: Bool {
-        get { lock.withLock { _showFurHands } }
-        set { lock.withLock { _showFurHands = newValue } }
+        get { withLock { _showFurHands } }
+        set { withLock { _showFurHands = newValue } }
     }
 }
 

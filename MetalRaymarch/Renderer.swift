@@ -59,6 +59,9 @@ actor Renderer {
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
     
+    // Cached constant matrices (computed once, reused every frame)
+    private let cachedRotationMatrix: matrix_float4x4
+    
     // Tile-based compute pipelines (4x4, 2x2, and adaptive 8x8 variants)
     var tileRaymarchPipeline4x4: MTLComputePipelineState?
     var tileRaymarchPipeline2x2: MTLComputePipelineState?
@@ -126,15 +129,24 @@ actor Renderer {
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
-        self.commandQueue = self.device.makeCommandQueue()!
+        guard let queue = self.device.makeCommandQueue() else {
+            fatalError("Failed to create command queue")
+        }
+        self.commandQueue = queue
         self.appModel = appModel
+        
+        // Pre-compute constant rotation matrix (never changes)
+        self.cachedRotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
 
         let device = self.device
 
         let uniformBufferSize = alignedUniformsSize * maxBuffersInFlight
 
-        self.dynamicUniformBuffer = self.device.makeBuffer(length:uniformBufferSize,
-                                                           options:[MTLResourceOptions.storageModeShared])!
+        guard let uniformBuffer = self.device.makeBuffer(length: uniformBufferSize,
+                                                          options: [MTLResourceOptions.storageModeShared]) else {
+            fatalError("Failed to create uniform buffer")
+        }
+        self.dynamicUniformBuffer = uniformBuffer
 
         self.dynamicUniformBuffer.label = "UniformBuffer"
 
@@ -558,11 +570,11 @@ actor Renderer {
         smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
         smoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
         
-        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
+        // Use cached rotation matrix (constant, computed once in init)
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
         let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
         
-        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
         
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
