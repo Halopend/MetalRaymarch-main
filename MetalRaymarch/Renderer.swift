@@ -656,9 +656,9 @@ actor Renderer {
 
         drawable.deviceAnchor = deviceAnchor
 
-        // Calculate deltaTime (clamped) for FPS tracking; pose smoothing removed
+        // Calculate deltaTime (clamped only on the fast side for FPS tracking; pose smoothing removed)
         let rawDelta = lastPresentationTime.map { $0.duration(to: presentationTime).timeInterval } ?? (1.0 / 90.0)
-        let deltaTime = max(1.0 / 240.0, min(1.0 / 30.0, rawDelta))
+        let deltaTime = max(1.0 / 240.0, rawDelta)  // Allow slow frames to surface instead of capping at 30 FPS
 
         // FPS tracking using clamped interval (stable with triple buffering)
         if deltaTime > 0 {

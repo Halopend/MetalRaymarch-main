@@ -65,7 +65,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = .zero
     private var _fractalScale: Float = 2.8
-    private var _fractalIterations: Int = 4         // Lower = faster (was 5)
+    private var _fractalIterations: Int = 6         // Slightly higher default for quality
     private var _maxRaySteps: Int = 32              // Lower = faster (was 48) - target 90fps
     private var _foveationIntensity: Float = 1.0    // Gentle shader-side foveation (rate maps handle gaze tracking)
     private var _colorMix: Float = 0.5

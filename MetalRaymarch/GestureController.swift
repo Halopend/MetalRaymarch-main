@@ -121,6 +121,9 @@ final class GestureController {
     // Hands close together = min value, hands far apart = max value
     private let minHandDistance: Float = 0.05  // 5cm
     private let maxHandDistance: Float = 0.60  // 60cm
+    // Guardrails to prevent accidental activation when hands are wide apart
+    private let maxStartHandDistance: Float = 0.35  // Require hands within 35cm to start
+    private let maxActiveHandDistance: Float = 0.50 // Allow some expansion while active, drop if beyond
     
     // Mandelbox parameter ranges - WIDE for exploration
     private let minDistanceRange: ClosedRange<Float> = 0.001...5.0
@@ -342,16 +345,23 @@ final class GestureController {
         let activateThresh = (digit == 3) ? ringPinchActivateThreshold : pinchActivateThreshold
         let releaseThresh = (digit == 3) ? ringPinchReleaseThreshold : pinchReleaseThreshold
         
-        // Check if BOTH hands are pinching (with hysteresis)
+        // Measure hand separation (only meaningful if both tracked)
+        let leftPos = leftHand.pinchPosition(digit: digit)
+        let rightPos = rightHand.pinchPosition(digit: digit)
+        let currentDistance = simd_length(leftPos - rightPos)
+
+        // Check if BOTH hands are pinching (with hysteresis) and within distance guardrails
         let bothActive: Bool
         if state.isActive {
-            // Already active - use release threshold
+            // Already active - allow up to maxActiveHandDistance, use release threshold
             bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         currentDistance <= maxActiveHandDistance &&
                          leftPinch >= releaseThresh &&
                          rightPinch >= releaseThresh
         } else {
-            // Not active - use activate threshold
+            // Not active - require hands to be reasonably close to start
             bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         currentDistance <= maxStartHandDistance &&
                          leftPinch >= activateThresh &&
                          rightPinch >= activateThresh
         }
@@ -371,10 +381,6 @@ final class GestureController {
         
         // Gesture active - map hand distance directly to parameter range
         if bothActive {
-            let leftPos = leftHand.pinchPosition(digit: digit)
-            let rightPos = rightHand.pinchPosition(digit: digit)
-            let currentDistance = simd_length(leftPos - rightPos)
-            
             // Direct mapping: 5cm = 0%, 60cm = 100% of range
             let normalizedDistance = simd_clamp(
                 (currentDistance - minHandDistance) / (maxHandDistance - minHandDistance),
