@@ -131,18 +131,33 @@ typedef struct
 } SDFHierarchy;
 
 // Uniforms for SDF grid compute shader
+// Explicit padding to ensure Swift/Metal layout match
 typedef struct
 {
-    int levelIndex;             // Which level we're building
-    vector_int3 resolution;
-    float voxelSize;
-    vector_float3 gridOrigin;
+    int levelIndex;             // offset 0
+    int pad1;                   // offset 4
+    int pad2;                   // offset 8
+    int pad3;                   // offset 12
+    
+    vector_int3 resolution;     // offset 16 (16-byte aligned)
+    
+    float voxelSize;            // offset 32 (size 4)
+    float pad4;                 // offset 36
+    float pad5;                 // offset 40
+    float pad6;                 // offset 44
+    
+    vector_float3 gridOrigin;   // offset 48 (16-byte aligned)
+    
     // Fractal parameters for sceneSDF
-    float minDistance;
-    float fractalScale;
-    float sphereRadius;
-    float foldingLimit;
-    int fractalIterations;
+    float minDistance;          // offset 64
+    float fractalScale;         // offset 68
+    float sphereRadius;         // offset 72
+    float foldingLimit;         // offset 76
+    
+    int fractalIterations;      // offset 80
+    int pad7;                   // offset 84
+    int pad8;                   // offset 88
+    int pad9;                   // offset 92
 } SDFGridBuildUniforms;
 
 // Hand joint data for fur rendering

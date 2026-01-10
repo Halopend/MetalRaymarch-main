@@ -449,15 +449,19 @@ FORCE_INLINE float sampleSDFAtLevel(float3 worldPos, float3 gridOrigin,
     // Convert to normalized texture coordinates [0,1]
     float3 texCoord = gridCoord / resolution;
     
-    // Clamp to valid texture bounds
-    texCoord = clamp(texCoord, float3(0.001), float3(0.999));
+    // Clamp to valid texture bounds - use wider range for debugging
+    texCoord = clamp(texCoord, float3(0.0), float3(1.0));
     
     // Sample with trilinear interpolation
     constexpr sampler sdfSampler(coord::normalized, address::clamp_to_edge, filter::linear);
     float vNorm = sdfTexture.sample(sdfSampler, texCoord).r;  // snorm8 stored as float [-1,1]
     
+    // DEBUG: log the raw texture value
+    // float debugVal = vNorm;  // Would log if we could
+    
     // Decode to world-space distance: d = v_norm * (2.5 * voxelDiagonal)
-    return vNorm * scale;
+    float decodedSDF = vNorm * scale;
+    return decodedSDF;
 }
 
 // === LEVEL SELECTION ===
@@ -607,8 +611,11 @@ struct GSTHit {
     bool hit;
     float t;
     float glow;
+    int debugIters;   // For debugging
+    float debugSDF;   // Last SDF value for debugging
 };
 
+// Simplified GST with multi-level support
 GSTHit gridSphereTraceRay(float3 rayOrigin, float3 rayDir,
                            constant SDFHierarchy& hierarchy,
                            texture3d<float, access::sample> level0,
@@ -620,22 +627,45 @@ GSTHit gridSphereTraceRay(float3 rayOrigin, float3 rayDir,
     result.hit = false;
     result.t = 0.0;
     result.glow = 0.0;
+    result.debugIters = 0;
+    result.debugSDF = 0.0;
     
-    float t = 0.05;
-    float prevSDF = 1.0;  // Assume starting outside (positive SDF)
+    float t = 0.01;  // Start closer to origin
     
     float3 gridOrigin = hierarchy.gridOrigin;
+    float3 gridExtent = float3(hierarchy.gridExtent);
+    float3 gridMax = gridOrigin + gridExtent;
     
     NO_UNROLL
     for (int iter = 0; iter < 256; ++iter) {
         float3 pos = rayOrigin + t * rayDir;
+        result.debugIters = iter;
         
-        // 1) Select appropriate grid level (coarse→fine adaptive)
-        int chosenLevel = 0;
+        // Check if we're still inside the grid bounds
+        if (any(pos < gridOrigin) || any(pos > gridMax)) {
+            // Outside grid - use larger step to skip empty space
+            // Try to intersect the grid bounding box
+            float3 invDir = 1.0 / rayDir;
+            float3 t0 = (gridOrigin - pos) * invDir;
+            float3 t1 = (gridMax - pos) * invDir;
+            float3 tmin = min(t0, t1);
+            float3 tmax = max(t0, t1);
+            float tEntry = max(max(tmin.x, tmin.y), tmin.z);
+            
+            if (tEntry > 0.0 && tEntry < tMax - t) {
+                // Jump to grid boundary
+                t += tEntry + 0.001;
+                continue;
+            } else {
+                // Ray doesn't intersect grid - miss
+                break;
+            }
+        }
+        
+        // Find appropriate level and sample SDF
+        // Start from coarsest level (largest safe steps) and work down
         float sdf = 0.0;
-        
-        // Check from coarsest to finest, use coarsest that's safe
-        for (int L = hierarchy.numLevels - 1; L >= 0; --L) {
+        for (int L = min(hierarchy.numLevels - 1, 3); L >= 0; --L) {
             constant SDFGridLevel& lvl = hierarchy.levels[L];
             float3 res = float3(lvl.resolution);
             
@@ -648,52 +678,39 @@ GSTHit gridSphereTraceRay(float3 rayOrigin, float3 rayDir,
                 default: sdfL = sampleSDFAtLevel(pos, gridOrigin, level0, lvl.voxelSize, res, lvl.scale); break;
             }
             
-            if (abs(sdfL) > 2.5 * lvl.voxelDiagonal) {
-                chosenLevel = L;
+            // If we're far enough from surface, this level is safe to use
+            // Use threshold of 1.5 * voxelDiagonal to allow some margin
+            if (abs(sdfL) > 1.5 * lvl.voxelDiagonal || L == 0) {
                 sdf = sdfL;
                 break;
             }
-            sdf = sdfL;  // Keep finest level's SDF
         }
         
-        // 2) Check for surface crossing (outside → inside)
-        if (prevSDF > 0.0 && sdf <= 0.0) {
-            // Refine hit within current voxel
-            constant SDFGridLevel& lvl = hierarchy.levels[0];  // Use finest level
-            float3 voxelMin = floor((pos - gridOrigin) / lvl.voxelSize) * lvl.voxelSize + gridOrigin;
-            
-            float tLocal = intersectWithinVoxel(rayOrigin, rayDir, voxelMin, lvl.voxelSize,
-                                                 level0, float3(lvl.resolution), gridOrigin);
-            if (tLocal > 0.0) {
-                result.hit = true;
-                result.t = tLocal;
-                result.glow = saturate(result.glow * 0.25);
-                return result;
-            }
-            // Fallback: use current t if refinement fails
-            result.hit = true;
-            result.t = t;
-            result.glow = saturate(result.glow * 0.25);
-            return result;
-        }
+        result.debugSDF = sdf;
         
-        // 3) Accumulate glow
+        // Accumulate glow
         result.glow = fma(saturate(0.04 - abs(sdf)), glowIntensity, result.glow);
         
-        // 4) Step forward by conservative distance
-        float stepSize = abs(sdf);
-        t += max(stepSize, 0.001);  // Ensure forward progress
-        prevSDF = sdf;
+        // Check for surface hit (SDF close to zero or negative)
+        constant SDFGridLevel& finestLvl = hierarchy.levels[0];
+        float hitThreshold = finestLvl.voxelSize * 0.25;
         
-        // Exit conditions
-        if (t > tMax) break;
-        if (stepSize < 1e-4) {
-            // Near surface - treat as hit
+        if (sdf < hitThreshold) {
+            // We've hit or crossed the surface
             result.hit = true;
             result.t = t;
             result.glow = saturate(result.glow * 0.25);
             return result;
         }
+        
+        // Step forward by SDF distance (sphere tracing)
+        // Minimum step size to ensure progress
+        float minStep = finestLvl.voxelSize * 0.1;
+        float stepSize = max(sdf * 0.9, minStep);  // 0.9 for safety margin
+        t += stepSize;
+        
+        // Exit if we've gone too far
+        if (t > tMax) break;
     }
     
     result.glow = saturate(result.glow * 0.25);
@@ -706,7 +723,7 @@ FORCE_INLINE float3 computeNormalFromGrid(float3 worldPos,
                                            constant SDFHierarchy& hierarchy,
                                            texture3d<float, access::sample> level0) {
     constant SDFGridLevel& lvl = hierarchy.levels[0];
-    float eps = lvl.voxelSize;
+    float eps = lvl.voxelSize * 2.0;  // Use larger epsilon for smoother normals
     float3 gridOrigin = hierarchy.gridOrigin;
     float3 res = float3(lvl.resolution);
     
@@ -717,7 +734,13 @@ FORCE_INLINE float3 computeNormalFromGrid(float3 worldPos,
     float dz = sampleSDFAtLevel(worldPos + float3(0,0,eps), gridOrigin, level0, lvl.voxelSize, res, lvl.scale)
              - sampleSDFAtLevel(worldPos - float3(0,0,eps), gridOrigin, level0, lvl.voxelSize, res, lvl.scale);
     
-    return normalize(float3(dx, dy, dz));
+    float3 n = float3(dx, dy, dz);
+    float len = length(n);
+    // If gradient is near zero, return up vector as fallback
+    if (len < 1e-6) {
+        return float3(0.0, 1.0, 0.0);
+    }
+    return n / len;
 }
 
 // === ALTERNATIVE: Scene with optional GST fallback ===
@@ -2085,12 +2108,79 @@ inline FragmentOutput fragmentMainGST(ColorInOut in,
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
 
     float2 ret;
+    bool usedGST = false;  // Track if GST was actually used
     
     // Use Grid Sphere Tracing if enabled and grid is built
     if (useGST && hierarchy.isBuilt != 0) {
+        usedGST = true;
+        
         GSTHit gstHit = gridSphereTraceRay(cameraPos, rd, hierarchy, 
                                            gstLevel0, gstLevel1, gstLevel2, gstLevel3,
                                            kMaxRayDistance, uniforms.glowIntensity);
+        
+        // DEBUG: Visualize GST state with colors
+        // Comment this block out once GST is working
+        if (false) {
+            float3 gridMin = hierarchy.gridOrigin;
+            float3 gridMax = gridMin + float3(hierarchy.gridExtent);
+            
+            // Sample BOTH raw texture value AND decoded SDF at camera
+            constant SDFGridLevel& lvl = hierarchy.levels[0];
+            float3 res = float3(lvl.resolution);
+            
+            // Get raw texture value
+            float3 gridCoord = (cameraPos - gridMin) / lvl.voxelSize;
+            float3 texCoord = gridCoord / res;
+            texCoord = clamp(texCoord, float3(0.0), float3(1.0));
+            constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);
+            float rawVNorm = gstLevel0.sample(s, texCoord).r;
+            
+            // Get decoded SDF value
+            float decodedSDF = sampleSDFAtLevel(cameraPos, gridMin, gstLevel0, lvl.voxelSize, res, lvl.scale);
+            
+            // Check if camera is inside grid
+            bool camInGrid = all(cameraPos >= gridMin) && all(cameraPos <= gridMax);
+            
+            // PRIMARY: Show decoded SDF distance (this is what ray marching uses)
+            if (!camInGrid) {
+                // MAGENTA = camera outside grid
+                output.color = float4(0.5, 0.0, 0.5, 1.0);
+            } else if (decodedSDF < 0.0) {
+                // YELLOW = inside surface (negative SDF)
+                output.color = float4(1.0, 1.0, 0.0, 1.0);
+            } else if (decodedSDF < 0.1) {
+                // RED = very close to surface (< 0.1)
+                float brightness = decodedSDF * 10.0;  // 0.0-1.0
+                output.color = float4(brightness, 0.0, 0.0, 1.0);
+            } else if (decodedSDF < 1.0) {
+                // ORANGE-YELLOW = close (0.1 - 1.0)
+                float brightness = (decodedSDF - 0.1) / 0.9;
+                output.color = float4(1.0, brightness * 0.5, 0.0, 1.0);
+            } else if (decodedSDF < 3.0) {
+                // GREEN = normal range (1.0 - 3.0)
+                float brightness = (decodedSDF - 1.0) / 2.0;
+                output.color = float4(0.0, brightness, 0.0, 1.0);
+            } else {
+                // BLUE = far away (> 3.0)
+                float brightness = saturate((decodedSDF - 3.0) / 5.0);
+                output.color = float4(0.0, 0.0, brightness, 1.0);
+            }
+            
+            // CORNER: Show raw texture value in top-left
+            if (fragCoord.x < 150.0 && fragCoord.y < 150.0) {
+                // Show gradient: -1 (blue) to 0 (black) to +1 (white)
+                if (rawVNorm < 0.0) {
+                    output.color = float4(0.0, 0.0, -rawVNorm, 1.0);  // Blue for negative
+                } else {
+                    output.color = float4(rawVNorm, rawVNorm, rawVNorm, 1.0);  // White for positive
+                }
+            }
+            
+            output.depth = 1e-7;
+            return output;
+        }
+        // END DEBUG
+        
         if (gstHit.hit) {
             ret = float2(gstHit.t, gstHit.glow);
         } else {
@@ -2131,9 +2221,14 @@ inline FragmentOutput fragmentMainGST(ColorInOut in,
         float3 p = cameraPos + ret.x * rd;
 
         float3 nor;
-        if (useGST && hierarchy.isBuilt != 0) {
-            // Use grid-based normal when GST is active
-            nor = computeNormalFromGrid(p, hierarchy, gstLevel0);
+        if (usedGST && hierarchy.isBuilt != 0) {
+            // Use ANALYTIC normal even with GST for correct lighting
+            // Grid-based normals are often too coarse/wrong for good shading
+            if (quality > kMinQualityForNormals) {
+                nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
+            } else {
+                nor = computeNormalFromGrid(p, hierarchy, gstLevel0);
+            }
         } else if (quality > kMinQualityForNormals) {
             nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
         } else {
@@ -2200,6 +2295,12 @@ inline FragmentOutput fragmentMainGST(ColorInOut in,
         col = renderHUD(col, float2(in.texCoord), uniforms.sceneIndex, uniforms.activeGesture,
                         uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius,
                         uniforms.ifsScale, uniforms.ifsOffset, uniforms.ifsGlow);
+    }
+    
+    // DEBUG: Tint GST-rendered pixels slightly blue to verify GST is active
+    // Remove this once GST is working correctly
+    if (usedGST && ret.x < kRayMissThreshold) {
+        col = col * half3(0.9h, 0.9h, 1.1h);  // Slight blue tint
     }
 
     output.color = float4(float3(col), 1.0);

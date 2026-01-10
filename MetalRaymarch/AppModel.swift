@@ -92,7 +92,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _showFurHands: Bool = false          // Render hands as fur (default off)
     
     // Grid Sphere Tracing (GST)
-    private var _useGST: Bool = false                // Use precomputed SDF grid for raymarching (default off for now)
+    private var _useGST: Bool = true                // Use precomputed SDF grid for raymarching (default ON)
 
     var minDistance: Float {
         get { withLock { _minDistance } }

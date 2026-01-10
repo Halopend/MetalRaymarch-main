@@ -1238,18 +1238,22 @@ actor Renderer {
             
             var buildUniforms = SDFGridBuildUniforms(
                 levelIndex: 0,
+                pad1: 0, pad2: 0, pad3: 0, // Manual padding
                 resolution: SIMD3<Int32>(baseResolution, baseResolution, baseResolution),
                 voxelSize: gridExtent / Float(baseResolution),
+                pad4: 0, pad5: 0, pad6: 0, // Manual padding
                 gridOrigin: gridOrigin,
                 minDistance: settings.minDistance,
                 fractalScale: settings.fractalScale,
                 sphereRadius: settings.sphereRadius,
                 foldingLimit: settings.foldingLimit,
-                fractalIterations: Int32(settings.fractalIterations)
+                fractalIterations: Int32(settings.fractalIterations),
+                pad7: 0, pad8: 0, pad9: 0  // Manual padding
             )
             
-            memcpy(buildUniformBuffer.contents(), &buildUniforms, MemoryLayout<SDFGridBuildUniforms>.size)
-            computeEncoder.setBuffer(buildUniformBuffer, offset: 0, index: 0)
+            // USE setBytes INSTEAD OF setBuffer TO AVOID HAZARDS
+            // because we reuse this struct multiple times in the same command buffer
+            computeEncoder.setBytes(&buildUniforms, length: MemoryLayout<SDFGridBuildUniforms>.size, index: 0)
             computeEncoder.setTexture(gstSDFTextures[0], index: 0)
             
             let threadgroupSize = MTLSize(width: 4, height: 4, depth: 4)
@@ -1268,19 +1272,22 @@ actor Renderer {
                 
                 var buildUniforms = SDFGridBuildUniforms(
                     levelIndex: Int32(level),
+                    pad1: 0, pad2: 0, pad3: 0,
                     resolution: SIMD3<Int32>(res, res, res),
                     voxelSize: gridExtent / Float(res),
+                    pad4: 0, pad5: 0, pad6: 0,
                     gridOrigin: gridOrigin,
                     minDistance: settings.minDistance,
                     fractalScale: settings.fractalScale,
                     sphereRadius: settings.sphereRadius,
                     foldingLimit: settings.foldingLimit,
-                    fractalIterations: Int32(settings.fractalIterations)
+                    fractalIterations: Int32(settings.fractalIterations),
+                    pad7: 0, pad8: 0, pad9: 0
                 )
                 
-                memcpy(buildUniformBuffer.contents(), &buildUniforms, MemoryLayout<SDFGridBuildUniforms>.size)
+                // USE setBytes INSTEAD OF setBuffer
+                computeEncoder.setBytes(&buildUniforms, length: MemoryLayout<SDFGridBuildUniforms>.size, index: 0)
                 computeEncoder.setComputePipelineState(coarsePipeline)
-                computeEncoder.setBuffer(buildUniformBuffer, offset: 0, index: 0)
                 computeEncoder.setTexture(gstSDFTextures[level - 1], index: 0)  // Input: finer level
                 computeEncoder.setTexture(gstSDFTextures[level], index: 1)      // Output: this level
                 
@@ -1310,7 +1317,12 @@ actor Renderer {
             iters: settings.fractalIterations
         )
         
+        // Debug output
         print("✓ GST grid built: \(numLevels) levels, \(baseResolution)³ base resolution")
+        print("  Grid origin: (\(gridOrigin.x), \(gridOrigin.y), \(gridOrigin.z))")
+        print("  Grid extent: \(gridExtent)")
+        print("  Level 0 voxelSize: \(gridExtent / Float(baseResolution))")
+        print("  Fractal params: scale=\(settings.fractalScale), minDist=\(settings.minDistance), fold=\(settings.foldingLimit), sphere=\(settings.sphereRadius), iters=\(settings.fractalIterations)")
     }
     
     /// Dispatches the adaptive 8x8 hierarchical compute kernel for high-performance raymarching
