@@ -432,6 +432,392 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
 }
 
 // =============================================================================
+// GRID SPHERE TRACING (GST) - High Performance SDF Ray Marching
+// =============================================================================
+// Uses precomputed SDF grid hierarchy for faster convergence
+// Reference: "Grid Sphere Tracing" (JCGT paper methodology)
+
+// === GRID SAMPLING ===
+// Sample SDF from a 3D texture at a specific level
+// Input: worldPos in model space, gridLevel parameters
+// Output: world-space distance estimate
+FORCE_INLINE float sampleSDFAtLevel(float3 worldPos, float3 gridOrigin, 
+                                     texture3d<float, access::sample> sdfTexture,
+                                     float voxelSize, float3 resolution, float scale) {
+    // Convert to grid coordinates (voxel units)
+    float3 gridCoord = (worldPos - gridOrigin) / voxelSize;
+    // Convert to normalized texture coordinates [0,1]
+    float3 texCoord = gridCoord / resolution;
+    
+    // Clamp to valid texture bounds
+    texCoord = clamp(texCoord, float3(0.001), float3(0.999));
+    
+    // Sample with trilinear interpolation
+    constexpr sampler sdfSampler(coord::normalized, address::clamp_to_edge, filter::linear);
+    float vNorm = sdfTexture.sample(sdfSampler, texCoord).r;  // snorm8 stored as float [-1,1]
+    
+    // Decode to world-space distance: d = v_norm * (2.5 * voxelDiagonal)
+    return vNorm * scale;
+}
+
+// === LEVEL SELECTION ===
+// Choose appropriate grid level based on SDF magnitude
+// Coarser levels when far from surface, finer when close
+FORCE_INLINE int selectGridLevel(float3 pos, float3 gridOrigin,
+                                  constant SDFHierarchy& hierarchy,
+                                  texture3d<float, access::sample> level0,
+                                  texture3d<float, access::sample> level1,
+                                  texture3d<float, access::sample> level2,
+                                  texture3d<float, access::sample> level3) {
+    // Start from coarsest, check if we can use it
+    for (int L = hierarchy.numLevels - 1; L >= 0; --L) {
+        constant SDFGridLevel& lvl = hierarchy.levels[L];
+        float3 res = float3(lvl.resolution);
+        
+        float sdf;
+        switch(L) {
+            case 0: sdf = sampleSDFAtLevel(pos, gridOrigin, level0, lvl.voxelSize, res, lvl.scale); break;
+            case 1: sdf = sampleSDFAtLevel(pos, gridOrigin, level1, lvl.voxelSize, res, lvl.scale); break;
+            case 2: sdf = sampleSDFAtLevel(pos, gridOrigin, level2, lvl.voxelSize, res, lvl.scale); break;
+            case 3: sdf = sampleSDFAtLevel(pos, gridOrigin, level3, lvl.voxelSize, res, lvl.scale); break;
+            default: sdf = sampleSDFAtLevel(pos, gridOrigin, level0, lvl.voxelSize, res, lvl.scale); break;
+        }
+        
+        // If SDF is large enough, this level is safe to use
+        if (abs(sdf) > 2.5 * lvl.voxelDiagonal) {
+            return L;
+        }
+    }
+    return 0;  // Default to finest level
+}
+
+// === CUBIC ROOT FINDING FOR VOXEL INTERSECTION ===
+// Solves c3*t^3 + c2*t^2 + c1*t + c0 = 0 within [0, tFar]
+// Uses bisection + Newton iterations for robustness
+
+FORCE_INLINE float evalCubic(float t, float c0, float c1, float c2, float c3) {
+    return ((c3 * t + c2) * t + c1) * t + c0;
+}
+
+FORCE_INLINE float evalCubicDeriv(float t, float c1, float c2, float c3) {
+    return (3.0 * c3 * t + 2.0 * c2) * t + c1;
+}
+
+FORCE_INLINE float findCubicRoot(float t0, float t1, float c0, float c1, float c2, float c3) {
+    float a = t0, b = t1;
+    float fa = evalCubic(a, c0, c1, c2, c3);
+    float fb = evalCubic(b, c0, c1, c2, c3);
+    
+    // No sign change means no root in this interval
+    if (fa * fb > 0.0) return -1.0;
+    
+    float t = 0.5 * (a + b);
+    
+    UNROLL_8
+    for (int i = 0; i < 8; ++i) {
+        float ft = evalCubic(t, c0, c1, c2, c3);
+        if (abs(ft) < 1e-4) break;
+        
+        // Newton step
+        float dft = evalCubicDeriv(t, c1, c2, c3);
+        if (dft != 0.0) {
+            float tNew = t - ft / dft;
+            if (tNew >= a && tNew <= b) t = tNew;
+        }
+        
+        // Bisection fallback
+        if (fa * ft <= 0.0) { b = t; fb = ft; }
+        else { a = t; fa = ft; }
+    }
+    
+    return t;
+}
+
+// === VOXEL INTERSECTION REFINEMENT ===
+// Given we crossed a surface within a voxel, find exact hit using trilinear interpolation
+// Based on JCGT paper: transforms to canonical [0,1]^3 space and solves cubic
+FORCE_INLINE float intersectWithinVoxel(float3 rayOrigin, float3 rayDir,
+                                         float3 voxelMin, float voxelSize,
+                                         texture3d<float, access::sample> sdfTexture,
+                                         float3 resolution, float3 gridOrigin) {
+    // Transform ray to voxel's local [0,1]^3 space
+    float3 o = (rayOrigin - voxelMin) / voxelSize;
+    float3 d = rayDir / voxelSize;
+    
+    // Compute ray-box intersection for exit point
+    float3 tMin = (float3(0.0) - o) / d;
+    float3 tMax = (float3(1.0) - o) / d;
+    float3 t1 = min(tMin, tMax);
+    float3 t2 = max(tMin, tMax);
+    float tNear = max(max(t1.x, t1.y), max(t1.z, 0.0));
+    float tFar = min(min(t2.x, t2.y), t2.z);
+    
+    if (tNear >= tFar) return -1.0;
+    
+    // Sample 8 corner SDF values (in normalized texture space)
+    float3 baseCoord = (voxelMin - gridOrigin) / voxelSize / resolution;
+    float3 step = float3(1.0) / resolution;
+    
+    constexpr sampler sdfSampler(coord::normalized, address::clamp_to_edge, filter::nearest);
+    
+    float s000 = sdfTexture.sample(sdfSampler, baseCoord).r;
+    float s100 = sdfTexture.sample(sdfSampler, baseCoord + float3(step.x, 0, 0)).r;
+    float s010 = sdfTexture.sample(sdfSampler, baseCoord + float3(0, step.y, 0)).r;
+    float s110 = sdfTexture.sample(sdfSampler, baseCoord + float3(step.x, step.y, 0)).r;
+    float s001 = sdfTexture.sample(sdfSampler, baseCoord + float3(0, 0, step.z)).r;
+    float s101 = sdfTexture.sample(sdfSampler, baseCoord + float3(step.x, 0, step.z)).r;
+    float s011 = sdfTexture.sample(sdfSampler, baseCoord + float3(0, step.y, step.z)).r;
+    float s111 = sdfTexture.sample(sdfSampler, baseCoord + step).r;
+    
+    // Build cubic coefficients from corner values (JCGT formulation)
+    float a  = s101 - s001;
+    float k0 = s000;
+    float k1 = s100 - s000;
+    float k2 = s010 - s000;
+    float k3 = s110 - s010 - k1;
+    float k4 = k0 - s001;
+    float k5 = k1 - a;
+    float k6 = k2 - (s011 - s001);
+    float k7 = k3 - (s111 - s011 - a);
+    
+    // Compute intermediates from ray in voxel space
+    float ox = o.x, oy = o.y, oz = o.z;
+    float dx = d.x, dy = d.y, dz = d.z;
+    
+    float m0 = ox * oy;
+    float m1 = dx * dy;
+    float m2 = ox * dy + oy * dx;
+    float m3 = k5 * oz - k1;
+    float m4 = k6 * oz - k2;
+    float m5 = k7 * oz - k3;
+    
+    // Cubic coefficients: c3*t^3 + c2*t^2 + c1*t + c0 = 0
+    float c0 = (k4 * oz - k0) + ox * m3 + oy * m4 + m0 * m5;
+    float c1 = dx * m3 + dy * m4 + m2 * m5 + dz * (k4 + k5*ox + k6*oy + k7*m0);
+    float c2 = m1 * m5 + dz * (k5*dx + k6*dy + k7*m2);
+    float c3 = k7 * m1 * dz;
+    
+    // Find smallest positive root in [0, tFar]
+    return findCubicRoot(0.0, tFar, c0, c1, c2, c3);
+}
+
+// === GRID SPHERE TRACING MAIN LOOP ===
+// Uses precomputed SDF hierarchy for faster convergence
+struct GSTHit {
+    bool hit;
+    float t;
+    float glow;
+};
+
+GSTHit gridSphereTraceRay(float3 rayOrigin, float3 rayDir,
+                           constant SDFHierarchy& hierarchy,
+                           texture3d<float, access::sample> level0,
+                           texture3d<float, access::sample> level1,
+                           texture3d<float, access::sample> level2,
+                           texture3d<float, access::sample> level3,
+                           float tMax, float glowIntensity) {
+    GSTHit result;
+    result.hit = false;
+    result.t = 0.0;
+    result.glow = 0.0;
+    
+    float t = 0.05;
+    float prevSDF = 1.0;  // Assume starting outside (positive SDF)
+    
+    float3 gridOrigin = hierarchy.gridOrigin;
+    
+    NO_UNROLL
+    for (int iter = 0; iter < 256; ++iter) {
+        float3 pos = rayOrigin + t * rayDir;
+        
+        // 1) Select appropriate grid level (coarse→fine adaptive)
+        int chosenLevel = 0;
+        float sdf = 0.0;
+        
+        // Check from coarsest to finest, use coarsest that's safe
+        for (int L = hierarchy.numLevels - 1; L >= 0; --L) {
+            constant SDFGridLevel& lvl = hierarchy.levels[L];
+            float3 res = float3(lvl.resolution);
+            
+            float sdfL;
+            switch(L) {
+                case 0: sdfL = sampleSDFAtLevel(pos, gridOrigin, level0, lvl.voxelSize, res, lvl.scale); break;
+                case 1: sdfL = sampleSDFAtLevel(pos, gridOrigin, level1, lvl.voxelSize, res, lvl.scale); break;
+                case 2: sdfL = sampleSDFAtLevel(pos, gridOrigin, level2, lvl.voxelSize, res, lvl.scale); break;
+                case 3: sdfL = sampleSDFAtLevel(pos, gridOrigin, level3, lvl.voxelSize, res, lvl.scale); break;
+                default: sdfL = sampleSDFAtLevel(pos, gridOrigin, level0, lvl.voxelSize, res, lvl.scale); break;
+            }
+            
+            if (abs(sdfL) > 2.5 * lvl.voxelDiagonal) {
+                chosenLevel = L;
+                sdf = sdfL;
+                break;
+            }
+            sdf = sdfL;  // Keep finest level's SDF
+        }
+        
+        // 2) Check for surface crossing (outside → inside)
+        if (prevSDF > 0.0 && sdf <= 0.0) {
+            // Refine hit within current voxel
+            constant SDFGridLevel& lvl = hierarchy.levels[0];  // Use finest level
+            float3 voxelMin = floor((pos - gridOrigin) / lvl.voxelSize) * lvl.voxelSize + gridOrigin;
+            
+            float tLocal = intersectWithinVoxel(rayOrigin, rayDir, voxelMin, lvl.voxelSize,
+                                                 level0, float3(lvl.resolution), gridOrigin);
+            if (tLocal > 0.0) {
+                result.hit = true;
+                result.t = tLocal;
+                result.glow = saturate(result.glow * 0.25);
+                return result;
+            }
+            // Fallback: use current t if refinement fails
+            result.hit = true;
+            result.t = t;
+            result.glow = saturate(result.glow * 0.25);
+            return result;
+        }
+        
+        // 3) Accumulate glow
+        result.glow = fma(saturate(0.04 - abs(sdf)), glowIntensity, result.glow);
+        
+        // 4) Step forward by conservative distance
+        float stepSize = abs(sdf);
+        t += max(stepSize, 0.001);  // Ensure forward progress
+        prevSDF = sdf;
+        
+        // Exit conditions
+        if (t > tMax) break;
+        if (stepSize < 1e-4) {
+            // Near surface - treat as hit
+            result.hit = true;
+            result.t = t;
+            result.glow = saturate(result.glow * 0.25);
+            return result;
+        }
+    }
+    
+    result.glow = saturate(result.glow * 0.25);
+    return result;
+}
+
+// === GRID NORMAL COMPUTATION ===
+// Numeric gradient on level-0 grid
+FORCE_INLINE float3 computeNormalFromGrid(float3 worldPos, 
+                                           constant SDFHierarchy& hierarchy,
+                                           texture3d<float, access::sample> level0) {
+    constant SDFGridLevel& lvl = hierarchy.levels[0];
+    float eps = lvl.voxelSize;
+    float3 gridOrigin = hierarchy.gridOrigin;
+    float3 res = float3(lvl.resolution);
+    
+    float dx = sampleSDFAtLevel(worldPos + float3(eps,0,0), gridOrigin, level0, lvl.voxelSize, res, lvl.scale)
+             - sampleSDFAtLevel(worldPos - float3(eps,0,0), gridOrigin, level0, lvl.voxelSize, res, lvl.scale);
+    float dy = sampleSDFAtLevel(worldPos + float3(0,eps,0), gridOrigin, level0, lvl.voxelSize, res, lvl.scale)
+             - sampleSDFAtLevel(worldPos - float3(0,eps,0), gridOrigin, level0, lvl.voxelSize, res, lvl.scale);
+    float dz = sampleSDFAtLevel(worldPos + float3(0,0,eps), gridOrigin, level0, lvl.voxelSize, res, lvl.scale)
+             - sampleSDFAtLevel(worldPos - float3(0,0,eps), gridOrigin, level0, lvl.voxelSize, res, lvl.scale);
+    
+    return normalize(float3(dx, dy, dz));
+}
+
+// === ALTERNATIVE: Scene with optional GST fallback ===
+// When GST grid is not available, falls back to analytic SDF
+float2 SceneWithGST(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, 
+                    float glowIntensity, float foldingLimit, FractalParams params, int iterations, 
+                    float time, bool useGST, constant SDFHierarchy& hierarchy,
+                    texture3d<float, access::sample> level0,
+                    texture3d<float, access::sample> level1,
+                    texture3d<float, access::sample> level2,
+                    texture3d<float, access::sample> level3) {
+    if (useGST && hierarchy.isBuilt != 0) {
+        GSTHit hit = gridSphereTraceRay(rO, rD, hierarchy, level0, level1, level2, level3,
+                                        kMaxRayDistance, glowIntensity);
+        if (hit.hit) {
+            return float2(hit.t, hit.glow);
+        }
+        return float2(kRayMissThreshold + 100.0, hit.glow);
+    }
+    
+    // Fallback to standard analytic sphere tracing
+    return Scene(rO, rD, fragCoord, quality, maxStepsParam, glowIntensity, foldingLimit, params, iterations, time);
+}
+
+// =============================================================================
+// SDF GRID BUILDING COMPUTE KERNELS
+// =============================================================================
+
+// Build level 0 (finest) from analytic SDF
+kernel void buildSDFGridLevel0(
+    uint3 gid [[thread_position_in_grid]],
+    constant SDFGridBuildUniforms& uniforms [[buffer(0)]],
+    texture3d<float, access::write> outputSDF [[texture(0)]]
+) {
+    if (gid.x >= uint(uniforms.resolution.x) ||
+        gid.y >= uint(uniforms.resolution.y) ||
+        gid.z >= uint(uniforms.resolution.z)) {
+        return;
+    }
+    
+    // Compute world-space position for this voxel center
+    float3 worldPos = uniforms.gridOrigin + (float3(gid) + 0.5) * uniforms.voxelSize;
+    
+    // Create fractal params for sceneSDF
+    FractalParams params = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, 
+                                              uniforms.sphereRadius, uniforms.fractalIterations);
+    
+    // Evaluate analytic SDF (your existing Map function)
+    float sdf = Map(worldPos, params, uniforms.foldingLimit, uniforms.fractalIterations);
+    
+    // Encode to normalized [-1, 1] range
+    // d = v_norm * (2.5 * voxelDiagonal) => v_norm = d / (2.5 * voxelDiagonal)
+    float voxelDiag = sqrt(3.0) * uniforms.voxelSize;
+    float scale = 2.5 * voxelDiag;
+    float vNorm = clamp(sdf / scale, -1.0, 1.0);
+    
+    // Write to 3D texture (R channel, snorm8 will be converted from float)
+    outputSDF.write(float4(vNorm, 0.0, 0.0, 1.0), gid);
+}
+
+// Build coarser levels using MAX downsampling (conservative)
+kernel void buildSDFGridCoarseLevel(
+    uint3 gid [[thread_position_in_grid]],
+    constant SDFGridBuildUniforms& uniforms [[buffer(0)]],
+    texture3d<float, access::read> finerLevel [[texture(0)]],
+    texture3d<float, access::write> outputSDF [[texture(1)]]
+) {
+    if (gid.x >= uint(uniforms.resolution.x) ||
+        gid.y >= uint(uniforms.resolution.y) ||
+        gid.z >= uint(uniforms.resolution.z)) {
+        return;
+    }
+    
+    // Read 2x2x2 block from finer level
+    uint3 baseCoord = gid * 2;
+    
+    float maxAbsNorm = 0.0;
+    float signValue = 1.0;
+    
+    for (uint dz = 0; dz < 2; ++dz) {
+        for (uint dy = 0; dy < 2; ++dy) {
+            for (uint dx = 0; dx < 2; ++dx) {
+                float child = finerLevel.read(baseCoord + uint3(dx, dy, dz)).r;
+                if (abs(child) > maxAbsNorm) {
+                    maxAbsNorm = abs(child);
+                    signValue = sign(child);
+                }
+            }
+        }
+    }
+    
+    // Preserve sign with maximum magnitude (conservative for sphere tracing)
+    float vNorm = signValue * maxAbsNorm;
+    
+    outputSDF.write(float4(vNorm, 0.0, 0.0, 1.0), gid);
+}
+
+// =============================================================================
+
+// =============================================================================
 // SCENE 1: GLOWY IFS (Iterated Function System with volumetric glow)
 // =============================================================================
 // Port of "rendering with just glowy goodness" Shadertoy
@@ -1665,10 +2051,17 @@ inline LightingResult computeLighting(LightingParams lp, Uniforms uniforms) {
 }
 
 // Shared fragment body to avoid duplication and improve i-cache locality
-inline FragmentOutput fragmentMain(ColorInOut in,
+// GST version with optional grid textures
+inline FragmentOutput fragmentMainGST(ColorInOut in,
                                    Uniforms uniforms,
                                    float2 fragCoord,
-                                   float time)
+                                   float time,
+                                   bool useGST,
+                                   constant SDFHierarchy& hierarchy,
+                                   texture3d<float, access::sample> gstLevel0,
+                                   texture3d<float, access::sample> gstLevel1,
+                                   texture3d<float, access::sample> gstLevel2,
+                                   texture3d<float, access::sample> gstLevel3)
 {
     FragmentOutput output;
     
@@ -1687,13 +2080,27 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     
     // === SCENE 0: Mandelbox (default) ===
-    // NOTE: Disable shader-side foveation/LOD. The current heuristic uses mesh UVs
-    // (`in.texCoord`), which are not screen-space and can behave incorrectly.
     float quality = 1.0;
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
 
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    float2 ret;
+    
+    // Use Grid Sphere Tracing if enabled and grid is built
+    if (useGST && hierarchy.isBuilt != 0) {
+        GSTHit gstHit = gridSphereTraceRay(cameraPos, rd, hierarchy, 
+                                           gstLevel0, gstLevel1, gstLevel2, gstLevel3,
+                                           kMaxRayDistance, uniforms.glowIntensity);
+        if (gstHit.hit) {
+            ret = float2(gstHit.t, gstHit.glow);
+        } else {
+            ret = float2(kRayMissThreshold + 100.0, gstHit.glow);
+        }
+    } else {
+        // Fallback to standard analytic sphere tracing
+        ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    }
+    
     half3 col = half3(0.0h);
 
     if (ret.x < kRayMissThreshold)
@@ -1704,7 +2111,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
         // Debug: visualize depth as grayscale
         if (DEBUG_DEPTH_VISUALIZATION) {
-            float depthGray = saturate(output.depth); // Clamp depth to [0, 1]
+            float depthGray = saturate(output.depth);
             output.color = float4(depthGray, depthGray, depthGray, 1.0);
             return output;
         }
@@ -1714,7 +2121,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         output.depth = 1e-7;
 
         if (DEBUG_DEPTH_VISUALIZATION) {
-            output.color = float4(0.0, 0.0, 0.0, 1.0); // Black for far plane
+            output.color = float4(0.0, 0.0, 0.0, 1.0);
             return output;
         }
     }
@@ -1724,7 +2131,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         float3 p = cameraPos + ret.x * rd;
 
         float3 nor;
-        if (quality > kMinQualityForNormals) {
+        if (useGST && hierarchy.isBuilt != 0) {
+            // Use grid-based normal when GST is active
+            nor = computeNormalFromGrid(p, hierarchy, gstLevel0);
+        } else if (quality > kMinQualityForNormals) {
             nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
         } else {
             nor = normalize(p - cameraPos);
@@ -1799,8 +2209,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
                                constant FurHandUniforms & furHandUniforms [[buffer(BufferIndexFurHands)]],
+                               constant SDFHierarchy & gstHierarchy [[buffer(BufferIndexGSTHierarchy)]],
                                ushort ampId [[amplification_id]],
-                               texture2d<half> cubeMap [[texture(TextureIndexColor)]])
+                               texture2d<half> cubeMap [[texture(TextureIndexColor)]],
+                               texture3d<float, access::sample> gstLevel0 [[texture(TextureIndexGSTLevel0)]],
+                               texture3d<float, access::sample> gstLevel1 [[texture(TextureIndexGSTLevel1)]],
+                               texture3d<float, access::sample> gstLevel2 [[texture(TextureIndexGSTLevel2)]],
+                               texture3d<float, access::sample> gstLevel3 [[texture(TextureIndexGSTLevel3)]])
 {
     Uniforms uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
@@ -1821,8 +2236,11 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     // First check fur hands in WORLD SPACE
     FurHandResult furResult = raymarchFurHands(worldCameraPos, worldRd, furHandUniforms);
     
-    // Get fractal result
-    FragmentOutput fractalOutput = fragmentMain(in, uniforms, fragCoord, uniforms.time);
+    // Get fractal result - use GST if enabled
+    bool useGST = (uniforms.useGST != 0) && (gstHierarchy.isBuilt != 0);
+    FragmentOutput fractalOutput = fragmentMainGST(in, uniforms, fragCoord, uniforms.time,
+                                                   useGST, gstHierarchy,
+                                                   gstLevel0, gstLevel1, gstLevel2, gstLevel3);
     
     // Composite volumetric fur hands over fractal with alpha blending
     if (furResult.hit && furResult.alpha > 0.01) {

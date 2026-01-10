@@ -90,6 +90,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _showFurHands: Bool = false          // Render hands as fur (default off)
+    
+    // Grid Sphere Tracing (GST)
+    private var _useGST: Bool = false                // Use precomputed SDF grid for raymarching (default off for now)
 
     var minDistance: Float {
         get { withLock { _minDistance } }
@@ -237,6 +240,12 @@ final class RenderSettings: @unchecked Sendable {
     var showFurHands: Bool {
         get { withLock { _showFurHands } }
         set { withLock { _showFurHands = newValue } }
+    }
+    
+    /// Enable Grid Sphere Tracing for faster ray marching using precomputed SDF grids
+    var useGST: Bool {
+        get { withLock { _useGST } }
+        set { withLock { _useGST = newValue } }
     }
 }
 

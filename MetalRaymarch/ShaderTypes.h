@@ -23,7 +23,8 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
     BufferIndexUniforms      = 2,
-    BufferIndexFurHands      = 3
+    BufferIndexFurHands      = 3,
+    BufferIndexGSTHierarchy  = 4
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)
@@ -35,6 +36,10 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
     TextureIndexColor    = 0,
+    TextureIndexGSTLevel0 = 1,
+    TextureIndexGSTLevel1 = 2,
+    TextureIndexGSTLevel2 = 3,
+    TextureIndexGSTLevel3 = 4,
 };
 
 typedef struct
@@ -65,6 +70,7 @@ typedef struct
     float ifsGlow;           // IFS glow intensity multiplier
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
+    int useGST;              // Use Grid Sphere Tracing (0/1)
 } Uniforms;
 
 typedef struct
@@ -98,6 +104,46 @@ typedef struct
     float ifsOffset;             // IFS offset parameter
     float ifsGlow;               // IFS glow intensity
 } TileUniforms;
+
+// =============================================================================
+// GRID SPHERE TRACING DATA STRUCTURES
+// =============================================================================
+// Precomputed SDF hierarchy for efficient ray marching
+
+#define GST_MAX_LEVELS 5
+#define GST_BASE_RESOLUTION 64  // Level 0 resolution (64^3)
+
+typedef struct
+{
+    vector_int3 resolution;     // (nx, ny, nz) for this level
+    float voxelSize;            // World-space size of one voxel edge
+    float voxelDiagonal;        // sqrt(3) * voxelSize (precomputed)
+    float scale;                // 2.5 * voxelDiagonal (for decode)
+} SDFGridLevel;
+
+typedef struct
+{
+    int numLevels;              // Typically 4-5
+    SDFGridLevel levels[GST_MAX_LEVELS];
+    vector_float3 gridOrigin;   // World-space origin of level 0
+    float gridExtent;           // World-space extent of entire grid
+    int isBuilt;                // 1 if grid is ready for use
+} SDFHierarchy;
+
+// Uniforms for SDF grid compute shader
+typedef struct
+{
+    int levelIndex;             // Which level we're building
+    vector_int3 resolution;
+    float voxelSize;
+    vector_float3 gridOrigin;
+    // Fractal parameters for sceneSDF
+    float minDistance;
+    float fractalScale;
+    float sphereRadius;
+    float foldingLimit;
+    int fractalIterations;
+} SDFGridBuildUniforms;
 
 // Hand joint data for fur rendering
 // 26 joints per hand (ARKit HandSkeleton)

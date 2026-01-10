@@ -136,6 +136,13 @@ struct ContentView: View {
                         Group {
                             Toggle("Show HUD", isOn: Binding(get: { appModel.renderSettings.showHUD }, set: { appModel.renderSettings.showHUD = $0 }))
 
+                            if appModel.renderSettings.sceneIndex == 0 {
+                                Toggle("Use Grid Sphere Tracing", isOn: Binding(
+                                    get: { appModel.renderSettings.useGST },
+                                    set: { appModel.renderSettings.useGST = $0 }
+                                ))
+                            }
+
                             Text("Foveation Intensity")
                             Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
                         }
