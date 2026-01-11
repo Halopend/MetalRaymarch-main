@@ -40,9 +40,23 @@ class AppModel {
     
     nonisolated let clock = AppClock()
     
+    // Preset management
+    let presetManager = PresetManager()
+    
+    // Screenshot capture (set by Renderer)
+    var captureScreenshotHandler: (() async -> Data?)?
+    
     init() {
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings)
+        
+        // Add built-in presets if this is first launch
+        presetManager.addBuiltInPresetsIfNeeded()
+    }
+    
+    /// Capture a screenshot for preset thumbnails
+    func captureScreenshot() async -> Data? {
+        return await captureScreenshotHandler?()
     }
 }
 

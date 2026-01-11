@@ -63,6 +63,23 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     return out;
 }
 
+// Screenshot vertex shader (no vertex amplification, uses view 0)
+vertex ColorInOut screenshotVertexShader(Vertex in [[stage_in]],
+                                         constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]])
+{
+    ColorInOut out;
+
+    // Use first view's uniforms for screenshot
+    Uniforms uniforms = uniformsArray.uniforms[0];
+    
+    float4 position = float4(in.position, 1);
+    out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
+    out.texCoord = in.texCoord;
+    out.modelPos = in.position;
+    
+    return out;
+}
+
 // --- Fractal Code Port ---
 // Spatial Rendering optimizations for visionOS
 

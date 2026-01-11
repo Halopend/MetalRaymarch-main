@@ -87,6 +87,13 @@ actor Renderer {
     var furHandUniformBuffer: MTLBuffer?
     var cachedLeftHandAnchor: HandAnchor?
     var cachedRightHandAnchor: HandAnchor?
+    
+    // Screenshot capture
+    var screenshotTexture: MTLTexture?
+    var screenshotPipeline: MTLRenderPipelineState?
+    var screenshotDepthTexture: MTLTexture?
+    var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
+    var shouldCaptureScreenshot: Bool = false
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -331,6 +338,62 @@ actor Renderer {
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
+        
+        // Setup screenshot capture pipeline
+        setupScreenshotCapture()
+    }
+    
+    /// Setup screenshot capture resources
+    private func setupScreenshotCapture() {
+        // Create a standard render pipeline for screenshot capture (no vertex amplification)
+        // We'll render a single view at 512x512 for preset thumbnails
+        let screenshotSize = 512
+        
+        // Create screenshot color texture
+        let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: screenshotSize,
+            height: screenshotSize,
+            mipmapped: false
+        )
+        colorDescriptor.usage = [.renderTarget, .shaderRead]
+        colorDescriptor.storageMode = .shared  // Allows CPU read
+        screenshotTexture = device.makeTexture(descriptor: colorDescriptor)
+        screenshotTexture?.label = "Screenshot Color"
+        
+        // Create screenshot depth texture
+        let depthDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .depth32Float,
+            width: screenshotSize,
+            height: screenshotSize,
+            mipmapped: false
+        )
+        depthDescriptor.usage = [.renderTarget]
+        depthDescriptor.storageMode = .private
+        screenshotDepthTexture = device.makeTexture(descriptor: depthDescriptor)
+        screenshotDepthTexture?.label = "Screenshot Depth"
+        
+        // Create render pipeline for screenshot (single view, no amplification)
+        do {
+            let library = device.makeDefaultLibrary()!
+            let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
+            let fragmentFunction = library.makeFunction(name: "fragmentShader")
+            
+            let pipelineDescriptor = MTLRenderPipelineDescriptor()
+            pipelineDescriptor.label = "Screenshot Pipeline"
+            pipelineDescriptor.vertexFunction = vertexFunction
+            pipelineDescriptor.fragmentFunction = fragmentFunction
+            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float
+            
+            let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
+            pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
+            
+            screenshotPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            print("✓ Screenshot capture pipeline ready")
+        } catch {
+            print("⚠️ Failed to create screenshot pipeline: \(error)")
+        }
     }
 
     private func startARSession() async {
@@ -353,9 +416,163 @@ actor Renderer {
     static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         Task(executorPreference: RendererTaskExecutor.shared) {
             let renderer = Renderer(layerRenderer, appModel: appModel)
+            
+            // Setup screenshot capture handler
+            await MainActor.run {
+                appModel.captureScreenshotHandler = {
+                    await renderer.captureScreenshot()
+                }
+            }
+            
             await renderer.startARSession()
             await renderer.renderLoop()
         }
+    }
+    
+    /// Request a screenshot capture (async)
+    func captureScreenshot() async -> Data? {
+        return await withCheckedContinuation { continuation in
+            self.pendingScreenshotContinuation = continuation
+            self.shouldCaptureScreenshot = true
+        }
+    }
+    
+    /// Render and capture a screenshot to PNG data
+    private func renderScreenshot() -> Data? {
+        guard let screenshotTexture = screenshotTexture,
+              let screenshotPipeline = screenshotPipeline,
+              let screenshotDepthTexture = screenshotDepthTexture,
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+        
+        // Setup render pass for screenshot
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+        renderPassDescriptor.colorAttachments[0].texture = screenshotTexture
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].storeAction = .store
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
+        
+        renderPassDescriptor.depthAttachment.texture = screenshotDepthTexture
+        renderPassDescriptor.depthAttachment.loadAction = .clear
+        renderPassDescriptor.depthAttachment.storeAction = .dontCare
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
+        
+        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            return nil
+        }
+        
+        renderEncoder.label = "Screenshot Render Encoder"
+        renderEncoder.setCullMode(.front)
+        renderEncoder.setFrontFacing(.counterClockwise)
+        renderEncoder.setRenderPipelineState(screenshotPipeline)
+        renderEncoder.setDepthStencilState(depthState)
+        
+        // Use current uniforms (view 0)
+        renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        
+        // Bind fur hand uniforms if available
+        if let furBuffer = furHandUniformBuffer {
+            renderEncoder.setFragmentBuffer(furBuffer, offset: 0, index: BufferIndex.furHands.rawValue)
+        }
+        
+        // Set viewport for screenshot size
+        let viewport = MTLViewport(originX: 0, originY: 0, 
+                                   width: Double(screenshotTexture.width), 
+                                   height: Double(screenshotTexture.height),
+                                   znear: 0, zfar: 1)
+        renderEncoder.setViewport(viewport)
+        
+        // Bind mesh vertices
+        for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
+            guard let layout = element as? MDLVertexBufferLayout, layout.stride != 0 else { continue }
+            let buffer = mesh.vertexBuffers[index]
+            renderEncoder.setVertexBuffer(buffer.buffer, offset: buffer.offset, index: index)
+        }
+        
+        // Bind textures
+        renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
+        
+        // Bind GST resources
+        if let hierarchyBuffer = gstHierarchyBuffer {
+            renderEncoder.setFragmentBuffer(hierarchyBuffer, offset: 0, index: BufferIndex.gstHierarchy.rawValue)
+        }
+        if gstSDFTextures.count >= 4 {
+            renderEncoder.setFragmentTexture(gstSDFTextures[0], index: TextureIndex.gstLevel0.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[1], index: TextureIndex.gstLevel1.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[2], index: TextureIndex.gstLevel2.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[3], index: TextureIndex.gstLevel3.rawValue)
+        }
+        
+        // Draw
+        for submesh in mesh.submeshes {
+            renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
+                                                indexCount: submesh.indexCount,
+                                                indexType: submesh.indexType,
+                                                indexBuffer: submesh.indexBuffer.buffer,
+                                                indexBufferOffset: submesh.indexBuffer.offset)
+        }
+        
+        renderEncoder.endEncoding()
+        
+        // Synchronize for CPU read (needed on macOS/visionOS with shared storage)
+        #if os(macOS) || os(visionOS)
+        if let blitEncoder = commandBuffer.makeBlitCommandEncoder() {
+            blitEncoder.synchronize(resource: screenshotTexture)
+            blitEncoder.endEncoding()
+        }
+        #endif
+        
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        
+        // Read texture data and convert to PNG
+        return textureToImageData(screenshotTexture)
+    }
+    
+    /// Convert a Metal texture to PNG image data
+    private func textureToImageData(_ texture: MTLTexture) -> Data? {
+        let width = texture.width
+        let height = texture.height
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        let totalBytes = bytesPerRow * height
+        
+        var pixelData = [UInt8](repeating: 0, count: totalBytes)
+        
+        texture.getBytes(&pixelData,
+                        bytesPerRow: bytesPerRow,
+                        from: MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0),
+                                       size: MTLSize(width: width, height: height, depth: 1)),
+                        mipmapLevel: 0)
+        
+        // Create CGImage from pixel data
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        
+        guard let context = CGContext(data: &pixelData,
+                                      width: width,
+                                      height: height,
+                                      bitsPerComponent: 8,
+                                      bytesPerRow: bytesPerRow,
+                                      space: colorSpace,
+                                      bitmapInfo: bitmapInfo.rawValue),
+              let cgImage = context.makeImage() else {
+            return nil
+        }
+        
+        #if os(visionOS) || os(iOS)
+        let image = UIImage(cgImage: cgImage)
+        return image.pngData()
+        #elseif os(macOS)
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData) else {
+            return nil
+        }
+        return bitmapRep.representation(using: .png, properties: [:])
+        #endif
     }
 
     static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {
@@ -1763,6 +1980,15 @@ actor Renderer {
                         appModel.immersiveSpaceState = .open
                     }
                 }
+                
+                // Check for pending screenshot request
+                if shouldCaptureScreenshot {
+                    shouldCaptureScreenshot = false
+                    let screenshotData = renderScreenshot()
+                    pendingScreenshotContinuation?.resume(returning: screenshotData)
+                    pendingScreenshotContinuation = nil
+                }
+                
                 autoreleasepool {
                     self.renderFrame()
                 }

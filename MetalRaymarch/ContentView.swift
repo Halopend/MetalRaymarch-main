@@ -24,6 +24,21 @@ struct ContentView: View {
 
         VStack {
             VStack(spacing: 10) {
+                // Presets button at the top
+                HStack {
+                    PresetButton(
+                        presetManager: appModel.presetManager,
+                        settings: appModel.renderSettings,
+                        captureScreenshot: { await appModel.captureScreenshot() },
+                        onLoadPreset: { preset in
+                            preset.apply(to: appModel.renderSettings)
+                        }
+                    )
+                    
+                    Spacer()
+                }
+                .padding(.bottom, 8)
+                
                 Text("Resolution Scale: \(Int(appModel.renderSettings.resolutionScale * 100))%")
                     .font(.headline)
 
