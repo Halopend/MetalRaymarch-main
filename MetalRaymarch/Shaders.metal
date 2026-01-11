@@ -488,7 +488,7 @@ FORCE_INLINE int selectGridLevel(float3 pos, float3 gridOrigin,
         }
         
         // If SDF is large enough, this level is safe to use
-        if (abs(sdf) > 2.5 * lvl.voxelDiagonal) {
+        if (abs(sdf) > 4.0 * lvl.voxelDiagonal) {
             return L;
         }
     }
@@ -679,8 +679,8 @@ GSTHit gridSphereTraceRay(float3 rayOrigin, float3 rayDir,
             }
             
             // If we're far enough from surface, this level is safe to use
-            // Use threshold of 1.5 * voxelDiagonal to allow some margin
-            if (abs(sdfL) > 1.5 * lvl.voxelDiagonal || L == 0) {
+            // Use threshold of 2.5 * voxelDiagonal for conservative level selection
+            if (abs(sdfL) > 2.5 * lvl.voxelDiagonal || L == 0) {
                 sdf = sdfL;
                 break;
             }
@@ -693,7 +693,7 @@ GSTHit gridSphereTraceRay(float3 rayOrigin, float3 rayDir,
         
         // Check for surface hit (SDF close to zero or negative)
         constant SDFGridLevel& finestLvl = hierarchy.levels[0];
-        float hitThreshold = finestLvl.voxelSize * 0.25;
+        float hitThreshold = finestLvl.voxelSize * 0.1;  // Tighter threshold for better precision
         
         if (sdf < hitThreshold) {
             // We've hit or crossed the surface
@@ -704,9 +704,9 @@ GSTHit gridSphereTraceRay(float3 rayOrigin, float3 rayDir,
         }
         
         // Step forward by SDF distance (sphere tracing)
-        // Minimum step size to ensure progress
-        float minStep = finestLvl.voxelSize * 0.1;
-        float stepSize = max(sdf * 0.9, minStep);  // 0.9 for safety margin
+        // Use 0.95 multiplier - safe but not overly conservative
+        float minStep = finestLvl.voxelSize * 0.05;  // Smaller minimum step
+        float stepSize = max(sdf * 0.95, minStep);
         t += stepSize;
         
         // Exit if we've gone too far
@@ -792,9 +792,10 @@ kernel void buildSDFGridLevel0(
     float sdf = Map(worldPos, params, uniforms.foldingLimit, uniforms.fractalIterations);
     
     // Encode to normalized [-1, 1] range
-    // d = v_norm * (2.5 * voxelDiagonal) => v_norm = d / (2.5 * voxelDiagonal)
+    // d = v_norm * (scale * voxelDiagonal) => v_norm = d / (scale * voxelDiagonal)
+    // Scale of 4.0 balances precision near surface with range in empty space
     float voxelDiag = sqrt(3.0) * uniforms.voxelSize;
-    float scale = 2.5 * voxelDiag;
+    float scale = 4.0 * voxelDiag;
     float vNorm = clamp(sdf / scale, -1.0, 1.0);
     
     // Write to 3D texture (R channel, snorm8 will be converted from float)

@@ -1144,18 +1144,18 @@ actor Renderer {
             return
         }
         
-        let numLevels = 4  // 64^3, 32^3, 16^3, 8^3
-        let baseResolution: Int32 = 64
-        let gridExtent: Float = 8.0  // World-space extent of the grid
+        let numLevels = 4  // 128^3, 64^3, 32^3, 16^3
+        let baseResolution: Int32 = 128
+        let gridExtent: Float = 4.0  // World-space extent of the grid
         let gridOrigin = SIMD3<Float>(-gridExtent / 2, -gridExtent / 2, -gridExtent / 2)
         
-        // Create properly sized 3D textures if needed (check if first texture is placeholder size)
-        let needsTextureRebuild = gstSDFTextures.isEmpty || gstSDFTextures[0].width == 1
+        // Create properly sized 3D textures if needed (check if first texture is placeholder size or resolution changed)
+        let needsTextureRebuild = gstSDFTextures.isEmpty || gstSDFTextures[0].width != Int(baseResolution)
         if needsTextureRebuild {
             gstSDFTextures.removeAll()
             
             for level in 0..<numLevels {
-                let res = baseResolution >> level  // 64, 32, 16, 8
+                let res = baseResolution >> level  // 128, 64, 32, 16
                 
                 let descriptor = MTLTextureDescriptor()
                 descriptor.textureType = .type3D
@@ -1200,28 +1200,28 @@ actor Renderer {
                     resolution: SIMD3<Int32>(res, res, res),
                     voxelSize: voxelSize,
                     voxelDiagonal: voxelDiagonal,
-                    scale: 2.5 * voxelDiagonal
+                    scale: 4.0 * voxelDiagonal
                 )
             case 1:
                 hierarchy.levels.1 = SDFGridLevel(
                     resolution: SIMD3<Int32>(res, res, res),
                     voxelSize: voxelSize,
                     voxelDiagonal: voxelDiagonal,
-                    scale: 2.5 * voxelDiagonal
+                    scale: 4.0 * voxelDiagonal
                 )
             case 2:
                 hierarchy.levels.2 = SDFGridLevel(
                     resolution: SIMD3<Int32>(res, res, res),
                     voxelSize: voxelSize,
                     voxelDiagonal: voxelDiagonal,
-                    scale: 2.5 * voxelDiagonal
+                    scale: 4.0 * voxelDiagonal
                 )
             case 3:
                 hierarchy.levels.3 = SDFGridLevel(
                     resolution: SIMD3<Int32>(res, res, res),
                     voxelSize: voxelSize,
                     voxelDiagonal: voxelDiagonal,
-                    scale: 2.5 * voxelDiagonal
+                    scale: 4.0 * voxelDiagonal
                 )
             default:
                 break
