@@ -672,6 +672,8 @@ actor Renderer {
                             glowIntensity: settings.glowIntensity,
                             foldingLimit: settings.foldingLimit,
                             sphereRadius: settings.sphereRadius,
+                            safetyBubbleRadius: settings.safetyBubbleRadius,
+                            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
                             colorIterations: settings.colorIterations,
                             useHierarchical: settings.useHierarchical ? 1 : 0,
                             limitFlash: settings.limitFlash,
@@ -1188,11 +1190,6 @@ actor Renderer {
             let voxelSize = gridExtent / Float(res)
             let voxelDiagonal = sqrt(3.0) * voxelSize
             
-            hierarchy.levels.0.resolution = SIMD3<Int32>(res, res, res)
-            hierarchy.levels.0.voxelSize = voxelSize
-            hierarchy.levels.0.voxelDiagonal = voxelDiagonal
-            hierarchy.levels.0.scale = 2.5 * voxelDiagonal
-            
             // Set the appropriate level (Swift tuples need manual access)
             switch level {
             case 0:
@@ -1374,6 +1371,8 @@ actor Renderer {
             minDistance: settings.minDistance,
             fractalScale: settings.fractalScale,
             sphereRadius: settings.sphereRadius,
+            safetyBubbleRadius: settings.safetyBubbleRadius,
+            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
             foldingLimit: settings.foldingLimit,
             glowIntensity: settings.glowIntensity,
             colorMix: settings.colorMix,

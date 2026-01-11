@@ -94,6 +94,10 @@ final class RenderSettings: @unchecked Sendable {
     // Grid Sphere Tracing (GST)
     private var _useGST: Bool = true                // Use precomputed SDF grid for raymarching (default ON)
 
+    // Safety bubble controls
+    private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
+    private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
+
     var minDistance: Float {
         get { withLock { _minDistance } }
         set { withLock { _minDistance = newValue } }
@@ -246,6 +250,18 @@ final class RenderSettings: @unchecked Sendable {
     var useGST: Bool {
         get { withLock { _useGST } }
         set { withLock { _useGST = newValue } }
+    }
+
+    /// Enable safety bubble around the camera to prevent clipping into fractal geometry
+    var safetyBubbleEnabled: Bool {
+        get { withLock { _safetyBubbleEnabled } }
+        set { withLock { _safetyBubbleEnabled = newValue } }
+    }
+
+    /// Radius of the safety bubble in meters (0.05 - 2.5)
+    var safetyBubbleRadius: Float {
+        get { withLock { _safetyBubbleRadius } }
+        set { withLock { _safetyBubbleRadius = max(0.05, min(2.5, newValue)) } }
     }
 }
 

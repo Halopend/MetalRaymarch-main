@@ -61,6 +61,8 @@ typedef struct
     float glowIntensity;
     float foldingLimit;      // Box folding limit (default 1.0)
     float sphereRadius;      // Sphere folding radius (default 0.5)
+    float safetyBubbleRadius; // Safety bubble radius (meters)
+    int safetyBubbleEnabled;  // Enable safety bubble (0/1)
     float colorIterations;   // How many iterations contribute to color
     int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
@@ -90,6 +92,8 @@ typedef struct
     float minDistance;
     float fractalScale;
     float sphereRadius;
+    float safetyBubbleRadius; // Safety bubble radius (meters)
+    int safetyBubbleEnabled;  // Enable safety bubble (0/1)
     float foldingLimit;
     float glowIntensity;
     float colorMix;
