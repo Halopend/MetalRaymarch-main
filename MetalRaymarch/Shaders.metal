@@ -509,22 +509,36 @@ half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
     return powr(max(rgb, half3(kPowEpsilonHalf)), half3(0.47h));
 }
 
-// Ultra-fast shadow with over-relaxation
-float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
+// Ultra-fast shadow with over-relaxation and distance-based LOD
+// surfaceDistance: distance from camera to surface (for LOD decisions)
+float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations, float surfaceDistance = 0.0)
 {
     // Skip shadows in extreme periphery
     if (quality < 0.25) return 0.65;
+    
+    // Distance-based shadow skipping: fog dominates beyond 8 units
+    if (surfaceDistance > 8.0) return 0.7;
+    
+    // Distance-based shadow LOD: reduce quality for distant surfaces
+    float distanceLOD = saturate(1.0 - surfaceDistance * 0.1);
+    float effectiveQuality = quality * distanceLOD;
+    
+    // Skip detailed shadows for distant surfaces
+    if (effectiveQuality < 0.3) return 0.6 + effectiveQuality * 0.3;
     
     float res = 1.0;
     float t = 0.08;
     float prevH = 1e10;
     
-    // Very few steps with aggressive over-relaxation
-    int steps = int(quality * 2.0) + 1; // 1-3 steps
+    // Adaptive step count: 1-3 steps based on effective quality
+    int steps = int(effectiveQuality * 2.0) + 1;
+    
+    // Reduce iterations for shadow rays (fine detail not visible in shadows)
+    int shadowIters = max(iterations - 1, 2);
     
     for (int i = 0; i < steps; i++)
     {
-        float h = Map(ro + rd * t, params, foldingLimit, iterations);
+        float h = Map(ro + rd * t, params, foldingLimit, shadowIters);
         
         // Soft shadow calculation
         res = min(res, 10.0 * h / t);
@@ -534,8 +548,8 @@ float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalPar
         
         // Over-relaxation: step more aggressively when safe
         float relax = step(prevH * 0.8, h);
-        float step = mix(h, h * 1.5, relax);
-        t += max(step, 0.15);
+        float stepSize = mix(h, h * 1.5, relax);
+        t += max(stepSize, 0.15);
         prevH = h;
         
         // Don't trace too far for shadows
@@ -598,6 +612,67 @@ float3 CameraPath(float t)
 {
     float3 p = float3(-.78 + 3. * sin(2.14*t),.05+2.5 * sin(.942*t+1.3),.05 + 3.5 * cos(3.594*t) );
     return p;
+}
+
+// === SHARED LIGHTING CALCULATION ===
+// Consolidated lighting function to reduce code duplication across fragment/compute paths
+// Returns: half3 lit color
+struct LightingParams {
+    float3 hitPoint;
+    float3 normal;
+    float3 rayDir;
+    float hitDistance;
+    float gTime;
+    float quality;
+    float foldingLimit;
+    float sphereRadius;
+    float minDistance;
+    float fractalScale;
+    float colorMix;
+    int colorIterations;
+    int fractalIterations;
+};
+
+half3 ComputeLighting(LightingParams params, FractalParams fractalParams) {
+    float3 p = params.hitPoint;
+    float3 nor = params.normal;
+    float3 rd = params.rayDir;
+    float gTime = params.gTime;
+    
+    // Spot light calculation
+    float3 spotLight = CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+    float3 spot = spotLight - p;
+    float atten = length(spot);
+    spot /= atten;
+    
+    // Shadow calculation with LOD
+    int shadowIterations = max(params.fractalIterations - 2, 2);
+    FractalParams shadowParams = makeFractalParams(params.minDistance, params.fractalScale, params.sphereRadius, shadowIterations);
+    
+    half shaSpot = half(Shadow(p, spot, params.quality, params.foldingLimit, shadowParams, shadowIterations, params.hitDistance));
+    half shaSun = half(Shadow(p, sunDir, params.quality, params.foldingLimit, shadowParams, shadowIterations, params.hitDistance));
+    
+    // Diffuse lighting
+    float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+    half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+    half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+    
+    // Color from fractal
+    half3 col = Colour(p, params.hitDistance, gTime, params.quality, params.minDistance, params.fractalScale, 
+                       params.colorMix, params.foldingLimit, params.sphereRadius, 
+                       max(int(float(params.colorIterations) * params.quality), 2));
+    col = (col * bri * shaSpot) + (col * briSun * shaSun);
+    
+    // Specular (skip for low quality)
+    if (params.quality > 0.5) {
+        float3 ref = reflect(rd, nor);
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        col += half3(specSpot) * shaSpot * bri;
+        col += half3(specSun) * shaSun * briSun;
+    }
+    
+    return col;
 }
 
 // === HIERARCHICAL TILE-BASED COMPUTE KERNEL ===
@@ -712,8 +787,8 @@ kernel void tileRaymarchKernel(
             int shadowIterations = max(lodIterations - 2, 2);
             FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
             
-            half shaSpot = half(Shadow(p, spot, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSpot = half(Shadow(p, spot, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
+            half shaSun = half(Shadow(p, sunDir, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
             
             float attenPow = powr(max(atten, kPowEpsilon), 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
@@ -829,8 +904,8 @@ kernel void tileRaymarchKernel2x2(
             int shadowIterations = max(lodIterations - 2, 2);
             FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
             
-            half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
+            half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
             
             float attenPow = powr(max(atten, kPowEpsilon), 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
@@ -942,8 +1017,8 @@ kernel void adaptiveHierarchical8x8(
         int shadowIterations = max(lodIterations - 2, 2);
         FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
         
-        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
+        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
         
         float attenPow = powr(max(atten, kPowEpsilon), 1.5);
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
@@ -1085,8 +1160,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             int shadowIterations = max(lodIterations - 2, 2);
             FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
 
-            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, ret.x));
+            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, ret.x));
 
             float attenPow = powr(max(atten, kPowEpsilon), 1.5);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
@@ -1201,8 +1276,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         if (quadLaneId == 0) {
             // Only leader computes shadows - expensive!
-            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
+            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, adjustedDist));
         }
         
         // Broadcast shadow values to all 4 pixels in quad
