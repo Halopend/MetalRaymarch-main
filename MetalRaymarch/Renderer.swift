@@ -90,6 +90,9 @@ actor Renderer {
 
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
+    
+    // Cached model matrix to avoid redundant calculations in encodeAdaptiveCompute
+    var cachedModelMatrix: simd_float4x4 = matrix_identity_float4x4
 
     var mesh: MTKMesh
 
@@ -443,6 +446,9 @@ actor Renderer {
         let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
         
         let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        
+        // Cache the model matrix for use in encodeAdaptiveCompute (avoids redundant calculation)
+        cachedModelMatrix = modelMatrix
         
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
@@ -905,22 +911,15 @@ actor Renderer {
         let settings = appModel.renderSettings
         let view = drawable.views[viewIndex]
         
-        // Build model matrix (must match fragment shader exactly!)
-        let t: Float = 0.1
-        let currentSmoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
-        let currentSmoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
-        
-        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
-        let translationMatrix = matrix4x4_translation(currentSmoothedPosition.x, currentSmoothedPosition.y, currentSmoothedPosition.z)
-        let scaleMatrix = matrix4x4_scale(currentSmoothedScale, currentSmoothedScale, currentSmoothedScale)
-        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        // Use cached model matrix from updateGameState (avoids redundant calculation)
+        let modelMatrix = cachedModelMatrix
         
         // Build view matrix (same as fragment shader)
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         let viewMatrix = (deviceTransform * view.transform).inverse
         let projection = drawable.computeProjection(viewIndex: viewIndex)
         
-        // Model-view matrix and its inverse (THIS WAS MISSING!)
+        // Model-view matrix and its inverse
         let modelView = viewMatrix * modelMatrix
         let inverseModelView = modelView.inverse
         

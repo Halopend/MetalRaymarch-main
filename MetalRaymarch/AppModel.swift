@@ -45,6 +45,33 @@ class AppModel {
     }
 }
 
+/// Snapshot of all render settings for single-lock batch reading
+/// Use this in the render loop to avoid multiple lock acquisitions per frame
+struct SettingsSnapshot {
+    let minDistance: Float
+    let scale: Float
+    let position: SIMD3<Float>
+    let fractalScale: Float
+    let fractalIterations: Int
+    let maxRaySteps: Int
+    let foveationIntensity: Float
+    let colorMix: Float
+    let glowIntensity: Float
+    let foldingLimit: Float
+    let sphereRadius: Float
+    let colorIterations: Float
+    let resolutionScale: Float
+    let debugEyeTint: Bool
+    let tileSize: Int
+    let useHierarchical: Bool
+    let debugHierarchical: Bool
+    let limitFlash: Float
+    let sceneIndex: Int
+    let ifsScale: Float
+    let ifsOffset: Float
+    let ifsGlow: Float
+}
+
 class RenderSettings {
     private let lock = NSLock()
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
@@ -71,6 +98,37 @@ class RenderSettings {
     private var _ifsScale: Float = 1.74              // IFS scaling factor (default 1.74)
     private var _ifsOffset: Float = 0.98             // IFS offset parameter (default 0.98)
     private var _ifsGlow: Float = 1.0                // IFS glow intensity multiplier
+    
+    /// Get a snapshot of all settings with a single lock acquisition
+    /// Use this at the start of each frame to avoid repeated lock overhead
+    func snapshot() -> SettingsSnapshot {
+        lock.withLock {
+            SettingsSnapshot(
+                minDistance: _minDistance,
+                scale: _scale,
+                position: _position,
+                fractalScale: _fractalScale,
+                fractalIterations: _fractalIterations,
+                maxRaySteps: _maxRaySteps,
+                foveationIntensity: _foveationIntensity,
+                colorMix: _colorMix,
+                glowIntensity: _glowIntensity,
+                foldingLimit: _foldingLimit,
+                sphereRadius: _sphereRadius,
+                colorIterations: _colorIterations,
+                resolutionScale: _resolutionScale,
+                debugEyeTint: _debugEyeTint,
+                tileSize: _tileSize,
+                useHierarchical: _useHierarchical,
+                debugHierarchical: _debugHierarchical,
+                limitFlash: _limitFlash,
+                sceneIndex: _sceneIndex,
+                ifsScale: _ifsScale,
+                ifsOffset: _ifsOffset,
+                ifsGlow: _ifsGlow
+            )
+        }
+    }
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
