@@ -140,6 +140,39 @@ For maximum performance (in order of implementation):
 8. **Plotting Algorithms for the Mandelbrot Set - Wikipedia**
    - Comprehensive overview of escape time algorithms and bailout conditions
 
+## Current Research Directions (2024+)
+
+Recent advances focus on further accelerating sphere tracing approaches. Research at NVIDIA and other institutions suggests these optimizations can achieve 3x performance improvements over baseline methods while maintaining visual fidelity.
+
+### SDF Scaling
+Manipulating distance values to reduce step count while maintaining visual quality. By scaling the SDF in low-resolution buffers, early convergence detection becomes possible.
+
+### Early Ray Termination
+Detecting when rays converge to complex surface areas and terminating sphere tracing early. This is particularly effective for fractals where some regions have much higher detail than others.
+
+### Adaptive Refinement
+Using ray cone information to automatically select appropriate grid resolution at each iteration. This allows coarse sampling in smooth areas and fine sampling near complex geometry.
+
+### Compression
+Applying texture compression to reduce memory bandwidth while maintaining quality. Important for mobile/embedded GPUs with limited bandwidth.
+
+## Academic References
+
+1. **Hart, J.C.** "Sphere Tracing: A Geometric Method for the Antialiased Ray Tracing of Implicit Surfaces." The Visual Computer, 1996.
+   - Foundational paper on sphere tracing
+
+2. **Söderlund, H.H., Evans, A., & Akenine-Möller, T.** "Ray Tracing of Signed Distance Function Grids." Journal of Computer Graphics Techniques, Vol. 11, No. 3, 2022.
+   - Modern SDF grid traversal techniques
+
+3. **Havran, V. et al.** "A Coherent Grid Traversal Approach to Visualizing Particle Data." Scientific Visualization, 2006.
+   - Coherent traversal for improved cache utilization
+
+4. **Keinert, B. et al.** "Enhanced Sphere Tracing." Smart Tools and Apps for Graphics, 2014.
+   - Over-relaxation and other sphere tracing enhancements
+
+5. **Polychronakis, A. et al.** "SDF Scaling & Early Ray Termination for Fast Sphere Tracing." CGVC, 2024.
+   - Latest research on 3x performance improvements through SDF scaling and early termination
+
 ## State-of-the-Art Tools
 
 - **DeepDrill**: Perturbation theory + series approximation
