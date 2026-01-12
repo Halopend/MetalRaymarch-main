@@ -530,12 +530,18 @@ actor Renderer {
         let deltaTime = max(1.0 / 240.0, min(1.0 / 30.0, rawDelta))
 
         // FPS tracking using clamped interval (stable with triple buffering)
+        // Only update UI every 10 frames to reduce Task spawning overhead
         if deltaTime > 0 {
             let instantFPS = 1.0 / deltaTime
             let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * 0.1
             smoothedFPS = updatedFPS
-            Task { @MainActor in
-                appModel.fps = updatedFPS
+            
+            // Batch UI updates: only dispatch to MainActor every ~10 frames
+            // This reduces Task spawning overhead in the hot path
+            if Int(updatedFPS) % 10 == 0 || abs(updatedFPS - appModel.fps) > 5.0 {
+                Task { @MainActor in
+                    appModel.fps = updatedFPS
+                }
             }
         }
         lastPresentationTime = presentationTime
