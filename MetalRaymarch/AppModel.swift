@@ -262,54 +262,54 @@ final class RenderSettings: @unchecked Sendable {
     // === REFINING PARAMETERS ===
     // Over-relaxation multiplier (Keinert 2014)
     var relaxFactor: Float {
-        get { lock.withLock { _relaxFactor } }
+        get { withLock { _relaxFactor } }
         set { 
-            lock.withLock { _relaxFactor = newValue }
+            withLock { _relaxFactor = newValue }
             print("[REFINE] relaxFactor = \(newValue)")
         }
     }
     
     // Backtrack factor when overshooting
     var relaxBacktrack: Float {
-        get { lock.withLock { _relaxBacktrack } }
+        get { withLock { _relaxBacktrack } }
         set { 
-            lock.withLock { _relaxBacktrack = newValue }
+            withLock { _relaxBacktrack = newValue }
             print("[REFINE] relaxBacktrack = \(newValue)")
         }
     }
     
     // SDF scaling for coarse pass (Polychronakis 2024)
     var sdfScaleCoarse: Float {
-        get { lock.withLock { _sdfScaleCoarse } }
+        get { withLock { _sdfScaleCoarse } }
         set { 
-            lock.withLock { _sdfScaleCoarse = newValue }
+            withLock { _sdfScaleCoarse = newValue }
             print("[REFINE] sdfScaleCoarse = \(newValue)")
         }
     }
     
     // SDF scaling for super-coarse pass
     var sdfScaleSuperCoarse: Float {
-        get { lock.withLock { _sdfScaleSuperCoarse } }
+        get { withLock { _sdfScaleSuperCoarse } }
         set { 
-            lock.withLock { _sdfScaleSuperCoarse = newValue }
+            withLock { _sdfScaleSuperCoarse = newValue }
             print("[REFINE] sdfScaleSuperCoarse = \(newValue)")
         }
     }
     
     // Early termination convergence ratio
     var earlyTermRatio: Float {
-        get { lock.withLock { _earlyTermRatio } }
+        get { withLock { _earlyTermRatio } }
         set { 
-            lock.withLock { _earlyTermRatio = newValue }
+            withLock { _earlyTermRatio = newValue }
             print("[REFINE] earlyTermRatio = \(newValue)")
         }
     }
     
     // Steps before early termination
     var earlyTermCount: Int {
-        get { lock.withLock { _earlyTermCount } }
+        get { withLock { _earlyTermCount } }
         set { 
-            lock.withLock { _earlyTermCount = newValue }
+            withLock { _earlyTermCount = newValue }
             print("[REFINE] earlyTermCount = \(newValue)")
         }
     }
