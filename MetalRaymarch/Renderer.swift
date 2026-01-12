@@ -339,10 +339,8 @@ actor Renderer {
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
         
-        // Setup screenshot capture pipeline (called on MainActor)
-        Task { @MainActor in
-            self.setupScreenshotCapture()
-        }
+        // Setup screenshot capture pipeline
+        setupScreenshotCapture()
     }
     
     /// Setup screenshot capture resources
