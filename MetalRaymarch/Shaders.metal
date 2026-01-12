@@ -986,8 +986,8 @@ kernel void tileRaymarchKernel2x2(
 
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
 // Three-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
-// Dramatically reduces total Map() evaluations while maintaining quality
-// Expected speedup: 3-8x depending on scene composition
+// Uses threadgroup shared memory to share coarse raymarch results across the tile
+// Expected speedup: 2-4x compared to per-pixel raymarching
 kernel void adaptiveHierarchical8x8(
     uint2 tileId [[threadgroup_position_in_grid]],
     uint2 localId [[thread_position_in_threadgroup]],
@@ -998,38 +998,29 @@ kernel void adaptiveHierarchical8x8(
     const uint ADAPTIVE_TILE_SIZE = 8;
     uint2 pixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
     
+    // Shared memory for hierarchical results
+    // Level 0: 1 super-coarse result for entire 8x8 tile (thread 0,0)
+    // Level 1: 4 coarse results for 4x4 quadrants (threads at corners of 4x4 blocks)
+    threadgroup float sharedSuperCoarseT;
+    threadgroup float sharedCoarseT[4];  // 2x2 grid of 4x4 blocks
+    
     if (pixelCoord.x >= uint(uniforms.resolution.x) || pixelCoord.y >= uint(uniforms.resolution.y)) {
         return;
     }
     
-    // Compute ray direction in MODEL SPACE (matching fragment shader exactly)
-    // Fragment shader does: rd = normalize(in.modelPos - cameraPos)
-    // where modelPos comes from vertex positions and cameraPos is (invModelView * (0,0,0,1)).xyz
-    //
-    // For compute, we need to:
-    // 1. Unproject pixel to clip space
-    // 2. Transform through inverse projection to get view-space point
-    // 3. Transform through inverse model-view to get model-space point
-    // 4. Compute direction from camera to that point (both in model space)
-    
+    // Compute ray direction for this pixel
     float2 pixelCenter = float2(pixelCoord) + 0.5;
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     
-    // Unproject to view space at far plane (z = 1 in NDC)
-    float4 clipPos = float4(ndc, 1.0, 1.0);  // Far plane in clip space
+    float4 clipPos = float4(ndc, 1.0, 1.0);
     float4 viewPos = uniforms.invProjMatrix * clipPos;
     viewPos /= viewPos.w;
     
-    // Transform to model space (inverse model-view)
-    // invViewMatrix here is actually inverse MODEL-VIEW matrix (set in Swift)
     float4 modelPos4 = uniforms.invViewMatrix * viewPos;
     float3 modelPos = modelPos4.xyz / modelPos4.w;
     
-    // Camera position in model space (same as fragment shader)
     float3 cameraPos = uniforms.cameraPos;
-    
-    // Ray direction in model space (exactly like fragment shader)
     float3 rd = normalize(modelPos - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
@@ -1037,9 +1028,76 @@ kernel void adaptiveHierarchical8x8(
     
     float gTime = uniforms.time * 0.01 + 15.00;
     
-    // Use the SAME Scene() function as fragment shader for correctness
-    float2 ret = Scene(cameraPos, rd, pixelCenter, 1.0, uniforms.maxRaySteps, 
-                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+    // === LEVEL 0: Super-coarse pass (thread 0,0 only) ===
+    // Single raymarch for tile center to get approximate starting distance
+    if (localIndex == 0) {
+        // Compute ray for tile center (pixel 3.5, 3.5 within tile)
+        float2 tileCenterPixel = float2(tileId * ADAPTIVE_TILE_SIZE) + float2(3.5, 3.5);
+        float2 tileCenterNdc = (tileCenterPixel / uniforms.resolution) * 2.0 - 1.0;
+        tileCenterNdc.y = -tileCenterNdc.y;
+        
+        float4 tileCenterClip = float4(tileCenterNdc, 1.0, 1.0);
+        float4 tileCenterView = uniforms.invProjMatrix * tileCenterClip;
+        tileCenterView /= tileCenterView.w;
+        float4 tileCenterModel4 = uniforms.invViewMatrix * tileCenterView;
+        float3 tileCenterModel = tileCenterModel4.xyz / tileCenterModel4.w;
+        float3 tileCenterRd = normalize(tileCenterModel - cameraPos);
+        
+        // Super-coarse raymarch with reduced iterations
+        int superCoarseIters = max(lodIterations - 1, 2);
+        FractalParams superCoarseParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, superCoarseIters);
+        float2 superCoarseRet = SceneSuperCoarse(cameraPos, tileCenterRd, tileCenterPixel, 1.0, 
+                                                  uniforms.maxRaySteps / 2, uniforms.glowIntensity, 
+                                                  uniforms.foldingLimit, superCoarseParams, superCoarseIters, uniforms.time);
+        sharedSuperCoarseT = superCoarseRet.x;
+    }
+    
+    // Synchronize after super-coarse pass
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // === LEVEL 1: Coarse pass (4 leader threads for 4x4 quadrants) ===
+    // Threads at (0,0), (4,0), (0,4), (4,4) do coarse raymarch for their quadrant
+    uint quadrantX = localId.x / 4;
+    uint quadrantY = localId.y / 4;
+    uint quadrantIndex = quadrantY * 2 + quadrantX;
+    bool isQuadrantLeader = (localId.x % 4 == 0) && (localId.y % 4 == 0);
+    
+    if (isQuadrantLeader) {
+        // Use super-coarse result as starting point (with safety margin)
+        float startT = max(sharedSuperCoarseT * 0.8 - 0.5, 0.0);
+        
+        // Compute ray for quadrant center
+        float2 quadrantCenterOffset = float2(quadrantX * 4 + 1.5, quadrantY * 4 + 1.5);
+        float2 quadrantCenterPixel = float2(tileId * ADAPTIVE_TILE_SIZE) + quadrantCenterOffset;
+        float2 quadrantCenterNdc = (quadrantCenterPixel / uniforms.resolution) * 2.0 - 1.0;
+        quadrantCenterNdc.y = -quadrantCenterNdc.y;
+        
+        float4 quadrantClip = float4(quadrantCenterNdc, 1.0, 1.0);
+        float4 quadrantView = uniforms.invProjMatrix * quadrantClip;
+        quadrantView /= quadrantView.w;
+        float4 quadrantModel4 = uniforms.invViewMatrix * quadrantView;
+        float3 quadrantModel = quadrantModel4.xyz / quadrantModel4.w;
+        float3 quadrantRd = normalize(quadrantModel - cameraPos);
+        
+        // Coarse raymarch from starting point
+        int coarseIters = max(lodIterations - 1, 2);
+        FractalParams coarseParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, coarseIters);
+        float2 coarseRet = SceneFromStart(cameraPos, quadrantRd, startT, quadrantCenterPixel, 1.0,
+                                          uniforms.maxRaySteps / 2, uniforms.glowIntensity,
+                                          uniforms.foldingLimit, coarseParams, coarseIters, uniforms.time);
+        sharedCoarseT[quadrantIndex] = coarseRet.x;
+    }
+    
+    // Synchronize after coarse pass
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    // === LEVEL 2: Fine pass (all 64 threads) ===
+    // Each thread uses nearest coarse result as starting point
+    float myStartT = max(sharedCoarseT[quadrantIndex] * 0.9 - 0.3, 0.0);
+    
+    // Fine raymarch from coarse starting point
+    float2 ret = SceneFromStart(cameraPos, rd, myStartT, pixelCenter, 1.0, uniforms.maxRaySteps,
+                                uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
     
     float adjustedDist = ret.x;
     float glow = ret.y;
@@ -1086,17 +1144,23 @@ kernel void adaptiveHierarchical8x8(
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     col = clamp(col, half3(0.0h), half3(2.0h));
     
-    // Apply PostEffects to match fragment shader exactly
-    // (saturation, contrast, vignette, gamma)
-    // Compute approximate texCoord for vignette (0-1 range)
+    // Apply PostEffects
     half2 texCoord = half2(pixelCenter / uniforms.resolution);
     col = PostEffects(col, texCoord, half(uniforms.limitFlash));
     
     // Debug visualization
     if (uniforms.debugHierarchical == 1) {
-        // Show tile boundaries
+        // Show tile boundaries in yellow
         if (localId.x == 0 || localId.y == 0) {
             col = mix(col, half3(1.0h, 1.0h, 0.0h), 0.5h);
+        }
+        // Show quadrant boundaries in cyan
+        if (localId.x == 4 || localId.y == 4) {
+            col = mix(col, half3(0.0h, 1.0h, 1.0h), 0.3h);
+        }
+        // Show coarse hit/miss
+        if (sharedCoarseT[quadrantIndex] < 900.0) {
+            col = mix(col, half3(0.0h, 0.5h, 0.0h), 0.1h);  // Green tint = coarse hit
         }
     }
     
