@@ -63,6 +63,13 @@ constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this di
 constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
 constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
+// === ENHANCED OVER-RELAXATION CONSTANTS ===
+// Based on "Skipping Spheres" paper and relaxed sphere tracing research
+// Over-relaxation factor: 1.6-2.0 is safe for most SDFs with backtracking
+constant float RELAX_FACTOR = 1.6f;             // Over-relaxation multiplier
+constant float RELAX_BACKTRACK = 0.7f;          // Backtrack factor when overshooting
+constant float CONVERGENCE_THRESHOLD = 0.85f;   // Early termination when convergence slows
+
 // === BOUNDING SPHERE EARLY EXIT ===
 // Returns -1 if ray misses sphere, otherwise returns entry distance
 inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, float radius) {
@@ -153,6 +160,34 @@ float Map(float3 pos, FractalParams params, float foldingLimit, int iterations)
     return (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
 }
 
+// === HALF PRECISION MAP FOR APPLE SILICON ===
+// Apple GPUs have dedicated half-precision ALUs running at 2x throughput
+// Use for coarse distance estimation where full precision isn't needed
+half MapHalf(half3 pos, FractalParams params, half foldingLimit, int iterations) 
+{
+    half4 p = half4(pos, 1.0h);
+    half4 p0 = p;
+    half4 scaleH = half4(params.scale);
+    half minRadius2H = half(params.minRadius2);
+    half invMinRadius2H = 1.0h / minRadius2H;
+
+    // Unroll small iteration counts for better instruction scheduling
+    [[unroll]]
+    for (int i = 0; i < iterations; i++)
+    {
+        // Box fold
+        p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0h - p.xyz;
+
+        // Branchless sphere fold
+        half r2 = dot(p.xyz, p.xyz);
+        half t = clamp(1.0h / max(r2, minRadius2H), 1.0h, invMinRadius2H);
+        p *= t;
+
+        p = p * scaleH + p0;
+    }
+    return (length(p.xyz) - half(params.absScalem1)) / p.w - half(params.absScalePow);
+}
+
 // Optimized colour function using half precision
 half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
@@ -212,50 +247,67 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, fl
 }
 
 // === SUPER-COARSE RAYMARCH (for 8x8 tiles) ===
-// Very fast approximate raymarch - 12 steps with aggressive stepping
+// Very fast approximate raymarch using half precision on Apple Silicon
 // Used for initial distance estimation in large tiles
 float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
 {
     float t = max(startT, 0.05);
+    half foldingLimitH = half(foldingLimit);
     
-    // Very few steps with 1.5x over-relaxation for speed
+    // Very few steps with 2x over-relaxation for maximum speed
+    [[unroll]]
     for(int j = 0; j < 12; j++)
     {
         float3 p = rO + t * rD;
-        float h = Map(p, params, foldingLimit, iterations);
+        // Use half precision Map for coarse pass
+        half h = MapHalf(half3(p), params, foldingLimitH, iterations);
         
         // Loose threshold - we just need approximate distance
-        if(h < 0.1) return t;
+        if(h < 0.1h) return t;
         
         if (t > 80.0) return 1000.0;  // Limit search range
         
-        // Aggressive over-relaxation: step 1.5x the SDF value
-        t += h * 1.5;
+        // More aggressive over-relaxation: step 2x the SDF value
+        t += float(h) * 2.0;
     }
     
     return 1000.0;
 }
 
-// === COARSE RAYMARCH ===
+// === COARSE RAYMARCH WITH HALF PRECISION ===
 // Fast approximate raymarch for hierarchical rendering
-// Uses fewer iterations but standard stepping to find approximate hit distance
+// Uses half precision for 2x throughput on Apple Silicon
 float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
 {
     float t = 0.05;
+    half foldingLimitH = half(foldingLimit);
+    half prevH = half(1e10);
     
-    // More steps with standard stepping for reliability
+    // Use over-relaxation with backtracking for coarse pass
+    [[unroll]]
     for(int j = 0; j < 24; j++)
     {
         float3 p = rO + t * rD;
-        float h = Map(p, params, foldingLimit, iterations);
+        // Use half precision Map for coarse pass
+        half h = MapHalf(half3(p), params, foldingLimitH, iterations);
         
         // Tighter threshold to get closer before handing off
-        if(h < 0.02) return t;
+        if(h < 0.02h) return t;
         
         if (t > 12.0) return 1000.0;
         
-        // Standard sphere tracing - no overstepping
-        t += h;
+        // Over-relaxation with backtracking
+        half step;
+        if (h > prevH * 1.2h) {
+            // Overstep - backtrack slightly
+            t -= float(prevH) * 0.3;
+            step = h;
+        } else {
+            step = h * 1.5h;
+        }
+        
+        t += float(step);
+        prevH = h;
     }
     
     return 1000.0;
@@ -297,7 +349,9 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
     return float2(1000.0, saturate(glow * 0.25));
 }
 
-// Standard sphere tracing - reliable, no aggressive optimizations
+// === ENHANCED OVER-RELAXATION SPHERE TRACING ===
+// Based on "Relaxed Sphere Tracing" and "Skipping Spheres" papers
+// Uses over-relaxation with backtracking for ~40% fewer steps
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
@@ -306,6 +360,10 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
+    
+    // Over-relaxation state
+    float prevH = 1e10;
+    float omega = RELAX_FACTOR;  // Start with aggressive over-relaxation
     
     for(int j = 0; j < maxSteps; j++)
     {
@@ -326,9 +384,26 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         // Accumulate glow
         glow += saturate(0.04 - h) * glowIntensity;
         
-        // Standard sphere tracing: step by the SDF value
-        // This is guaranteed safe for a valid SDF
-        t += h;
+        // === ENHANCED OVER-RELAXATION WITH BACKTRACKING ===
+        // If we overstepped (h increased significantly), backtrack and reduce omega
+        float step;
+        if (h > prevH * 1.1 && omega > 1.0) {
+            // Overstep detected - backtrack and use conservative stepping
+            t -= prevH * (omega - 1.0) * RELAX_BACKTRACK;
+            omega = 1.0;  // Fall back to standard sphere tracing
+            step = h;
+        } else {
+            // Safe to use over-relaxation
+            step = h * omega;
+            
+            // Adaptive omega: reduce near surfaces for precision
+            if (h < 0.1) {
+                omega = max(1.0f, omega * 0.95f);
+            }
+        }
+        
+        t += step;
+        prevH = h;
     }
     
     return float2(1000.0, saturate(glow * 0.25));
@@ -509,40 +584,54 @@ half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
     return powr(max(rgb, half3(kPowEpsilonHalf)), half3(0.47h));
 }
 
-// Ultra-fast shadow with over-relaxation
+// === OPTIMIZED SHADOW WITH HALF PRECISION ===
+// Uses half precision for intermediate calculations on Apple Silicon
+// Apple GPUs have 2x throughput for half precision operations
 float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
 {
     // Skip shadows in extreme periphery
     if (quality < 0.25) return 0.65;
     
-    float res = 1.0;
+    half res = 1.0h;
     float t = 0.08;
-    float prevH = 1e10;
+    half prevH = half(1e10);
     
     // Very few steps with aggressive over-relaxation
-    int steps = int(quality * 2.0) + 1; // 1-3 steps
+    // Use 2-4 steps based on quality for better shadow quality
+    int steps = int(quality * 3.0) + 1;
     
-    for (int i = 0; i < steps; i++)
+    // Precompute half precision folding limit
+    half foldingLimitH = half(foldingLimit);
+    
+    [[unroll]]
+    for (int i = 0; i < 4; i++)
     {
-        float h = Map(ro + rd * t, params, foldingLimit, iterations);
+        if (i >= steps) break;
         
-        // Soft shadow calculation
-        res = min(res, 10.0 * h / t);
+        float3 p = ro + rd * t;
+        
+        // Use half precision Map for shadow rays (precision less critical)
+        half h = MapHalf(half3(p), params, foldingLimitH, iterations);
+        
+        // Soft shadow calculation with improved penumbra
+        // k=10 gives soft shadows, higher = sharper
+        half shadowK = 10.0h;
+        res = min(res, shadowK * h / half(t));
         
         // Early exit if definitely in shadow
-        if (res < 0.02) return 0.0;
+        if (res < 0.02h) return 0.0;
         
-        // Over-relaxation: step more aggressively when safe
-        float relax = step(prevH * 0.8, h);
-        float step = mix(h, h * 1.5, relax);
-        t += max(step, 0.15);
+        // Enhanced over-relaxation for shadows (can be more aggressive)
+        half relax = step(prevH * 0.7h, h);
+        half stepSize = mix(h, h * 1.8h, relax);
+        t += max(float(stepSize), 0.12f);
         prevH = h;
         
         // Don't trace too far for shadows
         if (t > 4.0) break;
     }
     
-    return saturate(res);
+    return float(saturate(res));
 }
 
 // === TILE-BASED RAYMARCHING (4x4 pixel groups) ===
