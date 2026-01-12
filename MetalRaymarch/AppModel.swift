@@ -93,12 +93,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
-    private var _sceneIndex: Int = 0                 // 0 = Mandelbox, 1 = Glowy IFS
-    
-    // IFS Scene parameters
-    private var _ifsScale: Float = 1.74              // IFS scaling factor (default 1.74)
-    private var _ifsOffset: Float = 0.98             // IFS offset parameter (default 0.98)
-    private var _ifsGlow: Float = 1.0                // IFS glow intensity multiplier
     
     // HUD display
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
@@ -221,28 +215,6 @@ final class RenderSettings: @unchecked Sendable {
         withLock {
             _limitFlash = 1.0
         }
-    }
-    
-    /// Current scene: 0 = Mandelbox, 1 = Glowy IFS
-    var sceneIndex: Int {
-        get { withLock { _sceneIndex } }
-        set { withLock { _sceneIndex = newValue } }
-    }
-    
-    // IFS Scene parameters
-    var ifsScale: Float {
-        get { withLock { _ifsScale } }
-        set { withLock { _ifsScale = newValue } }
-    }
-    
-    var ifsOffset: Float {
-        get { withLock { _ifsOffset } }
-        set { withLock { _ifsOffset = newValue } }
-    }
-    
-    var ifsGlow: Float {
-        get { withLock { _ifsGlow } }
-        set { withLock { _ifsGlow = newValue } }
     }
     
     var showHUD: Bool {

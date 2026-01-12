@@ -1249,150 +1249,6 @@ kernel void buildSDFGridCoarseLevel(
 
 // =============================================================================
 
-// =============================================================================
-// SCENE 1: GLOWY IFS (Iterated Function System with volumetric glow)
-// =============================================================================
-// Port of "rendering with just glowy goodness" Shadertoy
-
-// Thread-local color for IFS iteration coloring
-struct IFSResult {
-    float distance;
-    float3 color;
-};
-
-IFSResult MapIFS(float3 p, float mscale, float offset) {
-    // Spatial repetition with offset
-    p.xy = fmod(p.xy - 1.0, 2.0) - 1.0;
-    p.z = abs(p.z) - 0.8;
-    
-    float4 q = float4(p, 1.0);
-    
-    float3 color = float3(0.0);
-    float colorRadius = 0.0;
-    
-    for(int i = 0; i < 20; i++) {
-        q.xyz = abs(q.xyz) - float3(0.3, 1.0, 0.0) + float3(0.6, 0.0, 0.0);
-        float ilength = length(q.xyz);
-        q = mscale * q / clamp(powr(max(ilength, kPowEpsilon), 2.0), 0.5, 1.0) 
-            - float4(offset, 0.01, 0.3, 0.0);
-        
-        if (q.x * q.y > colorRadius) { color.x += 1.0; }
-        else if (q.y * q.z > colorRadius) { color.y += 1.0; }
-        else if (q.z * q.x > colorRadius) { color.z += 1.0; }
-    }
-    
-    IFSResult result;
-    result.distance = length(q.xyz) / q.w;
-    result.color = color;
-    return result;
-}
-
-// IFS raymarch with volumetric glow accumulation
-struct IFSMarchResult {
-    float t;
-    float glow;
-    float glow2;
-    float3 color;
-};
-
-IFSMarchResult MarchIFS(float3 ro, float3 rd, float3 lightDir, float maxT, float mscale, float offset) {
-    float t = 0.0;
-    float eps = 3e-6;
-    float distfac = 200.0;
-    float hitThreshold = eps;
-    float glow = 0.0;
-    float glow2 = 0.0;
-    float3 lastColor = float3(0.0);
-    
-    for(int i = 0; i < 100; i++) {
-        float3 pos = ro + rd * t;
-        IFSResult mapResult = MapIFS(pos, mscale, offset);
-        float d = mapResult.distance;
-        lastColor = mapResult.color;
-        
-        if (d < hitThreshold || t >= maxT) break;
-        
-        t += d;
-        hitThreshold = eps * (1.0 + t * t * distfac);
-        
-        // Glow based on proximity to light plane
-        float zz = pos.y - lightDir.y;
-        zz *= zz;
-        glow += exp(-max(8.0 * (1.0 - exp(-zz * 4.0)) - d, 0.0) / 10.0);
-        
-        // Secondary glow based on camera distance
-        float zz2 = ro.z - pos.z;
-        zz2 *= zz2;
-        glow2 += exp(-max(1.0 - d, 0.0) / 300.0);
-    }
-    
-    IFSMarchResult result;
-    result.t = t;
-    result.glow = glow;
-    result.glow2 = glow2;
-    result.color = lastColor;
-    return result;
-}
-
-float3 RenderIFS(float3 ro, float3 rd, float time, float mscale, float offset, float glowMult) {
-    float tt = fmod(time, 7.0);
-    float tf = tt * tt;
-    
-    float3 lightDir = ro;
-    lightDir.y += tf;
-    
-    IFSMarchResult march = MarchIFS(ro, rd, lightDir, 20.0, mscale, offset);
-    
-    float3 pos = ro + rd * march.t;
-    
-    // Glow strength based on light proximity
-    float glowStr = exp(-abs(pos.y - lightDir.y) / 4.0);
-    march.glow *= glowStr * glowMult;
-    
-    // Secondary glow strength based on camera proximity  
-    float glowStr2 = exp(-length(pos - ro) / 6.0);
-    march.glow2 *= glowStr2 * glowMult;
-    
-    // Color from IFS iterations
-    float3 color = cos(march.color * 3.0);
-    color *= color;
-    float3 glowCol = 0.5 * (color * color);
-    
-    // Combine glows for final color
-    float3 result = 
-        3e-11 * powr(max(march.glow2, kPowEpsilon), 9.0) * glowCol 
-        + 1e-10 * powr(max(march.glow, kPowEpsilon), 11.0) * float3(0.05, 0.03, 0.001) * glowCol
-        + 0.01 * cos(pos.x / 15.0 + time * 1.7) * 1e-9 * glowCol
-          * (pos.z < -0.2 ? powr(max(march.glow2, kPowEpsilon), 11.0) : 0.0);
-    
-    return result;
-}
-
-// Full IFS scene render with camera setup
-half3 SceneIFS(float3 cameraPos, float3 rd, float time, float mscale, float offset, float glowMult) {
-    // Camera animation
-    float3 ro = float3(0.0, 0.0, -2.0);
-    
-    // Apply camera transforms
-    float angle = -1.0;  // Pitch
-    float c = cos(angle), s = sin(angle);
-    rd.yz = float2(rd.y * c - rd.z * s, rd.y * s + rd.z * c);
-    
-    ro.y += time / 5.0;  // Move up over time
-    
-    angle = 0.8;  // Roll
-    c = cos(angle); s = sin(angle);
-    rd.xy = float2(rd.x * c - rd.y * s, rd.x * s + rd.y * c);
-    
-    float3 col = clamp(RenderIFS(ro, rd, time, mscale, offset, glowMult), 1e-6, 1e6);
-    
-    // Tone mapping
-    col = 1.0 - exp(-0.4 * col);
-    
-    return half3(col);
-}
-// =============================================================================
-
 // Simplified post effects using half precision
 half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
 {
@@ -1442,10 +1298,9 @@ float hudBar(float2 uv, float2 pos, float2 size, float fillAmount) {
     return max(border, fill);
 }
 
-// Render HUD overlay showing current parameter values
-half3 renderHUD(half3 baseColor, float2 uv, int sceneIndex, int activeGesture,
-                float minDist, float foldLimit, float sphereRad,
-                float ifsScale, float ifsOffset, float ifsGlow) {
+// Render HUD overlay showing current Mandelbox parameter values
+half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
+                float minDist, float foldLimit, float sphereRad) {
     // HUD in bottom-left corner
     float2 hudPos = float2(0.02, 0.02);
     float hudWidth = 0.2;
@@ -1464,47 +1319,26 @@ half3 renderHUD(half3 baseColor, float2 uv, int sceneIndex, int activeGesture,
     // Semi-transparent background
     float bg = 0.25;
     
-    if (sceneIndex == 0) {
-        // Mandelbox: minDistance (0.001-5), foldingLimit (0.1-10), sphereRadius (0.01-2)
-        float fill1 = clamp(minDist / 5.0, 0.0, 1.0);
-        float fill2 = clamp(foldLimit / 10.0, 0.0, 1.0);
-        float fill3 = clamp(sphereRad / 2.0, 0.0, 1.0);
-        
-        float bar1 = hudBar(hudUV, float2(0.05, 0.68), float2(0.9, 0.22), fill1);
-        float bar2 = hudBar(hudUV, float2(0.05, 0.39), float2(0.9, 0.22), fill2);
-        float bar3 = hudBar(hudUV, float2(0.05, 0.10), float2(0.9, 0.22), fill3);
-        
-        // Colors: index=cyan, middle=yellow, ring=magenta
-        // Highlight active gesture
-        float h1 = (activeGesture == 1) ? 1.5 : 1.0;
-        float h2 = (activeGesture == 2) ? 1.5 : 1.0;
-        float h3 = (activeGesture == 3) ? 1.5 : 1.0;
-        
-        hudColor += half3(0.0h, 1.0h, 1.0h) * half(bar1 * h1);   // Cyan - minDistance
-        hudColor += half3(1.0h, 1.0h, 0.0h) * half(bar2 * h2);   // Yellow - foldingLimit
-        hudColor += half3(1.0h, 0.0h, 1.0h) * half(bar3 * h3);   // Magenta - sphereRadius
-        
-        alpha = max(max(bar1, bar2), bar3);
-    } else {
-        // IFS: ifsScale (0.5-5), ifsOffset (0.1-3), ifsGlow (0.01-10)
-        float fill1 = clamp((ifsScale - 0.5) / 4.5, 0.0, 1.0);
-        float fill2 = clamp((ifsOffset - 0.1) / 2.9, 0.0, 1.0);
-        float fill3 = clamp(ifsGlow / 10.0, 0.0, 1.0);
-        
-        float bar1 = hudBar(hudUV, float2(0.05, 0.68), float2(0.9, 0.22), fill1);
-        float bar2 = hudBar(hudUV, float2(0.05, 0.39), float2(0.9, 0.22), fill2);
-        float bar3 = hudBar(hudUV, float2(0.05, 0.10), float2(0.9, 0.22), fill3);
-        
-        float h1 = (activeGesture == 1) ? 1.5 : 1.0;
-        float h2 = (activeGesture == 2) ? 1.5 : 1.0;
-        float h3 = (activeGesture == 3) ? 1.5 : 1.0;
-        
-        hudColor += half3(0.0h, 1.0h, 1.0h) * half(bar1 * h1);
-        hudColor += half3(1.0h, 1.0h, 0.0h) * half(bar2 * h2);
-        hudColor += half3(1.0h, 0.0h, 1.0h) * half(bar3 * h3);
-        
-        alpha = max(max(bar1, bar2), bar3);
-    }
+    // Mandelbox: minDistance (0.001-5), foldingLimit (0.1-10), sphereRadius (0.01-2)
+    float fill1 = clamp(minDist / 5.0, 0.0, 1.0);
+    float fill2 = clamp(foldLimit / 10.0, 0.0, 1.0);
+    float fill3 = clamp(sphereRad / 2.0, 0.0, 1.0);
+    
+    float bar1 = hudBar(hudUV, float2(0.05, 0.68), float2(0.9, 0.22), fill1);
+    float bar2 = hudBar(hudUV, float2(0.05, 0.39), float2(0.9, 0.22), fill2);
+    float bar3 = hudBar(hudUV, float2(0.05, 0.10), float2(0.9, 0.22), fill3);
+    
+    // Colors: index=cyan, middle=yellow, ring=magenta
+    // Highlight active gesture
+    float h1 = (activeGesture == 1) ? 1.5 : 1.0;
+    float h2 = (activeGesture == 2) ? 1.5 : 1.0;
+    float h3 = (activeGesture == 3) ? 1.5 : 1.0;
+    
+    hudColor += half3(0.0h, 1.0h, 1.0h) * half(bar1 * h1);   // Cyan - minDistance
+    hudColor += half3(1.0h, 1.0h, 0.0h) * half(bar2 * h2);   // Yellow - foldingLimit
+    hudColor += half3(1.0h, 0.0h, 1.0h) * half(bar3 * h3);   // Magenta - sphereRadius
+    
+    alpha = max(max(bar1, bar2), bar3);
     
     // Blend: background + bars
     alpha = max(alpha, bg);
@@ -2507,17 +2341,7 @@ inline FragmentOutput fragmentMainGST(ColorInOut in,
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
-    // === SCENE SWITCHING ===
-    if (uniforms.sceneIndex == 1) {
-        // Scene 1: Glowy IFS
-        half3 col = SceneIFS(cameraPos, rd, time, uniforms.ifsScale, uniforms.ifsOffset, uniforms.ifsGlow);
-        col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
-        output.color = float4(float3(col), 1.0);
-        output.depth = 1e-7;  // No depth for volumetric scene
-        return output;
-    }
-    
-    // === SCENE 0: Mandelbox (default) ===
+    // === Mandelbox Scene ===
     float quality = 1.0;
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
@@ -2709,15 +2533,8 @@ inline FragmentOutput fragmentMainGST(ColorInOut in,
 
     // Render HUD overlay if enabled
     if (uniforms.showHUD != 0) {
-        col = renderHUD(col, float2(in.texCoord), uniforms.sceneIndex, uniforms.activeGesture,
-                        uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius,
-                        uniforms.ifsScale, uniforms.ifsOffset, uniforms.ifsGlow);
-    }
-    
-    // DEBUG: Tint GST-rendered pixels slightly blue to verify GST is active
-    // Remove this once GST is working correctly
-    if (usedGST && ret.x < kRayMissThreshold) {
-        col = col * half3(0.9h, 0.9h, 1.1h);  // Slight blue tint
+        col = renderHUD(col, float2(in.texCoord), uniforms.activeGesture,
+                        uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius);
     }
 
     output.color = float4(float3(col), 1.0);

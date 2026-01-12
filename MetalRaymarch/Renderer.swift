@@ -894,10 +894,6 @@ actor Renderer {
                             colorIterations: settings.colorIterations,
                             useHierarchical: settings.useHierarchical ? 1 : 0,
                             limitFlash: settings.limitFlash,
-                            sceneIndex: Int32(settings.sceneIndex),
-                            ifsScale: settings.ifsScale,
-                            ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow,
                             showHUD: settings.showHUD ? 1 : 0,
                             activeGesture: Int32(settings.activeGestureIndex),
                             useGST: settings.useGST ? 1 : 0)
@@ -978,8 +974,7 @@ actor Renderer {
         self.updateGameState(drawable: drawable)
         
         // Build GST grid if enabled (rebuilds only when parameters change).
-        // Only relevant for the SDF-based Mandelbox scene.
-        if appModel.renderSettings.useGST && appModel.renderSettings.sceneIndex == 0 {
+        if appModel.renderSettings.useGST {
             buildGSTGrid(commandBuffer: commandBuffer, settings: appModel.renderSettings)
         }
 
@@ -1598,11 +1593,7 @@ actor Renderer {
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
-            limitFlash: settings.limitFlash,
-            sceneIndex: Int32(settings.sceneIndex),
-            ifsScale: settings.ifsScale,
-            ifsOffset: settings.ifsOffset,
-            ifsGlow: settings.ifsGlow
+            limitFlash: settings.limitFlash
         )
         
         // Copy uniforms to buffer
