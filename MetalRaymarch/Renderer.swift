@@ -516,8 +516,8 @@ actor Renderer {
         
         renderEncoder.endEncoding()
         
-        // Synchronize for CPU read (needed on macOS/visionOS with shared storage)
-        #if os(macOS) || os(visionOS)
+        // Synchronize for CPU read (only available on macOS; visionOS uses shared memory without explicit sync)
+        #if os(macOS)
         if let blitEncoder = commandBuffer.makeBlitCommandEncoder() {
             blitEncoder.synchronize(resource: screenshotTexture)
             blitEncoder.endEncoding()
