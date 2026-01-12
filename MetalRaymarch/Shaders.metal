@@ -1311,7 +1311,7 @@ FORCE_INLINE float3 computeNormalFromGrid(float3 worldPos,
 // When GST grid is not available, falls back to analytic SDF
 float2 SceneWithGST(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, 
                     float glowIntensity, float foldingLimit, FractalParams params, int iterations, 
-                    float time, bool useGST, constant SDFHierarchy& hierarchy,
+                    float time, RefiningParams refining, bool useGST, constant SDFHierarchy& hierarchy,
                     texture3d<float, access::sample> level0,
                     texture3d<float, access::sample> level1,
                     texture3d<float, access::sample> level2,
@@ -1326,7 +1326,7 @@ float2 SceneWithGST(float3 rO, float3 rD, float2 fragCoord, float quality, int m
     }
     
     // Fallback to standard analytic sphere tracing
-    return Scene(rO, rD, fragCoord, quality, maxStepsParam, glowIntensity, foldingLimit, params, iterations, time);
+    return Scene(rO, rD, fragCoord, quality, maxStepsParam, glowIntensity, foldingLimit, params, iterations, time, refining);
 }
 
 // =============================================================================
