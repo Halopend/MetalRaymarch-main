@@ -63,20 +63,20 @@ constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this di
 constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
 constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
-// === ENHANCED OVER-RELAXATION CONSTANTS ===
+// === ENHANCED OVER-RELAXATION DEFAULTS ===
 // Based on "Skipping Spheres" paper and relaxed sphere tracing research
+// These are fallback defaults - actual values come from uniforms for runtime tuning
 // Over-relaxation factor: 1.6-2.0 is safe for most SDFs with backtracking
-constant float RELAX_FACTOR = 1.6f;             // Over-relaxation multiplier
-constant float RELAX_BACKTRACK = 0.7f;          // Backtrack factor when overshooting
-constant float CONVERGENCE_THRESHOLD = 0.85f;   // Early termination when convergence slows
+constant float DEFAULT_RELAX_FACTOR = 1.6f;             // Over-relaxation multiplier
+constant float DEFAULT_RELAX_BACKTRACK = 0.7f;          // Backtrack factor when overshooting
 
-// === SDF SCALING & EARLY RAY TERMINATION (Polychronakis 2024) ===
+// === SDF SCALING & EARLY RAY TERMINATION DEFAULTS (Polychronakis 2024) ===
 // SDF scaling allows larger steps in coarse passes while maintaining correctness
 // Early termination detects slow convergence and terminates before wasting steps
-constant float SDF_SCALE_COARSE = 1.3f;         // Scale factor for coarse SDF (Lipschitz-safe)
-constant float SDF_SCALE_SUPER_COARSE = 1.5f;   // More aggressive for super-coarse
-constant float EARLY_TERM_RATIO = 0.3f;         // Terminate if d_n/d_{n-1} < this for N steps
-constant int EARLY_TERM_COUNT = 3;              // Number of slow convergence steps before termination
+constant float DEFAULT_SDF_SCALE_COARSE = 1.3f;         // Scale factor for coarse SDF (Lipschitz-safe)
+constant float DEFAULT_SDF_SCALE_SUPER_COARSE = 1.5f;   // More aggressive for super-coarse
+constant float DEFAULT_EARLY_TERM_RATIO = 0.3f;         // Terminate if d_n/d_{n-1} < this for N steps
+constant int DEFAULT_EARLY_TERM_COUNT = 3;              // Number of slow convergence steps before termination
 
 // === BOUNDING SPHERE EARLY EXIT ===
 // Returns -1 if ray misses sphere, otherwise returns entry distance

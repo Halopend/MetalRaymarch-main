@@ -38,6 +38,13 @@ struct MetalProjectTestApp: App {
                 .environment(appModel)
         }
         .defaultSize(width: 600, height: 250)
+        
+        // Refining window for tuning optimization thresholds
+        WindowGroup(id: "refining") {
+            RefiningView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 320, height: 500)
 
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in

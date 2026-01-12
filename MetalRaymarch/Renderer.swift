@@ -478,7 +478,13 @@ actor Renderer {
                             sceneIndex: Int32(settings.sceneIndex),
                             ifsScale: settings.ifsScale,
                             ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow)
+                            ifsGlow: settings.ifsGlow,
+                            relaxFactor: settings.relaxFactor,
+                            relaxBacktrack: settings.relaxBacktrack,
+                            sdfScaleCoarse: settings.sdfScaleCoarse,
+                            sdfScaleSuperCoarse: settings.sdfScaleSuperCoarse,
+                            earlyTermRatio: settings.earlyTermRatio,
+                            earlyTermCount: Int32(settings.earlyTermCount))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -948,7 +954,13 @@ actor Renderer {
             sceneIndex: Int32(settings.sceneIndex),
             ifsScale: settings.ifsScale,
             ifsOffset: settings.ifsOffset,
-            ifsGlow: settings.ifsGlow
+            ifsGlow: settings.ifsGlow,
+            relaxFactor: settings.relaxFactor,
+            relaxBacktrack: settings.relaxBacktrack,
+            sdfScaleCoarse: settings.sdfScaleCoarse,
+            sdfScaleSuperCoarse: settings.sdfScaleSuperCoarse,
+            earlyTermRatio: settings.earlyTermRatio,
+            earlyTermCount: Int32(settings.earlyTermCount)
         )
         
         // Copy uniforms to buffer

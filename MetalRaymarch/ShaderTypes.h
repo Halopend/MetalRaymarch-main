@@ -60,6 +60,13 @@ typedef struct
     float ifsScale;          // IFS scaling factor (default 1.74)
     float ifsOffset;         // IFS offset parameter (default 0.98)
     float ifsGlow;           // IFS glow intensity multiplier
+    // Refining parameters (Polychronakis 2024 / Keinert 2014)
+    float relaxFactor;       // Over-relaxation multiplier (default 1.6)
+    float relaxBacktrack;    // Backtrack factor when overshooting (default 0.7)
+    float sdfScaleCoarse;    // SDF scaling for coarse pass (default 1.3)
+    float sdfScaleSuperCoarse; // SDF scaling for super-coarse pass (default 1.5)
+    float earlyTermRatio;    // Early termination convergence ratio (default 0.3)
+    int earlyTermCount;      // Steps before early termination (default 3)
 } Uniforms;
 
 typedef struct
@@ -92,6 +99,13 @@ typedef struct
     float ifsScale;              // IFS scaling factor
     float ifsOffset;             // IFS offset parameter
     float ifsGlow;               // IFS glow intensity
+    // Refining parameters (Polychronakis 2024 / Keinert 2014)
+    float relaxFactor;           // Over-relaxation multiplier (default 1.6)
+    float relaxBacktrack;        // Backtrack factor when overshooting (default 0.7)
+    float sdfScaleCoarse;        // SDF scaling for coarse pass (default 1.3)
+    float sdfScaleSuperCoarse;   // SDF scaling for super-coarse pass (default 1.5)
+    float earlyTermRatio;        // Early termination convergence ratio (default 0.3)
+    int earlyTermCount;          // Steps before early termination (default 3)
 } TileUniforms;
 
 #endif /* ShaderTypes_h */
