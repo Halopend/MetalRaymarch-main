@@ -132,44 +132,69 @@ inline FractalParams makeFractalParams(float minRad2Val, float fractalScale, flo
     return params;
 }
 
-// Optimized branchless Map function
+// Pre-computed reciprocal for faster sphere fold
+inline float getInvMinRadius2(float minRadius2) {
+    return 1.0 / minRadius2;
+}
+
+// Optimized branchless Map function with early exit for distant points
 float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
 {
+    // Early exit for points clearly outside the fractal bounding sphere
+    // The Mandelbox is typically contained within radius ~4 from origin
+    float distFromOrigin = length(pos);
+    if (distFromOrigin > BOUNDING_SPHERE_RADIUS + 1.0) {
+        return distFromOrigin - BOUNDING_SPHERE_RADIUS;
+    }
+    
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
+    
+    // Pre-compute reciprocal for faster clamping
+    float invMinRadius2 = getInvMinRadius2(params.minRadius2);
 
     for (int i = 0; i < iterations; i++)
     {
         // Box fold (optimized)
         p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
 
-        // Branchless sphere fold - much faster on GPU
+        // Branchless sphere fold with pre-computed reciprocal
         float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0 / max(r2, params.minRadius2), 1.0, 1.0/params.minRadius2);
+        float t = clamp(1.0 / max(r2, params.minRadius2), 1.0, invMinRadius2);
         p *= t;
 
         p = p * params.scale + p0;
+        
+        // Early exit if point is escaping (w growing too large means ray is outside)
+        if (p.w > 1e6) {
+            return length(p.xyz) / p.w;
+        }
     }
     return (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
 }
 
-// Optimized colour function using half precision
-half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
+// Optimized colour function using half precision with distance-based LOD
+// sphereR parameter is actually the hit distance (used for LOD)
+half3 Colour(float3 pos, float hitDistance, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
     float4 scale = float4(fractalScale) / minRad2Val;
     scale.w = abs(scale.w);
     float minRadius2 = sphereRadius * sphereRadius;
+    float invMinRadius2 = 1.0 / minRadius2;
 
     float3 p = pos;
     float3 p0 = p;
     float trap = 1.0;
     
-    int steps = max(int(float(colorIters) * quality), 2);
+    // Distance-based LOD: reduce color iterations for distant surfaces
+    float distanceLOD = saturate(1.0 - hitDistance * 0.08);
+    int steps = max(int(float(colorIters) * quality * distanceLOD), 2);
+    
     for (int i = 0; i < steps; i++)
     {
         p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
         float r2 = dot(p, p);
-        p *= clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
+        p *= clamp(1.0 / max(r2, minRadius2), 1.0, invMinRadius2);
         p = p * scale.xyz + p0;
         trap = min(trap, r2);
     }
