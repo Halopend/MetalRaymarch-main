@@ -59,15 +59,41 @@ actor Renderer {
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
     
+    // Cached constant matrices (computed once, reused every frame)
+    private let cachedRotationMatrix: matrix_float4x4
+    
     // Tile-based compute pipelines (4x4, 2x2, and adaptive 8x8 variants)
     var tileRaymarchPipeline4x4: MTLComputePipelineState?
     var tileRaymarchPipeline2x2: MTLComputePipelineState?
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
     
+    // === GRID SPHERE TRACING (GST) ===
+    // Precomputed SDF grid hierarchy for efficient ray marching
+    var gstBuildLevel0Pipeline: MTLComputePipelineState?   // Build finest level from analytic SDF
+    var gstBuildCoarsePipeline: MTLComputePipelineState?   // Downsample to coarser levels
+    var gstSDFTextures: [MTLTexture] = []                  // 3D textures for each level
+    var gstHierarchy: SDFHierarchy = SDFHierarchy()        // CPU-side hierarchy metadata
+    var gstHierarchyBuffer: MTLBuffer?                     // GPU buffer for hierarchy
+    var gstBuildUniformBuffer: MTLBuffer?                  // Uniforms for grid building
+    var gstIsBuilt: Bool = false                           // Track if grid needs rebuild
+    var gstLastBuildParams: (scale: Float, minDist: Float, foldLimit: Float, sphereRad: Float, iters: Int)?
+    
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
+    
+    // Fur hand rendering
+    var furHandUniformBuffer: MTLBuffer?
+    var cachedLeftHandAnchor: HandAnchor?
+    var cachedRightHandAnchor: HandAnchor?
+    
+    // Screenshot capture
+    var screenshotTexture: MTLTexture?
+    var screenshotPipeline: MTLRenderPipelineState?
+    var screenshotDepthTexture: MTLTexture?
+    var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
+    var shouldCaptureScreenshot: Bool = false
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -121,15 +147,24 @@ actor Renderer {
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
-        self.commandQueue = self.device.makeCommandQueue()!
+        guard let queue = self.device.makeCommandQueue() else {
+            fatalError("Failed to create command queue")
+        }
+        self.commandQueue = queue
         self.appModel = appModel
+        
+        // Pre-compute constant rotation matrix (never changes)
+        self.cachedRotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
 
         let device = self.device
 
         let uniformBufferSize = alignedUniformsSize * maxBuffersInFlight
 
-        self.dynamicUniformBuffer = self.device.makeBuffer(length:uniformBufferSize,
-                                                           options:[MTLResourceOptions.storageModeShared])!
+        guard let uniformBuffer = self.device.makeBuffer(length: uniformBufferSize,
+                                                          options: [MTLResourceOptions.storageModeShared]) else {
+            fatalError("Failed to create uniform buffer")
+        }
+        self.dynamicUniformBuffer = uniformBuffer
 
         self.dynamicUniformBuffer.label = "UniformBuffer"
 
@@ -233,6 +268,11 @@ actor Renderer {
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
             
+            // Fur hand uniform buffer
+            let furHandUniformSize = MemoryLayout<FurHandUniforms>.stride
+            furHandUniformBuffer = device.makeBuffer(length: furHandUniformSize, options: .storageModeShared)
+            furHandUniformBuffer?.label = "FurHandUniforms"
+            
             print("✓ Tile-based compute pipelines ready (4x4, 2x2, and adaptive 8x8)")
         } catch {
             print("⚠️ Failed to create tile compute pipelines: \(error)")
@@ -240,10 +280,122 @@ actor Renderer {
             tileRaymarchPipeline2x2 = nil
             adaptiveHierarchicalPipeline8x8 = nil
         }
+        
+        // === GRID SPHERE TRACING INITIALIZATION ===
+        do {
+            let library = device.makeDefaultLibrary()!
+            
+            // Build level 0 kernel (finest, from analytic SDF)
+            if let buildLevel0 = library.makeFunction(name: "buildSDFGridLevel0") {
+                gstBuildLevel0Pipeline = try device.makeComputePipelineState(function: buildLevel0)
+            }
+            
+            // Build coarse level kernel (downsample)
+            if let buildCoarse = library.makeFunction(name: "buildSDFGridCoarseLevel") {
+                gstBuildCoarsePipeline = try device.makeComputePipelineState(function: buildCoarse)
+            }
+            
+            // Allocate hierarchy buffer
+            gstHierarchyBuffer = device.makeBuffer(length: MemoryLayout<SDFHierarchy>.stride, options: .storageModeShared)
+            gstHierarchyBuffer?.label = "GST Hierarchy"
+            
+            // Initialize hierarchy with isBuilt = 0
+            if let buffer = gstHierarchyBuffer {
+                var emptyHierarchy = SDFHierarchy()
+                emptyHierarchy.isBuilt = 0
+                memcpy(buffer.contents(), &emptyHierarchy, MemoryLayout<SDFHierarchy>.size)
+            }
+            
+            // Create placeholder 3D textures (1x1x1) for shader binding
+            // These will be replaced with real textures when GST is first built
+            for level in 0..<4 {
+                let descriptor = MTLTextureDescriptor()
+                descriptor.textureType = .type3D
+                descriptor.pixelFormat = .r8Snorm
+                descriptor.width = 1
+                descriptor.height = 1
+                descriptor.depth = 1
+                descriptor.storageMode = .private
+                descriptor.usage = [.shaderRead, .shaderWrite]
+                
+                if let texture = device.makeTexture(descriptor: descriptor) {
+                    texture.label = "GST Placeholder Level \(level)"
+                    gstSDFTextures.append(texture)
+                }
+            }
+            
+            // Allocate build uniforms buffer
+            gstBuildUniformBuffer = device.makeBuffer(length: MemoryLayout<SDFGridBuildUniforms>.stride, options: .storageModeShared)
+            gstBuildUniformBuffer?.label = "GST Build Uniforms"
+            
+            print("✓ Grid Sphere Tracing pipelines ready")
+        } catch {
+            print("⚠️ Failed to create GST pipelines: \(error)")
+            gstBuildLevel0Pipeline = nil
+            gstBuildCoarsePipeline = nil
+        }
 
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
+        
+        // Setup screenshot capture pipeline (called on MainActor)
+        Task { @MainActor in
+            self.setupScreenshotCapture()
+        }
+    }
+    
+    /// Setup screenshot capture resources
+    private func setupScreenshotCapture() {
+        // Create a standard render pipeline for screenshot capture (no vertex amplification)
+        // We'll render a single view at 512x512 for preset thumbnails
+        let screenshotSize = 512
+        
+        // Create screenshot color texture
+        let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: screenshotSize,
+            height: screenshotSize,
+            mipmapped: false
+        )
+        colorDescriptor.usage = [.renderTarget, .shaderRead]
+        colorDescriptor.storageMode = .shared  // Allows CPU read
+        screenshotTexture = device.makeTexture(descriptor: colorDescriptor)
+        screenshotTexture?.label = "Screenshot Color"
+        
+        // Create screenshot depth texture
+        let depthDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .depth32Float,
+            width: screenshotSize,
+            height: screenshotSize,
+            mipmapped: false
+        )
+        depthDescriptor.usage = [.renderTarget]
+        depthDescriptor.storageMode = .private
+        screenshotDepthTexture = device.makeTexture(descriptor: depthDescriptor)
+        screenshotDepthTexture?.label = "Screenshot Depth"
+        
+        // Create render pipeline for screenshot (single view, no amplification)
+        do {
+            let library = device.makeDefaultLibrary()!
+            let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
+            let fragmentFunction = library.makeFunction(name: "fragmentShader")
+            
+            let pipelineDescriptor = MTLRenderPipelineDescriptor()
+            pipelineDescriptor.label = "Screenshot Pipeline"
+            pipelineDescriptor.vertexFunction = vertexFunction
+            pipelineDescriptor.fragmentFunction = fragmentFunction
+            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float
+            
+            let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
+            pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
+            
+            screenshotPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            print("✓ Screenshot capture pipeline ready")
+        } catch {
+            print("⚠️ Failed to create screenshot pipeline: \(error)")
+        }
     }
 
     private func startARSession() async {
@@ -266,9 +418,163 @@ actor Renderer {
     static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         Task(executorPreference: RendererTaskExecutor.shared) {
             let renderer = Renderer(layerRenderer, appModel: appModel)
+            
+            // Setup screenshot capture handler
+            await MainActor.run {
+                appModel.captureScreenshotHandler = {
+                    await renderer.captureScreenshot()
+                }
+            }
+            
             await renderer.startARSession()
             await renderer.renderLoop()
         }
+    }
+    
+    /// Request a screenshot capture (async)
+    func captureScreenshot() async -> Data? {
+        return await withCheckedContinuation { continuation in
+            self.pendingScreenshotContinuation = continuation
+            self.shouldCaptureScreenshot = true
+        }
+    }
+    
+    /// Render and capture a screenshot to PNG data
+    private func renderScreenshot() -> Data? {
+        guard let screenshotTexture = screenshotTexture,
+              let screenshotPipeline = screenshotPipeline,
+              let screenshotDepthTexture = screenshotDepthTexture,
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+        
+        // Setup render pass for screenshot
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+        renderPassDescriptor.colorAttachments[0].texture = screenshotTexture
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].storeAction = .store
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
+        
+        renderPassDescriptor.depthAttachment.texture = screenshotDepthTexture
+        renderPassDescriptor.depthAttachment.loadAction = .clear
+        renderPassDescriptor.depthAttachment.storeAction = .dontCare
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
+        
+        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            return nil
+        }
+        
+        renderEncoder.label = "Screenshot Render Encoder"
+        renderEncoder.setCullMode(.front)
+        renderEncoder.setFrontFacing(.counterClockwise)
+        renderEncoder.setRenderPipelineState(screenshotPipeline)
+        renderEncoder.setDepthStencilState(depthState)
+        
+        // Use current uniforms (view 0)
+        renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        
+        // Bind fur hand uniforms if available
+        if let furBuffer = furHandUniformBuffer {
+            renderEncoder.setFragmentBuffer(furBuffer, offset: 0, index: BufferIndex.furHands.rawValue)
+        }
+        
+        // Set viewport for screenshot size
+        let viewport = MTLViewport(originX: 0, originY: 0, 
+                                   width: Double(screenshotTexture.width), 
+                                   height: Double(screenshotTexture.height),
+                                   znear: 0, zfar: 1)
+        renderEncoder.setViewport(viewport)
+        
+        // Bind mesh vertices
+        for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
+            guard let layout = element as? MDLVertexBufferLayout, layout.stride != 0 else { continue }
+            let buffer = mesh.vertexBuffers[index]
+            renderEncoder.setVertexBuffer(buffer.buffer, offset: buffer.offset, index: index)
+        }
+        
+        // Bind textures
+        renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
+        
+        // Bind GST resources
+        if let hierarchyBuffer = gstHierarchyBuffer {
+            renderEncoder.setFragmentBuffer(hierarchyBuffer, offset: 0, index: BufferIndex.gstHierarchy.rawValue)
+        }
+        if gstSDFTextures.count >= 4 {
+            renderEncoder.setFragmentTexture(gstSDFTextures[0], index: TextureIndex.gstLevel0.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[1], index: TextureIndex.gstLevel1.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[2], index: TextureIndex.gstLevel2.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[3], index: TextureIndex.gstLevel3.rawValue)
+        }
+        
+        // Draw
+        for submesh in mesh.submeshes {
+            renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
+                                                indexCount: submesh.indexCount,
+                                                indexType: submesh.indexType,
+                                                indexBuffer: submesh.indexBuffer.buffer,
+                                                indexBufferOffset: submesh.indexBuffer.offset)
+        }
+        
+        renderEncoder.endEncoding()
+        
+        // Synchronize for CPU read (needed on macOS only, not available on visionOS)
+        #if os(macOS)
+        if let blitEncoder = commandBuffer.makeBlitCommandEncoder() {
+            blitEncoder.synchronize(resource: screenshotTexture)
+            blitEncoder.endEncoding()
+        }
+        #endif
+        
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        
+        // Read texture data and convert to PNG
+        return textureToImageData(screenshotTexture)
+    }
+    
+    /// Convert a Metal texture to PNG image data
+    private func textureToImageData(_ texture: MTLTexture) -> Data? {
+        let width = texture.width
+        let height = texture.height
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        let totalBytes = bytesPerRow * height
+        
+        var pixelData = [UInt8](repeating: 0, count: totalBytes)
+        
+        texture.getBytes(&pixelData,
+                        bytesPerRow: bytesPerRow,
+                        from: MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0),
+                                       size: MTLSize(width: width, height: height, depth: 1)),
+                        mipmapLevel: 0)
+        
+        // Create CGImage from pixel data
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        
+        guard let context = CGContext(data: &pixelData,
+                                      width: width,
+                                      height: height,
+                                      bitsPerComponent: 8,
+                                      bytesPerRow: bytesPerRow,
+                                      space: colorSpace,
+                                      bitmapInfo: bitmapInfo.rawValue),
+              let cgImage = context.makeImage() else {
+            return nil
+        }
+        
+        #if os(visionOS) || os(iOS)
+        let image = UIImage(cgImage: cgImage)
+        return image.pngData()
+        #elseif os(macOS)
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData) else {
+            return nil
+        }
+        return bitmapRep.representation(using: .png, properties: [:])
+        #endif
     }
 
     static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {
@@ -409,6 +715,10 @@ actor Renderer {
         // Get hand anchors at the current time
         let anchors = ht.handAnchors(at: time)
         
+        // Cache anchors for fur hand rendering
+        cachedLeftHandAnchor = anchors.leftHand
+        cachedRightHandAnchor = anchors.rightHand
+        
         // Update gesture controller on main actor
         Task { @MainActor in
             // Update tracking state for UI
@@ -421,6 +731,112 @@ actor Renderer {
                     leftAnchor: anchors.leftHand,
                     rightAnchor: anchors.rightHand
                 )
+            }
+        }
+    }
+    
+    /// Update fur hand uniforms from cached hand anchors
+    private func updateFurHandUniforms(time: Float) {
+        guard let buffer = furHandUniformBuffer else { return }
+        
+        let furUniforms = buffer.contents().bindMemory(to: FurHandUniforms.self, capacity: 1)
+        
+        // Configure fur parameters
+        furUniforms.pointee.time = time
+        furUniforms.pointee.showFurHands = appModel.renderSettings.showFurHands ? 1 : 0
+        
+        // Default fur properties
+        let defaultFurDensity: Float = 1.0
+        let defaultFurLength: Float = 0.012  // 12mm fur
+        let defaultFurNoiseScale: Float = 80.0
+        
+        // Update left hand
+        if let leftAnchor = cachedLeftHandAnchor, leftAnchor.isTracked {
+            furUniforms.pointee.leftHand.isTracked = 1
+            furUniforms.pointee.leftHand.furDensity = defaultFurDensity
+            furUniforms.pointee.leftHand.furLength = defaultFurLength
+            furUniforms.pointee.leftHand.furNoiseScale = defaultFurNoiseScale
+            populateHandJoints(from: leftAnchor, into: &furUniforms.pointee.leftHand)
+        } else {
+            furUniforms.pointee.leftHand.isTracked = 0
+        }
+        
+        // Update right hand
+        if let rightAnchor = cachedRightHandAnchor, rightAnchor.isTracked {
+            furUniforms.pointee.rightHand.isTracked = 1
+            furUniforms.pointee.rightHand.furDensity = defaultFurDensity
+            furUniforms.pointee.rightHand.furLength = defaultFurLength
+            furUniforms.pointee.rightHand.furNoiseScale = defaultFurNoiseScale
+            populateHandJoints(from: rightAnchor, into: &furUniforms.pointee.rightHand)
+        } else {
+            furUniforms.pointee.rightHand.isTracked = 0
+        }
+    }
+    
+    /// Populate joint positions from an ARKit hand anchor
+    private func populateHandJoints(from anchor: HandAnchor, into handData: inout FurHandData) {
+        guard let skeleton = anchor.handSkeleton else { return }
+        
+        let transform = anchor.originFromAnchorTransform
+        
+        // Joint name to index mapping (ARKit HandSkeleton order)
+        // We'll map the 26 ARKit joints to our FurHandData.joints array
+        let jointMappings: [(index: Int, name: HandSkeleton.JointName, radiusScale: Float)] = [
+            (0, .wrist, 2.5),
+            (1, .thumbKnuckle, 1.8),
+            (2, .thumbIntermediateBase, 1.4),
+            (3, .thumbIntermediateTip, 1.0),
+            (4, .thumbTip, 0.8),
+            (5, .indexFingerKnuckle, 1.4),
+            (6, .indexFingerIntermediateBase, 1.0),
+            (7, .indexFingerIntermediateTip, 1.0),
+            (8, .indexFingerTip, 0.8),
+            (9, .middleFingerKnuckle, 1.4),
+            (10, .middleFingerIntermediateBase, 1.0),
+            (11, .middleFingerIntermediateTip, 1.0),
+            (12, .middleFingerTip, 0.8),
+            (13, .ringFingerKnuckle, 1.4),
+            (14, .ringFingerIntermediateBase, 1.0),
+            (15, .ringFingerIntermediateTip, 1.0),
+            (16, .ringFingerTip, 0.8),
+            (17, .littleFingerKnuckle, 1.2),
+            (18, .littleFingerIntermediateBase, 0.9),
+            (19, .littleFingerIntermediateTip, 0.9),
+            (20, .littleFingerTip, 0.7),
+            (21, .forearmWrist, 3.0),
+            (22, .indexFingerMetacarpal, 1.6),
+            (23, .middleFingerMetacarpal, 1.6),
+            (24, .ringFingerMetacarpal, 1.5),
+            (25, .littleFingerMetacarpal, 1.4)
+        ]
+        
+        let baseRadius: Float = 0.008  // 8mm base radius
+        
+        // Access the fixed-size joints array through pointer
+        withUnsafeMutablePointer(to: &handData.joints) { jointsPtr in
+            let joints = UnsafeMutableRawPointer(jointsPtr).bindMemory(to: FurHandJoint.self, capacity: 26)
+            
+            for mapping in jointMappings {
+                let index = mapping.index
+                guard index < 26 else { continue }
+                
+                let joint = skeleton.joint(mapping.name)
+                if joint.isTracked {
+                    let localTransform = joint.anchorFromJointTransform
+                    let worldTransform = transform * localTransform
+                    
+                    let position = SIMD3<Float>(
+                        worldTransform.columns.3.x,
+                        worldTransform.columns.3.y,
+                        worldTransform.columns.3.z
+                    )
+                    
+                    joints[index].position = position
+                    joints[index].radius = baseRadius * mapping.radiusScale
+                } else {
+                    joints[index].position = .zero
+                    joints[index].radius = 0
+                }
             }
         }
     }
@@ -438,11 +854,11 @@ actor Renderer {
         smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
         smoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
         
-        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
+        // Use cached rotation matrix (constant, computed once in init)
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
         let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
         
-        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
         
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
@@ -455,12 +871,15 @@ actor Renderer {
             
             let modelView = viewMatrix * modelMatrix
             let inverseModelView = modelView.inverse
+            let inverseView = viewMatrix.inverse
             
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
                             inverseProjectionMatrix: inverseProjection,
+                            viewMatrix: viewMatrix,
+                            inverseViewMatrix: inverseView,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
@@ -472,9 +891,18 @@ actor Renderer {
                             glowIntensity: settings.glowIntensity,
                             foldingLimit: settings.foldingLimit,
                             sphereRadius: settings.sphereRadius,
+                            safetyBubbleRadius: settings.safetyBubbleRadius,
+                            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
                             colorIterations: settings.colorIterations,
                             useHierarchical: settings.useHierarchical ? 1 : 0,
-                            limitFlash: settings.limitFlash)
+                            limitFlash: settings.limitFlash,
+                            sceneIndex: Int32(settings.sceneIndex),
+                            ifsScale: settings.ifsScale,
+                            ifsOffset: settings.ifsOffset,
+                            ifsGlow: settings.ifsGlow,
+                            showHUD: settings.showHUD ? 1 : 0,
+                            activeGesture: Int32(settings.activeGestureIndex),
+                            useGST: settings.useGST ? 1 : 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -515,9 +943,9 @@ actor Renderer {
 
         drawable.deviceAnchor = deviceAnchor
 
-        // Calculate deltaTime (clamped) for FPS tracking; pose smoothing removed
+        // Calculate deltaTime (clamped only on the fast side for FPS tracking; pose smoothing removed)
         let rawDelta = lastPresentationTime.map { $0.duration(to: presentationTime).timeInterval } ?? (1.0 / 90.0)
-        let deltaTime = max(1.0 / 240.0, min(1.0 / 30.0, rawDelta))
+        let deltaTime = max(1.0 / 240.0, rawDelta)  // Allow slow frames to surface instead of capping at 30 FPS
 
         // FPS tracking using clamped interval (stable with triple buffering)
         if deltaTime > 0 {
@@ -545,8 +973,17 @@ actor Renderer {
 
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
+        
+        // Update fur hand uniforms
+        self.updateFurHandUniforms(time: Float(time))
 
         self.updateGameState(drawable: drawable)
+        
+        // Build GST grid if enabled (rebuilds only when parameters change).
+        // Only relevant for the SDF-based Mandelbox scene.
+        if appModel.renderSettings.useGST && appModel.renderSettings.sceneIndex == 0 {
+            buildGSTGrid(commandBuffer: commandBuffer, settings: appModel.renderSettings)
+        }
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = appModel.renderSettings.tileSize
@@ -648,6 +1085,11 @@ actor Renderer {
         
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        
+        // Bind fur hand uniforms for fur hand rendering
+        if let furBuffer = furHandUniformBuffer {
+            renderEncoder.setFragmentBuffer(furBuffer, offset: 0, index: BufferIndex.furHands.rawValue)
+        }
 
         // When rendering to MetalFX input, use FULL input texture as viewport.
         // MetalFX input is now physical-sized for performance.
@@ -699,6 +1141,20 @@ actor Renderer {
         }
 
         renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
+        
+        // Always bind GST hierarchy buffer (shader expects it)
+        // If GST not built, hierarchy.isBuilt will be 0 and shader will use fallback
+        if let hierarchyBuffer = gstHierarchyBuffer {
+            renderEncoder.setFragmentBuffer(hierarchyBuffer, offset: 0, index: BufferIndex.gstHierarchy.rawValue)
+        }
+        
+        // Bind GST textures if available
+        if gstSDFTextures.count >= 4 {
+            renderEncoder.setFragmentTexture(gstSDFTextures[0], index: TextureIndex.gstLevel0.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[1], index: TextureIndex.gstLevel1.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[2], index: TextureIndex.gstLevel2.rawValue)
+            renderEncoder.setFragmentTexture(gstSDFTextures[3], index: TextureIndex.gstLevel3.rawValue)
+        }
 
         for submesh in mesh.submeshes {
             renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
@@ -883,6 +1339,208 @@ actor Renderer {
     
     // MARK: - Adaptive 8x8 Hierarchical Compute Rendering
     
+    // MARK: - Grid Sphere Tracing (GST) Grid Building
+    
+    /// Check if GST grid needs to be rebuilt due to parameter changes
+    private func gstNeedsRebuild(settings: RenderSettings) -> Bool {
+        guard let last = gstLastBuildParams else { return true }
+        return last.scale != settings.fractalScale ||
+               last.minDist != settings.minDistance ||
+               last.foldLimit != settings.foldingLimit ||
+               last.sphereRad != settings.sphereRadius ||
+               last.iters != settings.fractalIterations
+    }
+    
+    /// Build the SDF grid hierarchy for Grid Sphere Tracing
+    private func buildGSTGrid(commandBuffer: MTLCommandBuffer, settings: RenderSettings) {
+        guard gstBuildLevel0Pipeline != nil,
+              gstBuildCoarsePipeline != nil,
+              let hierarchyBuffer = gstHierarchyBuffer,
+              let _ = gstBuildUniformBuffer else {
+            return
+        }
+        
+        // Skip if already built with same parameters
+        if gstIsBuilt && !gstNeedsRebuild(settings: settings) {
+            return
+        }
+        
+        let numLevels = 4  // 128^3, 64^3, 32^3, 16^3
+        let baseResolution: Int32 = 128
+        let gridExtent: Float = 4.0  // World-space extent of the grid
+        let gridOrigin = SIMD3<Float>(-gridExtent / 2, -gridExtent / 2, -gridExtent / 2)
+        
+        // Create properly sized 3D textures if needed (check if first texture is placeholder size or resolution changed)
+        let needsTextureRebuild = gstSDFTextures.isEmpty || gstSDFTextures[0].width != Int(baseResolution)
+        if needsTextureRebuild {
+            gstSDFTextures.removeAll()
+            
+            for level in 0..<numLevels {
+                let res = baseResolution >> level  // 128, 64, 32, 16
+                
+                let descriptor = MTLTextureDescriptor()
+                descriptor.textureType = .type3D
+                descriptor.pixelFormat = .r8Snorm  // 8-bit signed normalized [-1, 1]
+                descriptor.width = Int(res)
+                descriptor.height = Int(res)
+                descriptor.depth = Int(res)
+                descriptor.storageMode = .private
+                descriptor.usage = [.shaderRead, .shaderWrite]
+                
+                guard let texture = device.makeTexture(descriptor: descriptor) else {
+                    print("⚠️ Failed to create GST texture for level \(level)")
+                    return
+                }
+                texture.label = "GST SDF Level \(level) (\(res)³)"
+                gstSDFTextures.append(texture)
+            }
+            print("✓ Created \(numLevels) GST 3D textures")
+        }
+        
+        // Initialize hierarchy metadata
+        var hierarchy = SDFHierarchy()
+        hierarchy.numLevels = Int32(numLevels)
+        hierarchy.gridOrigin = gridOrigin
+        hierarchy.gridExtent = gridExtent
+        hierarchy.isBuilt = 0  // Will set to 1 after build completes
+        
+        for level in 0..<numLevels {
+            let res = baseResolution >> level
+            let voxelSize = gridExtent / Float(res)
+            let voxelDiagonal = sqrt(3.0) * voxelSize
+            
+            // Set the appropriate level (Swift tuples need manual access)
+            switch level {
+            case 0:
+                hierarchy.levels.0 = SDFGridLevel(
+                    resolution: SIMD3<Int32>(res, res, res),
+                    voxelSize: voxelSize,
+                    voxelDiagonal: voxelDiagonal,
+                    scale: 4.0 * voxelDiagonal
+                )
+            case 1:
+                hierarchy.levels.1 = SDFGridLevel(
+                    resolution: SIMD3<Int32>(res, res, res),
+                    voxelSize: voxelSize,
+                    voxelDiagonal: voxelDiagonal,
+                    scale: 4.0 * voxelDiagonal
+                )
+            case 2:
+                hierarchy.levels.2 = SDFGridLevel(
+                    resolution: SIMD3<Int32>(res, res, res),
+                    voxelSize: voxelSize,
+                    voxelDiagonal: voxelDiagonal,
+                    scale: 4.0 * voxelDiagonal
+                )
+            case 3:
+                hierarchy.levels.3 = SDFGridLevel(
+                    resolution: SIMD3<Int32>(res, res, res),
+                    voxelSize: voxelSize,
+                    voxelDiagonal: voxelDiagonal,
+                    scale: 4.0 * voxelDiagonal
+                )
+            default:
+                break
+            }
+        }
+        
+        // Build level 0 from analytic SDF
+        guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        computeEncoder.label = "GST Grid Build"
+        
+        // Level 0: Build from analytic SDF
+        if let pipeline = gstBuildLevel0Pipeline {
+            computeEncoder.setComputePipelineState(pipeline)
+            
+            var buildUniforms = SDFGridBuildUniforms(
+                levelIndex: 0,
+                pad1: 0, pad2: 0, pad3: 0, // Manual padding
+                resolution: SIMD3<Int32>(baseResolution, baseResolution, baseResolution),
+                voxelSize: gridExtent / Float(baseResolution),
+                pad4: 0, pad5: 0, pad6: 0, // Manual padding
+                gridOrigin: gridOrigin,
+                minDistance: settings.minDistance,
+                fractalScale: settings.fractalScale,
+                sphereRadius: settings.sphereRadius,
+                foldingLimit: settings.foldingLimit,
+                fractalIterations: Int32(settings.fractalIterations),
+                pad7: 0, pad8: 0, pad9: 0  // Manual padding
+            )
+            
+            // USE setBytes INSTEAD OF setBuffer TO AVOID HAZARDS
+            // because we reuse this struct multiple times in the same command buffer
+            computeEncoder.setBytes(&buildUniforms, length: MemoryLayout<SDFGridBuildUniforms>.size, index: 0)
+            computeEncoder.setTexture(gstSDFTextures[0], index: 0)
+            
+            let threadgroupSize = MTLSize(width: 4, height: 4, depth: 4)
+            let gridSize = MTLSize(
+                width: (Int(baseResolution) + 3) / 4,
+                height: (Int(baseResolution) + 3) / 4,
+                depth: (Int(baseResolution) + 3) / 4
+            )
+            computeEncoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
+        }
+        
+        // Build coarser levels via MAX downsampling
+        if let coarsePipeline = gstBuildCoarsePipeline {
+            for level in 1..<numLevels {
+                let res = baseResolution >> level
+                
+                var buildUniforms = SDFGridBuildUniforms(
+                    levelIndex: Int32(level),
+                    pad1: 0, pad2: 0, pad3: 0,
+                    resolution: SIMD3<Int32>(res, res, res),
+                    voxelSize: gridExtent / Float(res),
+                    pad4: 0, pad5: 0, pad6: 0,
+                    gridOrigin: gridOrigin,
+                    minDistance: settings.minDistance,
+                    fractalScale: settings.fractalScale,
+                    sphereRadius: settings.sphereRadius,
+                    foldingLimit: settings.foldingLimit,
+                    fractalIterations: Int32(settings.fractalIterations),
+                    pad7: 0, pad8: 0, pad9: 0
+                )
+                
+                // USE setBytes INSTEAD OF setBuffer
+                computeEncoder.setBytes(&buildUniforms, length: MemoryLayout<SDFGridBuildUniforms>.size, index: 0)
+                computeEncoder.setComputePipelineState(coarsePipeline)
+                computeEncoder.setTexture(gstSDFTextures[level - 1], index: 0)  // Input: finer level
+                computeEncoder.setTexture(gstSDFTextures[level], index: 1)      // Output: this level
+                
+                let threadgroupSize = MTLSize(width: 4, height: 4, depth: 4)
+                let gridSize = MTLSize(
+                    width: (Int(res) + 3) / 4,
+                    height: (Int(res) + 3) / 4,
+                    depth: (Int(res) + 3) / 4
+                )
+                computeEncoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
+            }
+        }
+        
+        computeEncoder.endEncoding()
+        
+        // Mark as built
+        hierarchy.isBuilt = 1
+        gstHierarchy = hierarchy
+        memcpy(hierarchyBuffer.contents(), &hierarchy, MemoryLayout<SDFHierarchy>.size)
+        
+        gstIsBuilt = true
+        gstLastBuildParams = (
+            scale: settings.fractalScale,
+            minDist: settings.minDistance,
+            foldLimit: settings.foldingLimit,
+            sphereRad: settings.sphereRadius,
+            iters: settings.fractalIterations
+        )
+        
+        // Debug output
+        print("✓ GST grid built: \(numLevels) levels, \(baseResolution)³ base resolution")
+        print("  Grid origin: (\(gridOrigin.x), \(gridOrigin.y), \(gridOrigin.z))")
+        print("  Grid extent: \(gridExtent)")
+        print("  Level 0 voxelSize: \(gridExtent / Float(baseResolution))")
+        print("  Fractal params: scale=\(settings.fractalScale), minDist=\(settings.minDistance), fold=\(settings.foldingLimit), sphere=\(settings.sphereRadius), iters=\(settings.fractalIterations)")
+    }
+    
     /// Dispatches the adaptive 8x8 hierarchical compute kernel for high-performance raymarching
     /// This uses a 3-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
     /// Expected speedup: 3-8x compared to per-pixel raymarching
@@ -932,6 +1590,8 @@ actor Renderer {
             minDistance: settings.minDistance,
             fractalScale: settings.fractalScale,
             sphereRadius: settings.sphereRadius,
+            safetyBubbleRadius: settings.safetyBubbleRadius,
+            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
             foldingLimit: settings.foldingLimit,
             glowIntensity: settings.glowIntensity,
             colorMix: settings.colorMix,
@@ -940,9 +1600,13 @@ actor Renderer {
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
-            limitFlash: settings.limitFlash
+            limitFlash: settings.limitFlash,
+            sceneIndex: Int32(settings.sceneIndex),
+            ifsScale: settings.ifsScale,
+            ifsOffset: settings.ifsOffset,
+            ifsGlow: settings.ifsGlow
         )
-
+        
         // Copy uniforms to buffer
         let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex
         memcpy(uniformBuffer.contents().advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
@@ -1318,6 +1982,15 @@ actor Renderer {
                         appModel.immersiveSpaceState = .open
                     }
                 }
+                
+                // Check for pending screenshot request
+                if shouldCaptureScreenshot {
+                    shouldCaptureScreenshot = false
+                    let screenshotData = renderScreenshot()
+                    pendingScreenshotContinuation?.resume(returning: screenshotData)
+                    pendingScreenshotContinuation = nil
+                }
+                
                 autoreleasepool {
                     self.renderFrame()
                 }
@@ -1367,4 +2040,5 @@ func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_floa
     mat.columns.3 = SIMD4<Float>(translation, 1)
     return mat
 }
+
 

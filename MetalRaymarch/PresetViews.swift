@@ -48,11 +48,11 @@ struct PresetRowView: View {
                     .font(.headline)
                 
                 HStack(spacing: 8) {
-                    Text("Mandelbox")
+                    Text(preset.sceneIndex == 0 ? "Mandelbox" : "IFS")
                         .font(.caption)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.2))
+                        .background(preset.sceneIndex == 0 ? Color.blue.opacity(0.2) : Color.purple.opacity(0.2))
                         .clipShape(Capsule())
                     
                     Text(preset.createdAt, style: .date)
@@ -96,7 +96,7 @@ struct PresetRowView: View {
                 .fill(Color.gray.opacity(0.2))
                 .frame(width: 60, height: 60)
             
-            Image(systemName: "cube.fill")
+            Image(systemName: preset.sceneIndex == 0 ? "cube.fill" : "sparkles")
                 .font(.title2)
                 .foregroundStyle(.secondary)
         }
@@ -147,6 +147,15 @@ struct SavePresetSheet: View {
                 TextField("Preset Name", text: $presetName)
                     .textFieldStyle(.roundedBorder)
                     .padding(.horizontal)
+                
+                // Scene info
+                HStack {
+                    Text("Scene:")
+                        .foregroundStyle(.secondary)
+                    Text(settings.sceneIndex == 0 ? "Mandelbox" : "Glowy IFS")
+                        .fontWeight(.medium)
+                }
+                .font(.subheadline)
                 
                 Spacer()
             }

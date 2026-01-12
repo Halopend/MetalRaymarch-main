@@ -15,6 +15,9 @@ struct FractalPreset: Codable, Identifiable {
     var createdAt: Date
     var thumbnailData: Data?  // PNG image data
     
+    // Scene selection
+    var sceneIndex: Int
+    
     // Common settings
     var fractalIterations: Int
     var maxRaySteps: Int
@@ -24,11 +27,16 @@ struct FractalPreset: Codable, Identifiable {
     var position: SIMD3<Float>
     var scale: Float
     
-    // Mandelbox parameters
+    // Mandelbox-specific (scene 0)
     var minDistance: Float
     var fractalScale: Float
     var foldingLimit: Float
     var sphereRadius: Float
+    
+    // IFS-specific (scene 1)
+    var ifsScale: Float
+    var ifsOffset: Float
+    var ifsGlow: Float
     
     // Performance settings (optional to save)
     var resolutionScale: Float?
@@ -46,6 +54,7 @@ struct FractalPreset: Codable, Identifiable {
         self.thumbnailData = thumbnailData
         
         // Initialize with defaults
+        self.sceneIndex = 0
         self.fractalIterations = 6
         self.maxRaySteps = 32
         self.colorMix = 0.5
@@ -58,12 +67,17 @@ struct FractalPreset: Codable, Identifiable {
         self.fractalScale = 2.8
         self.foldingLimit = 1.0
         self.sphereRadius = 0.5
+        
+        self.ifsScale = 1.74
+        self.ifsOffset = 0.98
+        self.ifsGlow = 1.0
     }
     
     /// Create a preset from current render settings
     static func fromSettings(_ settings: RenderSettings, name: String, thumbnailData: Data? = nil) -> FractalPreset {
         var preset = FractalPreset(name: name, thumbnailData: thumbnailData)
         
+        preset.sceneIndex = settings.sceneIndex
         preset.fractalIterations = settings.fractalIterations
         preset.maxRaySteps = settings.maxRaySteps
         preset.colorMix = settings.colorMix
@@ -77,6 +91,10 @@ struct FractalPreset: Codable, Identifiable {
         preset.foldingLimit = settings.foldingLimit
         preset.sphereRadius = settings.sphereRadius
         
+        preset.ifsScale = settings.ifsScale
+        preset.ifsOffset = settings.ifsOffset
+        preset.ifsGlow = settings.ifsGlow
+        
         preset.resolutionScale = settings.resolutionScale
         preset.tileSize = settings.tileSize
         preset.useGST = settings.useGST
@@ -89,6 +107,7 @@ struct FractalPreset: Codable, Identifiable {
     
     /// Apply this preset to render settings
     func apply(to settings: RenderSettings, includePerformance: Bool = false) {
+        settings.sceneIndex = sceneIndex
         settings.fractalIterations = fractalIterations
         settings.maxRaySteps = maxRaySteps
         settings.colorMix = colorMix
@@ -101,6 +120,10 @@ struct FractalPreset: Codable, Identifiable {
         settings.fractalScale = fractalScale
         settings.foldingLimit = foldingLimit
         settings.sphereRadius = sphereRadius
+        
+        settings.ifsScale = ifsScale
+        settings.ifsOffset = ifsOffset
+        settings.ifsGlow = ifsGlow
         
         if includePerformance {
             if let resolutionScale = resolutionScale {
@@ -134,28 +157,6 @@ struct FractalPreset: Codable, Identifiable {
         return NSImage(data: data)
     }
     #endif
-}
-
-// MARK: - Codable support for SIMD3<Float>
-extension SIMD3: Codable where Scalar == Float {
-    enum CodingKeys: String, CodingKey {
-        case x, y, z
-    }
-    
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let x = try container.decode(Float.self, forKey: .x)
-        let y = try container.decode(Float.self, forKey: .y)
-        let z = try container.decode(Float.self, forKey: .z)
-        self.init(x, y, z)
-    }
-    
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(x, forKey: .x)
-        try container.encode(y, forKey: .y)
-        try container.encode(z, forKey: .z)
-    }
 }
 
 /// Manages saving and loading of presets
@@ -234,27 +235,7 @@ class PresetManager {
     func updatePreset(_ preset: FractalPreset, settings: RenderSettings, thumbnailData: Data? = nil) {
         guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
         
-        var updatedPreset = FractalPreset.fromSettings(settings, name: preset.name, thumbnailData: thumbnailData ?? preset.thumbnailData)
-        updatedPreset = FractalPreset(
-            id: preset.id,  // Keep original ID
-            name: preset.name,
-            createdAt: preset.createdAt,
-            thumbnailData: thumbnailData ?? preset.thumbnailData
-        )
-        
-        // Copy settings from the new preset
-        let newPreset = FractalPreset.fromSettings(settings, name: preset.name, thumbnailData: thumbnailData ?? preset.thumbnailData)
-        presets[index] = FractalPreset(
-            id: preset.id,
-            name: preset.name,
-            createdAt: preset.createdAt,
-            thumbnailData: thumbnailData ?? preset.thumbnailData
-        )
-        
-        // We need to manually copy all fields since we're preserving id/name/date
-        var finalPreset = newPreset
-        finalPreset = FractalPreset.fromSettings(settings, name: preset.name, thumbnailData: thumbnailData ?? preset.thumbnailData)
-        // Recreate with proper ID preservation
+        // Recreate preset with proper ID preservation
         presets[index] = createPresetWithID(preset.id, name: preset.name, createdAt: preset.createdAt, settings: settings, thumbnailData: thumbnailData ?? preset.thumbnailData)
         
         savePresets()
@@ -264,6 +245,7 @@ class PresetManager {
     private func createPresetWithID(_ id: UUID, name: String, createdAt: Date, settings: RenderSettings, thumbnailData: Data?) -> FractalPreset {
         var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
         
+        preset.sceneIndex = settings.sceneIndex
         preset.fractalIterations = settings.fractalIterations
         preset.maxRaySteps = settings.maxRaySteps
         preset.colorMix = settings.colorMix
@@ -276,6 +258,10 @@ class PresetManager {
         preset.fractalScale = settings.fractalScale
         preset.foldingLimit = settings.foldingLimit
         preset.sphereRadius = settings.sphereRadius
+        
+        preset.ifsScale = settings.ifsScale
+        preset.ifsOffset = settings.ifsOffset
+        preset.ifsGlow = settings.ifsGlow
         
         preset.resolutionScale = settings.resolutionScale
         preset.tileSize = settings.tileSize
@@ -348,6 +334,7 @@ class PresetManager {
             // Copy all the settings manually (since we changed the ID)
             let importedPreset = try decoder.decode(FractalPreset.self, from: data)
             var newPreset = preset
+            newPreset.sceneIndex = importedPreset.sceneIndex
             newPreset.fractalIterations = importedPreset.fractalIterations
             newPreset.maxRaySteps = importedPreset.maxRaySteps
             newPreset.colorMix = importedPreset.colorMix
@@ -359,6 +346,9 @@ class PresetManager {
             newPreset.fractalScale = importedPreset.fractalScale
             newPreset.foldingLimit = importedPreset.foldingLimit
             newPreset.sphereRadius = importedPreset.sphereRadius
+            newPreset.ifsScale = importedPreset.ifsScale
+            newPreset.ifsOffset = importedPreset.ifsOffset
+            newPreset.ifsGlow = importedPreset.ifsGlow
             newPreset.resolutionScale = importedPreset.resolutionScale
             newPreset.tileSize = importedPreset.tileSize
             newPreset.useGST = importedPreset.useGST
@@ -384,6 +374,7 @@ extension PresetManager {
         
         // Classic Mandelbox
         var classic = FractalPreset(name: "Classic Mandelbox")
+        classic.sceneIndex = 0
         classic.fractalScale = 2.8
         classic.fractalIterations = 6
         classic.foldingLimit = 1.0
@@ -394,6 +385,7 @@ extension PresetManager {
         
         // Deep Dive
         var deepDive = FractalPreset(name: "Deep Dive")
+        deepDive.sceneIndex = 0
         deepDive.fractalScale = 2.2
         deepDive.fractalIterations = 10
         deepDive.foldingLimit = 1.5
@@ -401,6 +393,25 @@ extension PresetManager {
         deepDive.colorMix = 0.7
         deepDive.glowIntensity = 0.4
         presets.append(deepDive)
+        
+        // Cosmic IFS
+        var cosmicIFS = FractalPreset(name: "Cosmic IFS")
+        cosmicIFS.sceneIndex = 1
+        cosmicIFS.ifsScale = 1.74
+        cosmicIFS.ifsOffset = 0.98
+        cosmicIFS.ifsGlow = 1.5
+        cosmicIFS.colorIterations = 12
+        presets.append(cosmicIFS)
+        
+        // Neon Dreams
+        var neonDreams = FractalPreset(name: "Neon Dreams")
+        neonDreams.sceneIndex = 1
+        neonDreams.ifsScale = 2.0
+        neonDreams.ifsOffset = 0.75
+        neonDreams.ifsGlow = 2.5
+        neonDreams.colorMix = 0.3
+        neonDreams.colorIterations = 8
+        presets.append(neonDreams)
         
         savePresets()
     }

@@ -10,7 +10,6 @@ import RealityKit
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
-    @Environment(\.openWindow) private var openWindow
     
     @State private var speed: Float = 0
     @State private var initialPosition: SIMD3<Float> = .zero
@@ -62,6 +61,19 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                 }
 
+                // Scene selector
+                HStack {
+                    Text("Scene:")
+                    Picker("", selection: Binding(
+                        get: { appModel.renderSettings.sceneIndex },
+                        set: { appModel.renderSettings.sceneIndex = $0 }
+                    )) {
+                        Text("Mandelbox").tag(0)
+                        Text("Glowy IFS").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
                 // Show MetalFX / upscaling status for easier debugging
                 HStack(spacing: 8) {
                     Image(systemName: appModel.metalFXAvailable ? "bolt.fill" : "bolt.slash")
@@ -96,19 +108,31 @@ struct ContentView: View {
                             Slider(value: Binding(get: { Float(appModel.renderSettings.maxRaySteps) }, set: { appModel.renderSettings.maxRaySteps = Int($0) }), in: 16...128, step: 8)
                         }
 
-                        // Mandelbox parameters
-                        Group {
-                            Text("Min Distance")
-                            Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...3.0)
+                        if appModel.renderSettings.sceneIndex == 0 {
+                            Group {
+                                Text("Min Distance")
+                                Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...3.0)
 
-                            Text("Fractal Scale")
-                            Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
+                                Text("Fractal Scale")
+                                Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
 
-                            Text("Box Folding Limit")
-                            Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.1...5.0)
+                                Text("Box Folding Limit")
+                                Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.1...5.0)
 
-                            Text("Sphere Radius")
-                            Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.01...2.0)
+                                Text("Sphere Radius")
+                                Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.01...2.0)
+                            }
+                        } else {
+                            Group {
+                                Text("IFS Scale: \(appModel.renderSettings.ifsScale, specifier: "%.2f")")
+                                Slider(value: Binding(get: { appModel.renderSettings.ifsScale }, set: { appModel.renderSettings.ifsScale = $0 }), in: 1.2...2.5)
+
+                                Text("IFS Offset: \(appModel.renderSettings.ifsOffset, specifier: "%.2f")")
+                                Slider(value: Binding(get: { appModel.renderSettings.ifsOffset }, set: { appModel.renderSettings.ifsOffset = $0 }), in: 0.5...1.5)
+
+                                Text("Glow Intensity: \(appModel.renderSettings.ifsGlow, specifier: "%.2f")")
+                                Slider(value: Binding(get: { appModel.renderSettings.ifsGlow }, set: { appModel.renderSettings.ifsGlow = $0 }), in: 0.1...3.0)
+                            }
                         }
 
                         // Color & glow (not gesture-mapped)
@@ -127,10 +151,12 @@ struct ContentView: View {
                         Group {
                             Toggle("Show HUD", isOn: Binding(get: { appModel.renderSettings.showHUD }, set: { appModel.renderSettings.showHUD = $0 }))
 
-                            Toggle("Use Grid Sphere Tracing", isOn: Binding(
-                                get: { appModel.renderSettings.useGST },
-                                set: { appModel.renderSettings.useGST = $0 }
-                            ))
+                            if appModel.renderSettings.sceneIndex == 0 {
+                                Toggle("Use Grid Sphere Tracing", isOn: Binding(
+                                    get: { appModel.renderSettings.useGST },
+                                    set: { appModel.renderSettings.useGST = $0 }
+                                ))
+                            }
 
                             Text("Foveation Intensity")
                             Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
@@ -144,14 +170,6 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.top, 4)
-                        
-                        // Open Refining window button
-                        Button(action: {
-                            openWindow(id: "refining")
-                        }) {
-                            Label("Open Refining", systemImage: "slider.horizontal.3")
-                        }
-                        .buttonStyle(.bordered)
                     }
                     .padding(.horizontal)
                 }

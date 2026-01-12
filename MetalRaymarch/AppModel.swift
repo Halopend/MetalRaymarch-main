@@ -102,6 +102,14 @@ final class RenderSettings: @unchecked Sendable {
     // Grid Sphere Tracing (GST)
     private var _useGST: Bool = true                // Use precomputed SDF grid for raymarching (default ON)
 
+    // Scene selection
+    private var _sceneIndex: Int = 0                // 0=Mandelbox, 1=IFS, etc.
+    
+    // IFS (Iterated Function System) parameters
+    private var _ifsScale: Float = 2.0              // IFS scaling factor
+    private var _ifsOffset: Float = 0.98            // IFS offset parameter
+    private var _ifsGlow: Float = 0.5               // IFS glow intensity
+
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
@@ -245,6 +253,30 @@ final class RenderSettings: @unchecked Sendable {
     var useGST: Bool {
         get { withLock { _useGST } }
         set { withLock { _useGST = newValue } }
+    }
+
+    /// Scene index (0=Mandelbox, 1=IFS, etc.)
+    var sceneIndex: Int {
+        get { withLock { _sceneIndex } }
+        set { withLock { _sceneIndex = newValue } }
+    }
+    
+    /// IFS scaling factor
+    var ifsScale: Float {
+        get { withLock { _ifsScale } }
+        set { withLock { _ifsScale = newValue } }
+    }
+    
+    /// IFS offset parameter
+    var ifsOffset: Float {
+        get { withLock { _ifsOffset } }
+        set { withLock { _ifsOffset = newValue } }
+    }
+    
+    /// IFS glow intensity
+    var ifsGlow: Float {
+        get { withLock { _ifsGlow } }
+        set { withLock { _ifsGlow = newValue } }
     }
 
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry
