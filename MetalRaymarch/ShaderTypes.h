@@ -23,8 +23,7 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
     BufferIndexUniforms      = 2,
-    BufferIndexFurHands      = 3,
-    BufferIndexGSTHierarchy  = 4
+    BufferIndexFurHands      = 3
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)
@@ -35,11 +34,7 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
-    TextureIndexColor    = 0,
-    TextureIndexGSTLevel0 = 1,
-    TextureIndexGSTLevel1 = 2,
-    TextureIndexGSTLevel2 = 3,
-    TextureIndexGSTLevel3 = 4,
+    TextureIndexColor    = 0
 };
 
 typedef struct
@@ -66,13 +61,8 @@ typedef struct
     float colorIterations;   // How many iterations contribute to color
     int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
-    int sceneIndex;          // 0 = Mandelbox, 1 = Glowy IFS
-    float ifsScale;          // IFS scaling factor (default 1.74)
-    float ifsOffset;         // IFS offset parameter (default 0.98)
-    float ifsGlow;           // IFS glow intensity multiplier
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    int useGST;              // Use Grid Sphere Tracing (0/1)
 } Uniforms;
 
 typedef struct
@@ -103,66 +93,7 @@ typedef struct
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
-    int sceneIndex;              // 0 = Mandelbox, 1 = Glowy IFS
-    float ifsScale;              // IFS scaling factor
-    float ifsOffset;             // IFS offset parameter
-    float ifsGlow;               // IFS glow intensity
 } TileUniforms;
-
-// =============================================================================
-// GRID SPHERE TRACING DATA STRUCTURES
-// =============================================================================
-// Precomputed SDF hierarchy for efficient ray marching
-
-#define GST_MAX_LEVELS 5
-#define GST_BASE_RESOLUTION 64  // Level 0 resolution (64^3)
-
-typedef struct
-{
-    vector_int3 resolution;     // (nx, ny, nz) for this level
-    float voxelSize;            // World-space size of one voxel edge
-    float voxelDiagonal;        // sqrt(3) * voxelSize (precomputed)
-    float scale;                // 2.5 * voxelDiagonal (for decode)
-} SDFGridLevel;
-
-typedef struct
-{
-    int numLevels;              // Typically 4-5
-    SDFGridLevel levels[GST_MAX_LEVELS];
-    vector_float3 gridOrigin;   // World-space origin of level 0
-    float gridExtent;           // World-space extent of entire grid
-    int isBuilt;                // 1 if grid is ready for use
-} SDFHierarchy;
-
-// Uniforms for SDF grid compute shader
-// Explicit padding to ensure Swift/Metal layout match
-typedef struct
-{
-    int levelIndex;             // offset 0
-    int pad1;                   // offset 4
-    int pad2;                   // offset 8
-    int pad3;                   // offset 12
-    
-    vector_int3 resolution;     // offset 16 (16-byte aligned)
-    
-    float voxelSize;            // offset 32 (size 4)
-    float pad4;                 // offset 36
-    float pad5;                 // offset 40
-    float pad6;                 // offset 44
-    
-    vector_float3 gridOrigin;   // offset 48 (16-byte aligned)
-    
-    // Fractal parameters for sceneSDF
-    float minDistance;          // offset 64
-    float fractalScale;         // offset 68
-    float sphereRadius;         // offset 72
-    float foldingLimit;         // offset 76
-    
-    int fractalIterations;      // offset 80
-    int pad7;                   // offset 84
-    int pad8;                   // offset 88
-    int pad9;                   // offset 92
-} SDFGridBuildUniforms;
 
 // Hand joint data for fur rendering
 // 26 joints per hand (ARKit HandSkeleton)

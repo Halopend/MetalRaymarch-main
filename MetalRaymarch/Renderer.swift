@@ -68,17 +68,6 @@ actor Renderer {
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
     
-    // === GRID SPHERE TRACING (GST) ===
-    // Precomputed SDF grid hierarchy for efficient ray marching
-    var gstBuildLevel0Pipeline: MTLComputePipelineState?   // Build finest level from analytic SDF
-    var gstBuildCoarsePipeline: MTLComputePipelineState?   // Downsample to coarser levels
-    var gstSDFTextures: [MTLTexture] = []                  // 3D textures for each level
-    var gstHierarchy: SDFHierarchy = SDFHierarchy()        // CPU-side hierarchy metadata
-    var gstHierarchyBuffer: MTLBuffer?                     // GPU buffer for hierarchy
-    var gstBuildUniformBuffer: MTLBuffer?                  // Uniforms for grid building
-    var gstIsBuilt: Bool = false                           // Track if grid needs rebuild
-    var gstLastBuildParams: (scale: Float, minDist: Float, foldLimit: Float, sphereRad: Float, iters: Int)?
-    
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
@@ -281,60 +270,6 @@ actor Renderer {
             adaptiveHierarchicalPipeline8x8 = nil
         }
         
-        // === GRID SPHERE TRACING INITIALIZATION ===
-        do {
-            let library = device.makeDefaultLibrary()!
-            
-            // Build level 0 kernel (finest, from analytic SDF)
-            if let buildLevel0 = library.makeFunction(name: "buildSDFGridLevel0") {
-                gstBuildLevel0Pipeline = try device.makeComputePipelineState(function: buildLevel0)
-            }
-            
-            // Build coarse level kernel (downsample)
-            if let buildCoarse = library.makeFunction(name: "buildSDFGridCoarseLevel") {
-                gstBuildCoarsePipeline = try device.makeComputePipelineState(function: buildCoarse)
-            }
-            
-            // Allocate hierarchy buffer
-            gstHierarchyBuffer = device.makeBuffer(length: MemoryLayout<SDFHierarchy>.stride, options: .storageModeShared)
-            gstHierarchyBuffer?.label = "GST Hierarchy"
-            
-            // Initialize hierarchy with isBuilt = 0
-            if let buffer = gstHierarchyBuffer {
-                var emptyHierarchy = SDFHierarchy()
-                emptyHierarchy.isBuilt = 0
-                memcpy(buffer.contents(), &emptyHierarchy, MemoryLayout<SDFHierarchy>.size)
-            }
-            
-            // Create placeholder 3D textures (1x1x1) for shader binding
-            // These will be replaced with real textures when GST is first built
-            for level in 0..<4 {
-                let descriptor = MTLTextureDescriptor()
-                descriptor.textureType = .type3D
-                descriptor.pixelFormat = .r8Snorm
-                descriptor.width = 1
-                descriptor.height = 1
-                descriptor.depth = 1
-                descriptor.storageMode = .private
-                descriptor.usage = [.shaderRead, .shaderWrite]
-                
-                if let texture = device.makeTexture(descriptor: descriptor) {
-                    texture.label = "GST Placeholder Level \(level)"
-                    gstSDFTextures.append(texture)
-                }
-            }
-            
-            // Allocate build uniforms buffer
-            gstBuildUniformBuffer = device.makeBuffer(length: MemoryLayout<SDFGridBuildUniforms>.stride, options: .storageModeShared)
-            gstBuildUniformBuffer?.label = "GST Build Uniforms"
-            
-            print("✓ Grid Sphere Tracing pipelines ready")
-        } catch {
-            print("⚠️ Failed to create GST pipelines: \(error)")
-            gstBuildLevel0Pipeline = nil
-            gstBuildCoarsePipeline = nil
-        }
-
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
@@ -493,17 +428,6 @@ actor Renderer {
         
         // Bind textures
         renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
-        
-        // Bind GST resources
-        if let hierarchyBuffer = gstHierarchyBuffer {
-            renderEncoder.setFragmentBuffer(hierarchyBuffer, offset: 0, index: BufferIndex.gstHierarchy.rawValue)
-        }
-        if gstSDFTextures.count >= 4 {
-            renderEncoder.setFragmentTexture(gstSDFTextures[0], index: TextureIndex.gstLevel0.rawValue)
-            renderEncoder.setFragmentTexture(gstSDFTextures[1], index: TextureIndex.gstLevel1.rawValue)
-            renderEncoder.setFragmentTexture(gstSDFTextures[2], index: TextureIndex.gstLevel2.rawValue)
-            renderEncoder.setFragmentTexture(gstSDFTextures[3], index: TextureIndex.gstLevel3.rawValue)
-        }
         
         // Draw
         for submesh in mesh.submeshes {
@@ -894,13 +818,8 @@ actor Renderer {
                             colorIterations: settings.colorIterations,
                             useHierarchical: settings.useHierarchical ? 1 : 0,
                             limitFlash: settings.limitFlash,
-                            sceneIndex: Int32(settings.sceneIndex),
-                            ifsScale: settings.ifsScale,
-                            ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow,
                             showHUD: settings.showHUD ? 1 : 0,
-                            activeGesture: Int32(settings.activeGestureIndex),
-                            useGST: settings.useGST ? 1 : 0)
+                            activeGesture: Int32(settings.activeGestureIndex))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -976,12 +895,6 @@ actor Renderer {
         self.updateFurHandUniforms(time: Float(time))
 
         self.updateGameState(drawable: drawable)
-        
-        // Build GST grid if enabled (rebuilds only when parameters change).
-        // Only relevant for the SDF-based Mandelbox scene.
-        if appModel.renderSettings.useGST && appModel.renderSettings.sceneIndex == 0 {
-            buildGSTGrid(commandBuffer: commandBuffer, settings: appModel.renderSettings)
-        }
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = appModel.renderSettings.tileSize
@@ -1139,20 +1052,6 @@ actor Renderer {
         }
 
         renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
-        
-        // Always bind GST hierarchy buffer (shader expects it)
-        // If GST not built, hierarchy.isBuilt will be 0 and shader will use fallback
-        if let hierarchyBuffer = gstHierarchyBuffer {
-            renderEncoder.setFragmentBuffer(hierarchyBuffer, offset: 0, index: BufferIndex.gstHierarchy.rawValue)
-        }
-        
-        // Bind GST textures if available
-        if gstSDFTextures.count >= 4 {
-            renderEncoder.setFragmentTexture(gstSDFTextures[0], index: TextureIndex.gstLevel0.rawValue)
-            renderEncoder.setFragmentTexture(gstSDFTextures[1], index: TextureIndex.gstLevel1.rawValue)
-            renderEncoder.setFragmentTexture(gstSDFTextures[2], index: TextureIndex.gstLevel2.rawValue)
-            renderEncoder.setFragmentTexture(gstSDFTextures[3], index: TextureIndex.gstLevel3.rawValue)
-        }
 
         for submesh in mesh.submeshes {
             renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
@@ -1337,208 +1236,6 @@ actor Renderer {
     
     // MARK: - Adaptive 8x8 Hierarchical Compute Rendering
     
-    // MARK: - Grid Sphere Tracing (GST) Grid Building
-    
-    /// Check if GST grid needs to be rebuilt due to parameter changes
-    private func gstNeedsRebuild(settings: RenderSettings) -> Bool {
-        guard let last = gstLastBuildParams else { return true }
-        return last.scale != settings.fractalScale ||
-               last.minDist != settings.minDistance ||
-               last.foldLimit != settings.foldingLimit ||
-               last.sphereRad != settings.sphereRadius ||
-               last.iters != settings.fractalIterations
-    }
-    
-    /// Build the SDF grid hierarchy for Grid Sphere Tracing
-    private func buildGSTGrid(commandBuffer: MTLCommandBuffer, settings: RenderSettings) {
-        guard gstBuildLevel0Pipeline != nil,
-              gstBuildCoarsePipeline != nil,
-              let hierarchyBuffer = gstHierarchyBuffer,
-              let _ = gstBuildUniformBuffer else {
-            return
-        }
-        
-        // Skip if already built with same parameters
-        if gstIsBuilt && !gstNeedsRebuild(settings: settings) {
-            return
-        }
-        
-        let numLevels = 4  // 128^3, 64^3, 32^3, 16^3
-        let baseResolution: Int32 = 128
-        let gridExtent: Float = 4.0  // World-space extent of the grid
-        let gridOrigin = SIMD3<Float>(-gridExtent / 2, -gridExtent / 2, -gridExtent / 2)
-        
-        // Create properly sized 3D textures if needed (check if first texture is placeholder size or resolution changed)
-        let needsTextureRebuild = gstSDFTextures.isEmpty || gstSDFTextures[0].width != Int(baseResolution)
-        if needsTextureRebuild {
-            gstSDFTextures.removeAll()
-            
-            for level in 0..<numLevels {
-                let res = baseResolution >> level  // 128, 64, 32, 16
-                
-                let descriptor = MTLTextureDescriptor()
-                descriptor.textureType = .type3D
-                descriptor.pixelFormat = .r8Snorm  // 8-bit signed normalized [-1, 1]
-                descriptor.width = Int(res)
-                descriptor.height = Int(res)
-                descriptor.depth = Int(res)
-                descriptor.storageMode = .private
-                descriptor.usage = [.shaderRead, .shaderWrite]
-                
-                guard let texture = device.makeTexture(descriptor: descriptor) else {
-                    print("⚠️ Failed to create GST texture for level \(level)")
-                    return
-                }
-                texture.label = "GST SDF Level \(level) (\(res)³)"
-                gstSDFTextures.append(texture)
-            }
-            print("✓ Created \(numLevels) GST 3D textures")
-        }
-        
-        // Initialize hierarchy metadata
-        var hierarchy = SDFHierarchy()
-        hierarchy.numLevels = Int32(numLevels)
-        hierarchy.gridOrigin = gridOrigin
-        hierarchy.gridExtent = gridExtent
-        hierarchy.isBuilt = 0  // Will set to 1 after build completes
-        
-        for level in 0..<numLevels {
-            let res = baseResolution >> level
-            let voxelSize = gridExtent / Float(res)
-            let voxelDiagonal = sqrt(3.0) * voxelSize
-            
-            // Set the appropriate level (Swift tuples need manual access)
-            switch level {
-            case 0:
-                hierarchy.levels.0 = SDFGridLevel(
-                    resolution: SIMD3<Int32>(res, res, res),
-                    voxelSize: voxelSize,
-                    voxelDiagonal: voxelDiagonal,
-                    scale: 4.0 * voxelDiagonal
-                )
-            case 1:
-                hierarchy.levels.1 = SDFGridLevel(
-                    resolution: SIMD3<Int32>(res, res, res),
-                    voxelSize: voxelSize,
-                    voxelDiagonal: voxelDiagonal,
-                    scale: 4.0 * voxelDiagonal
-                )
-            case 2:
-                hierarchy.levels.2 = SDFGridLevel(
-                    resolution: SIMD3<Int32>(res, res, res),
-                    voxelSize: voxelSize,
-                    voxelDiagonal: voxelDiagonal,
-                    scale: 4.0 * voxelDiagonal
-                )
-            case 3:
-                hierarchy.levels.3 = SDFGridLevel(
-                    resolution: SIMD3<Int32>(res, res, res),
-                    voxelSize: voxelSize,
-                    voxelDiagonal: voxelDiagonal,
-                    scale: 4.0 * voxelDiagonal
-                )
-            default:
-                break
-            }
-        }
-        
-        // Build level 0 from analytic SDF
-        guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
-        computeEncoder.label = "GST Grid Build"
-        
-        // Level 0: Build from analytic SDF
-        if let pipeline = gstBuildLevel0Pipeline {
-            computeEncoder.setComputePipelineState(pipeline)
-            
-            var buildUniforms = SDFGridBuildUniforms(
-                levelIndex: 0,
-                pad1: 0, pad2: 0, pad3: 0, // Manual padding
-                resolution: SIMD3<Int32>(baseResolution, baseResolution, baseResolution),
-                voxelSize: gridExtent / Float(baseResolution),
-                pad4: 0, pad5: 0, pad6: 0, // Manual padding
-                gridOrigin: gridOrigin,
-                minDistance: settings.minDistance,
-                fractalScale: settings.fractalScale,
-                sphereRadius: settings.sphereRadius,
-                foldingLimit: settings.foldingLimit,
-                fractalIterations: Int32(settings.fractalIterations),
-                pad7: 0, pad8: 0, pad9: 0  // Manual padding
-            )
-            
-            // USE setBytes INSTEAD OF setBuffer TO AVOID HAZARDS
-            // because we reuse this struct multiple times in the same command buffer
-            computeEncoder.setBytes(&buildUniforms, length: MemoryLayout<SDFGridBuildUniforms>.size, index: 0)
-            computeEncoder.setTexture(gstSDFTextures[0], index: 0)
-            
-            let threadgroupSize = MTLSize(width: 4, height: 4, depth: 4)
-            let gridSize = MTLSize(
-                width: (Int(baseResolution) + 3) / 4,
-                height: (Int(baseResolution) + 3) / 4,
-                depth: (Int(baseResolution) + 3) / 4
-            )
-            computeEncoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
-        }
-        
-        // Build coarser levels via MAX downsampling
-        if let coarsePipeline = gstBuildCoarsePipeline {
-            for level in 1..<numLevels {
-                let res = baseResolution >> level
-                
-                var buildUniforms = SDFGridBuildUniforms(
-                    levelIndex: Int32(level),
-                    pad1: 0, pad2: 0, pad3: 0,
-                    resolution: SIMD3<Int32>(res, res, res),
-                    voxelSize: gridExtent / Float(res),
-                    pad4: 0, pad5: 0, pad6: 0,
-                    gridOrigin: gridOrigin,
-                    minDistance: settings.minDistance,
-                    fractalScale: settings.fractalScale,
-                    sphereRadius: settings.sphereRadius,
-                    foldingLimit: settings.foldingLimit,
-                    fractalIterations: Int32(settings.fractalIterations),
-                    pad7: 0, pad8: 0, pad9: 0
-                )
-                
-                // USE setBytes INSTEAD OF setBuffer
-                computeEncoder.setBytes(&buildUniforms, length: MemoryLayout<SDFGridBuildUniforms>.size, index: 0)
-                computeEncoder.setComputePipelineState(coarsePipeline)
-                computeEncoder.setTexture(gstSDFTextures[level - 1], index: 0)  // Input: finer level
-                computeEncoder.setTexture(gstSDFTextures[level], index: 1)      // Output: this level
-                
-                let threadgroupSize = MTLSize(width: 4, height: 4, depth: 4)
-                let gridSize = MTLSize(
-                    width: (Int(res) + 3) / 4,
-                    height: (Int(res) + 3) / 4,
-                    depth: (Int(res) + 3) / 4
-                )
-                computeEncoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
-            }
-        }
-        
-        computeEncoder.endEncoding()
-        
-        // Mark as built
-        hierarchy.isBuilt = 1
-        gstHierarchy = hierarchy
-        memcpy(hierarchyBuffer.contents(), &hierarchy, MemoryLayout<SDFHierarchy>.size)
-        
-        gstIsBuilt = true
-        gstLastBuildParams = (
-            scale: settings.fractalScale,
-            minDist: settings.minDistance,
-            foldLimit: settings.foldingLimit,
-            sphereRad: settings.sphereRadius,
-            iters: settings.fractalIterations
-        )
-        
-        // Debug output
-        print("✓ GST grid built: \(numLevels) levels, \(baseResolution)³ base resolution")
-        print("  Grid origin: (\(gridOrigin.x), \(gridOrigin.y), \(gridOrigin.z))")
-        print("  Grid extent: \(gridExtent)")
-        print("  Level 0 voxelSize: \(gridExtent / Float(baseResolution))")
-        print("  Fractal params: scale=\(settings.fractalScale), minDist=\(settings.minDistance), fold=\(settings.foldingLimit), sphere=\(settings.sphereRadius), iters=\(settings.fractalIterations)")
-    }
-    
     /// Dispatches the adaptive 8x8 hierarchical compute kernel for high-performance raymarching
     /// This uses a 3-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
     /// Expected speedup: 3-8x compared to per-pixel raymarching
@@ -1598,11 +1295,7 @@ actor Renderer {
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
-            limitFlash: settings.limitFlash,
-            sceneIndex: Int32(settings.sceneIndex),
-            ifsScale: settings.ifsScale,
-            ifsOffset: settings.ifsOffset,
-            ifsGlow: settings.ifsGlow
+            limitFlash: settings.limitFlash
         )
         
         // Copy uniforms to buffer

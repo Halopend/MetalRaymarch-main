@@ -15,9 +15,6 @@ struct FractalPreset: Codable, Identifiable {
     var createdAt: Date
     var thumbnailData: Data?  // PNG image data
     
-    // Scene selection
-    var sceneIndex: Int
-    
     // Common settings
     var fractalIterations: Int
     var maxRaySteps: Int
@@ -27,21 +24,15 @@ struct FractalPreset: Codable, Identifiable {
     var position: SIMD3<Float>
     var scale: Float
     
-    // Mandelbox-specific (scene 0)
+    // Mandelbox parameters
     var minDistance: Float
     var fractalScale: Float
     var foldingLimit: Float
     var sphereRadius: Float
     
-    // IFS-specific (scene 1)
-    var ifsScale: Float
-    var ifsOffset: Float
-    var ifsGlow: Float
-    
     // Performance settings (optional to save)
     var resolutionScale: Float?
     var tileSize: Int?
-    var useGST: Bool?
     
     // Safety bubble
     var safetyBubbleEnabled: Bool?
@@ -54,7 +45,6 @@ struct FractalPreset: Codable, Identifiable {
         self.thumbnailData = thumbnailData
         
         // Initialize with defaults
-        self.sceneIndex = 0
         self.fractalIterations = 6
         self.maxRaySteps = 32
         self.colorMix = 0.5
@@ -67,17 +57,12 @@ struct FractalPreset: Codable, Identifiable {
         self.fractalScale = 2.8
         self.foldingLimit = 1.0
         self.sphereRadius = 0.5
-        
-        self.ifsScale = 1.74
-        self.ifsOffset = 0.98
-        self.ifsGlow = 1.0
     }
     
     /// Create a preset from current render settings
     static func fromSettings(_ settings: RenderSettings, name: String, thumbnailData: Data? = nil) -> FractalPreset {
         var preset = FractalPreset(name: name, thumbnailData: thumbnailData)
         
-        preset.sceneIndex = settings.sceneIndex
         preset.fractalIterations = settings.fractalIterations
         preset.maxRaySteps = settings.maxRaySteps
         preset.colorMix = settings.colorMix
@@ -91,13 +76,8 @@ struct FractalPreset: Codable, Identifiable {
         preset.foldingLimit = settings.foldingLimit
         preset.sphereRadius = settings.sphereRadius
         
-        preset.ifsScale = settings.ifsScale
-        preset.ifsOffset = settings.ifsOffset
-        preset.ifsGlow = settings.ifsGlow
-        
         preset.resolutionScale = settings.resolutionScale
         preset.tileSize = settings.tileSize
-        preset.useGST = settings.useGST
         
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
@@ -107,7 +87,6 @@ struct FractalPreset: Codable, Identifiable {
     
     /// Apply this preset to render settings
     func apply(to settings: RenderSettings, includePerformance: Bool = false) {
-        settings.sceneIndex = sceneIndex
         settings.fractalIterations = fractalIterations
         settings.maxRaySteps = maxRaySteps
         settings.colorMix = colorMix
@@ -121,19 +100,12 @@ struct FractalPreset: Codable, Identifiable {
         settings.foldingLimit = foldingLimit
         settings.sphereRadius = sphereRadius
         
-        settings.ifsScale = ifsScale
-        settings.ifsOffset = ifsOffset
-        settings.ifsGlow = ifsGlow
-        
         if includePerformance {
             if let resolutionScale = resolutionScale {
                 settings.resolutionScale = resolutionScale
             }
             if let tileSize = tileSize {
                 settings.tileSize = tileSize
-            }
-            if let useGST = useGST {
-                settings.useGST = useGST
             }
         }
         
@@ -245,7 +217,6 @@ class PresetManager {
     private func createPresetWithID(_ id: UUID, name: String, createdAt: Date, settings: RenderSettings, thumbnailData: Data?) -> FractalPreset {
         var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
         
-        preset.sceneIndex = settings.sceneIndex
         preset.fractalIterations = settings.fractalIterations
         preset.maxRaySteps = settings.maxRaySteps
         preset.colorMix = settings.colorMix
@@ -259,13 +230,8 @@ class PresetManager {
         preset.foldingLimit = settings.foldingLimit
         preset.sphereRadius = settings.sphereRadius
         
-        preset.ifsScale = settings.ifsScale
-        preset.ifsOffset = settings.ifsOffset
-        preset.ifsGlow = settings.ifsGlow
-        
         preset.resolutionScale = settings.resolutionScale
         preset.tileSize = settings.tileSize
-        preset.useGST = settings.useGST
         
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
@@ -334,7 +300,6 @@ class PresetManager {
             // Copy all the settings manually (since we changed the ID)
             let importedPreset = try decoder.decode(FractalPreset.self, from: data)
             var newPreset = preset
-            newPreset.sceneIndex = importedPreset.sceneIndex
             newPreset.fractalIterations = importedPreset.fractalIterations
             newPreset.maxRaySteps = importedPreset.maxRaySteps
             newPreset.colorMix = importedPreset.colorMix
@@ -346,12 +311,8 @@ class PresetManager {
             newPreset.fractalScale = importedPreset.fractalScale
             newPreset.foldingLimit = importedPreset.foldingLimit
             newPreset.sphereRadius = importedPreset.sphereRadius
-            newPreset.ifsScale = importedPreset.ifsScale
-            newPreset.ifsOffset = importedPreset.ifsOffset
-            newPreset.ifsGlow = importedPreset.ifsGlow
             newPreset.resolutionScale = importedPreset.resolutionScale
             newPreset.tileSize = importedPreset.tileSize
-            newPreset.useGST = importedPreset.useGST
             newPreset.safetyBubbleEnabled = importedPreset.safetyBubbleEnabled
             newPreset.safetyBubbleRadius = importedPreset.safetyBubbleRadius
             
@@ -374,7 +335,6 @@ extension PresetManager {
         
         // Classic Mandelbox
         var classic = FractalPreset(name: "Classic Mandelbox")
-        classic.sceneIndex = 0
         classic.fractalScale = 2.8
         classic.fractalIterations = 6
         classic.foldingLimit = 1.0
@@ -385,7 +345,6 @@ extension PresetManager {
         
         // Deep Dive
         var deepDive = FractalPreset(name: "Deep Dive")
-        deepDive.sceneIndex = 0
         deepDive.fractalScale = 2.2
         deepDive.fractalIterations = 10
         deepDive.foldingLimit = 1.5
@@ -393,25 +352,6 @@ extension PresetManager {
         deepDive.colorMix = 0.7
         deepDive.glowIntensity = 0.4
         presets.append(deepDive)
-        
-        // Cosmic IFS
-        var cosmicIFS = FractalPreset(name: "Cosmic IFS")
-        cosmicIFS.sceneIndex = 1
-        cosmicIFS.ifsScale = 1.74
-        cosmicIFS.ifsOffset = 0.98
-        cosmicIFS.ifsGlow = 1.5
-        cosmicIFS.colorIterations = 12
-        presets.append(cosmicIFS)
-        
-        // Neon Dreams
-        var neonDreams = FractalPreset(name: "Neon Dreams")
-        neonDreams.sceneIndex = 1
-        neonDreams.ifsScale = 2.0
-        neonDreams.ifsOffset = 0.75
-        neonDreams.ifsGlow = 2.5
-        neonDreams.colorMix = 0.3
-        neonDreams.colorIterations = 8
-        presets.append(neonDreams)
         
         savePresets()
     }
