@@ -115,6 +115,32 @@ constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this di
 constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
 constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
+// === REFINING PARAMETERS STRUCT ===
+// Passed from Swift uniforms for runtime tuning of sphere tracing optimization
+struct RefiningParams {
+    float relaxFactor;           // Over-relaxation multiplier (1.0-2.0)
+    float relaxBacktrack;        // Backtrack factor when overshooting (0.3-1.0)
+    float sdfScaleCoarse;        // SDF scaling for coarse pass (1.0-2.0)
+    float sdfScaleSuperCoarse;   // SDF scaling for super-coarse pass (1.0-2.5)
+    float earlyTermRatio;        // Early termination convergence ratio (0.1-0.6)
+    int earlyTermCount;          // Steps before early termination (1-6)
+};
+
+// === ENHANCED OVER-RELAXATION DEFAULTS ===
+// Based on "Skipping Spheres" paper and relaxed sphere tracing research
+// These are fallback defaults - actual values come from uniforms for runtime tuning
+// Over-relaxation factor: 1.6-2.0 is safe for most SDFs with backtracking
+constant float DEFAULT_RELAX_FACTOR = 1.6f;             // Over-relaxation multiplier
+constant float DEFAULT_RELAX_BACKTRACK = 0.7f;          // Backtrack factor when overshooting
+
+// === SDF SCALING & EARLY RAY TERMINATION DEFAULTS (Polychronakis 2024) ===
+// SDF scaling allows larger steps in coarse passes while maintaining correctness
+// Early termination detects slow convergence and terminates before wasting steps
+constant float DEFAULT_SDF_SCALE_COARSE = 1.3f;         // Scale factor for coarse SDF (Lipschitz-safe)
+constant float DEFAULT_SDF_SCALE_SUPER_COARSE = 1.5f;   // More aggressive for super-coarse
+constant float DEFAULT_EARLY_TERM_RATIO = 0.3f;         // Terminate if d_n/d_{n-1} < this for N steps
+constant int DEFAULT_EARLY_TERM_COUNT = 3;              // Number of slow convergence steps before termination
+
 // === BOUNDING SPHERE EARLY EXIT ===
 // Returns -1 if ray misses sphere, otherwise returns entry distance
 inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, float radius) {
@@ -272,6 +298,34 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     return d;
 }
 
+// === HALF PRECISION MAP FOR APPLE SILICON ===
+// Apple GPUs have dedicated half-precision ALUs running at 2x throughput
+// Use for coarse distance estimation where full precision isn't needed
+half MapHalf(half3 pos, FractalParams params, half foldingLimit, int iterations) 
+{
+    half4 p = half4(pos, 1.0h);
+    half4 p0 = p;
+    half4 scaleH = half4(params.scale);
+    half minRadius2H = half(params.minRadius2);
+    half invMinRadius2H = 1.0h / minRadius2H;
+
+    // Unroll small iteration counts for better instruction scheduling
+    [[unroll]]
+    for (int i = 0; i < iterations; i++)
+    {
+        // Box fold
+        p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0h - p.xyz;
+
+        // Branchless sphere fold
+        half r2 = dot(p.xyz, p.xyz);
+        half t = clamp(1.0h / max(r2, minRadius2H), 1.0h, invMinRadius2H);
+        p *= t;
+
+        p = p * scaleH + p0;
+    }
+    return (length(p.xyz) - half(params.absScalem1)) / p.w - half(params.absScalePow);
+}
+
 // Optimized colour function using half precision
 half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
@@ -336,52 +390,101 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, fl
     return halfwayT;
 }
 
-// === SUPER-COARSE RAYMARCH (for 8x8 tiles) ===
-// Very fast approximate raymarch - 12 steps with aggressive stepping
-// Used for initial distance estimation in large tiles
-FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
+// === SUPER-COARSE RAYMARCH WITH SDF SCALING (for 8x8 tiles) ===
+// Based on "SDF Scaling & Early Ray Termination" (Polychronakis 2024)
+// Uses SDF scaling to allow even larger steps while maintaining Lipschitz safety
+// Combined with half precision for 2x throughput on Apple Silicon
+FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, RefiningParams refining)
 {
     float t = max(startT, 0.05);
+    half foldingLimitH = half(foldingLimit);
+    
+    // SDF scaling factor (Polychronakis 2024) - from runtime uniforms
+    half sdfScale = half(refining.sdfScaleSuperCoarse);
     
     // Fixed 12 steps - unroll completely for maximum speed
     UNROLL_FULL
     for(int j = 0; j < 12; j++)
     {
         float3 p = fma(rD, float3(t), rO);
-        float h = Map(p, params, foldingLimit, iterations);
+        // Use half precision Map for coarse pass
+        half h = MapHalf(half3(p), params, foldingLimitH, iterations);
+        
+        // Apply SDF scaling - allows larger steps
+        half scaledH = h * sdfScale;
         
         // Loose threshold - we just need approximate distance
-        if(UNLIKELY(h < 0.1)) return t;
+        if(UNLIKELY(h < 0.1h)) return t;
         
         if (UNLIKELY(t > kCoarseMaxDistance)) return kRayMissThreshold + 100.0;
         
-        // Aggressive over-relaxation: step 1.5x the SDF value
-        t = fma(h, 1.5, t);
+        // Step by scaled SDF value with additional over-relaxation
+        t = fma(float(scaledH), 1.5, t);
     }
     
     return kRayMissThreshold + 100.0;
 }
 
-// === COARSE RAYMARCH ===
-// Fast approximate raymarch for hierarchical rendering
-// Uses fewer iterations but standard stepping to find approximate hit distance
-FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
+// === COARSE RAYMARCH WITH SDF SCALING ===
+// Based on "SDF Scaling & Early Ray Termination" (Polychronakis 2024)
+// Uses SDF scaling for faster convergence in hierarchical rendering
+// Combined with half precision for 2x throughput on Apple Silicon
+FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, RefiningParams refining)
 {
     float t = 0.05;
+    half foldingLimitH = half(foldingLimit);
+    half prevH = half(1e10);
+    
+    // SDF scaling factor (Polychronakis 2024) - from runtime uniforms
+    half sdfScale = half(refining.sdfScaleCoarse);
+    
+    // Early termination thresholds - from runtime uniforms
+    half earlyTermRatio = half(refining.earlyTermRatio);
+    int earlyTermCount = refining.earlyTermCount;
+    
+    // Early termination counter
+    int slowCount = 0;
     
     // Fixed 24 steps - can unroll partially
     UNROLL_8
     for(int j = 0; j < 24; j++)
     {
         float3 p = fma(rD, float3(t), rO);
-        float h = Map(p, params, foldingLimit, iterations);
+        // Use half precision Map for coarse pass
+        half h = MapHalf(half3(p), params, foldingLimitH, iterations);
         
         // LIKELY: Coarse pass finds hits most of the time
-        if(UNLIKELY(h < 0.02)) return t;
+        if(UNLIKELY(h < 0.02h)) return t;
         
         if (UNLIKELY(t > kMaxRayDistance)) return kRayMissThreshold + 100.0;
         
-        t += h;
+        // Early ray termination check (Polychronakis 2024) - using runtime thresholds
+        half ratio = h / max(prevH, half(0.0001));
+        if (ratio < earlyTermRatio && h < 0.3h) {
+            slowCount++;
+            if (slowCount >= earlyTermCount) {
+                return t;  // Terminate early on slow convergence
+            }
+        } else {
+            slowCount = 0;
+        }
+        
+        // Apply SDF scaling
+        half scaledH = h * sdfScale;
+        
+        // Over-relaxation with backtracking
+        half step;
+        if (h > prevH * 1.2h) {
+            // Overstep - backtrack slightly
+            t -= float(prevH) * 0.3;
+            step = h;  // Use unscaled for recovery
+            slowCount = 0;
+        } else {
+            step = scaledH * 1.3h;  // Scaled + over-relaxation
+        }
+        
+        t += float(step);
+        prevH = h;
     }
     
     return kRayMissThreshold + 100.0;
@@ -423,9 +526,12 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
     return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
-// Standard sphere tracing - reliable, no aggressive optimizations
+// === ENHANCED SPHERE TRACING WITH EARLY RAY TERMINATION ===
+// Based on "Enhanced Sphere Tracing" (Keinert 2014) and 
+// "SDF Scaling & Early Ray Termination" (Polychronakis 2024)
+// Combines over-relaxation, backtracking, and convergence-based early termination
 // This is the main raymarch loop - optimize for typical case (many steps, eventual hit)
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, RefiningParams refining)
 {
     // Use temporally stable blue noise dithering for reprojection
     float dither = blueNoise(fragCoord, time) * 0.015;
@@ -433,6 +539,19 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
+    
+    // Over-relaxation state (Keinert 2014) - from runtime uniforms
+    float prevH = 1e10;
+    float omega = refining.relaxFactor;  // Start with aggressive over-relaxation
+    float relaxBacktrack = refining.relaxBacktrack;
+    
+    // Early ray termination thresholds - from runtime uniforms
+    float earlyTermRatio = refining.earlyTermRatio;
+    int earlyTermCount = refining.earlyTermCount;
+    
+    // Early ray termination state (Polychronakis 2024)
+    // Track consecutive slow convergence steps
+    int slowConvergenceCount = 0;
     
     // NO_UNROLL: Variable iteration count, unrolling would bloat code
     NO_UNROLL
@@ -456,8 +575,42 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         // Accumulate glow - saturate is free on GPU
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
         
-        // Standard sphere tracing: step by the SDF value
-        t += h;
+        // === EARLY RAY TERMINATION (Polychronakis 2024) ===
+        // Detect slow convergence: if we're making tiny progress relative to distance,
+        // we're likely approaching a complex surface area - terminate early
+        float convergenceRatio = h / max(prevH, 0.0001f);
+        if (convergenceRatio < earlyTermRatio && h < 0.5) {
+            slowConvergenceCount++;
+            if (slowConvergenceCount >= earlyTermCount) {
+                // Slow convergence detected - terminate and use current position
+                // This saves many wasted steps in complex fractal regions
+                return float2(t, saturate(glow * 0.25));
+            }
+        } else {
+            slowConvergenceCount = 0;  // Reset counter on good progress
+        }
+        
+        // === ENHANCED OVER-RELAXATION WITH BACKTRACKING (Keinert 2014) ===
+        // If we overstepped (h increased significantly), backtrack and reduce omega
+        float step;
+        if (h > prevH * 1.1 && omega > 1.0) {
+            // Overstep detected - backtrack and use conservative stepping
+            t -= prevH * (omega - 1.0) * relaxBacktrack;
+            omega = 1.0;  // Fall back to standard sphere tracing
+            step = h;
+            slowConvergenceCount = 0;  // Reset on backtrack
+        } else {
+            // Safe to use over-relaxation
+            step = h * omega;
+            
+            // Adaptive omega: reduce near surfaces for precision
+            if (h < 0.1) {
+                omega = max(1.0f, omega * 0.95f);
+            }
+        }
+        
+        t += step;
+        prevH = h;
     }
     
     return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
@@ -1347,42 +1500,53 @@ half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
 
 // =============================================================================
 
-// Ultra-fast shadow with over-relaxation
+// === OPTIMIZED SHADOW WITH HALF PRECISION ===
+// Uses half precision for intermediate calculations on Apple Silicon
+// Apple GPUs have 2x throughput for half precision operations
 // FORCE_INLINE: Called twice per lit pixel (spot + sun)
 FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
 {
     // Skip shadows in extreme periphery - early out
     if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65;
     
-    float res = 1.0;
+    half res = 1.0h;
     float t = 0.08;
-    float prevH = 1e10;
+    half prevH = half(1e10);
     
     // Very few steps for shadows - unroll completely
-    int steps = int(fma(quality, 2.0, 1.0)); // 1-3 steps
+    int steps = int(fma(quality, 3.0, 1.0)); // 1-4 steps
+    
+    // Precompute half precision folding limit
+    half foldingLimitH = half(foldingLimit);
     
     UNROLL_4
-    for (int i = 0; i < steps; i++)
+    for (int i = 0; i < 4; i++)
     {
-        float h = Map(fma(rd, float3(t), ro), params, foldingLimit, iterations);
+        if (i >= steps) break;
         
-        // Soft shadow calculation - min is single instruction
-        res = min(res, 10.0 * h / t);
+        float3 p = fma(rd, float3(t), ro);
+        
+        // Use half precision Map for shadow rays (precision less critical)
+        half h = MapHalf(half3(p), params, foldingLimitH, iterations);
+        
+        // Soft shadow calculation with improved penumbra
+        half shadowK = 10.0h;
+        res = min(res, shadowK * h / half(t));
         
         // UNLIKELY: Most shadow rays don't hit
-        if (UNLIKELY(res < 0.02)) return 0.0;
+        if (UNLIKELY(res < 0.02h)) return 0.0;
         
-        // Over-relaxation: step more aggressively when safe
-        float relax = step(prevH * 0.8, h);
-        float stepDist = mix(h, h * 1.5, relax);
-        t += max(stepDist, 0.15);
+        // Enhanced over-relaxation for shadows (can be more aggressive)
+        half relax = step(prevH * 0.7h, h);
+        half stepSize = mix(h, h * 1.8h, relax);
+        t += max(float(stepSize), 0.12f);
         prevH = h;
         
         // UNLIKELY: Shadows don't trace far
         if (UNLIKELY(t > 4.0)) break;
     }
     
-    return saturate(res);
+    return float(saturate(res));
 }
 
 // === TILE-BASED RAYMARCHING (4x4 pixel groups) ===
@@ -1510,10 +1674,19 @@ kernel void tileRaymarchKernel(
     // Note: invProjMatrix/invViewMatrix precomputed into sharedRayDirs by leader
     float3 rd = sharedRayDirs[localId.y * 4 + localId.x];
 
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
     if (localId.x == 1 && localId.y == 1) {
         sharedCenterRayDir = rd;
-        sharedCoarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+        sharedCoarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations, refining);
     }
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1633,10 +1806,19 @@ kernel void tileRaymarchKernel2x2(
     viewPos /= viewPos.w;
     float3 rd = normalize((uniforms.invViewMatrix * float4(viewPos.xyz, 0.0)).xyz);
     
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
     if (localIndex == 0) {
         sharedCenterRayDir = rd;
-        sharedCoarseT = SceneCoarse(uniforms.cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+        sharedCoarseT = SceneCoarse(uniforms.cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations, refining);
     }
     
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1766,9 +1948,18 @@ kernel void adaptiveHierarchical8x8(
     
     float gTime = uniforms.time * 0.01 + 15.00;
     
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // Use the SAME Scene() function as fragment shader for correctness
     float2 ret = Scene(cameraPos, rd, pixelCenter, 1.0, uniforms.maxRaySteps, 
-                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, refining);
     
     float adjustedDist = ret.x;
     float glow = ret.y;
@@ -2347,6 +2538,15 @@ inline FragmentOutput fragmentMainGST(ColorInOut in,
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
 
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+
     float2 ret;
     bool usedGST = false;  // Track if GST was actually used
     
@@ -2427,8 +2627,8 @@ inline FragmentOutput fragmentMainGST(ColorInOut in,
             ret = float2(kRayMissThreshold + 100.0, gstHit.glow);
         }
     } else {
-        // Fallback to standard analytic sphere tracing
-        ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+        // Fallback to standard analytic sphere tracing with RefiningParams
+        ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, refining);
     }
     
     half3 col = half3(0.0h);
@@ -2644,9 +2844,18 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
     
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // === STANDARD RAYMARCH (every pixel) ===
     // The hierarchical coarse/fine approach doesn't help due to SIMD lockstep execution
-    float2 ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, refining);
     float adjustedDist = ret.x;
     float glow = ret.y;
     

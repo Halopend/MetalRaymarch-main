@@ -896,7 +896,13 @@ actor Renderer {
                             limitFlash: settings.limitFlash,
                             showHUD: settings.showHUD ? 1 : 0,
                             activeGesture: Int32(settings.activeGestureIndex),
-                            useGST: settings.useGST ? 1 : 0)
+                            useGST: settings.useGST ? 1 : 0,
+                            relaxFactor: settings.relaxFactor,
+                            relaxBacktrack: settings.relaxBacktrack,
+                            sdfScaleCoarse: settings.sdfScaleCoarse,
+                            sdfScaleSuperCoarse: settings.sdfScaleSuperCoarse,
+                            earlyTermRatio: settings.earlyTermRatio,
+                            earlyTermCount: Int32(settings.earlyTermCount))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -1593,7 +1599,13 @@ actor Renderer {
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
-            limitFlash: settings.limitFlash
+            limitFlash: settings.limitFlash,
+            relaxFactor: settings.relaxFactor,
+            relaxBacktrack: settings.relaxBacktrack,
+            sdfScaleCoarse: settings.sdfScaleCoarse,
+            sdfScaleSuperCoarse: settings.sdfScaleSuperCoarse,
+            earlyTermRatio: settings.earlyTermRatio,
+            earlyTermCount: Int32(settings.earlyTermCount)
         )
         
         // Copy uniforms to buffer

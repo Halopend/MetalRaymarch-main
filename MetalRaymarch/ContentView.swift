@@ -10,6 +10,7 @@ import RealityKit
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.openWindow) private var openWindow
     
     @State private var speed: Float = 0
     @State private var initialPosition: SIMD3<Float> = .zero
@@ -143,6 +144,14 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.top, 4)
+                        
+                        // Open Refining window button
+                        Button(action: {
+                            openWindow(id: "refining")
+                        }) {
+                            Label("Open Refining", systemImage: "slider.horizontal.3")
+                        }
+                        .buttonStyle(.bordered)
                     }
                     .padding(.horizontal)
                 }

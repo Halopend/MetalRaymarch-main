@@ -69,6 +69,13 @@ typedef struct
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     int useGST;              // Use Grid Sphere Tracing (0/1)
+    // Refining parameters (Polychronakis 2024 / Keinert 2014)
+    float relaxFactor;       // Over-relaxation multiplier (default 1.6)
+    float relaxBacktrack;    // Backtrack factor when overshooting (default 0.7)
+    float sdfScaleCoarse;    // SDF scaling for coarse pass (default 1.3)
+    float sdfScaleSuperCoarse; // SDF scaling for super-coarse pass (default 1.5)
+    float earlyTermRatio;    // Early termination convergence ratio (default 0.3)
+    int earlyTermCount;      // Steps before early termination (default 3)
 } Uniforms;
 
 typedef struct
@@ -99,6 +106,13 @@ typedef struct
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
+    // Refining parameters (Polychronakis 2024 / Keinert 2014)
+    float relaxFactor;           // Over-relaxation multiplier (default 1.6)
+    float relaxBacktrack;        // Backtrack factor when overshooting (default 0.7)
+    float sdfScaleCoarse;        // SDF scaling for coarse pass (default 1.3)
+    float sdfScaleSuperCoarse;   // SDF scaling for super-coarse pass (default 1.5)
+    float earlyTermRatio;        // Early termination convergence ratio (default 0.3)
+    int earlyTermCount;          // Steps before early termination (default 3)
 } TileUniforms;
 
 // =============================================================================
