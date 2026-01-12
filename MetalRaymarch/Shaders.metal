@@ -63,6 +63,17 @@ constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this di
 constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
 constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
+// === REFINING PARAMETERS STRUCT ===
+// Passed from Swift uniforms for runtime tuning of sphere tracing optimization
+struct RefiningParams {
+    float relaxFactor;           // Over-relaxation multiplier (1.0-2.0)
+    float relaxBacktrack;        // Backtrack factor when overshooting (0.3-1.0)
+    float sdfScaleCoarse;        // SDF scaling for coarse pass (1.0-2.0)
+    float sdfScaleSuperCoarse;   // SDF scaling for super-coarse pass (1.0-2.5)
+    float earlyTermRatio;        // Early termination convergence ratio (0.1-0.6)
+    int earlyTermCount;          // Steps before early termination (1-6)
+};
+
 // === ENHANCED OVER-RELAXATION DEFAULTS ===
 // Based on "Skipping Spheres" paper and relaxed sphere tracing research
 // These are fallback defaults - actual values come from uniforms for runtime tuning
@@ -258,14 +269,14 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, fl
 // Based on "SDF Scaling & Early Ray Termination" (Polychronakis 2024)
 // Uses SDF scaling to allow even larger steps while maintaining Lipschitz safety
 // Combined with half precision for 2x throughput on Apple Silicon
-float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
+float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, RefiningParams refining)
 {
     float t = max(startT, 0.05);
     half foldingLimitH = half(foldingLimit);
     
-    // SDF scaling factor (Polychronakis 2024)
+    // SDF scaling factor (Polychronakis 2024) - from runtime uniforms
     // Scale up the SDF to allow larger steps - safe because we're just finding approximate distance
-    half sdfScale = half(SDF_SCALE_SUPER_COARSE);
+    half sdfScale = half(refining.sdfScaleSuperCoarse);
     
     // Very few steps with SDF scaling + over-relaxation for maximum speed
     [[unroll]]
@@ -294,14 +305,18 @@ float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, F
 // Based on "SDF Scaling & Early Ray Termination" (Polychronakis 2024)
 // Uses SDF scaling for faster convergence in hierarchical rendering
 // Combined with half precision for 2x throughput on Apple Silicon
-float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
+float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, RefiningParams refining)
 {
     float t = 0.05;
     half foldingLimitH = half(foldingLimit);
     half prevH = half(1e10);
     
-    // SDF scaling factor (Polychronakis 2024)
-    half sdfScale = half(SDF_SCALE_COARSE);
+    // SDF scaling factor (Polychronakis 2024) - from runtime uniforms
+    half sdfScale = half(refining.sdfScaleCoarse);
+    
+    // Early termination thresholds - from runtime uniforms
+    half earlyTermRatio = half(refining.earlyTermRatio);
+    int earlyTermCount = refining.earlyTermCount;
     
     // Early termination counter
     int slowCount = 0;
@@ -319,11 +334,11 @@ float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params
         
         if (t > 12.0) return 1000.0;
         
-        // Early ray termination check (Polychronakis 2024)
+        // Early ray termination check (Polychronakis 2024) - using runtime thresholds
         half ratio = h / max(prevH, half(0.0001));
-        if (ratio < half(EARLY_TERM_RATIO) && h < 0.3h) {
+        if (ratio < earlyTermRatio && h < 0.3h) {
             slowCount++;
-            if (slowCount >= EARLY_TERM_COUNT) {
+            if (slowCount >= earlyTermCount) {
                 return t;  // Terminate early on slow convergence
             }
         } else {
@@ -391,7 +406,7 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
 // Based on "Enhanced Sphere Tracing" (Keinert 2014) and 
 // "SDF Scaling & Early Ray Termination" (Polychronakis 2024)
 // Combines over-relaxation, backtracking, and convergence-based early termination
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, RefiningParams refining)
 {
     // Use temporally stable blue noise dithering for reprojection
     float dither = blueNoise(fragCoord, time) * 0.015;
@@ -400,9 +415,14 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     float glow = 0.0;
     int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
-    // Over-relaxation state (Keinert 2014)
+    // Over-relaxation state (Keinert 2014) - from runtime uniforms
     float prevH = 1e10;
-    float omega = RELAX_FACTOR;  // Start with aggressive over-relaxation
+    float omega = refining.relaxFactor;  // Start with aggressive over-relaxation
+    float relaxBacktrack = refining.relaxBacktrack;
+    
+    // Early ray termination thresholds - from runtime uniforms
+    float earlyTermRatio = refining.earlyTermRatio;
+    int earlyTermCount = refining.earlyTermCount;
     
     // Early ray termination state (Polychronakis 2024)
     // Track consecutive slow convergence steps
@@ -431,9 +451,9 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         // Detect slow convergence: if we're making tiny progress relative to distance,
         // we're likely approaching a complex surface area - terminate early
         float convergenceRatio = h / max(prevH, 0.0001f);
-        if (convergenceRatio < EARLY_TERM_RATIO && h < 0.5) {
+        if (convergenceRatio < earlyTermRatio && h < 0.5) {
             slowConvergenceCount++;
-            if (slowConvergenceCount >= EARLY_TERM_COUNT) {
+            if (slowConvergenceCount >= earlyTermCount) {
                 // Slow convergence detected - terminate and use current position
                 // This saves many wasted steps in complex fractal regions
                 return float2(t, saturate(glow * 0.25));
@@ -447,7 +467,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         float step;
         if (h > prevH * 1.1 && omega > 1.0) {
             // Overstep detected - backtrack and use conservative stepping
-            t -= prevH * (omega - 1.0) * RELAX_BACKTRACK;
+            t -= prevH * (omega - 1.0) * relaxBacktrack;
             omega = 1.0;  // Fall back to standard sphere tracing
             step = h;
             slowConvergenceCount = 0;  // Reset on backtrack
@@ -813,10 +833,19 @@ kernel void tileRaymarchKernel(
     float4x4 invViewMatrix = sharedInvViewMatrix;
     float3 rd = sharedRayDirs[localId.y * 4 + localId.x];
 
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
     if (localId.x == 1 && localId.y == 1) {
         sharedCenterRayDir = rd;
-        sharedCoarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+        sharedCoarseT = SceneCoarse(cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations, refining);
     }
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -938,10 +967,19 @@ kernel void tileRaymarchKernel2x2(
     viewPos /= viewPos.w;
     float3 rd = normalize((uniforms.invViewMatrix * float4(viewPos.xyz, 0.0)).xyz);
     
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
     if (localIndex == 0) {
         sharedCenterRayDir = rd;
-        sharedCoarseT = SceneCoarse(uniforms.cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations);
+        sharedCoarseT = SceneCoarse(uniforms.cameraPos, rd, uniforms.foldingLimit, fractalParams, lodIterations, refining);
     }
     
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1069,9 +1107,18 @@ kernel void adaptiveHierarchical8x8(
     
     float gTime = uniforms.time * 0.01 + 15.00;
     
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // Use the SAME Scene() function as fragment shader for correctness
     float2 ret = Scene(cameraPos, rd, pixelCenter, 1.0, uniforms.maxRaySteps, 
-                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, refining);
     
     float adjustedDist = ret.x;
     float glow = ret.y;
@@ -1187,7 +1234,16 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
 
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, refining);
     half3 col = half3(0.0h);
 
     if (ret.x < 900.0)
@@ -1318,9 +1374,18 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
     
+    // Build RefiningParams from uniforms for runtime tuning
+    RefiningParams refining;
+    refining.relaxFactor = uniforms.relaxFactor;
+    refining.relaxBacktrack = uniforms.relaxBacktrack;
+    refining.sdfScaleCoarse = uniforms.sdfScaleCoarse;
+    refining.sdfScaleSuperCoarse = uniforms.sdfScaleSuperCoarse;
+    refining.earlyTermRatio = uniforms.earlyTermRatio;
+    refining.earlyTermCount = uniforms.earlyTermCount;
+    
     // === STANDARD RAYMARCH (every pixel) ===
     // The hierarchical coarse/fine approach doesn't help due to SIMD lockstep execution
-    float2 ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, refining);
     float adjustedDist = ret.x;
     float glow = ret.y;
     
