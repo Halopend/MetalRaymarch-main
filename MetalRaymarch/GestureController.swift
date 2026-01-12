@@ -9,8 +9,9 @@
 //    * Index fingers = minDistance (pull apart = increase)
 //    * Middle fingers = foldingLimit
 //    * Ring fingers = sphereRadius
-//  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
-//    * Right hand index = translate position
+//  - ONE-HAND PINCH+DRAG: Pinch and drag with right hand to translate
+//    * Works even when left hand is tracked (as long as left isn't pinching)
+//    * Right hand index pinch = translate position
 //
 
 import Foundation
@@ -392,6 +393,7 @@ final class GestureController {
     }
     
     /// Right-hand index pinch drag → position translate
+    /// Now works with one hand - no longer requires left hand to be absent
     private func processRightIndexDrag() {
         guard let settings = renderSettings else { return }
         
@@ -402,11 +404,19 @@ final class GestureController {
         }
         
         let rightPinch = rightHand.indexPinch
+        let leftPinch = leftHand.indexPinch
+        
+        // Allow one-handed drag: right hand pinching while left hand is NOT pinching (or not tracked)
+        // This enables translation with just one hand while still allowing two-hand gestures
+        let leftNotPinching = !leftHand.isTracked || leftPinch < pinchActivateThreshold
+        
         let active: Bool
         if rightIndexDragActive {
-            active = rightHand.isTracked && rightPinch >= pinchReleaseThreshold
+            // Stay active as long as right hand is pinching and left is not also pinching
+            active = rightHand.isTracked && rightPinch >= pinchReleaseThreshold && leftNotPinching
         } else {
-            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold && !leftHand.isTracked
+            // Activate when right hand pinches and left hand is not pinching
+            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold && leftNotPinching
         }
         
         // Gesture started

@@ -21,9 +21,9 @@ struct ContentView: View {
         
         let _ = print("DEBUG: ContentView body re-evaluated. Resolution Scale: \(appModel.renderSettings.resolutionScale)")
 
-        VStack {
+        VStack(spacing: 8) {
             // Resolution Scale - Always visible
-            VStack(spacing: 5) {
+            VStack(spacing: 4) {
                 Text("Resolution Scale: \(Int(appModel.renderSettings.resolutionScale * 100))%")
                     .font(.headline)
                 
@@ -69,13 +69,13 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                 }
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 10)
 
             ToggleImmersiveSpaceButton()
             
             if appModel.immersiveSpaceState == .open {
                 ScrollView {
-                    VStack(spacing: 12) {
+                    VStack(spacing: 8) {
                         Divider()
                         
                         Text("Animation speed (caution: motion sickness!)")
@@ -126,15 +126,15 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text("Drag to move, Pinch to scale")
+                        Text("One-hand pinch+drag to move")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 8)
                 }
             }
         }
-        .padding(40)
+        .padding(20)
         .gesture(
             DragGesture()
                 .onChanged { value in
