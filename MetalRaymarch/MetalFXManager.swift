@@ -2,12 +2,9 @@
 import MetalFX
 import Metal
 
-/// Optimized MetalFX spatial upscaler with cached views and scaler reuse.
-/// Depth is preserved for ASW / reprojection.
+/// Minimal MetalFX spatial upscaler used by the raymarch renderer
+/// Creates per-eye input/output textures and encodes spatial upscale.
 final class MetalFXManager {
-
-    // MARK: - Configuration
-
     struct Configuration: Equatable {
         var inputWidth: Int
         var inputHeight: Int
@@ -38,8 +35,6 @@ final class MetalFXManager {
         }
     }
 
-    // MARK: - Properties
-
     private let device: MTLDevice
     private(set) var configuration: Configuration
     private var viewCount: Int
@@ -50,154 +45,110 @@ final class MetalFXManager {
     private(set) var depthTexture: MTLTexture?
     private(set) var outputTexture: MTLTexture?
 
-    // Cached per-eye views (NO per-frame allocation)
-    private var inputViews: [MTLTexture] = []
-    private var outputViews: [MTLTexture] = []
-
-    // MARK: - Init
-
     init(device: MTLDevice, configuration: Configuration, viewCount: Int) throws {
         self.device = device
         self.configuration = configuration
         self.viewCount = max(1, viewCount)
-
         try createTextures()
-        try createOrUpdateScalers(resolutionChanged: true)
+        try createScalers()
     }
-
-    // MARK: - Public Update
 
     func update(configuration: Configuration, viewCount: Int) throws {
-        let newViewCount = max(1, viewCount)
-
-        let resolutionChanged =
-            self.configuration.inputWidth  != configuration.inputWidth ||
-            self.configuration.inputHeight != configuration.inputHeight ||
-            self.configuration.outputWidth != configuration.outputWidth ||
-            self.configuration.outputHeight != configuration.outputHeight ||
-            self.configuration.colorFormat != configuration.colorFormat
-
-        let viewCountChanged = self.viewCount != newViewCount
-
+        if self.configuration == configuration && self.viewCount == viewCount { return }
         self.configuration = configuration
-        self.viewCount = newViewCount
-
-        if resolutionChanged || viewCountChanged {
-            try createTextures()
-        }
-
-        try createOrUpdateScalers(resolutionChanged: resolutionChanged)
+        self.viewCount = max(1, viewCount)
+        try createTextures()
+        try createScalers()
     }
 
-    // MARK: - Encoding
-
     func encodeSpatialUpscale(commandBuffer: MTLCommandBuffer) throws {
-        guard
-            !inputViews.isEmpty,
-            !outputViews.isEmpty,
-            scalers.count >= viewCount
-        else {
+        guard let input = inputTexture, let output = outputTexture else {
             throw Error.missingTextures
         }
 
         for eye in 0..<viewCount {
+            guard let inView = input.makeTextureView(
+                pixelFormat: input.pixelFormat,
+                textureType: .type2D,
+                levels: 0..<1,
+                slices: eye..<(eye + 1)
+            ), let outView = output.makeTextureView(
+                pixelFormat: output.pixelFormat,
+                textureType: .type2D,
+                levels: 0..<1,
+                slices: eye..<(eye + 1)
+            ) else {
+                throw Error.textureViewFailed
+            }
+
+            guard eye < scalers.count else { throw Error.scalerCreationFailed }
             let scaler = scalers[eye]
-            scaler.colorTexture = inputViews[eye]
-            scaler.outputTexture = outputViews[eye]
+            scaler.colorTexture = inView
+            scaler.outputTexture = outView
+            // Tell the scaler exactly how much of the input texture contains valid content
+            scaler.inputContentWidth = configuration.inputWidth
+            scaler.inputContentHeight = configuration.inputHeight
             scaler.encode(commandBuffer: commandBuffer)
         }
     }
 
-    // MARK: - Texture Creation
-
     private func createTextures() throws {
+        // Input (low-res render target) - MUST have renderTarget for render pass
+        let inputDescriptor = MTLTextureDescriptor()
+        inputDescriptor.textureType = .type2DArray
+        inputDescriptor.arrayLength = viewCount
+        inputDescriptor.width = configuration.inputWidth
+        inputDescriptor.height = configuration.inputHeight
+        inputDescriptor.pixelFormat = configuration.colorFormat
+        inputDescriptor.storageMode = .private
+        // Needs renderTarget for fragment shaders, shaderWrite for compute, shaderRead for MetalFX
+        inputDescriptor.usage = [.renderTarget, .shaderRead, .shaderWrite]
 
-        inputViews.removeAll(keepingCapacity: true)
-        outputViews.removeAll(keepingCapacity: true)
-
-        // Low-res color input (rendered into)
-        let inputDesc = MTLTextureDescriptor()
-        inputDesc.textureType = .type2DArray
-        inputDesc.arrayLength = viewCount
-        inputDesc.width = configuration.inputWidth
-        inputDesc.height = configuration.inputHeight
-        inputDesc.pixelFormat = configuration.colorFormat
-        inputDesc.storageMode = .private
-        inputDesc.usage = [.renderTarget, .shaderRead]
-
-        guard let input = device.makeTexture(descriptor: inputDesc) else {
+        guard let input = device.makeTexture(descriptor: inputDescriptor) else {
             throw Error.textureCreationFailed("input")
         }
         input.label = "MetalFX Input"
+        
+        // Verify usage was set correctly
+        guard input.usage.contains(.renderTarget) else {
+            throw Error.textureCreationFailed("input - renderTarget usage not set (got \(input.usage.rawValue))")
+        }
         inputTexture = input
 
-        // Depth texture (REQUIRED for ASW / reprojection)
-        let depthDesc = MTLTextureDescriptor()
-        depthDesc.textureType = .type2DArray
-        depthDesc.arrayLength = viewCount
-        depthDesc.width = configuration.inputWidth
-        depthDesc.height = configuration.inputHeight
-        depthDesc.pixelFormat = configuration.depthFormat
-        depthDesc.storageMode = .private
-        depthDesc.usage = [.renderTarget, .shaderRead]
+        // Depth for offscreen render
+        let depthDescriptor = MTLTextureDescriptor()
+        depthDescriptor.textureType = .type2DArray
+        depthDescriptor.arrayLength = viewCount
+        depthDescriptor.width = configuration.inputWidth
+        depthDescriptor.height = configuration.inputHeight
+        depthDescriptor.pixelFormat = configuration.depthFormat
+        depthDescriptor.storageMode = .private
+        depthDescriptor.usage = [.renderTarget, .shaderRead]
 
-        guard let depth = device.makeTexture(descriptor: depthDesc) else {
+        guard let depth = device.makeTexture(descriptor: depthDescriptor) else {
             throw Error.textureCreationFailed("depth")
         }
         depth.label = "MetalFX Depth"
         depthTexture = depth
 
-        // Upscaled output
-        let outputDesc = MTLTextureDescriptor()
-        outputDesc.textureType = .type2DArray
-        outputDesc.arrayLength = viewCount
-        outputDesc.width = configuration.outputWidth
-        outputDesc.height = configuration.outputHeight
-        outputDesc.pixelFormat = configuration.colorFormat
-        outputDesc.storageMode = .private
-        outputDesc.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        // Output (upscaled) - needs renderTarget for potential use in render passes
+        let outputDescriptor = MTLTextureDescriptor()
+        outputDescriptor.textureType = .type2DArray
+        outputDescriptor.arrayLength = viewCount
+        outputDescriptor.width = configuration.outputWidth
+        outputDescriptor.height = configuration.outputHeight
+        outputDescriptor.pixelFormat = configuration.colorFormat
+        outputDescriptor.storageMode = .private
+        outputDescriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
 
-        guard let output = device.makeTexture(descriptor: outputDesc) else {
+        guard let output = device.makeTexture(descriptor: outputDescriptor) else {
             throw Error.textureCreationFailed("output")
         }
         output.label = "MetalFX Output"
         outputTexture = output
-
-        // Cache per-eye views ONCE
-        for eye in 0..<viewCount {
-            guard
-                let inView = input.makeTextureView(
-                    pixelFormat: input.pixelFormat,
-                    textureType: .type2D,
-                    levels: 0..<1,
-                    slices: eye..<(eye + 1)
-                ),
-                let outView = output.makeTextureView(
-                    pixelFormat: output.pixelFormat,
-                    textureType: .type2D,
-                    levels: 0..<1,
-                    slices: eye..<(eye + 1)
-                )
-            else {
-                throw Error.textureViewFailed
-            }
-
-            inView.label = "MetalFX Input Eye \(eye)"
-            outView.label = "MetalFX Output Eye \(eye)"
-
-            inputViews.append(inView)
-            outputViews.append(outView)
-        }
     }
 
-    // MARK: - Scaler Creation / Reuse
-
-    private func createOrUpdateScalers(resolutionChanged: Bool) throws {
-
-        if resolutionChanged {
-            scalers.removeAll(keepingCapacity: true)
-        }
-
+    private func createScalers() throws {
         let descriptor = MTLFXSpatialScalerDescriptor()
         descriptor.inputWidth = configuration.inputWidth
         descriptor.inputHeight = configuration.inputHeight
@@ -205,17 +156,18 @@ final class MetalFXManager {
         descriptor.outputHeight = configuration.outputHeight
         descriptor.colorTextureFormat = configuration.colorFormat
         descriptor.outputTextureFormat = configuration.colorFormat
+        // Use linear processing for rgba16Float (HDR/linear content)
+        // .perceptual assumes sRGB gamma which causes edge artifacts with linear formats
         descriptor.colorProcessingMode = .linear
 
-        // These do NOT change per frame – set once
-        for _ in scalers.count..<viewCount {
+        var newScalers: [MTLFXSpatialScaler] = []
+        for _ in 0..<viewCount {
             guard let scaler = descriptor.makeSpatialScaler(device: device) else {
                 throw Error.scalerCreationFailed
             }
-            scaler.inputContentWidth = configuration.inputWidth
-            scaler.inputContentHeight = configuration.inputHeight
-            scalers.append(scaler)
+            newScalers.append(scaler)
         }
+        scalers = newScalers
     }
 }
 #endif
