@@ -78,6 +78,9 @@ actor Renderer {
     // Previous frame matrices for reprojection
     var prevProjectionMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
     var prevModelViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    var prevViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    var lastFrameProjectionMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    var lastFrameViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -509,9 +512,14 @@ actor Renderer {
             let viewMatrix = (deviceTransform * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             let modelView = viewMatrix * modelMatrix
-            
+
+            // Cache last frame matrices for temporal reprojection in compute path
+            lastFrameProjectionMatrices[viewIndex] = prevProjectionMatrices[viewIndex]
+            lastFrameViewMatrices[viewIndex] = prevViewMatrices[viewIndex]
+
             prevProjectionMatrices[viewIndex] = projection
             prevModelViewMatrices[viewIndex] = modelView
+            prevViewMatrices[viewIndex] = viewMatrix
         }
 
 //        rotation += 0.01
@@ -954,10 +962,15 @@ actor Renderer {
         
         // Get camera position from inverse model-view matrix (in model space)
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
+
+        let prevViewMatrix = viewIndex < lastFrameViewMatrices.count ? lastFrameViewMatrices[viewIndex] : matrix_identity_float4x4
+        let prevProjMatrix = viewIndex < lastFrameProjectionMatrices.count ? lastFrameProjectionMatrices[viewIndex] : matrix_identity_float4x4
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
+            prevViewMatrix: prevViewMatrix,
+            prevProjMatrix: prevProjMatrix,
             cameraPos: cameraPos,
             time: Float(appModel.clock.time),
             resolution: SIMD2<Float>(Float(outputTexture.width), Float(outputTexture.height)),
@@ -976,7 +989,8 @@ actor Renderer {
             sceneIndex: Int32(settings.sceneIndex),
             ifsScale: settings.ifsScale,
             ifsOffset: settings.ifsOffset,
-            ifsGlow: settings.ifsGlow
+            ifsGlow: settings.ifsGlow,
+            useTemporalReprojection: settings.useTemporalReprojection ? 1 : 0
         )
         
         // Copy uniforms to buffer
