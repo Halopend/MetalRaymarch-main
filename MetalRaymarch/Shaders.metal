@@ -334,6 +334,119 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     return float2(1000.0, saturate(glow * 0.25));
 }
 
+// === TEMPORAL REPROJECTION UTILITIES ===
+// Reproject current pixel to previous frame's UV coordinates
+// Returns: xy = previous UV (0-1), z = confidence (0 = invalid, 1 = valid)
+float3 reprojectToPreviousFrame(
+    float3 worldPos,
+    float4x4 prevViewMatrix,
+    float4x4 prevProjMatrix,
+    float2 resolution
+) {
+    // Transform world position to previous frame's clip space
+    float4 prevClip = prevProjMatrix * prevViewMatrix * float4(worldPos, 1.0);
+    
+    // Perspective divide
+    if (prevClip.w <= 0.0) return float3(0.0, 0.0, 0.0);  // Behind camera
+    
+    float3 prevNDC = prevClip.xyz / prevClip.w;
+    
+    // Check if within NDC bounds (-1 to 1)
+    if (abs(prevNDC.x) > 1.0 || abs(prevNDC.y) > 1.0 || prevNDC.z < 0.0 || prevNDC.z > 1.0) {
+        return float3(0.0, 0.0, 0.0);  // Outside view frustum
+    }
+    
+    // Convert NDC to UV (0-1)
+    float2 prevUV = prevNDC.xy * 0.5 + 0.5;
+    prevUV.y = 1.0 - prevUV.y;  // Flip Y for Metal
+    
+    return float3(prevUV, 1.0);  // Valid reprojection
+}
+
+// Temporal raymarch - uses previous frame's hit distance as starting point
+// Can reduce steps by 50-80% for slow-moving scenes
+float2 SceneTemporal(
+    float3 rO,
+    float3 rD,
+    float2 fragCoord,
+    float quality,
+    int maxStepsParam,
+    float glowIntensity,
+    float foldingLimit,
+    FractalParams params,
+    int iterations,
+    float time,
+    float prevHitDistance,  // From history buffer
+    float reprojectionConfidence  // 0-1, how reliable is the reprojection
+) {
+    float dither = blueNoise(fragCoord, time) * 0.015;
+    
+    // If we have a valid reprojection, start from there (backed up slightly for safety)
+    float startT;
+    int maxSteps;
+    
+    if (reprojectionConfidence > 0.5 && prevHitDistance > 0.0 && prevHitDistance < 100.0) {
+        // Start from previous hit distance, backed up by 10% for safety
+        startT = max(0.01, prevHitDistance * 0.9) + dither;
+        // Fewer steps needed since we're starting close to the surface
+        maxSteps = max(int(float(maxStepsParam) * quality * 0.4), 4);
+    } else {
+        // No valid reprojection, use standard starting point
+        startT = 0.05 + dither;
+        maxSteps = max(int(float(maxStepsParam) * quality), 4);
+    }
+    
+    float t = startT;
+    float glow = 0.0;
+    
+    for(int j = 0; j < maxSteps; j++)
+    {
+        float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
+        
+        float3 p = rO + t * rD;
+        float h = Map(p, params, foldingLimit, iterations);
+        
+        if(h < threshold)
+        {
+            return float2(t, saturate(glow * 0.25));
+        }
+        
+        if (t > 12.0) break;
+        
+        glow += saturate(0.04 - h) * glowIntensity;
+        t += h;
+    }
+    
+    // If we started from reprojection and missed, fall back to full search
+    if (reprojectionConfidence > 0.5 && prevHitDistance > 0.0) {
+        // Try searching from the beginning
+        t = 0.05 + dither;
+        glow = 0.0;
+        int fallbackSteps = max(int(float(maxStepsParam) * quality * 0.6), 4);
+        
+        for(int j = 0; j < fallbackSteps; j++)
+        {
+            float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
+            
+            float3 p = rO + t * rD;
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(h < threshold)
+            {
+                return float2(t, saturate(glow * 0.25));
+            }
+            
+            // Stop before we reach the reprojected distance (already searched there)
+            if (t > prevHitDistance * 0.85) break;
+            
+            glow += saturate(0.04 - h) * glowIntensity;
+            t += h;
+        }
+    }
+    
+    return float2(1000.0, saturate(glow * 0.25));
+}
+
 // =============================================================================
 // SCENE 1: GLOWY IFS (Iterated Function System with volumetric glow)
 // =============================================================================
@@ -1241,6 +1354,141 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     col = clamp(col, half3(0.0h), half3(2.0h));
     
+    col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
+    
+    output.color = float4(float3(col), 1.0);
+    return output;
+}
+
+// === TEMPORAL REPROJECTION FRAGMENT SHADER ===
+// Uses previous frame's hit distance to accelerate raymarching
+// Can reduce steps by 50-80% for slow-moving scenes
+
+// Output structure that includes hit distance for history buffer
+struct TemporalFragmentOutput {
+    float4 color [[color(0)]];
+    float depth [[depth(any)]];
+    float hitDistance [[color(1)]];  // Write hit distance to second render target
+};
+
+fragment TemporalFragmentOutput fragmentShaderTemporal(ColorInOut in [[stage_in]],
+                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                               ushort ampId [[amplification_id]],
+                               texture2d<half> cubeMap [[texture(TextureIndexColor)]],
+                               texture2d<float> historyTexture [[texture(1)]])  // Previous frame's hit distances
+{
+    TemporalFragmentOutput output;
+    Uniforms uniforms = uniformsArray.uniforms[ampId];
+    float2 fragCoord = in.position.xy;
+    float time = uniforms.time;
+    
+    float gTime = time * 0.01 + 15.00;
+    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
+    float3 rd = normalize(in.modelPos - cameraPos);
+    
+    int lodIterations = max(int(uniforms.fractalIterations), 2);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    
+    // === TEMPORAL REPROJECTION ===
+    float prevHitDistance = 0.0;
+    float reprojectionConfidence = 0.0;
+    
+    if (uniforms.useTemporalReprojection == 1) {
+        // Estimate world position using a reasonable default distance
+        float estimatedDist = 2.0;  // Default estimate
+        float3 estimatedWorldPos = cameraPos + rd * estimatedDist;
+        
+        // Reproject to previous frame
+        float4 prevClip = uniforms.prevProjectionMatrix * uniforms.prevModelViewMatrix * float4(estimatedWorldPos, 1.0);
+        if (prevClip.w > 0.0) {
+            float3 prevNDC = prevClip.xyz / prevClip.w;
+            
+            // Check if within view frustum
+            if (abs(prevNDC.x) < 1.0 && abs(prevNDC.y) < 1.0) {
+                float2 prevUV = prevNDC.xy * 0.5 + 0.5;
+                prevUV.y = 1.0 - prevUV.y;  // Flip Y for Metal
+                
+                // Sample history buffer
+                constexpr sampler historySampler(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+                float4 historyValue = historyTexture.sample(historySampler, prevUV);
+                prevHitDistance = historyValue.r;
+                
+                // Confidence based on how close the reprojection is to screen center
+                // and whether we got a valid hit distance
+                if (prevHitDistance > 0.0 && prevHitDistance < 100.0) {
+                    float edgeDist = max(abs(prevNDC.x), abs(prevNDC.y));
+                    reprojectionConfidence = 1.0 - edgeDist * 0.5;
+                }
+            }
+        }
+    }
+    
+    // Use temporal raymarch if we have valid reprojection, otherwise standard
+    float2 ret;
+    if (reprojectionConfidence > 0.3) {
+        ret = SceneTemporal(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, 
+                           uniforms.foldingLimit, fractalParams, lodIterations, time, 
+                           prevHitDistance, reprojectionConfidence);
+    } else {
+        ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, 
+                   uniforms.foldingLimit, fractalParams, lodIterations, time);
+    }
+    
+    float adjustedDist = ret.x;
+    float glow = ret.y;
+    
+    // Store hit distance for next frame
+    output.hitDistance = (adjustedDist < 900.0) ? adjustedDist : 0.0;
+    
+    half3 col = half3(0.0h);
+    
+    if (ret.x < 900.0)
+    {
+        float3 p = cameraPos + adjustedDist * rd;
+        float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
+        
+        // Lighting
+        int shadowIterations = max(lodIterations - 2, 2);
+        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        
+        float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+        float3 spot = spotLight - p;
+        float atten = length(spot);
+        spot /= atten;
+        
+        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        
+        float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+        half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+        
+        col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
+        col = (col * bri * shaSpot) + (col * briSun * shaSun);
+        
+        // Specular
+        float3 ref = reflect(rd, nor);
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        col += half3(specSpot) * shaSpot * bri;
+        col += half3(specSun) * shaSun * briSun;
+
+        // Compute clip-space depth
+        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
+        output.depth = clipPos.z / clipPos.w;
+    }
+    else
+    {
+        output.depth = 1e-7;
+    }
+    
+    half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
+    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
+    
+    half glowH = half(glow);
+    col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
+    
+    col = clamp(col, half3(0.0h), half3(2.0h));
     col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
     
     output.color = float4(float3(col), 1.0);

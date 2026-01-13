@@ -71,6 +71,9 @@ class RenderSettings {
     private var _ifsScale: Float = 1.74              // IFS scaling factor (default 1.74)
     private var _ifsOffset: Float = 0.98             // IFS offset parameter (default 0.98)
     private var _ifsGlow: Float = 1.0                // IFS glow intensity multiplier
+    
+    // Temporal reprojection: use previous frame's hit distance to accelerate raymarching
+    private var _useTemporalReprojection: Bool = true  // Enabled by default for performance
 
     var minDistance: Float {
         get { lock.withLock { _minDistance } }
@@ -203,6 +206,13 @@ class RenderSettings {
     var ifsGlow: Float {
         get { lock.withLock { _ifsGlow } }
         set { lock.withLock { _ifsGlow = newValue } }
+    }
+    
+    /// Enable temporal reprojection to use previous frame's hit distance as starting point
+    /// Can reduce raymarch steps by 50-80% for slow-moving scenes
+    var useTemporalReprojection: Bool {
+        get { lock.withLock { _useTemporalReprojection } }
+        set { lock.withLock { _useTemporalReprojection = newValue } }
     }
 }
 
