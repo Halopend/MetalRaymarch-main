@@ -9,6 +9,42 @@ import SwiftUI
 import ARKit
 import os  // For os_unfair_lock - fastest available lock primitive
 
+/// Quality preset that bundles fractal iterations and ray steps
+enum QualityPreset: String, CaseIterable {
+    case low = "Low"
+    case mid = "Mid"
+    case high = "High"
+    case ultra = "Ultra"
+    
+    var fractalIterations: Int {
+        switch self {
+        case .low: return 6
+        case .mid: return 9
+        case .high: return 12
+        case .ultra: return 16
+        }
+    }
+    
+    var raySteps: Int {
+        switch self {
+        case .low: return 32
+        case .mid: return 64
+        case .high: return 100
+        case .ultra: return 128
+        }
+    }
+    
+    /// Try to detect preset from current settings
+    static func detect(fractalIterations: Int, raySteps: Int) -> QualityPreset? {
+        for preset in allCases {
+            if preset.fractalIterations == fractalIterations && preset.raySteps == raySteps {
+                return preset
+            }
+        }
+        return nil
+    }
+}
+
 @MainActor
 @Observable
 class AppModel {

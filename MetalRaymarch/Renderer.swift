@@ -220,49 +220,46 @@ actor Renderer {
         // - Register spilling from loop variables
         // Expected: 30-50% overall performance improvement
         
-        let commonIterationCounts = [6, 11, 14]  // Most commonly used fractal iterations
-        let commonRayStepCounts = [32, 64, 100]  // Most commonly used ray steps
+        // Quality presets: Low (6,32), Mid (9,64), High (12,100), Ultra (16,128)
+        // Only build pipelines for exact preset combinations (4 pipelines, not 16)
+        let qualityPresets = QualityPreset.allCases
         
         var pipelineCount = 0
-        print("Building specialized pipelines for \(commonIterationCounts.count) × \(commonRayStepCounts.count) = \(commonIterationCounts.count * commonRayStepCounts.count) combinations...")
+        print("Building specialized pipelines for \(qualityPresets.count) quality presets...")
         
-        for iterCount in commonIterationCounts {
-            for raySteps in commonRayStepCounts {
-                let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
-                let config = FunctionConstantConfig(
-                    fractalIterations: Int32(iterCount),
-                    shadowIterations: Int32(max(iterCount - 2, 2)),
-                    debugHierarchical: false,
-                    maxRaySteps: Int32(raySteps)
-                )
-                let constants = config.toMTLConstants()
-                
-                // Standard pipeline
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: rasterSampleCount,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    functionConstants: constants
-                ) {
-                    specializedPipelines[key] = pipeline
-                    pipelineCount += 1
-                }
-                
-                // Quad-shared pipeline
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: rasterSampleCount,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    fragmentFunctionName: "fragmentShaderQuadShared",
-                    functionConstants: constants
-                ) {
-                    specializedQuadSharedPipelines[key] = pipeline
-                }
+        for preset in qualityPresets {
+            let iterCount = preset.fractalIterations
+            let raySteps = preset.raySteps
+            let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
+            let config = FunctionConstantConfig.forQualityPreset(preset)
+            let constants = config.toMTLConstants()
+            
+            // Standard pipeline
+            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                functionConstants: constants
+            ) {
+                specializedPipelines[key] = pipeline
+                pipelineCount += 1
+                print("  ✓ \(preset.rawValue): FI=\(iterCount), RI=\(raySteps)")
+            }
+            
+            // Quad-shared pipeline
+            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                fragmentFunctionName: "fragmentShaderQuadShared",
+                functionConstants: constants
+            ) {
+                specializedQuadSharedPipelines[key] = pipeline
             }
         }
-        print("✓ Built \\(pipelineCount) specialized standard pipelines")
+        print("✓ Built \(pipelineCount) specialized standard pipelines")
 
         // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
         #if canImport(MetalFX)
@@ -285,45 +282,40 @@ actor Renderer {
                                                                               vertexFunctionName: "vertexShader",
                                                                               fragmentFunctionName: "fragmentShaderQuadShared")
             
-            // Also build specialized MetalFX pipelines for common (iterations, raySteps) combinations
+            // Also build specialized MetalFX pipelines for quality presets
             var metalFXPipelineCount = 0
-            for iterCount in commonIterationCounts {
-                for raySteps in commonRayStepCounts {
-                    let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
-                    let config = FunctionConstantConfig(
-                        fractalIterations: Int32(iterCount),
-                        shadowIterations: Int32(max(iterCount - 2, 2)),
-                        debugHierarchical: false,
-                        maxRaySteps: Int32(raySteps)
-                    )
-                    let constants = config.toMTLConstants()
+            for preset in qualityPresets {
+                let iterCount = preset.fractalIterations
+                let raySteps = preset.raySteps
+                let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
+                let config = FunctionConstantConfig.forQualityPreset(preset)
+                let constants = config.toMTLConstants()
                     
-                    if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                        device: device,
-                        layerRenderer: layerRenderer,
-                        rasterSampleCount: 1,
-                        mtlVertexDescriptor: mtlVertexDescriptor,
-                        colorFormat: .rgba16Float,
-                        functionConstants: constants
-                    ) {
-                        specializedMetalFXPipelines[key] = pipeline
-                        metalFXPipelineCount += 1
-                    }
-                    
-                    if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                        device: device,
-                        layerRenderer: layerRenderer,
-                        rasterSampleCount: 1,
-                        mtlVertexDescriptor: mtlVertexDescriptor,
-                        colorFormat: .rgba16Float,
-                        fragmentFunctionName: "fragmentShaderQuadShared",
-                        functionConstants: constants
-                    ) {
-                        specializedMetalFXQuadSharedPipelines[key] = pipeline
-                    }
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: 1,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    colorFormat: .rgba16Float,
+                    functionConstants: constants
+                ) {
+                    specializedMetalFXPipelines[key] = pipeline
+                    metalFXPipelineCount += 1
+                }
+                
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: 1,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    colorFormat: .rgba16Float,
+                    fragmentFunctionName: "fragmentShaderQuadShared",
+                    functionConstants: constants
+                ) {
+                    specializedMetalFXQuadSharedPipelines[key] = pipeline
                 }
             }
-            print("✓ Built \\(metalFXPipelineCount) specialized MetalFX pipelines")
+            print("✓ Built \(metalFXPipelineCount) specialized MetalFX pipelines")
             
             depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
                                                                                layerRenderer: layerRenderer, 
@@ -769,29 +761,52 @@ actor Renderer {
             return constants
         }
         
-        /// Creates a config optimized for high performance (iteration=4, no HUD, no fur, no debug)
+        /// Creates a config optimized for high performance (Low quality preset: FI=6, RI=32)
         static var highPerformance: FunctionConstantConfig {
-            return FunctionConstantConfig(
-                fractalIterations: 4,
-                shadowIterations: 2,
-                safetyBubbleEnabled: false,
-                showFurHands: false,
-                showHUD: false,
-                qualityMode: 1,  // Medium quality
-                debugHierarchical: false
-            )
-        }
-        
-        /// Creates a config for high quality rendering
-        static var highQuality: FunctionConstantConfig {
             return FunctionConstantConfig(
                 fractalIterations: 6,
                 shadowIterations: 4,
+                safetyBubbleEnabled: false,
+                showFurHands: false,
+                showHUD: false,
+                qualityMode: 2,  // Low quality
+                debugHierarchical: false,
+                maxRaySteps: 32
+            )
+        }
+        
+        /// Creates a config for high quality rendering (Ultra quality preset: FI=16, RI=128)
+        static var highQuality: FunctionConstantConfig {
+            return FunctionConstantConfig(
+                fractalIterations: 16,
+                shadowIterations: 14,
                 safetyBubbleEnabled: true,
                 showFurHands: true,
                 showHUD: true,
                 qualityMode: 0,  // High quality
-                debugHierarchical: false
+                debugHierarchical: false,
+                maxRaySteps: 128
+            )
+        }
+        
+        /// Creates a config for each quality preset
+        static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
+            let qualityMode: Int32
+            switch preset {
+            case .low: qualityMode = 2
+            case .mid: qualityMode = 1  
+            case .high: qualityMode = 0
+            case .ultra: qualityMode = 0
+            }
+            return FunctionConstantConfig(
+                fractalIterations: Int32(preset.fractalIterations),
+                shadowIterations: Int32(max(preset.fractalIterations - 2, 2)),
+                safetyBubbleEnabled: true,
+                showFurHands: false,
+                showHUD: true,
+                qualityMode: qualityMode,
+                debugHierarchical: false,
+                maxRaySteps: Int32(preset.raySteps)
             )
         }
     }

@@ -86,13 +86,39 @@ struct ContentView: View {
                             }
                         })
 
-                        // Core controls
+                        // Quality preset picker
                         Group {
-                            Text("Fractal Iterations: \(appModel.renderSettings.fractalIterations)")
-                            Slider(value: Binding(get: { Float(appModel.renderSettings.fractalIterations) }, set: { appModel.renderSettings.fractalIterations = Int($0) }), in: 4...18, step: 1)
-
-                            Text("Ray Steps: \(appModel.renderSettings.maxRaySteps)")
-                            Slider(value: Binding(get: { Float(appModel.renderSettings.maxRaySteps) }, set: { appModel.renderSettings.maxRaySteps = Int($0) }), in: 16...128, step: 8)
+                            Text("Quality Preset")
+                                .font(.headline)
+                            
+                            Picker("Quality", selection: Binding(
+                                get: {
+                                    QualityPreset.detect(
+                                        fractalIterations: appModel.renderSettings.fractalIterations,
+                                        raySteps: appModel.renderSettings.maxRaySteps
+                                    ) ?? .low
+                                },
+                                set: { preset in
+                                    appModel.renderSettings.fractalIterations = preset.fractalIterations
+                                    appModel.renderSettings.maxRaySteps = preset.raySteps
+                                }
+                            )) {
+                                ForEach(QualityPreset.allCases, id: \.self) { preset in
+                                    Text(preset.rawValue).tag(preset)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            
+                            // Show current values
+                            HStack {
+                                Text("FI: \(appModel.renderSettings.fractalIterations)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("RI: \(appModel.renderSettings.maxRaySteps)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         // Mandelbox parameters
