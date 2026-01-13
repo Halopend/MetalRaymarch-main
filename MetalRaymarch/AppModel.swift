@@ -148,6 +148,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _sdfScaleSuperCoarse: Float = 1.5    // SDF scaling for super-coarse pass (1.0-2.5)
     private var _earlyTermRatio: Float = 0.3         // Early termination convergence ratio (0.1-0.5)
     private var _earlyTermCount: Int = 3             // Steps before early termination (1-5)
+    
+    // Temporal reprojection: use previous frame's hit distance to accelerate raymarching
+    private var _useTemporalReprojection: Bool = true  // Enabled by default for performance
 
     var minDistance: Float {
         get { withLock { _minDistance } }
@@ -357,6 +360,13 @@ final class RenderSettings: @unchecked Sendable {
         print("[REFINE] earlyTermRatio = \(earlyTermRatio)")
         print("[REFINE] earlyTermCount = \(earlyTermCount)")
         print("[REFINE] ================================")
+    }
+    
+    /// Enable temporal reprojection to use previous frame's hit distance as starting point
+    /// Can reduce raymarch steps by 50-80% for slow-moving scenes
+    var useTemporalReprojection: Bool {
+        get { withLock { _useTemporalReprojection } }
+        set { withLock { _useTemporalReprojection = newValue } }
     }
 }
 

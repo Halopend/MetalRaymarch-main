@@ -58,6 +58,9 @@ typedef struct
     matrix_float4x4 inverseProjectionMatrix;
     matrix_float4x4 viewMatrix;           // Pure view matrix (no model transform)
     matrix_float4x4 inverseViewMatrix;    // For world-space ray origin
+    // Temporal reprojection: previous frame matrices
+    matrix_float4x4 prevProjectionMatrix;
+    matrix_float4x4 prevModelViewMatrix;
     float time;
     float minDistance;
     vector_float2 foveaCenter;
@@ -76,6 +79,7 @@ typedef struct
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
+    int useTemporalReprojection;  // 1 = use previous frame hit distance, 0 = standard
 } Uniforms;
 
 typedef struct
@@ -89,6 +93,9 @@ typedef struct
 {
     matrix_float4x4 invViewMatrix;
     matrix_float4x4 invProjMatrix;
+    // Temporal reprojection matrices
+    matrix_float4x4 prevViewMatrix;
+    matrix_float4x4 prevProjMatrix;
     vector_float3 cameraPos;
     float time;
     vector_float2 resolution;
@@ -106,6 +113,7 @@ typedef struct
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
+    int useTemporalReprojection; // 1 = use previous frame hit distance
 } TileUniforms;
 
 // Hand joint data for fur rendering
