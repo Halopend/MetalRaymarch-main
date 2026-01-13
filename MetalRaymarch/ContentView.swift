@@ -121,39 +121,54 @@ struct ContentView: View {
                             }
                         }
 
-                        // Mandelbox parameters
-                        Group {
-                            Text("Min Distance")
-                            Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...3.0)
+                        // Primary Parameter: Fractal Scale
+                        Text("Fractal Scale")
+                        Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
 
-                            Text("Fractal Scale")
-                            Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
+                        // Shape Parameters Group
+                        DisclosureGroup("Shape Parameters") {
+                            VStack(spacing: 8) {
+                                Text("Min Distance")
+                                Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...3.0)
 
-                            Text("Box Folding Limit")
-                            Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.1...5.0)
+                                Text("Box Folding Limit")
+                                Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.1...5.0)
 
-                            Text("Sphere Radius")
-                            Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.01...2.0)
+                                Text("Sphere Radius")
+                                Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.01...2.0)
+                            }
+                            .padding(.leading, 10)
                         }
 
-                        // Color & glow (not gesture-mapped)
-                        Group {
-                            Text("Color Mix")
-                            Slider(value: Binding(get: { appModel.renderSettings.colorMix }, set: { appModel.renderSettings.colorMix = $0 }), in: 0...1.0)
+                        // Color & Glow Group
+                        DisclosureGroup("Color & Glow") {
+                            VStack(spacing: 8) {
+                                Text("Color Mix")
+                                Slider(value: Binding(get: { appModel.renderSettings.colorMix }, set: { appModel.renderSettings.colorMix = $0 }), in: 0...1.0)
 
-                            Text("Glow Intensity")
-                            Slider(value: Binding(get: { appModel.renderSettings.glowIntensity }, set: { appModel.renderSettings.glowIntensity = $0 }), in: 0...2.0)
+                                Text("Glow Intensity")
+                                Slider(value: Binding(get: { appModel.renderSettings.glowIntensity }, set: { appModel.renderSettings.glowIntensity = $0 }), in: 0...2.0)
 
-                            Text("Color Iterations: \(appModel.renderSettings.colorIterations, specifier: "%.0f")")
-                            Slider(value: Binding(get: { appModel.renderSettings.colorIterations }, set: { appModel.renderSettings.colorIterations = $0 }), in: 4...16, step: 1)
+                                Text("Color Iterations: \(appModel.renderSettings.colorIterations, specifier: "%.0f")")
+                                Slider(value: Binding(get: { appModel.renderSettings.colorIterations }, set: { appModel.renderSettings.colorIterations = $0 }), in: 4...16, step: 1)
+                            }
+                            .padding(.leading, 10)
                         }
 
-                        // Foveation & debug
-                        Group {
-                            Toggle("Show HUD", isOn: Binding(get: { appModel.renderSettings.showHUD }, set: { appModel.renderSettings.showHUD = $0 }))
+                        // Foveation, Safety & Debug Group
+                        DisclosureGroup("Safety & Render Options") {
+                            VStack(spacing: 8) {
+                                Toggle("Show HUD", isOn: Binding(get: { appModel.renderSettings.showHUD }, set: { appModel.renderSettings.showHUD = $0 }))
 
-                            Text("Foveation Intensity")
-                            Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
+                                Toggle("Safety Bubble", isOn: Binding(get: { appModel.renderSettings.safetyBubbleEnabled }, set: { appModel.renderSettings.safetyBubbleEnabled = $0 }))
+
+                                Text("Safety Bubble Radius: \(appModel.renderSettings.safetyBubbleRadius, specifier: "%.2f")m")
+                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleRadius }, set: { appModel.renderSettings.safetyBubbleRadius = $0 }), in: 0.05...2.5)
+
+                                Text("Foveation Intensity")
+                                Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
+                            }
+                            .padding(.leading, 10)
                         }
 
                         Text("FPS: \(appModel.fps, specifier: "%.1f")")

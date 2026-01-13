@@ -123,11 +123,11 @@ final class GestureController {
     private let maxHandDistance: Float = 0.60  // 60cm
     // Guardrails to prevent accidental activation when hands are wide apart
     private let maxStartHandDistance: Float = 0.35  // Require hands within 35cm to start
-    private let maxActiveHandDistance: Float = 0.50 // Allow some expansion while active, drop if beyond
+    private let maxActiveHandDistance: Float = 0.80 // Allow expansion up to 80cm
     
     // Mandelbox parameter ranges - WIDE for exploration
     private let minDistanceRange: ClosedRange<Float> = 0.001...5.0
-    private let foldingLimitRange: ClosedRange<Float> = 0.1...10.0
+    private let foldingLimitRange: ClosedRange<Float> = 0.1...13.0
     private let sphereRadiusRange: ClosedRange<Float> = 0.01...2.0
     
     // Single-hand drag sensitivity
@@ -242,38 +242,19 @@ final class GestureController {
         // Track active gesture for HUD display
         var activeDigit = 0
         
-        // TWO-HAND gestures (both hands pinching same finger)
-        // DIRECT MAPPING: hand distance (5cm-60cm) maps to full parameter range
-        // Hands close = min value, hands far = max value
+        // TWO-HAND gestures
+        // Supports both Absolute (direct mapping) and Relative (delta-based) modes
         
         // INDEX FINGER: minDistance
-        processTwoHandGesture(digit: 1, state: &indexGestureState, parameterUpdate: { [weak self] normalizedDistance in
-            guard let self = self else { return false }
-            let range = self.minDistanceRange
-            let newValue = range.lowerBound + normalizedDistance * (range.upperBound - range.lowerBound)
-            self.smoothedMinDistance.target = newValue
-            return normalizedDistance <= 0.01 || normalizedDistance >= 0.99
-        })
+        processTwoHandGesture(digit: 1, state: &indexGestureState, target: smoothedMinDistance, range: minDistanceRange)
         if indexGestureState.isActive { activeDigit = 1 }
         
         // MIDDLE FINGER: foldingLimit
-        processTwoHandGesture(digit: 2, state: &middleGestureState, parameterUpdate: { [weak self] normalizedDistance in
-            guard let self = self else { return false }
-            let range = self.foldingLimitRange
-            let newValue = range.lowerBound + normalizedDistance * (range.upperBound - range.lowerBound)
-            self.smoothedFoldingLimit.target = newValue
-            return normalizedDistance <= 0.01 || normalizedDistance >= 0.99
-        })
+        processTwoHandGesture(digit: 2, state: &middleGestureState, target: smoothedFoldingLimit, range: foldingLimitRange)
         if middleGestureState.isActive { activeDigit = 2 }
         
         // RING FINGER: sphereRadius
-        processTwoHandGesture(digit: 3, state: &ringGestureState, parameterUpdate: { [weak self] normalizedDistance in
-            guard let self = self else { return false }
-            let range = self.sphereRadiusRange
-            let newValue = range.lowerBound + normalizedDistance * (range.upperBound - range.lowerBound)
-            self.smoothedSphereRadius.target = newValue
-            return normalizedDistance <= 0.01 || normalizedDistance >= 0.99
-        })
+        processTwoHandGesture(digit: 3, state: &ringGestureState, target: smoothedSphereRadius, range: sphereRadiusRange)
         if ringGestureState.isActive { activeDigit = 3 }
         
         // Update active gesture for HUD
@@ -289,12 +270,13 @@ final class GestureController {
     }
     
     /// Process a two-hand gesture for a specific finger
-    /// DIRECT MAPPING: hand distance (5cm-60cm) maps directly to full parameter range
+    /// Supports Relative (Default) and Absolute (Direct Mapping) modes
     /// - Parameters:
     ///   - digit: 1=index, 2=middle, 3=ring, 4=pinky
     ///   - state: The gesture state to track
-    ///   - parameterUpdate: Closure called with normalized distance (0-1), returns true if at limit
-    private func processTwoHandGesture(digit: Int, state: inout TwoHandGestureState, parameterUpdate: (Float) -> Bool) {
+    ///   - target: The smoothed value to update
+    ///   - range: The valid range for the parameter
+    private func processTwoHandGesture(digit: Int, state: inout TwoHandGestureState, target: SmoothedValue, range: ClosedRange<Float>) {
         guard let settings = renderSettings else { return }
         
         let leftPinch = leftHand.pinchStrength(digit: digit)
@@ -328,24 +310,46 @@ final class GestureController {
         // Gesture just started
         if bothActive && !state.isActive {
             state.isActive = true
+            state.startDistance = currentDistance
+            state.startParameterValue = target.target // Snap start value to current target
             
             #if DEBUG
             let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius"]
             let paramName = paramNames[min(digit, 3)]
-            print("🤲 Two-hand \(paramName) gesture STARTED (direct mapping: 5cm-60cm = full range)")
+            let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
+            print("🤲 Two-hand \(paramName) gesture STARTED (\(mode))")
             #endif
         }
         
-        // Gesture active - map hand distance directly to parameter range
+        // Gesture active
         if bothActive {
-            // Direct mapping: 5cm = 0%, 60cm = 100% of range
-            let normalizedDistance = simd_clamp(
-                (currentDistance - minHandDistance) / (maxHandDistance - minHandDistance),
-                0.0, 1.0
-            )
+            var hitLimit = false
             
-            // Update parameter - closure maps 0-1 to actual parameter range
-            let hitLimit = parameterUpdate(normalizedDistance)
+            if settings.useRelativeGestures {
+                // RELATIVE: Change based on delta from start distance
+                // Calculate sensitivity: map (max-min hand dist) to (max-min parameter range)
+                // This ensures full parameter range is reachable with similar physical movement
+                let rangeSpan = range.upperBound - range.lowerBound
+                let distSpan = maxHandDistance - minHandDistance
+                let sensitivity = rangeSpan / distSpan
+                
+                let delta = currentDistance - state.startDistance
+                let newValue = state.startParameterValue + (delta * sensitivity)
+                
+                target.target = min(range.upperBound, max(range.lowerBound, newValue))
+                hitLimit = (target.target <= range.lowerBound + 1e-5 || target.target >= range.upperBound - 1e-5)
+                
+            } else {
+                // ABSOLUTE: Map distance directly to 0-1 range
+                let normalizedDistance = simd_clamp(
+                    (currentDistance - minHandDistance) / (maxHandDistance - minHandDistance),
+                    0.0, 1.0
+                )
+                
+                let newValue = range.lowerBound + normalizedDistance * (range.upperBound - range.lowerBound)
+                target.target = newValue
+                hitLimit = (normalizedDistance <= 0.01 || normalizedDistance >= 0.99)
+            }
             
             // Trigger screen flash when hitting limits
             if hitLimit {
@@ -356,7 +360,7 @@ final class GestureController {
             struct DebugState { static var counter = 0 }
             DebugState.counter += 1
             if DebugState.counter % 60 == 0 {
-                print("🤲 distance: \(String(format: "%.1f", currentDistance * 100))cm → \(String(format: "%.0f", normalizedDistance * 100))%")
+                // print("🤲 distance: \(String(format: "%.1f", currentDistance * 100))cm")
             }
             #endif
         }

@@ -128,6 +128,7 @@ actor Renderer {
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
     var smoothedFPS: Double = 0
+    private var lastFPSUpdateTime: TimeInterval = 0
 
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
@@ -1166,8 +1167,13 @@ actor Renderer {
             let instantFPS = 1.0 / deltaTime
             let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * 0.1
             smoothedFPS = updatedFPS
-            Task { @MainActor in
-                appModel.fps = updatedFPS
+            
+            // Throttle UI updates to 4Hz (every 0.25s) to prevent SwiftUI layout thrashing
+            if time - lastFPSUpdateTime > 0.25 {
+                lastFPSUpdateTime = time
+                Task { @MainActor in
+                    appModel.fps = updatedFPS
+                }
             }
         }
         lastPresentationTime = presentationTime
