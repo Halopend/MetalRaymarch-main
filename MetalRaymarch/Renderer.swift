@@ -68,6 +68,16 @@ actor Renderer {
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
+    
+    // Temporal reprojection: history buffers for hit distances
+    // Double-buffered: read from previous frame, write to current frame
+    var hitDistanceHistoryTextures: [MTLTexture] = []  // One per eye, ping-pong buffered
+    var hitDistanceHistoryIndex: Int = 0  // Which buffer to read from (0 or 1)
+    var hitDistanceHistorySize: SIMD2<Int> = .zero
+    
+    // Previous frame matrices for reprojection
+    var prevProjectionMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    var prevModelViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -456,11 +466,17 @@ actor Renderer {
             let modelView = viewMatrix * modelMatrix
             let inverseModelView = modelView.inverse
             
+            // Get previous frame matrices for temporal reprojection
+            let prevProj = prevProjectionMatrices[viewIndex]
+            let prevModelView = prevModelViewMatrices[viewIndex]
+            
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
                             inverseProjectionMatrix: inverseProjection,
+                            prevProjectionMatrix: prevProj,
+                            prevModelViewMatrix: prevModelView,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
@@ -478,12 +494,24 @@ actor Renderer {
                             sceneIndex: Int32(settings.sceneIndex),
                             ifsScale: settings.ifsScale,
                             ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow)
+                            ifsGlow: settings.ifsGlow,
+                            useTemporalReprojection: settings.useTemporalReprojection ? 1 : 0)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
         if drawable.views.count > 1 {
             self.uniforms[0].uniforms.1 = uniforms(forViewIndex: 1)
+        }
+        
+        // Store current matrices for next frame's temporal reprojection
+        for viewIndex in 0..<min(drawable.views.count, 2) {
+            let view = drawable.views[viewIndex]
+            let viewMatrix = (deviceTransform * view.transform).inverse
+            let projection = drawable.computeProjection(viewIndex: viewIndex)
+            let modelView = viewMatrix * modelMatrix
+            
+            prevProjectionMatrices[viewIndex] = projection
+            prevModelViewMatrices[viewIndex] = modelView
         }
 
 //        rotation += 0.01

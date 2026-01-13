@@ -42,6 +42,9 @@ typedef struct
     matrix_float4x4 modelViewMatrix;
     matrix_float4x4 inverseModelViewMatrix;
     matrix_float4x4 inverseProjectionMatrix;
+    // Temporal reprojection: previous frame matrices
+    matrix_float4x4 prevProjectionMatrix;
+    matrix_float4x4 prevModelViewMatrix;
     float time;
     float minDistance;
     vector_float2 foveaCenter;
@@ -60,6 +63,7 @@ typedef struct
     float ifsScale;          // IFS scaling factor (default 1.74)
     float ifsOffset;         // IFS offset parameter (default 0.98)
     float ifsGlow;           // IFS glow intensity multiplier
+    int useTemporalReprojection;  // 1 = use previous frame hit distance, 0 = standard
 } Uniforms;
 
 typedef struct
@@ -73,6 +77,9 @@ typedef struct
 {
     matrix_float4x4 invViewMatrix;
     matrix_float4x4 invProjMatrix;
+    // Temporal reprojection matrices
+    matrix_float4x4 prevViewMatrix;
+    matrix_float4x4 prevProjMatrix;
     vector_float3 cameraPos;
     float time;
     vector_float2 resolution;
@@ -92,6 +99,7 @@ typedef struct
     float ifsScale;              // IFS scaling factor
     float ifsOffset;             // IFS offset parameter
     float ifsGlow;               // IFS glow intensity
+    int useTemporalReprojection; // 1 = use previous frame hit distance
 } TileUniforms;
 
 #endif /* ShaderTypes_h */
