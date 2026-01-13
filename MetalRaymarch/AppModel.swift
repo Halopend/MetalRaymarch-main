@@ -134,6 +134,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _showFurHands: Bool = false          // Render hands as fur (default off)
+    private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
 
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
@@ -272,6 +273,11 @@ final class RenderSettings: @unchecked Sendable {
     var showFurHands: Bool {
         get { withLock { _showFurHands } }
         set { withLock { _showFurHands = newValue } }
+    }
+
+    var useRelativeGestures: Bool {
+        get { withLock { _useRelativeGestures } }
+        set { withLock { _useRelativeGestures = newValue } }
     }
 
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry
