@@ -54,6 +54,10 @@ constant int FC_QUALITY_MODE [[function_constant(5)]]; // 0=high, 1=medium, 2=lo
 // Debug mode - can be compiled out entirely in release builds
 constant bool FC_DEBUG_HIERARCHICAL [[function_constant(6)]];
 
+// Max ray marching steps - controls main raymarch loop unrolling
+// This is the second most critical loop after Map()
+constant int FC_MAX_RAY_STEPS [[function_constant(7)]];
+
 typedef struct
 {
     float3 position [[attribute(VertexAttributePosition)]];
@@ -437,6 +441,7 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
 
 // === FINE RAYMARCH FROM STARTING POINT ===
 // Refines from a known starting distance (from coarse pass or neighbor)
+// Uses FC_MAX_RAY_STEPS when available for compile-time optimization
 FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     float dither = blueNoise(fragCoord, time) * 0.01;
@@ -445,27 +450,47 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
     float t = max(0.01, startT - 0.3) + dither;
     
     float glow = 0.0;
-    // More steps for reliability
-    int maxSteps = max(int(float(maxStepsParam) * quality * 0.5), 8);
+    // Use function constant when available for compile-time optimization
+    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
+    int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
     float endT = startT + 2.0;  // Pre-compute end threshold
     
-    NO_UNROLL
-    for(int j = 0; j < maxSteps; j++)
-    {
-        float threshold = fma(t, 0.0006, 0.0005);
-        
-        float3 p = fma(rD, float3(t), rO);
-        float h = Map(p, params, foldingLimit, iterations);
-        
-        if(UNLIKELY(h < threshold))
+    // Use partial unrolling when max steps is known at compile time
+    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
+        UNROLL_8
+        for(int j = 0; j < maxSteps; j++)
         {
-            return float2(t, saturate(glow * 0.25));
+            float threshold = fma(t, 0.0006, 0.0005);
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold)) {
+                return float2(t, saturate(glow * 0.25));
+            }
+            if (UNLIKELY(t > endT)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
         }
-        
-        if (UNLIKELY(t > endT)) break;
-        
-        glow = fma(saturate(0.04 - h), glowIntensity, glow);
-        t += h;
+    } else {
+        NO_UNROLL
+        for(int j = 0; j < maxSteps; j++)
+        {
+            float threshold = fma(t, 0.0006, 0.0005);
+            
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold))
+            {
+                return float2(t, saturate(glow * 0.25));
+            }
+            
+            if (UNLIKELY(t > endT)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
+        }
     }
     
     return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
@@ -473,6 +498,7 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
 
 // Standard sphere tracing - reliable, no aggressive optimizations
 // This is the main raymarch loop - optimize for typical case (many steps, eventual hit)
+// When FC_MAX_RAY_STEPS is defined, the compiler can optimize the loop more aggressively
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
@@ -480,32 +506,55 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     float t = 0.05 + dither;
     
     float glow = 0.0;
-    int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
-    // NO_UNROLL: Variable iteration count, unrolling would bloat code
-    NO_UNROLL
-    for(int j = 0; j < maxSteps; j++)
-    {
-        // Distance-adaptive threshold (standard approach)
-        float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
-        
-        float3 p = fma(rD, float3(t), rO);  // p = rO + t * rD using fma
-        float h = Map(p, params, foldingLimit, iterations);
-        
-        // LIKELY: Most rays eventually hit the fractal
-        if(UNLIKELY(h < threshold))
+    // Use function constant for max steps when available
+    // This allows the compiler to know the upper bound at compile time
+    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
+    int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
+    
+    // When FC_MAX_RAY_STEPS is defined, use partial unrolling for better performance
+    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
+        UNROLL_8
+        for(int j = 0; j < maxSteps; j++)
         {
-            return float2(t, saturate(glow * 0.25));
+            float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold)) {
+                return float2(t, saturate(glow * 0.25));
+            }
+            if (UNLIKELY(t > kMaxRayDistance)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
         }
-        
-        // UNLIKELY: Early exit is rare with bounded fractal
-        if (UNLIKELY(t > kMaxRayDistance)) break;
-        
-        // Accumulate glow - saturate is free on GPU
-        glow = fma(saturate(0.04 - h), glowIntensity, glow);
-        
-        // Standard sphere tracing: step by the SDF value
-        t += h;
+    } else {
+        // NO_UNROLL: Variable iteration count, unrolling would bloat code
+        NO_UNROLL
+        for(int j = 0; j < maxSteps; j++)
+        {
+            // Distance-adaptive threshold (standard approach)
+            float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
+            
+            float3 p = fma(rD, float3(t), rO);  // p = rO + t * rD using fma
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            // LIKELY: Most rays eventually hit the fractal
+            if(UNLIKELY(h < threshold))
+            {
+                return float2(t, saturate(glow * 0.25));
+            }
+            
+            // UNLIKELY: Early exit is rare with bounded fractal
+            if (UNLIKELY(t > kMaxRayDistance)) break;
+            
+            // Accumulate glow - saturate is free on GPU
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            
+            // Standard sphere tracing: step by the SDF value
+            t += h;
+        }
     }
     
     return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));

@@ -30,6 +30,7 @@ enum FunctionConstantIndex: Int {
     case showHUD = 4
     case qualityMode = 5
     case debugHierarchical = 6
+    case maxRaySteps = 7  // Max ray marching steps for loop unrolling
 }
 
 enum RendererError: Error {
@@ -71,14 +72,18 @@ actor Renderer {
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
     
-    // === SPECIALIZED PIPELINES BY ITERATION COUNT ===
-    // Pre-compiled pipelines with fixed iteration counts for full loop unrolling in Map()
-    // This is THE critical optimization - Map() is called 50-100+ times per pixel
-    // Keys are iteration counts (4-12), values are specialized pipelines
-    var specializedPipelines: [Int: MTLRenderPipelineState] = [:]
-    var specializedQuadSharedPipelines: [Int: MTLRenderPipelineState] = [:]
-    var specializedMetalFXPipelines: [Int: MTLRenderPipelineState] = [:]
-    var specializedMetalFXQuadSharedPipelines: [Int: MTLRenderPipelineState] = [:]
+    // === SPECIALIZED PIPELINES BY (iterations, raySteps) ===
+    // Pre-compiled pipelines with fixed iteration and ray step counts for full loop unrolling
+    // This is THE critical optimization - Map() loop and raymarch loop can be fully unrolled
+    // Key: PipelineKey(fractalIterations, maxRaySteps)
+    struct PipelineKey: Hashable {
+        let fractalIterations: Int
+        let maxRaySteps: Int
+    }
+    var specializedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    var specializedQuadSharedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    var specializedMetalFXPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    var specializedMetalFXQuadSharedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
     
     // Cached constant matrices (computed once, reused every frame)
     private let cachedRotationMatrix: matrix_float4x4
@@ -205,48 +210,59 @@ actor Renderer {
             quadSharedPipelineState = nil
         }
         
-        // === BUILD SPECIALIZED PIPELINES FOR COMMON ITERATION COUNTS ===
-        // This is THE critical optimization. The Map() inner loop is called 50-100+ times per pixel.
-        // With fixed iteration counts, the compiler can fully unroll the loop, eliminating:
+        // === BUILD SPECIALIZED PIPELINES FOR COMMON (iterations, raySteps) COMBINATIONS ===
+        // This is THE critical optimization. Both loops can be unrolled:
+        // 1. Map() inner loop (50-100+ calls per pixel × iterations each)
+        // 2. Scene() raymarch loop (1 call per pixel × raySteps iterations)
+        // With fixed counts, the compiler can fully unroll both loops, eliminating:
         // - Loop counter overhead
         // - Branch prediction misses  
         // - Register spilling from loop variables
-        // Expected: 20-40% performance improvement in Map() function
-        let commonIterationCounts = [4, 5, 6, 7, 8, 10, 12]  // Most commonly used values
-        print("Building specialized pipelines for iteration counts: \(commonIterationCounts)...")
+        // Expected: 30-50% overall performance improvement
+        
+        let commonIterationCounts = [6, 11, 14]  // Most commonly used fractal iterations
+        let commonRayStepCounts = [32, 64, 100]  // Most commonly used ray steps
+        
+        var pipelineCount = 0
+        print("Building specialized pipelines for \(commonIterationCounts.count) × \(commonRayStepCounts.count) = \(commonIterationCounts.count * commonRayStepCounts.count) combinations...")
         
         for iterCount in commonIterationCounts {
-            let config = FunctionConstantConfig(
-                fractalIterations: Int32(iterCount),
-                shadowIterations: Int32(max(iterCount - 2, 2)),
-                debugHierarchical: false
-            )
-            let constants = config.toMTLConstants()
-            
-            // Standard pipeline
-            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                functionConstants: constants
-            ) {
-                specializedPipelines[iterCount] = pipeline
-            }
-            
-            // Quad-shared pipeline
-            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
-                fragmentFunctionName: "fragmentShaderQuadShared",
-                functionConstants: constants
-            ) {
-                specializedQuadSharedPipelines[iterCount] = pipeline
+            for raySteps in commonRayStepCounts {
+                let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
+                let config = FunctionConstantConfig(
+                    fractalIterations: Int32(iterCount),
+                    shadowIterations: Int32(max(iterCount - 2, 2)),
+                    debugHierarchical: false,
+                    maxRaySteps: Int32(raySteps)
+                )
+                let constants = config.toMTLConstants()
+                
+                // Standard pipeline
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: rasterSampleCount,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    functionConstants: constants
+                ) {
+                    specializedPipelines[key] = pipeline
+                    pipelineCount += 1
+                }
+                
+                // Quad-shared pipeline
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: rasterSampleCount,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    fragmentFunctionName: "fragmentShaderQuadShared",
+                    functionConstants: constants
+                ) {
+                    specializedQuadSharedPipelines[key] = pipeline
+                }
             }
         }
-        print("✓ Built \(specializedPipelines.count) specialized pipelines (iterations: \(specializedPipelines.keys.sorted()))")
+        print("✓ Built \\(pipelineCount) specialized standard pipelines")
 
         // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
         #if canImport(MetalFX)
@@ -269,39 +285,45 @@ actor Renderer {
                                                                               vertexFunctionName: "vertexShader",
                                                                               fragmentFunctionName: "fragmentShaderQuadShared")
             
-            // Also build specialized MetalFX pipelines for common iteration counts
+            // Also build specialized MetalFX pipelines for common (iterations, raySteps) combinations
+            var metalFXPipelineCount = 0
             for iterCount in commonIterationCounts {
-                let config = FunctionConstantConfig(
-                    fractalIterations: Int32(iterCount),
-                    shadowIterations: Int32(max(iterCount - 2, 2)),
-                    debugHierarchical: false
-                )
-                let constants = config.toMTLConstants()
-                
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: 1,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    colorFormat: .rgba16Float,
-                    functionConstants: constants
-                ) {
-                    specializedMetalFXPipelines[iterCount] = pipeline
-                }
-                
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: 1,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    colorFormat: .rgba16Float,
-                    fragmentFunctionName: "fragmentShaderQuadShared",
-                    functionConstants: constants
-                ) {
-                    specializedMetalFXQuadSharedPipelines[iterCount] = pipeline
+                for raySteps in commonRayStepCounts {
+                    let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
+                    let config = FunctionConstantConfig(
+                        fractalIterations: Int32(iterCount),
+                        shadowIterations: Int32(max(iterCount - 2, 2)),
+                        debugHierarchical: false,
+                        maxRaySteps: Int32(raySteps)
+                    )
+                    let constants = config.toMTLConstants()
+                    
+                    if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                        device: device,
+                        layerRenderer: layerRenderer,
+                        rasterSampleCount: 1,
+                        mtlVertexDescriptor: mtlVertexDescriptor,
+                        colorFormat: .rgba16Float,
+                        functionConstants: constants
+                    ) {
+                        specializedMetalFXPipelines[key] = pipeline
+                        metalFXPipelineCount += 1
+                    }
+                    
+                    if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                        device: device,
+                        layerRenderer: layerRenderer,
+                        rasterSampleCount: 1,
+                        mtlVertexDescriptor: mtlVertexDescriptor,
+                        colorFormat: .rgba16Float,
+                        fragmentFunctionName: "fragmentShaderQuadShared",
+                        functionConstants: constants
+                    ) {
+                        specializedMetalFXQuadSharedPipelines[key] = pipeline
+                    }
                 }
             }
-            print("✓ Built \(specializedMetalFXPipelines.count) specialized MetalFX pipelines")
+            print("✓ Built \\(metalFXPipelineCount) specialized MetalFX pipelines")
             
             depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
                                                                                layerRenderer: layerRenderer, 
@@ -713,6 +735,7 @@ actor Renderer {
         var showHUD: Bool?                 // FC index 4
         var qualityMode: Int32?            // FC index 5 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 6
+        var maxRaySteps: Int32?            // FC index 7 - max ray marching steps
         
         /// Creates MTLFunctionConstantValues from this config
         func toMTLConstants() -> MTLFunctionConstantValues {
@@ -738,6 +761,9 @@ actor Renderer {
             }
             if var debug = debugHierarchical {
                 constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
+            }
+            if var raySteps = maxRaySteps {
+                constants.setConstantValue(&raySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
             }
             
             return constants
@@ -770,20 +796,22 @@ actor Renderer {
         }
     }
     
-    /// Select the best specialized pipeline for the given iteration count
+    /// Select the best specialized pipeline for the given iteration count and ray steps
     /// Falls back to general pipeline if no specialized version exists
-    func selectPipeline(forIterations iterations: Int, useQuadShared: Bool, useMetalFX: Bool) -> MTLRenderPipelineState {
+    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool, useMetalFX: Bool) -> MTLRenderPipelineState {
+        let key = PipelineKey(fractalIterations: iterations, maxRaySteps: raySteps)
+        
         if useMetalFX {
             if useQuadShared {
                 // Try specialized MetalFX quad-shared first
-                if let specialized = specializedMetalFXQuadSharedPipelines[iterations] {
+                if let specialized = specializedMetalFXQuadSharedPipelines[key] {
                     return specialized
                 }
                 // Fallback to general MetalFX quad-shared
                 return metalFXQuadSharedPipelineState ?? pipelineState
             } else {
                 // Try specialized MetalFX first
-                if let specialized = specializedMetalFXPipelines[iterations] {
+                if let specialized = specializedMetalFXPipelines[key] {
                     return specialized
                 }
                 // Fallback to general MetalFX
@@ -792,14 +820,14 @@ actor Renderer {
         } else {
             if useQuadShared {
                 // Try specialized quad-shared first
-                if let specialized = specializedQuadSharedPipelines[iterations] {
+                if let specialized = specializedQuadSharedPipelines[key] {
                     return specialized
                 }
                 // Fallback to general quad-shared
                 return quadSharedPipelineState ?? pipelineState
             } else {
                 // Try specialized standard first
-                if let specialized = specializedPipelines[iterations] {
+                if let specialized = specializedPipelines[key] {
                     return specialized
                 }
                 // Fallback to general pipeline
@@ -1221,12 +1249,14 @@ actor Renderer {
         
         // Get current iteration count for specialized pipeline selection
         let currentIterations = appModel.renderSettings.fractalIterations
+        let currentRaySteps = appModel.renderSettings.maxRaySteps
         
         // Use specialized pipeline with fixed iteration count for full loop unrolling
         // This is THE critical optimization - Map() inner loop can be fully unrolled
         #if canImport(MetalFX)
         let selectedPipeline = selectPipeline(
             forIterations: currentIterations,
+            raySteps: currentRaySteps,
             useQuadShared: useQuadShared,
             useMetalFX: upscalingEnabled
         )
@@ -1234,6 +1264,7 @@ actor Renderer {
         #else
         let selectedPipeline = selectPipeline(
             forIterations: currentIterations,
+            raySteps: currentRaySteps,
             useQuadShared: useQuadShared,
             useMetalFX: false
         )
