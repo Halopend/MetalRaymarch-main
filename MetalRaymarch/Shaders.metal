@@ -4,6 +4,20 @@
 // Debug flag for depth visualization (set to 1 to enable)
 #define DEBUG_DEPTH_VISUALIZATION 0
 
+// === COMPILER OPTIMIZATION HINTS ===
+// Force aggressive inlining for hot path functions
+#define FORCE_INLINE __attribute__((always_inline))
+// Hint that a branch is likely/unlikely (helps branch predictor)
+#define LIKELY(x)   __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+// Unroll loops completely when iteration count is known
+#define UNROLL_FULL _Pragma("unroll")
+// Partial unroll for larger loops
+#define UNROLL_4 _Pragma("unroll(4)")
+#define UNROLL_8 _Pragma("unroll(8)")
+// Disable unrolling for variable-count loops to reduce register pressure
+#define NO_UNROLL _Pragma("nounroll")
+
 
 // File for Metal kernel and shader functions
 #include <metal_stdlib>
@@ -13,6 +27,36 @@
 #import "ShaderTypes.h"
 
 using namespace metal;
+
+// === FUNCTION CONSTANTS ===
+// These allow the Metal compiler to specialize shaders at pipeline creation time,
+// eliminating branches and enabling dead code elimination for significant performance gains.
+// The compiler can fully unroll loops with known bounds and remove unused code paths.
+//
+// Use is_function_constant_defined(FC_*) to check if a constant was provided at pipeline creation.
+
+// Fractal iteration counts - controls loop unrolling in hot Map() function
+constant int FC_FRACTAL_ITERATIONS [[function_constant(0)]];
+
+// Shadow iteration counts (typically fractalIterations - 2)
+constant int FC_SHADOW_ITERATIONS [[function_constant(1)]];
+
+// Feature toggles - allows compiler to eliminate entire code paths
+constant bool FC_SAFETY_BUBBLE_ENABLED [[function_constant(2)]];
+
+constant bool FC_SHOW_FUR_HANDS [[function_constant(3)]];
+
+constant bool FC_SHOW_HUD [[function_constant(4)]];
+
+// Quality mode - enables aggressive optimizations for lower quality settings
+constant int FC_QUALITY_MODE [[function_constant(5)]]; // 0=high, 1=medium, 2=low
+
+// Debug mode - can be compiled out entirely in release builds
+constant bool FC_DEBUG_HIERARCHICAL [[function_constant(6)]];
+
+// Max ray marching steps - controls main raymarch loop unrolling
+// This is the second most critical loop after Map()
+constant int FC_MAX_RAY_STEPS [[function_constant(7)]];
 
 typedef struct
 {
@@ -49,6 +93,23 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     return out;
 }
 
+// Screenshot vertex shader (no vertex amplification, uses view 0)
+vertex ColorInOut screenshotVertexShader(Vertex in [[stage_in]],
+                                         constant UniformsArray & uniformsArray [[ buffer(BufferIndexUniforms) ]])
+{
+    ColorInOut out;
+
+    // Use first view's uniforms for screenshot
+    Uniforms uniforms = uniformsArray.uniforms[0];
+    
+    float4 position = float4(in.position, 1);
+    out.position = uniforms.projectionMatrix * uniforms.modelViewMatrix * position;
+    out.texCoord = in.texCoord;
+    out.modelPos = in.position;
+    
+    return out;
+}
+
 // --- Fractal Code Port ---
 // Spatial Rendering optimizations for visionOS
 
@@ -56,6 +117,27 @@ constant float3 sunDir = float3(0.3235, 0.0924, 0.2773); // normalized(0.35, 0.1
 constant float3 sunColour = float3(1.0, 0.95, 0.8);
 constant float kPowEpsilon = 1e-6f;
 constant half kPowEpsilonHalf = 1e-4h;
+
+// === NAMED CONSTANTS FOR OPTIMIZATION ===
+// Raymarching thresholds
+constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
+constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
+constant float kCoarseMaxDistance = 80.0f;      // Super-coarse max distance
+constant float kFogStartDistance = 1.5f;        // Fog exponential start
+
+// Shading constants
+constant half kGamma = 0.47h;                   // Output gamma correction
+constant half kSaturation = 1.5h;               // Color saturation multiplier
+constant half kContrast = 1.08h;                // Contrast adjustment
+constant float kSpecularPower = 10.0f;          // Specular highlight power
+constant float kSpecularIntensity = 2.0f;       // Specular intensity multiplier
+constant float kAttenPower = 1.5f;              // Light attenuation power
+
+// Quality thresholds
+constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quality
+constant float kMinQualityForNormals = 0.2f;    // Use cheap normals below this
+constant float kMinQualityForSpecular = 0.7f;   // Skip specular below this
+constant float kMinQualityForPostFX = 0.5f;     // Use simple gamma below this
 
 // === ADAPTIVE HIERARCHICAL CONSTANTS ===
 constant float BOUNDING_SPHERE_RADIUS = 3.5f;  // Skip rays outside this
@@ -86,26 +168,61 @@ inline int selectAdaptiveLevel(float coarseT) {
 }
 
 // Blue noise approximation for temporal stability (better than white noise for reprojection)
-float blueNoise(float2 uv, float time) {
+// FORCE_INLINE: Called every pixel in Scene()
+FORCE_INLINE float blueNoise(float2 uv, float time) {
     // Interleaved gradient noise - more temporally stable than random
+    // Note: constexpr not available in Metal, but compiler will optimize this literal
     float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
     float noise = fract(magic.z * fract(dot(uv, magic.xy)));
     // Add small temporal variation to prevent static patterns
-    return fract(noise + time * 0.1);
+    return fract(fma(time, 0.1, noise));
 }
 constant float SCALE = 2.8;
 
-float hash(float n) { return fract(sin(n) * 753.5453123); }
+// Fast integer-based hash (faster than sin-based on GPU)
+// FORCE_INLINE ensures no function call overhead in tight loops
+FORCE_INLINE float hash(float n) { 
+    // Reinterpret float bits as uint - zero cost
+    uint u = as_type<uint>(n);
+    // XOR-shift hash - all single-cycle ops on GPU
+    u = (u ^ 61u) ^ (u >> 16u);
+    u = u + (u << 3u);
+    u = u ^ (u >> 4u);
+    u = u * 0x27d4eb2du;
+    u = u ^ (u >> 15u);
+    // Convert back to normalized float
+    return float(u) * (1.0f / 4294967296.0f);
+}
 
-float noise(float3 x) {
+// Original sin-based hash for compatibility (some noise functions may depend on exact distribution)
+FORCE_INLINE float hashSin(float n) { return fract(sin(n) * 753.5453123); }
+
+// 3D value noise - optimized for GPU coherent access
+// Using MAD (multiply-add) chains that map to single GPU instructions
+FORCE_INLINE float noise(float3 x) {
     float3 p = floor(x);
     float3 f = fract(x);
-    f = f * f * (3.0 - 2.0 * f);
-    float n = p.x + p.y * 157.0 + 113.0 * p.z;
-    return mix(mix(mix(hash(n +   0.0), hash(n +   1.0), f.x),
-                   mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
-               mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
-                   mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
+    // Smooth interpolation (cubic Hermite) - avoids derivative discontinuities
+    f = f * f * fma(f, float3(-2.0), float3(3.0));  // fma = fused multiply-add
+    
+    // Compute base index once, reuse
+    float n = fma(p.z, 113.0, fma(p.y, 157.0, p.x));
+    
+    // Prefetch all 8 corner hashes - GPU can parallelize these
+    float h000 = hash(n);
+    float h100 = hash(n + 1.0);
+    float h010 = hash(n + 157.0);
+    float h110 = hash(n + 158.0);
+    float h001 = hash(n + 113.0);
+    float h101 = hash(n + 114.0);
+    float h011 = hash(n + 270.0);
+    float h111 = hash(n + 271.0);
+    
+    // Trilinear interpolation using mix chains
+    return mix(mix(mix(h000, h100, f.x),
+                   mix(h010, h110, f.x), f.y),
+               mix(mix(h001, h101, f.x),
+                   mix(h011, h111, f.x), f.y), f.z);
 }
 
 float GetSky(float3 pos)
@@ -120,37 +237,91 @@ struct FractalParams {
     float absScalem1;
     float absScalePow;
     float minRadius2;
+    float3 bubbleCenter;
+    float bubbleRadius;
+    int bubbleEnabled;
 };
 
-inline FractalParams makeFractalParams(float minRad2Val, float fractalScale, float sphereRadius, int iterations) {
+// FORCE_INLINE: This is called per-pixel, must not have call overhead
+FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScale, float sphereRadius, int iterations,
+                                              float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
     FractalParams params;
-    params.scale = float4(fractalScale) / minRad2Val;
+    // Compute scale once, store in register-friendly float4
+    float invMinRad = 1.0f / minRad2Val;
+    params.scale = float4(fractalScale * invMinRad);
     params.scale.w = abs(params.scale.w);
     params.absScalem1 = abs(fractalScale - 1.0);
     params.absScalePow = powr(max(abs(fractalScale), kPowEpsilon), float(1 - iterations));
     params.minRadius2 = sphereRadius * sphereRadius;
+    params.bubbleCenter = bubbleCenter;
+    params.bubbleRadius = bubbleRadius;
+    params.bubbleEnabled = bubbleEnabled;
     return params;
 }
 
-// Optimized branchless Map function
-float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
+// Optimized branchless Map function - THE HOTTEST PATH IN THE ENTIRE SHADER
+// Called potentially 50-100+ times per pixel (raymarch + shadows + normals)
+// Every cycle here matters!
+// 
+// FUNCTION CONSTANT VERSION: When FC_FRACTAL_ITERATIONS is defined, the compiler
+// can fully unroll the loop and optimize aggressively.
+FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
+    
+    // Pre-compute reciprocal for sphere fold (division is expensive)
+    float invMinRadius2 = 1.0f / params.minRadius2;
 
-    for (int i = 0; i < iterations; i++)
-    {
-        // Box fold (optimized)
-        p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+    // Use function constant for iteration count when available
+    // This allows the compiler to fully unroll the loop at pipeline creation time
+    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
 
-        // Branchless sphere fold - much faster on GPU
-        float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0 / max(r2, params.minRadius2), 1.0, 1.0/params.minRadius2);
-        p *= t;
+    // UNROLL_FULL when using function constants (compiler knows exact count)
+    // UNROLL_8 as fallback for dynamic iteration count
+    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
+        UNROLL_FULL
+        for (int i = 0; i < loopCount; i++)
+        {
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+            float r2 = dot(p.xyz, p.xyz);
+            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            p *= t;
+            p = fma(p, params.scale, p0);
+        }
+    } else {
+        UNROLL_8
+        for (int i = 0; i < loopCount; i++)
+        {
+            // Box fold: clamp and reflect
+            // Using fma where beneficial for single-instruction execution
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
 
-        p = p * params.scale + p0;
+            // Branchless sphere fold using clamp
+            // r2 = dot product, single instruction on GPU
+            float r2 = dot(p.xyz, p.xyz);
+            // Sphere fold scale factor - clamped reciprocal
+            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            p *= t;
+
+            // Scale and translate - use fma for xyz, regular mul for w
+            p = fma(p, params.scale, p0);
+        }
     }
-    return (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
+    
+    // Final distance estimate
+    float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
+    
+    // Safety bubble: carve out a sphere around the camera to prevent clipping
+    // When is_function_constant_defined is false, this branch is evaluated at runtime
+    // When true, the compiler eliminates the branch entirely
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (bubbleEnabled) {
+        float3 toBubble = pos - params.bubbleCenter;
+        float bubbleDist = length(toBubble) - params.bubbleRadius;
+        d = max(d, -bubbleDist);
+    }
+    return d;
 }
 
 // Optimized colour function using half precision
@@ -186,16 +357,22 @@ half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad
     return mix(finalColor, altColor, half(colorMix));
 }
 
-// Fast normal using forward differences (3 Map calls instead of 4)
-float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
+// Fast normal using forward differences (3 Map calls instead of 4 with central diff)
+// This is called for every hit pixel - force inline to avoid call stack overhead
+FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
 {
+    // Epsilon scales with distance to maintain relative precision
     float e = distance * 0.001;
     float d = Map(pos, params, foldingLimit, iterations);
-    return normalize(float3(
+    // Forward difference gradient - 3 Map calls
+    // GPU can potentially parallelize these since they're independent
+    float3 gradient = float3(
         Map(pos + float3(e,0,0), params, foldingLimit, iterations) - d,
         Map(pos + float3(0,e,0), params, foldingLimit, iterations) - d,
         Map(pos + float3(0,0,e), params, foldingLimit, iterations) - d
-    ));
+    );
+    // Fast normalize - rsqrt is single instruction on GPU
+    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
 }
 
 // Reduced binary subdivision (4 iterations instead of 6)
@@ -214,56 +391,58 @@ float BinarySubdivision(float3 rO, float3 rD, float2 t, FractalParams params, fl
 // === SUPER-COARSE RAYMARCH (for 8x8 tiles) ===
 // Very fast approximate raymarch - 12 steps with aggressive stepping
 // Used for initial distance estimation in large tiles
-float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
+FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
 {
     float t = max(startT, 0.05);
     
-    // Very few steps with 1.5x over-relaxation for speed
+    // Fixed 12 steps - unroll completely for maximum speed
+    UNROLL_FULL
     for(int j = 0; j < 12; j++)
     {
-        float3 p = rO + t * rD;
+        float3 p = fma(rD, float3(t), rO);
         float h = Map(p, params, foldingLimit, iterations);
         
         // Loose threshold - we just need approximate distance
-        if(h < 0.1) return t;
+        if(UNLIKELY(h < 0.1)) return t;
         
-        if (t > 80.0) return 1000.0;  // Limit search range
+        if (UNLIKELY(t > kCoarseMaxDistance)) return kRayMissThreshold + 100.0;
         
         // Aggressive over-relaxation: step 1.5x the SDF value
-        t += h * 1.5;
+        t = fma(h, 1.5, t);
     }
     
-    return 1000.0;
+    return kRayMissThreshold + 100.0;
 }
 
 // === COARSE RAYMARCH ===
 // Fast approximate raymarch for hierarchical rendering
 // Uses fewer iterations but standard stepping to find approximate hit distance
-float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
+FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
 {
     float t = 0.05;
     
-    // More steps with standard stepping for reliability
+    // Fixed 24 steps - can unroll partially
+    UNROLL_8
     for(int j = 0; j < 24; j++)
     {
-        float3 p = rO + t * rD;
+        float3 p = fma(rD, float3(t), rO);
         float h = Map(p, params, foldingLimit, iterations);
         
-        // Tighter threshold to get closer before handing off
-        if(h < 0.02) return t;
+        // LIKELY: Coarse pass finds hits most of the time
+        if(UNLIKELY(h < 0.02)) return t;
         
-        if (t > 12.0) return 1000.0;
+        if (UNLIKELY(t > kMaxRayDistance)) return kRayMissThreshold + 100.0;
         
-        // Standard sphere tracing - no overstepping
         t += h;
     }
     
-    return 1000.0;
+    return kRayMissThreshold + 100.0;
 }
 
 // === FINE RAYMARCH FROM STARTING POINT ===
 // Refines from a known starting distance (from coarse pass or neighbor)
-float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+// Uses FC_MAX_RAY_STEPS when available for compile-time optimization
+FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     float dither = blueNoise(fragCoord, time) * 0.01;
     
@@ -271,33 +450,55 @@ float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, floa
     float t = max(0.01, startT - 0.3) + dither;
     
     float glow = 0.0;
-    // More steps for reliability
-    int maxSteps = max(int(float(maxStepsParam) * quality * 0.5), 8);
+    // Use function constant when available for compile-time optimization
+    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
+    int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
+    float endT = startT + 2.0;  // Pre-compute end threshold
     
-    for(int j = 0; j < maxSteps; j++)
-    {
-        float threshold = 0.0005 + t * 0.0006;
-        
-        float3 p = rO + t * rD;
-        float h = Map(p, params, foldingLimit, iterations);
-        
-        if(h < threshold)
+    // Use partial unrolling when max steps is known at compile time
+    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
+        UNROLL_8
+        for(int j = 0; j < maxSteps; j++)
         {
-            return float2(t, saturate(glow * 0.25));
+            float threshold = fma(t, 0.0006, 0.0005);
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold)) {
+                return float2(t, saturate(glow * 0.25));
+            }
+            if (UNLIKELY(t > endT)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
         }
-        
-        if (t > startT + 2.0) break; // Don't search too far past expected hit
-        
-        glow += saturate(0.04 - h) * glowIntensity;
-        
-        // Standard sphere tracing
-        t += h;
+    } else {
+        NO_UNROLL
+        for(int j = 0; j < maxSteps; j++)
+        {
+            float threshold = fma(t, 0.0006, 0.0005);
+            
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold))
+            {
+                return float2(t, saturate(glow * 0.25));
+            }
+            
+            if (UNLIKELY(t > endT)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
+        }
     }
     
-    return float2(1000.0, saturate(glow * 0.25));
+    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
 // Standard sphere tracing - reliable, no aggressive optimizations
+// This is the main raymarch loop - optimize for typical case (many steps, eventual hit)
+// When FC_MAX_RAY_STEPS is defined, the compiler can optimize the loop more aggressively
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
     // Use temporally stable blue noise dithering for reprojection
@@ -305,33 +506,58 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     float t = 0.05 + dither;
     
     float glow = 0.0;
-    int maxSteps = max(int(float(maxStepsParam) * quality), 4);
     
-    for(int j = 0; j < maxSteps; j++)
-    {
-        // Distance-adaptive threshold (standard approach)
-        float threshold = 0.0005 + t * 0.0008 + (1.0 - quality) * 0.003;
-        
-        float3 p = rO + t * rD;
-        float h = Map(p, params, foldingLimit, iterations);
-        
-        // Hit detection
-        if(h < threshold)
+    // Use function constant for max steps when available
+    // This allows the compiler to know the upper bound at compile time
+    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
+    int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
+    
+    // When FC_MAX_RAY_STEPS is defined, use partial unrolling for better performance
+    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
+        UNROLL_8
+        for(int j = 0; j < maxSteps; j++)
         {
-            return float2(t, saturate(glow * 0.25));
+            float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold)) {
+                return float2(t, saturate(glow * 0.25));
+            }
+            if (UNLIKELY(t > kMaxRayDistance)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
         }
-        
-        if (t > 12.0) break;
-        
-        // Accumulate glow
-        glow += saturate(0.04 - h) * glowIntensity;
-        
-        // Standard sphere tracing: step by the SDF value
-        // This is guaranteed safe for a valid SDF
-        t += h;
+    } else {
+        // NO_UNROLL: Variable iteration count, unrolling would bloat code
+        NO_UNROLL
+        for(int j = 0; j < maxSteps; j++)
+        {
+            // Distance-adaptive threshold (standard approach)
+            float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
+            
+            float3 p = fma(rD, float3(t), rO);  // p = rO + t * rD using fma
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            // LIKELY: Most rays eventually hit the fractal
+            if(UNLIKELY(h < threshold))
+            {
+                return float2(t, saturate(glow * 0.25));
+            }
+            
+            // UNLIKELY: Early exit is rare with bounded fractal
+            if (UNLIKELY(t > kMaxRayDistance)) break;
+            
+            // Accumulate glow - saturate is free on GPU
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            
+            // Standard sphere tracing: step by the SDF value
+            t += h;
+        }
     }
     
-    return float2(1000.0, saturate(glow * 0.25));
+    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
 // === TEMPORAL REPROJECTION UTILITIES ===
@@ -448,148 +674,6 @@ float2 SceneTemporal(
 }
 
 // =============================================================================
-// SCENE 1: GLOWY IFS (Iterated Function System with volumetric glow)
-// =============================================================================
-// Port of "rendering with just glowy goodness" Shadertoy
-
-// Thread-local color for IFS iteration coloring
-struct IFSResult {
-    float distance;
-    float3 color;
-};
-
-IFSResult MapIFS(float3 p, float mscale, float offset) {
-    // Spatial repetition with offset
-    p.xy = fmod(p.xy - 1.0, 2.0) - 1.0;
-    p.z = abs(p.z) - 0.8;
-    
-    float4 q = float4(p, 1.0);
-    
-    float3 color = float3(0.0);
-    float colorRadius = 0.0;
-    
-    for(int i = 0; i < 20; i++) {
-        q.xyz = abs(q.xyz) - float3(0.3, 1.0, 0.0) + float3(0.6, 0.0, 0.0);
-        float ilength = length(q.xyz);
-        q = mscale * q / clamp(powr(max(ilength, kPowEpsilon), 2.0), 0.5, 1.0) 
-            - float4(offset, 0.01, 0.3, 0.0);
-        
-        if (q.x * q.y > colorRadius) { color.x += 1.0; }
-        else if (q.y * q.z > colorRadius) { color.y += 1.0; }
-        else if (q.z * q.x > colorRadius) { color.z += 1.0; }
-    }
-    
-    IFSResult result;
-    result.distance = length(q.xyz) / q.w;
-    result.color = color;
-    return result;
-}
-
-// IFS raymarch with volumetric glow accumulation
-struct IFSMarchResult {
-    float t;
-    float glow;
-    float glow2;
-    float3 color;
-};
-
-IFSMarchResult MarchIFS(float3 ro, float3 rd, float3 lightDir, float maxT, float mscale, float offset) {
-    float t = 0.0;
-    float eps = 3e-6;
-    float distfac = 200.0;
-    float hitThreshold = eps;
-    float glow = 0.0;
-    float glow2 = 0.0;
-    float3 lastColor = float3(0.0);
-    
-    for(int i = 0; i < 100; i++) {
-        float3 pos = ro + rd * t;
-        IFSResult mapResult = MapIFS(pos, mscale, offset);
-        float d = mapResult.distance;
-        lastColor = mapResult.color;
-        
-        if (d < hitThreshold || t >= maxT) break;
-        
-        t += d;
-        hitThreshold = eps * (1.0 + t * t * distfac);
-        
-        // Glow based on proximity to light plane
-        float zz = pos.y - lightDir.y;
-        zz *= zz;
-        glow += exp(-max(8.0 * (1.0 - exp(-zz * 4.0)) - d, 0.0) / 10.0);
-        
-        // Secondary glow based on camera distance
-        float zz2 = ro.z - pos.z;
-        zz2 *= zz2;
-        glow2 += exp(-max(1.0 - d, 0.0) / 300.0);
-    }
-    
-    IFSMarchResult result;
-    result.t = t;
-    result.glow = glow;
-    result.glow2 = glow2;
-    result.color = lastColor;
-    return result;
-}
-
-float3 RenderIFS(float3 ro, float3 rd, float time, float mscale, float offset, float glowMult) {
-    float tt = fmod(time, 7.0);
-    float tf = tt * tt;
-    
-    float3 lightDir = ro;
-    lightDir.y += tf;
-    
-    IFSMarchResult march = MarchIFS(ro, rd, lightDir, 20.0, mscale, offset);
-    
-    float3 pos = ro + rd * march.t;
-    
-    // Glow strength based on light proximity
-    float glowStr = exp(-abs(pos.y - lightDir.y) / 4.0);
-    march.glow *= glowStr * glowMult;
-    
-    // Secondary glow strength based on camera proximity  
-    float glowStr2 = exp(-length(pos - ro) / 6.0);
-    march.glow2 *= glowStr2 * glowMult;
-    
-    // Color from IFS iterations
-    float3 color = cos(march.color * 3.0);
-    color *= color;
-    float3 glowCol = 0.5 * (color * color);
-    
-    // Combine glows for final color
-    float3 result = 
-        3e-11 * powr(max(march.glow2, kPowEpsilon), 9.0) * glowCol 
-        + 1e-10 * powr(max(march.glow, kPowEpsilon), 11.0) * float3(0.05, 0.03, 0.001) * glowCol
-        + 0.01 * cos(pos.x / 15.0 + time * 1.7) * 1e-9 * glowCol
-          * (pos.z < -0.2 ? powr(max(march.glow2, kPowEpsilon), 11.0) : 0.0);
-    
-    return result;
-}
-
-// Full IFS scene render with camera setup
-half3 SceneIFS(float3 cameraPos, float3 rd, float time, float mscale, float offset, float glowMult) {
-    // Camera animation
-    float3 ro = float3(0.0, 0.0, -2.0);
-    
-    // Apply camera transforms
-    float angle = -1.0;  // Pitch
-    float c = cos(angle), s = sin(angle);
-    rd.yz = float2(rd.y * c - rd.z * s, rd.y * s + rd.z * c);
-    
-    ro.y += time / 5.0;  // Move up over time
-    
-    angle = 0.8;  // Roll
-    c = cos(angle); s = sin(angle);
-    rd.xy = float2(rd.x * c - rd.y * s, rd.x * s + rd.y * c);
-    
-    float3 col = clamp(RenderIFS(ro, rd, time, mscale, offset, glowMult), 1e-6, 1e6);
-    
-    // Tone mapping
-    col = 1.0 - exp(-0.4 * col);
-    
-    return half3(col);
-}
-// =============================================================================
 
 // Simplified post effects using half precision
 half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
@@ -619,40 +703,115 @@ half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
     }
     
     // Gamma
-    return powr(max(rgb, half3(kPowEpsilonHalf)), half3(0.47h));
+    return powr(max(rgb, half3(kPowEpsilonHalf)), half3(kGamma));
 }
 
+// =============================================================================
+// HUD RENDERING - Simple bar display for parameters
+// =============================================================================
+
+// Draw a horizontal bar showing parameter value within range
+float hudBar(float2 uv, float2 pos, float2 size, float fillAmount) {
+    float2 localUV = (uv - pos) / size;
+    if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0) return 0.0;
+    
+    // Border (2% edge)
+    float border = (localUV.x < 0.02 || localUV.x > 0.98 || localUV.y < 0.08 || localUV.y > 0.92) ? 0.6 : 0.0;
+    
+    // Fill bar
+    float fill = (localUV.x > 0.02 && localUV.x < fillAmount * 0.96 + 0.02 && localUV.y > 0.08 && localUV.y < 0.92) ? 1.0 : 0.0;
+    
+    return max(border, fill);
+}
+
+// Render HUD overlay showing current parameter values (Mandelbox only)
+half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
+                float minDist, float foldLimit, float sphereRad) {
+    // HUD in bottom-left corner
+    float2 hudPos = float2(0.02, 0.02);
+    float hudWidth = 0.2;
+    float hudHeight = 0.15;
+    
+    float2 hudUV = (uv - hudPos) / float2(hudWidth, hudHeight);
+    
+    // Only render in HUD area
+    if (hudUV.x < 0.0 || hudUV.x > 1.0 || hudUV.y < 0.0 || hudUV.y > 1.0) {
+        return baseColor;
+    }
+    
+    half3 hudColor = half3(0.0h);
+    float alpha = 0.0;
+    
+    // Semi-transparent background
+    float bg = 0.25;
+    
+    // Mandelbox: minDistance (0.001-5), foldingLimit (0.1-10), sphereRadius (0.01-2)
+    float fill1 = clamp(minDist / 5.0, 0.0, 1.0);
+    float fill2 = clamp(foldLimit / 10.0, 0.0, 1.0);
+    float fill3 = clamp(sphereRad / 2.0, 0.0, 1.0);
+    
+    float bar1 = hudBar(hudUV, float2(0.05, 0.68), float2(0.9, 0.22), fill1);
+    float bar2 = hudBar(hudUV, float2(0.05, 0.39), float2(0.9, 0.22), fill2);
+    float bar3 = hudBar(hudUV, float2(0.05, 0.10), float2(0.9, 0.22), fill3);
+    
+    // Colors: index=cyan, middle=yellow, ring=magenta
+    // Highlight active gesture
+    float h1 = (activeGesture == 1) ? 1.5 : 1.0;
+    float h2 = (activeGesture == 2) ? 1.5 : 1.0;
+    float h3 = (activeGesture == 3) ? 1.5 : 1.0;
+    
+    hudColor += half3(0.0h, 1.0h, 1.0h) * half(bar1 * h1);   // Cyan - minDistance
+    hudColor += half3(1.0h, 1.0h, 0.0h) * half(bar2 * h2);   // Yellow - foldingLimit
+    hudColor += half3(1.0h, 0.0h, 1.0h) * half(bar3 * h3);   // Magenta - sphereRadius
+    
+    alpha = max(max(bar1, bar2), bar3);
+    
+    // Blend: background + bars
+    alpha = max(alpha, bg);
+    return mix(baseColor, hudColor + half3(0.05h), half(alpha * 0.85));
+}
+
+// =============================================================================
+
 // Ultra-fast shadow with over-relaxation
-float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
+// FORCE_INLINE: Called twice per lit pixel (spot + sun)
+// Uses FC_SHADOW_ITERATIONS when defined for compile-time optimization
+FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
 {
-    // Skip shadows in extreme periphery
-    if (quality < 0.25) return 0.65;
+    // Skip shadows based on quality mode (compile-time check when FC_QUALITY_MODE defined)
+    const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
+    if (qualityMode >= 2) return 0.65; // Low quality: skip shadows entirely
+    if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65;
     
     float res = 1.0;
     float t = 0.08;
     float prevH = 1e10;
     
-    // Very few steps with aggressive over-relaxation
-    int steps = int(quality * 2.0) + 1; // 1-3 steps
+    // Use function constant for shadow iterations when available
+    // Medium quality (mode 1) uses 2 steps, high quality (mode 0) uses 3
+    const int steps = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? 
+        (qualityMode == 1 ? 2 : 3) : 
+        int(fma(quality, 2.0, 1.0)); // 1-3 steps
     
+    UNROLL_4
     for (int i = 0; i < steps; i++)
     {
-        float h = Map(ro + rd * t, params, foldingLimit, iterations);
+        float h = Map(fma(rd, float3(t), ro), params, foldingLimit, iterations);
         
-        // Soft shadow calculation
+        // Soft shadow calculation - min is single instruction
         res = min(res, 10.0 * h / t);
         
-        // Early exit if definitely in shadow
-        if (res < 0.02) return 0.0;
+        // UNLIKELY: Most shadow rays don't hit
+        if (UNLIKELY(res < 0.02)) return 0.0;
         
         // Over-relaxation: step more aggressively when safe
         float relax = step(prevH * 0.8, h);
-        float step = mix(h, h * 1.5, relax);
-        t += max(step, 0.15);
+        float stepDist = mix(h, h * 1.5, relax);
+        t += max(stepDist, 0.15);
         prevH = h;
         
-        // Don't trace too far for shadows
-        if (t > 4.0) break;
+        // UNLIKELY: Shadows don't trace far
+        if (UNLIKELY(t > 4.0)) break;
     }
     
     return saturate(res);
@@ -688,19 +847,23 @@ float3 computeRayDirection(float2 pixelCoord, float2 resolution, float4x4 invPro
     return normalize(worldDir);
 }
 
-// Per-pixel normal calculation - fast tetrahedron method
-float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
+// Per-pixel normal calculation - fast tetrahedron method (4 samples, better accuracy)
+// FORCE_INLINE critical - called for every lit pixel
+FORCE_INLINE float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
 {
     float e = max(distance * 0.0005, 0.0001);
     
-    // Tetrahedron technique - 4 samples instead of 6
+    // Tetrahedron technique - 4 samples gives better gradient estimate
+    // The h vectors form a tetrahedron, giving unbiased gradient
     float2 h = float2(1.0, -1.0) * e;
-    return normalize(
+    float3 gradient = 
         h.xyy * Map(pos + h.xyy, params, foldingLimit, iterations) +
         h.yyx * Map(pos + h.yyx, params, foldingLimit, iterations) +
         h.yxy * Map(pos + h.yxy, params, foldingLimit, iterations) +
-        h.xxx * Map(pos + h.xxx, params, foldingLimit, iterations)
-    );
+        h.xxx * Map(pos + h.xxx, params, foldingLimit, iterations);
+    
+    // rsqrt is faster than normalize on GPU (single instruction vs sqrt+div)
+    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
 }
 
 // Forward declaration needed by compute kernels
@@ -736,11 +899,11 @@ kernel void tileRaymarchKernel(
     }
     
     // --- Threadgroup shared memory ---
-    threadgroup float sharedCoarseT;
-    threadgroup float3 sharedCenterRayDir;
+    threadgroup float sharedCoarseT = kRayMissThreshold + 100.0;
+    threadgroup float3 sharedCenterRayDir = float3(0.0);
     threadgroup FractalParams sharedFractalParams;
     threadgroup FractalParams sharedShadowParams;
-    threadgroup float3 sharedCameraPos;
+    threadgroup float3 sharedCameraPos = float3(0.0);
     threadgroup float4x4 sharedInvProjMatrix;
     threadgroup float4x4 sharedInvViewMatrix;
     threadgroup float3 sharedRayDirs[16];
@@ -749,9 +912,11 @@ kernel void tileRaymarchKernel(
 
     // Leader thread precomputes shared data
     if (localId.x == 1 && localId.y == 1) {
-        sharedFractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+        sharedFractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
+                                                 uniforms.cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
         int shadowIterations = max(lodIterations - 2, 2);
-        sharedShadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        sharedShadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
+                                                uniforms.cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
         sharedCameraPos = uniforms.cameraPos;
         sharedInvProjMatrix = uniforms.invProjMatrix;
         sharedInvViewMatrix = uniforms.invViewMatrix;
@@ -774,8 +939,7 @@ kernel void tileRaymarchKernel(
     FractalParams fractalParams = sharedFractalParams;
     FractalParams shadowParams = sharedShadowParams;
     float3 cameraPos = sharedCameraPos;
-    float4x4 invProjMatrix = sharedInvProjMatrix;
-    float4x4 invViewMatrix = sharedInvViewMatrix;
+    // Note: invProjMatrix/invViewMatrix precomputed into sharedRayDirs by leader
     float3 rd = sharedRayDirs[localId.y * 4 + localId.x];
 
     // === LEVEL 1: COARSE RAYMARCH (leader thread only) ===
@@ -795,7 +959,7 @@ kernel void tileRaymarchKernel(
     float adjustedDist = 1000.0;
     float glow = 0.0;
     
-    if (coarseT < 900.0) {
+    if (coarseT < kRayMissThreshold) {
         // Adjust starting distance for this pixel's ray direction
         float rayDot = max(dot(rd, centerRayDir), 0.9);
         float myStartT = coarseT * rayDot;
@@ -808,7 +972,7 @@ kernel void tileRaymarchKernel(
         adjustedDist = ret.x;
         glow = ret.y;
         
-        if (ret.x < 900.0) {
+        if (ret.x < kRayMissThreshold) {
             // Calculate per-pixel hit point
             float3 p = uniforms.cameraPos + adjustedDist * rd;
             
@@ -821,14 +985,11 @@ kernel void tileRaymarchKernel(
             float atten = length(spot);
             spot /= atten;
             
-            // Simplified shadows
-            int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+            // Use pre-computed shadow params from leader thread (avoid redundant creation)
+            half shaSpot = half(Shadow(p, spot, 0.7, uniforms.foldingLimit, shadowParams, shadowParams.absScalem1 > 0 ? lodIterations - 2 : 2));
+            half shaSun = half(Shadow(p, sunDir, 0.7, uniforms.foldingLimit, shadowParams, shadowParams.absScalem1 > 0 ? lodIterations - 2 : 2));
             
-            half shaSpot = half(Shadow(p, spot, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, 0.7, uniforms.foldingLimit, shadowParams, shadowIterations));
-            
-            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
             
@@ -839,8 +1000,8 @@ kernel void tileRaymarchKernel(
             
             // Specular
             float3 ref = reflect(rd, nor);
-            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
             col += half3(specSpot) * shaSpot * bri;
             col += half3(specSun) * shaSun * briSun;
             
@@ -855,13 +1016,15 @@ kernel void tileRaymarchKernel(
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     
     col = clamp(col, half3(0.0h), half3(2.0h));
-    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
     
     // Debug visualization: show hierarchical status
     // Green tint = coarse pass found hit (hierarchical worked)
     // Red tint = coarse missed, background/sky
-    if (uniforms.debugHierarchical == 1) {
-        if (coarseT < 900.0) {
+    // Use function constant to compile out debug code in release builds
+    const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
+    if (debugHierarchical) {
+        if (coarseT < kRayMissThreshold) {
             col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
         } else {
             col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
@@ -889,11 +1052,12 @@ kernel void tileRaymarchKernel2x2(
         return;
     }
     
-    threadgroup float sharedCoarseT;
-    threadgroup float3 sharedCenterRayDir;
+    threadgroup float sharedCoarseT = kRayMissThreshold + 100.0;
+    threadgroup float3 sharedCenterRayDir = float3(0.0);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
+                                                     uniforms.cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
     
     float2 pixelCenter = float2(pixelCoord) + 0.5;
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
@@ -920,7 +1084,7 @@ kernel void tileRaymarchKernel2x2(
     float adjustedDist = 1000.0;
     float glow = 0.0;
     
-    if (coarseT < 900.0) {
+    if (coarseT < kRayMissThreshold) {
         float rayDot = max(dot(rd, centerRayDir), 0.9);
         float myStartT = coarseT * rayDot;
         
@@ -930,7 +1094,7 @@ kernel void tileRaymarchKernel2x2(
         adjustedDist = ret.x;
         glow = ret.y;
         
-        if (ret.x < 900.0) {
+        if (ret.x < kRayMissThreshold) {
             float3 p = uniforms.cameraPos + adjustedDist * rd;
             float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
             
@@ -940,12 +1104,13 @@ kernel void tileRaymarchKernel2x2(
             spot /= atten;
             
             int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
+                                                            uniforms.cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
             
             half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
             half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
             
-            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
             
@@ -954,8 +1119,8 @@ kernel void tileRaymarchKernel2x2(
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
             
             float3 ref = reflect(rd, nor);
-            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
             col += half3(specSpot) * shaSpot * bri;
             col += half3(specSun) * shaSun * briSun;
             
@@ -967,11 +1132,13 @@ kernel void tileRaymarchKernel2x2(
     half glowH = half(glow);
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     col = clamp(col, half3(0.0h), half3(2.0h));
-    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+    col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
     
     // Debug visualization for 2x2 kernel
-    if (uniforms.debugHierarchical == 1) {
-        if (coarseT < 900.0) {
+    // Use function constant to compile out debug code in release builds
+    const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
+    if (debugHierarchical) {
+        if (coarseT < kRayMissThreshold) {
             col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
         } else {
             col = mix(col, half3(1.0h, 0.0h, 0.0h), 0.3h);  // Red = coarse miss
@@ -1013,24 +1180,25 @@ kernel void adaptiveHierarchical8x8(
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     
-    // Unproject to view space at far plane (z = 1 in NDC)
-    float4 clipPos = float4(ndc, 1.0, 1.0);  // Far plane in clip space
+    // Unproject to view space - use z = -1 (view-space convention: -Z is forward)
+    // This matches how the vertex shader projects positions and ensures consistency
+    // with wide FOV projections
+    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);  // Near plane in clip space
     float4 viewPos = uniforms.invProjMatrix * clipPos;
-    viewPos /= viewPos.w;
+    // For perspective projection, we need the direction, not normalized position
+    // viewPos.w will be 1 after inverse projection of a point at z=0
+    float3 viewDir = normalize(viewPos.xyz);
     
-    // Transform to model space (inverse model-view)
-    // invViewMatrix here is actually inverse MODEL-VIEW matrix (set in Swift)
-    float4 modelPos4 = uniforms.invViewMatrix * viewPos;
-    float3 modelPos = modelPos4.xyz / modelPos4.w;
+    // Transform direction to model space (inverse model-view matrix)
+    // Use w=0 for direction transformation (no translation)
+    float3 rd = normalize((uniforms.invViewMatrix * float4(viewDir, 0.0)).xyz);
     
     // Camera position in model space (same as fragment shader)
     float3 cameraPos = uniforms.cameraPos;
     
-    // Ray direction in model space (exactly like fragment shader)
-    float3 rd = normalize(modelPos - cameraPos);
-    
     int lodIterations = max(uniforms.fractalIterations, 2);
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
+                                                     cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
     
     float gTime = uniforms.time * 0.01 + 15.00;
     
@@ -1042,7 +1210,7 @@ kernel void adaptiveHierarchical8x8(
     float glow = ret.y;
     half3 col = half3(0.0h);
     
-    if (ret.x < 900.0) {
+    if (ret.x < kRayMissThreshold) {
         float3 p = cameraPos + adjustedDist * rd;
         float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
         
@@ -1053,12 +1221,13 @@ kernel void adaptiveHierarchical8x8(
         spot /= atten;
         
         int shadowIterations = max(lodIterations - 2, 2);
-        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
+                                                        cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
         
         half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
         half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
         
-        float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
@@ -1068,8 +1237,8 @@ kernel void adaptiveHierarchical8x8(
         
         // Specular
         float3 ref = reflect(rd, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
     }
@@ -1090,7 +1259,9 @@ kernel void adaptiveHierarchical8x8(
     col = PostEffects(col, texCoord, half(uniforms.limitFlash));
     
     // Debug visualization
-    if (uniforms.debugHierarchical == 1) {
+    // Use function constant to compile out debug code in release builds
+    const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
+    if (debugHierarchical) {
         // Show tile boundaries
         if (localId.x == 0 || localId.y == 0) {
             col = mix(col, half3(1.0h, 1.0h, 0.0h), 0.5h);
@@ -1123,7 +1294,475 @@ float3 uvToDir(float2 uv) // uv: -1..1
     return float3(xz.x * cos(uvRad.y), sin(uvRad.y), xz.y * cos(uvRad.y));
 }
 
-// Shared fragment body to avoid duplication and improve i-cache locality
+// =============================================================================
+// SOPHISTICATED FUR HAND RENDERING
+// =============================================================================
+// Strand-based raymarching with Kajiya-Kay anisotropic shading model
+// Features: Volumetric density, proper hair lighting, self-shadowing, color variation
+
+// SDF for a single hand bone (capsule between two joints)
+// FORCE_INLINE: Called 20+ times per sdHandSkeleton call
+FORCE_INLINE float sdCapsule(float3 p, float3 a, float3 b, float r) {
+    float3 pa = p - a;
+    float3 ba = b - a;
+    // Optimized: precompute reciprocal of dot(ba,ba) would help if ba is constant
+    float h = saturate(dot(pa, ba) / dot(ba, ba));  // saturate = clamp(x,0,1), free on GPU
+    return length(fma(ba, float3(-h), pa)) - r;  // pa - ba*h using fma
+}
+
+// SDF for entire hand skeleton (union of capsules)
+float sdHandSkeleton(float3 p, constant FurHandData& hand) {
+    if (hand.isTracked == 0) return 1000.0;
+    
+    float d = 1000.0;
+    float3 wrist = hand.joints[0].position;
+    float wristR = hand.joints[0].radius;
+    
+    // Thumb chain
+    d = min(d, sdCapsule(p, hand.joints[1].position, hand.joints[2].position, hand.joints[1].radius * 1.2));
+    d = min(d, sdCapsule(p, hand.joints[2].position, hand.joints[3].position, hand.joints[2].radius * 1.1));
+    d = min(d, sdCapsule(p, hand.joints[3].position, hand.joints[4].position, hand.joints[3].radius));
+    
+    // Index finger
+    d = min(d, sdCapsule(p, wrist, hand.joints[5].position, wristR * 0.8));
+    d = min(d, sdCapsule(p, hand.joints[5].position, hand.joints[6].position, hand.joints[5].radius));
+    d = min(d, sdCapsule(p, hand.joints[6].position, hand.joints[7].position, hand.joints[6].radius));
+    d = min(d, sdCapsule(p, hand.joints[7].position, hand.joints[8].position, hand.joints[7].radius * 0.9));
+    
+    // Middle finger
+    d = min(d, sdCapsule(p, wrist, hand.joints[9].position, wristR * 0.8));
+    d = min(d, sdCapsule(p, hand.joints[9].position, hand.joints[10].position, hand.joints[9].radius));
+    d = min(d, sdCapsule(p, hand.joints[10].position, hand.joints[11].position, hand.joints[10].radius));
+    d = min(d, sdCapsule(p, hand.joints[11].position, hand.joints[12].position, hand.joints[11].radius * 0.9));
+    
+    // Ring finger
+    d = min(d, sdCapsule(p, wrist, hand.joints[13].position, wristR * 0.7));
+    d = min(d, sdCapsule(p, hand.joints[13].position, hand.joints[14].position, hand.joints[13].radius));
+    d = min(d, sdCapsule(p, hand.joints[14].position, hand.joints[15].position, hand.joints[14].radius));
+    d = min(d, sdCapsule(p, hand.joints[15].position, hand.joints[16].position, hand.joints[15].radius * 0.9));
+    
+    // Little finger
+    d = min(d, sdCapsule(p, wrist, hand.joints[17].position, wristR * 0.6));
+    d = min(d, sdCapsule(p, hand.joints[17].position, hand.joints[18].position, hand.joints[17].radius * 0.9));
+    d = min(d, sdCapsule(p, hand.joints[18].position, hand.joints[19].position, hand.joints[18].radius * 0.9));
+    d = min(d, sdCapsule(p, hand.joints[19].position, hand.joints[20].position, hand.joints[19].radius * 0.85));
+    
+    // Palm mesh
+    d = min(d, sdCapsule(p, hand.joints[5].position, hand.joints[9].position, wristR * 0.5));
+    d = min(d, sdCapsule(p, hand.joints[9].position, hand.joints[13].position, wristR * 0.5));
+    d = min(d, sdCapsule(p, hand.joints[13].position, hand.joints[17].position, wristR * 0.45));
+    
+    return d;
+}
+
+// Get surface normal of hand skeleton (with safety for degenerate cases)
+float3 getHandNormal(float3 p, constant FurHandData& hand) {
+    float e = 0.0005;
+    float3 grad = float3(
+        sdHandSkeleton(p + float3(e,0,0), hand) - sdHandSkeleton(p - float3(e,0,0), hand),
+        sdHandSkeleton(p + float3(0,e,0), hand) - sdHandSkeleton(p - float3(0,e,0), hand),
+        sdHandSkeleton(p + float3(0,0,e), hand) - sdHandSkeleton(p - float3(0,0,e), hand)
+    );
+    float len = length(grad);
+    // Safety check to prevent division by zero
+    if (len < 0.00001) return float3(0.0, 1.0, 0.0);
+    return grad / len;
+}
+
+// High-quality 3D noise with derivatives for strand variation
+float furNoise3D(float3 p) {
+    float3 i = floor(p);
+    float3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n = i.x + i.y * 157.0 + 113.0 * i.z;
+    return mix(mix(mix(hash(n), hash(n + 1.0), f.x),
+                   mix(hash(n + 157.0), hash(n + 158.0), f.x), f.y),
+               mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
+                   mix(hash(n + 270.0), hash(n + 271.0), f.x), f.y), f.z);
+}
+
+// Fractional Brownian Motion for natural variation
+float furFBM(float3 p, int octaves) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    for (int i = 0; i < octaves; i++) {
+        value += amplitude * furNoise3D(p * frequency);
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    return value;
+}
+
+// === KAJIYA-KAY ANISOTROPIC HAIR SHADING ===
+// Physically-based model for hair/fur rendering
+
+// Kajiya-Kay diffuse term
+float kajiyaDiffuse(float3 tangent, float3 lightDir) {
+    float TdotL = dot(tangent, lightDir);
+    return sqrt(max(0.0, 1.0 - TdotL * TdotL));
+}
+
+// Kajiya-Kay specular term with shifted tangent
+float kajiyaSpecular(float3 tangent, float3 lightDir, float3 viewDir, float shift, float exponent) {
+    float3 T = normalize(tangent + shift * normalize(cross(tangent, viewDir)));
+    float TdotL = dot(T, lightDir);
+    float TdotV = dot(T, viewDir);
+    float sinTL = sqrt(max(0.0, 1.0 - TdotL * TdotL));
+    float sinTV = sqrt(max(0.0, 1.0 - TdotV * TdotV));
+    return pow(max(0.0, TdotL * TdotV + sinTL * sinTV), exponent);
+}
+
+// Marschner-inspired dual specular highlights
+float3 dualSpecular(float3 tangent, float3 lightDir, float3 viewDir, float3 baseColor) {
+    // Primary specular (R) - shifted towards root
+    float spec1 = kajiyaSpecular(tangent, lightDir, viewDir, -0.1, 80.0);
+    float3 specColor1 = float3(1.0, 0.98, 0.95);  // Slightly warm white
+    
+    // Secondary specular (TRT) - shifted towards tip, colored by hair
+    float spec2 = kajiyaSpecular(tangent, lightDir, viewDir, 0.1, 25.0);
+    float3 specColor2 = baseColor * 1.5;  // Tinted by hair color
+    
+    return spec1 * specColor1 * 0.4 + spec2 * specColor2 * 0.3;
+}
+
+// === VOLUMETRIC FUR DENSITY FIELD ===
+// Creates a density field with strand-like structures
+
+struct FurDensityResult {
+    float density;      // Volumetric density at point
+    float3 tangent;     // Local strand direction for anisotropic shading
+    float3 color;       // Base fur color at this point
+    float clumpId;      // For color variation per clump
+};
+
+FurDensityResult sampleFurDensity(float3 p, float3 surfaceNormal, float distToSurface, 
+                                   float furLength, float noiseScale, float time) {
+    FurDensityResult result;
+    result.density = 0.0;
+    result.tangent = surfaceNormal;
+    result.color = float3(0.5);
+    result.clumpId = 0.0;
+    
+    // Fur only exists within fur length from surface
+    if (distToSurface < 0.0 || distToSurface > furLength) return result;
+    
+    // Normalized height in fur (0 = root, 1 = tip)
+    float h = distToSurface / furLength;
+    
+    // === STRAND STRUCTURE ===
+    // Create strand pattern using high-frequency noise
+    float3 strandCoord = p * noiseScale * 15.0;
+    
+    // Clumping - strands group together
+    float3 clumpCoord = p * noiseScale * 3.0;
+    float clumpNoise = furFBM(clumpCoord, 3);
+    result.clumpId = floor(clumpNoise * 8.0) / 8.0;
+    
+    // Individual strand pattern
+    float strandPattern = furNoise3D(strandCoord);
+    strandPattern = smoothstep(0.35, 0.65, strandPattern);
+    
+    // Strand frequency increases with clumping
+    float clumpDensity = smoothstep(0.3, 0.7, clumpNoise);
+    strandPattern = mix(strandPattern, 1.0, clumpDensity * 0.5);
+    
+    // === DENSITY FALLOFF ===
+    // Density decreases from root to tip (tapered strands)
+    float heightFalloff = 1.0 - pow(h, 1.5);
+    
+    // Random strand length variation
+    float lengthVar = furNoise3D(p * noiseScale * 5.0 + 100.0);
+    float maxHeight = 0.6 + lengthVar * 0.4;
+    if (h > maxHeight) {
+        heightFalloff *= smoothstep(1.0, maxHeight, h);
+    }
+    
+    // Final density
+    result.density = strandPattern * heightFalloff * clumpDensity;
+    result.density = smoothstep(0.1, 0.5, result.density);
+    
+    // === STRAND TANGENT (for anisotropic shading) ===
+    // Strands grow outward with slight curl/wave
+    float3 baseDir = surfaceNormal;
+    
+    // Add curl variation
+    float curlPhase = furNoise3D(p * noiseScale * 8.0 + 50.0) * 6.28;
+    float curlAmount = h * 0.3;  // More curl at tips
+    float3 curlOffset = float3(
+        sin(curlPhase) * curlAmount,
+        0.0,
+        cos(curlPhase) * curlAmount
+    );
+    
+    // Add gravity bend
+    float3 gravityBend = float3(0.0, -1.0, 0.0) * h * h * 0.2;
+    
+    // Add time-based sway
+    float swayPhase = time * 1.5 + furNoise3D(p * 2.0) * 3.0;
+    float3 sway = float3(sin(swayPhase), 0.0, cos(swayPhase * 0.7)) * h * 0.05;
+    
+    result.tangent = normalize(baseDir + curlOffset + gravityBend + sway);
+    
+    // === FUR COLOR ===
+    // Rich color variation based on position and clump
+    float colorVar1 = furNoise3D(p * noiseScale * 2.0);
+    float colorVar2 = furNoise3D(p * noiseScale * 6.0 + 200.0);
+    
+    // Base colors - warm orange/brown fur
+    float3 rootColor = mix(
+        float3(0.65, 0.35, 0.15),   // Dark brown
+        float3(0.85, 0.55, 0.25),   // Golden brown
+        colorVar1
+    );
+    float3 tipColor = mix(
+        float3(0.95, 0.75, 0.45),   // Light golden
+        float3(0.55, 0.30, 0.12),   // Dark tips
+        colorVar2
+    );
+    
+    // Blend from root to tip
+    result.color = mix(rootColor, tipColor, pow(h, 0.7));
+    
+    // Add highlight strands
+    float highlightMask = smoothstep(0.85, 0.95, furNoise3D(p * noiseScale * 12.0));
+    result.color = mix(result.color, float3(1.0, 0.9, 0.7), highlightMask * 0.3);
+    
+    return result;
+}
+
+// === VOLUMETRIC FUR RAYMARCHING ===
+struct FurHandResult {
+    float t;           // Hit distance
+    float3 color;      // Accumulated color
+    float alpha;       // Accumulated opacity
+    float3 normal;     // Surface normal for depth
+    bool hit;          // Did we hit anything?
+};
+
+// Self-shadowing for fur (simplified)
+float furShadow(float3 p, float3 lightDir, float distToSurface, float furLength,
+                constant FurHandData& hand, float noiseScale, float time) {
+    float shadow = 1.0;
+    float stepSize = furLength * 0.15;
+    
+    float3 normal = getHandNormal(p, hand);
+    
+    for (int i = 0; i < 6; i++) {
+        float3 sp = p + lightDir * stepSize * float(i + 1);
+        float d = sdHandSkeleton(sp, hand);
+        
+        if (d < furLength && d > 0.0) {
+            FurDensityResult density = sampleFurDensity(sp, normal, d, furLength, noiseScale, time);
+            shadow *= 1.0 - density.density * 0.15;
+        }
+    }
+    
+    return max(shadow, 0.3);
+}
+
+FurHandResult raymarchFurHands(float3 ro, float3 rd, constant FurHandUniforms& furUniforms) {
+    FurHandResult result;
+    result.hit = false;
+    result.t = 1000.0;
+    result.color = float3(0.0);
+    result.alpha = 0.0;
+    result.normal = float3(0.0, 1.0, 0.0);
+    
+    // Use function constant when defined - allows compiler to eliminate entire function
+    const bool showFurHands = is_function_constant_defined(FC_SHOW_FUR_HANDS) ? FC_SHOW_FUR_HANDS : (furUniforms.showFurHands != 0);
+    if (!showFurHands) return result;
+    
+    // Safety: check if at least one hand is tracked
+    bool leftTracked = furUniforms.leftHand.isTracked != 0;
+    bool rightTracked = furUniforms.rightHand.isTracked != 0;
+    if (!leftTracked && !rightTracked) return result;
+    
+    float furLength = furUniforms.leftHand.furLength;
+    float noiseScale = furUniforms.leftHand.furNoiseScale;
+    float time = furUniforms.time;
+    
+    // Safety: validate fur parameters
+    if (furLength < 0.001 || furLength > 0.1) furLength = 0.012;
+    if (noiseScale < 1.0 || noiseScale > 200.0) noiseScale = 80.0;
+    
+    // Light setup
+    float3 lightDir = normalize(float3(0.5, 0.8, 0.3));
+    float3 lightColor = float3(1.0, 0.95, 0.9) * 1.5;
+    float3 ambientColor = float3(0.15, 0.18, 0.25);
+    
+    // Find entry point into fur volume
+    float t = 0.01;
+    float tMax = 2.0;  // Reduced max distance for performance
+    
+    // First, find where we enter the fur bounding volume
+    for (int i = 0; i < 32; i++) {  // Reduced iterations
+        float3 p = ro + rd * t;
+        float dLeft = leftTracked ? sdHandSkeleton(p, furUniforms.leftHand) : 1000.0;
+        float dRight = rightTracked ? sdHandSkeleton(p, furUniforms.rightHand) : 1000.0;
+        float d = min(dLeft, dRight);
+        
+        if (d < furLength * 1.2) break;  // Enter fur volume
+        
+        t += max(d * 0.9, 0.001);  // Safety: ensure forward progress
+        if (t > tMax) return result;
+    }
+    
+    // Volumetric integration through fur
+    float3 accumColor = float3(0.0);
+    float accumAlpha = 0.0;
+    float stepSize = furLength * 0.12;  // Slightly larger steps for performance
+    float firstHitT = -1.0;
+    float3 firstHitNormal = float3(0.0);
+    
+    for (int i = 0; i < 48 && accumAlpha < 0.95; i++) {  // Reduced iterations
+        float3 p = ro + rd * t;
+        
+        // Check both hands (only if tracked)
+        float dLeft = leftTracked ? sdHandSkeleton(p, furUniforms.leftHand) : 1000.0;
+        float dRight = rightTracked ? sdHandSkeleton(p, furUniforms.rightHand) : 1000.0;
+        bool isLeft = dLeft < dRight;
+        float d = min(dLeft, dRight);
+        constant FurHandData& activeHand = isLeft ? furUniforms.leftHand : furUniforms.rightHand;
+        
+        // Outside fur volume - skip ahead
+        if (d > furLength * 1.5) {
+            t += d * 0.8;
+            if (t > tMax) break;
+            continue;
+        }
+        
+        // Inside hand surface - we hit the skin
+        if (d < 0.001) {
+            if (firstHitT < 0.0) {
+                firstHitT = t;
+                firstHitNormal = getHandNormal(p, activeHand);
+            }
+            
+            // Skin color underneath fur
+            float3 skinColor = float3(0.4, 0.25, 0.18);
+            float skinAlpha = 1.0 - accumAlpha;
+            accumColor += skinColor * skinAlpha * 0.5;
+            accumAlpha = 1.0;
+            break;
+        }
+        
+        // Sample fur density
+        float3 normal = getHandNormal(p, activeHand);
+        FurDensityResult fur = sampleFurDensity(p, normal, d, furLength, noiseScale, time);
+        
+        if (fur.density > 0.01) {
+            if (firstHitT < 0.0) {
+                firstHitT = t;
+                firstHitNormal = normal;
+            }
+            
+            // === KAJIYA-KAY SHADING ===
+            float diffuse = kajiyaDiffuse(fur.tangent, lightDir);
+            float3 specular = dualSpecular(fur.tangent, lightDir, -rd, fur.color);
+            
+            // Self-shadowing
+            float shadow = furShadow(p, lightDir, d, furLength, activeHand, noiseScale, time);
+            
+            // Rim lighting (backlit fur glow)
+            float rim = pow(1.0 - saturate(dot(normal, -rd)), 3.0);
+            float backlit = saturate(dot(-rd, lightDir));
+            float3 rimColor = fur.color * rim * backlit * 0.6;
+            
+            // Ambient occlusion approximation
+            float ao = mix(0.5, 1.0, d / furLength);
+            
+            // Combine lighting
+            float3 litColor = fur.color * diffuse * lightColor * shadow;
+            litColor += specular * shadow;
+            litColor += fur.color * ambientColor * ao;
+            litColor += rimColor;
+            
+            // Accumulate with front-to-back compositing
+            float sampleAlpha = fur.density * stepSize * 15.0;
+            sampleAlpha = min(sampleAlpha, 1.0 - accumAlpha);
+            
+            accumColor += litColor * sampleAlpha;
+            accumAlpha += sampleAlpha;
+        }
+        
+        t += stepSize;
+        if (t > tMax) break;
+    }
+    
+    if (accumAlpha > 0.01) {
+        result.hit = true;
+        result.t = firstHitT > 0.0 ? firstHitT : t;
+        result.color = accumColor;
+        result.alpha = accumAlpha;
+        result.normal = firstHitNormal;
+    }
+    
+    return result;
+}
+
+// Shade fur result (mostly done in raymarch, this handles final compositing)
+half3 shadeFurHands(FurHandResult furResult, float3 rd, float3 lightDir, float3 lightColor) {
+    if (!furResult.hit) return half3(0.0);
+    return half3(furResult.color);
+}
+
+// =============================================================================
+
+// === SHARED LIGHTING COMPUTATION ===
+// Consolidates common lighting code to improve i-cache locality and reduce duplication
+struct LightingParams {
+    float3 position;        // Hit position
+    float3 normal;          // Surface normal
+    float3 rd;              // Ray direction
+    float distance;         // Hit distance
+    float gTime;            // Animation time
+    float quality;          // Quality level (0-1)
+    FractalParams fractalParams;
+    FractalParams shadowParams;
+    float foldingLimit;
+    int shadowIterations;
+};
+
+struct LightingResult {
+    half3 color;            // Final lit color
+    half shaSpot;           // Spot shadow
+    half shaSun;            // Sun shadow
+};
+
+inline LightingResult computeLighting(LightingParams lp, Uniforms uniforms) {
+    LightingResult result;
+    
+    float3 spotLight = CameraPath(lp.gTime + 0.03) + float3(sin(lp.gTime*18.4), cos(lp.gTime*17.98), sin(lp.gTime * 22.53)) * 0.2;
+    float3 spot = spotLight - lp.position;
+    float atten = length(spot);
+    spot /= atten;
+    
+    result.shaSpot = half(Shadow(lp.position, spot, lp.quality, lp.foldingLimit, lp.shadowParams, lp.shadowIterations));
+    result.shaSun = half(Shadow(lp.position, sunDir, lp.quality, lp.foldingLimit, lp.shadowParams, lp.shadowIterations));
+    
+    float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
+    half bri = half(max(dot(spot, lp.normal), 0.0) / attenPow * 0.25);
+    half briSun = half(max(dot(sunDir, lp.normal), 0.0) * 0.2);
+    
+    result.color = Colour(lp.position, lp.distance, lp.gTime, lp.quality, uniforms.minDistance, uniforms.fractalScale, 
+                         uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 
+                         max(int(uniforms.colorIterations * lp.quality), 2));
+    result.color = (result.color * bri * result.shaSpot) + (result.color * briSun * result.shaSun);
+    
+    // Specular
+    if (lp.quality > kMinQualityForSpecular) {
+        float3 ref = reflect(lp.rd, lp.normal);
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        result.color += half3(specSpot) * result.shaSpot * bri;
+        result.color += half3(specSun) * result.shaSun * briSun;
+    }
+    
+    return result;
+}
+
+// Shared fragment body for Mandelbox rendering
 inline FragmentOutput fragmentMain(ColorInOut in,
                                    Uniforms uniforms,
                                    float2 fragCoord,
@@ -1135,27 +1774,18 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
-    // === SCENE SWITCHING ===
-    if (uniforms.sceneIndex == 1) {
-        // Scene 1: Glowy IFS
-        half3 col = SceneIFS(cameraPos, rd, time, uniforms.ifsScale, uniforms.ifsOffset, uniforms.ifsGlow);
-        col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
-        output.color = float4(float3(col), 1.0);
-        output.depth = 1e-7;  // No depth for volumetric scene
-        return output;
-    }
-    
-    // === SCENE 0: Mandelbox (default) ===
-    // NOTE: Disable shader-side foveation/LOD. The current heuristic uses mesh UVs
-    // (`in.texCoord`), which are not screen-space and can behave incorrectly.
+    // === Mandelbox Scene ===
     float quality = 1.0;
     int lodIterations = max(int(uniforms.fractalIterations), 2);
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
+                                                     cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
 
+    // Standard analytic sphere tracing
     float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    
     half3 col = half3(0.0h);
 
-    if (ret.x < 900.0)
+    if (ret.x < kRayMissThreshold)
     {
         float3 p = cameraPos + ret.x * rd;
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
@@ -1163,7 +1793,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
         // Debug: visualize depth as grayscale
         if (DEBUG_DEPTH_VISUALIZATION) {
-            float depthGray = saturate(output.depth); // Clamp depth to [0, 1]
+            float depthGray = saturate(output.depth);
             output.color = float4(depthGray, depthGray, depthGray, 1.0);
             return output;
         }
@@ -1173,17 +1803,17 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         output.depth = 1e-7;
 
         if (DEBUG_DEPTH_VISUALIZATION) {
-            output.color = float4(0.0, 0.0, 0.0, 1.0); // Black for far plane
+            output.color = float4(0.0, 0.0, 0.0, 1.0);
             return output;
         }
     }
 
-    if (ret.x < 900.0)
+    if (ret.x < kRayMissThreshold)
     {
         float3 p = cameraPos + ret.x * rd;
 
         float3 nor;
-        if (quality > 0.2) {
+        if (quality > kMinQualityForNormals) {
             nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
         } else {
             nor = normalize(p - cameraPos);
@@ -1196,22 +1826,23 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             spot /= atten;
 
             int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
+                                                            cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
 
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
 
-            float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
             col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
 
-            if (quality > 0.7) {
+            if (quality > kMinQualityForSpecular) {
                 float3 ref = reflect(rd, nor);
-                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-                float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+                float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
                 col += half3(specSpot) * shaSpot * bri;
                 col += half3(specSun) * shaSun * briSun;
             }
@@ -1238,10 +1869,18 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     col = clamp(col, half3(0.0h), half3(2.0h));
 
-    if (quality > 0.5) {
+    if (quality > kMinQualityForPostFX) {
         col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
     } else {
-        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(0.47h));
+        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
+    }
+
+    // Render HUD overlay if enabled
+    // Use function constant when defined to eliminate this code path entirely
+    const bool showHUD = is_function_constant_defined(FC_SHOW_HUD) ? FC_SHOW_HUD : (uniforms.showHUD != 0);
+    if (showHUD) {
+        col = renderHUD(col, float2(in.texCoord), uniforms.activeGesture,
+                        uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius);
     }
 
     output.color = float4(float3(col), 1.0);
@@ -1250,12 +1889,61 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
 fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                               constant FurHandUniforms & furHandUniforms [[buffer(BufferIndexFurHands)]],
                                ushort ampId [[amplification_id]],
                                texture2d<half> cubeMap [[texture(TextureIndexColor)]])
 {
     Uniforms uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time);
+    
+    // Get camera and ray direction in MODEL SPACE for fractal
+    float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
+    float3 rd = normalize(in.modelPos - cameraPos);
+    
+    // Get camera and ray direction in WORLD SPACE for fur hands
+    // Hands are tracked in world space (device-anchored coordinates)
+    // Camera position in world space: inverse(viewMatrix) * (0,0,0,1)
+    float3 worldCameraPos = (uniforms.inverseViewMatrix * float4(0,0,0,1)).xyz;
+    // Transform mesh position to world space: inverse(viewMatrix) * modelViewMatrix * localPos
+    float4 viewSpacePos = uniforms.modelViewMatrix * float4(in.modelPos, 1.0);
+    float3 worldPos = (uniforms.inverseViewMatrix * viewSpacePos).xyz;
+    float3 worldRd = normalize(worldPos - worldCameraPos);
+    
+    // First check fur hands in WORLD SPACE
+    FurHandResult furResult = raymarchFurHands(worldCameraPos, worldRd, furHandUniforms);
+    
+    // Get fractal result
+    FragmentOutput fractalOutput = fragmentMain(in, uniforms, fragCoord, uniforms.time);
+    
+    // Composite volumetric fur hands over fractal with alpha blending
+    if (furResult.hit && furResult.alpha > 0.01) {
+        float fractalDepth = fractalOutput.depth;
+        
+        // Compute fur hand depth in WORLD SPACE then project
+        float3 furHitPos = worldCameraPos + furResult.t * worldRd;
+        float4 furClipPos = uniforms.projectionMatrix * uniforms.viewMatrix * float4(furHitPos, 1.0);
+        float furDepth = furClipPos.z / furClipPos.w;
+        
+        // If fur is closer or overlapping, blend it
+        if (furResult.t < 900.0 && (fractalDepth < 0.001 || furDepth > fractalDepth)) {
+            // Shade fur hands (color already computed in volumetric raymarch)
+            float3 lightDir = normalize(float3(0.5, 0.8, 0.3));
+            float3 lightColor = float3(1.0, 0.95, 0.9);
+            half3 furColor = shadeFurHands(furResult, worldRd, lightDir, lightColor);
+            
+            // Alpha blend fur over fractal for volumetric transparency
+            float alpha = furResult.alpha;
+            float3 blendedColor = float3(furColor) * alpha + fractalOutput.color.rgb * (1.0 - alpha);
+            fractalOutput.color = float4(blendedColor, 1.0);
+            
+            // Use fur depth if mostly opaque
+            if (alpha > 0.5) {
+                fractalOutput.depth = furDepth;
+            }
+        }
+    }
+    
+    return fractalOutput;
 }
 
 // === HIERARCHICAL QUAD-SHARED RAYMARCHING ===
@@ -1267,6 +1955,7 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
 
 fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
+                               constant FurHandUniforms & furHandUniforms [[buffer(BufferIndexFurHands)]],
                                ushort ampId [[amplification_id]],
                                texture2d<half> cubeMap [[texture(TextureIndexColor)]],
                                uint quadLaneId [[thread_index_in_quadgroup]])
@@ -1280,8 +1969,18 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
+    // World-space ray for fur hands
+    float3 worldCameraPos = (uniforms.inverseViewMatrix * float4(0,0,0,1)).xyz;
+    float4 viewSpacePos = uniforms.modelViewMatrix * float4(in.modelPos, 1.0);
+    float3 worldPos = (uniforms.inverseViewMatrix * viewSpacePos).xyz;
+    float3 worldRd = normalize(worldPos - worldCameraPos);
+    
+    // Check fur hands in world space
+    FurHandResult furResult = raymarchFurHands(worldCameraPos, worldRd, furHandUniforms);
+    
     int lodIterations = max(int(uniforms.fractalIterations), 2);
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations);
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
+                                                     cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
     
     // === STANDARD RAYMARCH (every pixel) ===
     // The hierarchical coarse/fine approach doesn't help due to SIMD lockstep execution
@@ -1291,7 +1990,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     half3 col = half3(0.0h);
     
-    if (ret.x < 900.0)
+    if (ret.x < kRayMissThreshold)
     {
         float3 p = cameraPos + adjustedDist * rd;
         
@@ -1305,7 +2004,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         half shaSun = 1.0h;
         
         int shadowIterations = max(lodIterations - 2, 2);
-        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations);
+        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
+                                                        cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
         
         float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
         float3 spot = spotLight - p;
@@ -1323,7 +2023,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         shaSun = quad_broadcast(shaSun, 0);
         
         // Per-pixel lighting with shared shadows
-        float attenPow = powr(max(atten, kPowEpsilon), 1.5);
+        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
@@ -1332,8 +2032,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         // Specular
         float3 ref = reflect(rd, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
-        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), 10.0) * 2.0;
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
 
@@ -1357,6 +2057,28 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
     
     output.color = float4(float3(col), 1.0);
+    
+    // Composite volumetric fur hands with alpha blending (world space)
+    if (furResult.hit && furResult.alpha > 0.01 && furResult.t < adjustedDist) {
+        float3 furHitPos = worldCameraPos + furResult.t * worldRd;
+        float4 furClipPos = uniforms.projectionMatrix * uniforms.viewMatrix * float4(furHitPos, 1.0);
+        float furDepth = furClipPos.z / furClipPos.w;
+        
+        float3 lightDir = normalize(float3(0.5, 0.8, 0.3));
+        float3 lightColor = float3(1.0, 0.95, 0.9);
+        half3 furColor = shadeFurHands(furResult, worldRd, lightDir, lightColor);
+        
+        // Alpha blend fur over fractal
+        float alpha = furResult.alpha;
+        float3 blendedColor = float3(furColor) * alpha + output.color.rgb * (1.0 - alpha);
+        output.color = float4(blendedColor, 1.0);
+        
+        // Use fur depth if mostly opaque
+        if (alpha > 0.5) {
+            output.depth = furDepth;
+        }
+    }
+    
     return output;
 }
 
