@@ -64,20 +64,27 @@ struct HandData {
 // MARK: - Smoothed Value
 
 /// Value with exponential smoothing - smooth transitions, no jitter
+/// Uses deltaTime for frame-rate independent animation speed
 final class SmoothedValue {
     var target: Float
     private(set) var current: Float
-    let smoothing: Float  // 0 = instant, 0.9 = very slow
+    let speed: Float  // Convergence speed in units per second (higher = faster)
     
-    init(initial: Float, smoothing: Float = 0.85) {
+    // Default speed 15.0 means ~63% convergence in 1/15th second (~67ms)
+    // This feels responsive while hiding frame-to-frame jitter
+    init(initial: Float, speed: Float = 15.0) {
         self.target = initial
         self.current = initial
-        self.smoothing = smoothing
+        self.speed = speed
     }
     
-    /// Update current value towards target. Call once per frame.
-    func update() {
-        current = current * smoothing + target * (1 - smoothing)
+    /// Update current value towards target using deltaTime for frame-rate independence
+    func update(deltaTime: Float) {
+        // Exponential decay: factor = 1 - e^(-speed * dt)
+        // At speed=15, dt=1/60: factor ≈ 0.22 (smooth)
+        // At speed=15, dt=1/30: factor ≈ 0.39 (catches up on slow frames)
+        let factor = 1.0 - exp(-speed * deltaTime)
+        current = current + (target - current) * factor
     }
     
     /// Snap immediately to target (no smoothing)
@@ -114,8 +121,9 @@ final class GestureController {
     private let ringPinchActivateThreshold: Float = 0.50
     private let ringPinchReleaseThreshold: Float = 0.30
     
-    // Value smoothing (higher = slower/smoother)
-    private let valueSmoothingFactor: Float = 0.75
+    // Smoothing speed for frame-rate independent animation (higher = faster convergence)
+    // 12.0 = ~63% convergence in 83ms, feels responsive yet smooth
+    private let valueSmoothingSpeed: Float = 12.0
     
     // Hand distance range for DIRECT MAPPING (in meters)
     // Hands close together = min value, hands far apart = max value
@@ -160,19 +168,24 @@ final class GestureController {
     init(renderSettings: RenderSettings) {
         self.renderSettings = renderSettings
         
-        // Initialize Mandelbox smoothed values
-        smoothedMinDistance = SmoothedValue(initial: renderSettings.minDistance, smoothing: valueSmoothingFactor)
-        smoothedFoldingLimit = SmoothedValue(initial: renderSettings.foldingLimit, smoothing: valueSmoothingFactor)
-        smoothedSphereRadius = SmoothedValue(initial: renderSettings.sphereRadius, smoothing: valueSmoothingFactor)
+        // Initialize Mandelbox smoothed values with frame-rate independent speed
+        smoothedMinDistance = SmoothedValue(initial: renderSettings.minDistance, speed: valueSmoothingSpeed)
+        smoothedFoldingLimit = SmoothedValue(initial: renderSettings.foldingLimit, speed: valueSmoothingSpeed)
+        smoothedSphereRadius = SmoothedValue(initial: renderSettings.sphereRadius, speed: valueSmoothingSpeed)
         
         smoothedPosition = renderSettings.position
     }
     
     // MARK: - Hand Tracking Updates
     
+    // Track deltaTime for frame-rate independent smoothing
+    private var lastUpdateDeltaTime: Float = 1.0 / 90.0
+    
     /// Update hand data from ARKit hand anchors
+    /// - Parameter deltaTime: Time since last update in seconds (for frame-rate independent smoothing)
     @available(visionOS 2.0, *)
-    func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?) {
+    func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
+        lastUpdateDeltaTime = deltaTime
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
         
@@ -263,10 +276,10 @@ final class GestureController {
         // SINGLE-HAND gesture: Right index pinch drag → translate
         processRightIndexDrag()
         
-        // Update smoothing for all values
-        smoothedMinDistance.update()
-        smoothedFoldingLimit.update()
-        smoothedSphereRadius.update()
+        // Update smoothing for all values (frame-rate independent)
+        smoothedMinDistance.update(deltaTime: lastUpdateDeltaTime)
+        smoothedFoldingLimit.update(deltaTime: lastUpdateDeltaTime)
+        smoothedSphereRadius.update(deltaTime: lastUpdateDeltaTime)
     }
     
     /// Process a two-hand gesture for a specific finger

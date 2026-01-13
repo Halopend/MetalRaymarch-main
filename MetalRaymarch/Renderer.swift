@@ -17,8 +17,10 @@ import ARKit
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 
-// Reduce buffer count to 1 to minimize latency and swimming/catch artifacts.
-let maxBuffersInFlight = 1
+// Double buffering for CPU/GPU pipelining.
+// Allows CPU to prepare frame N+1 while GPU renders N.
+// This prevents the 45fps vsync lock while minimizing latency.
+let maxBuffersInFlight = 2
 
 // Function constant indices - must match the indices in Shaders.metal
 // These allow compile-time shader specialization for better performance
@@ -129,6 +131,8 @@ actor Renderer {
     var lastPresentationTime: LayerRenderer.Clock.Instant?
     var smoothedFPS: Double = 0
     private var lastFPSUpdateTime: TimeInterval = 0
+    private var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
+    private var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
 
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
@@ -939,17 +943,24 @@ actor Renderer {
         cachedLeftHandAnchor = anchors.leftHand
         cachedRightHandAnchor = anchors.rightHand
         
-        // Update gesture controller on main actor
+        // Throttle UI updates to 30Hz to reduce main actor contention (was every frame)
+        // But track actual deltaTime since last gesture update for smooth animation
+        let gestureUpdateDelta = Float(time - lastHandTrackingUpdateTime)
+        guard time - lastHandTrackingUpdateTime > 0.033 else { return }
+        lastHandTrackingUpdateTime = time
+        
+        // Update gesture controller on main actor with proper deltaTime
         Task { @MainActor in
             // Update tracking state for UI
             appModel.leftHandTracked = anchors.leftHand?.isTracked ?? false
             appModel.rightHandTracked = anchors.rightHand?.isTracked ?? false
             
-            // Process gestures
+            // Process gestures with deltaTime for frame-rate independent smoothing
             if #available(visionOS 2.0, *) {
                 appModel.gestureController?.updateHands(
                     leftAnchor: anchors.leftHand,
-                    rightAnchor: anchors.rightHand
+                    rightAnchor: anchors.rightHand,
+                    deltaTime: gestureUpdateDelta
                 )
             }
         }
@@ -1066,13 +1077,15 @@ actor Renderer {
 
         let settings = appModel.renderSettings
         
-        // Decay the limit flash effect
-        settings.updateLimitFlash(deltaTime: 1.0 / 90.0)  // Assume 90fps
+        // Decay the limit flash effect using actual deltaTime
+        settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         
-        // Smoothing
-        let t: Float = 0.1
-        smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
-        smoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
+        // Frame-rate independent smoothing using exponential decay
+        // speed = 15 means ~63% convergence in 67ms, feels responsive yet smooth
+        let smoothSpeed: Float = 15.0
+        let smoothFactor = 1.0 - exp(-smoothSpeed * cachedDeltaTime)
+        smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * smoothFactor
+        smoothedScale = smoothedScale + (settings.scale - smoothedScale) * smoothFactor
         
         // Use cached rotation matrix (constant, computed once in init)
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
@@ -1148,6 +1161,9 @@ actor Renderer {
 
         guard let drawable = frame.queryDrawable() else { return }
 
+        // Wait for a buffer to become available. With maxBuffersInFlight=2,
+        // this allows CPU/GPU pipelining while preventing frame accumulation.
+        // The 2-buffer setup prevents the 45fps vsync lock that occurred with 1 buffer.
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
 
         frame.startSubmission()
@@ -1161,6 +1177,7 @@ actor Renderer {
         // Calculate deltaTime (clamped only on the fast side for FPS tracking; pose smoothing removed)
         let rawDelta = lastPresentationTime.map { $0.duration(to: presentationTime).timeInterval } ?? (1.0 / 90.0)
         let deltaTime = max(1.0 / 240.0, rawDelta)  // Allow slow frames to surface instead of capping at 30 FPS
+        cachedDeltaTime = Float(deltaTime)  // Cache for use in updateGameState and other methods
 
         // FPS tracking using clamped interval (stable with triple buffering)
         if deltaTime > 0 {
