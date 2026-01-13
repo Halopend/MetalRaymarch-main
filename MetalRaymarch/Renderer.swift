@@ -20,6 +20,18 @@ let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 // Reduce buffer count to 1 to minimize latency and swimming/catch artifacts.
 let maxBuffersInFlight = 1
 
+// Function constant indices - must match the indices in Shaders.metal
+// These allow compile-time shader specialization for better performance
+enum FunctionConstantIndex: Int {
+    case fractalIterations = 0
+    case shadowIterations = 1
+    case safetyBubbleEnabled = 2
+    case showFurHands = 3
+    case showHUD = 4
+    case qualityMode = 5
+    case debugHierarchical = 6
+}
+
 enum RendererError: Error {
     case badVertexDescriptor
 }
@@ -58,6 +70,15 @@ actor Renderer {
     var depthUpscalePipelineState: MTLRenderPipelineState?
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
+    
+    // === SPECIALIZED PIPELINES BY ITERATION COUNT ===
+    // Pre-compiled pipelines with fixed iteration counts for full loop unrolling in Map()
+    // This is THE critical optimization - Map() is called 50-100+ times per pixel
+    // Keys are iteration counts (4-12), values are specialized pipelines
+    var specializedPipelines: [Int: MTLRenderPipelineState] = [:]
+    var specializedQuadSharedPipelines: [Int: MTLRenderPipelineState] = [:]
+    var specializedMetalFXPipelines: [Int: MTLRenderPipelineState] = [:]
+    var specializedMetalFXQuadSharedPipelines: [Int: MTLRenderPipelineState] = [:]
     
     // Cached constant matrices (computed once, reused every frame)
     private let cachedRotationMatrix: matrix_float4x4
@@ -183,6 +204,49 @@ actor Renderer {
             print("⚠️ Quad-shared pipeline failed: \(error)")
             quadSharedPipelineState = nil
         }
+        
+        // === BUILD SPECIALIZED PIPELINES FOR COMMON ITERATION COUNTS ===
+        // This is THE critical optimization. The Map() inner loop is called 50-100+ times per pixel.
+        // With fixed iteration counts, the compiler can fully unroll the loop, eliminating:
+        // - Loop counter overhead
+        // - Branch prediction misses  
+        // - Register spilling from loop variables
+        // Expected: 20-40% performance improvement in Map() function
+        let commonIterationCounts = [4, 5, 6, 7, 8, 10, 12]  // Most commonly used values
+        print("Building specialized pipelines for iteration counts: \(commonIterationCounts)...")
+        
+        for iterCount in commonIterationCounts {
+            let config = FunctionConstantConfig(
+                fractalIterations: Int32(iterCount),
+                shadowIterations: Int32(max(iterCount - 2, 2)),
+                debugHierarchical: false
+            )
+            let constants = config.toMTLConstants()
+            
+            // Standard pipeline
+            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                functionConstants: constants
+            ) {
+                specializedPipelines[iterCount] = pipeline
+            }
+            
+            // Quad-shared pipeline
+            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                fragmentFunctionName: "fragmentShaderQuadShared",
+                functionConstants: constants
+            ) {
+                specializedQuadSharedPipelines[iterCount] = pipeline
+            }
+        }
+        print("✓ Built \(specializedPipelines.count) specialized pipelines (iterations: \(specializedPipelines.keys.sorted()))")
 
         // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
         #if canImport(MetalFX)
@@ -204,6 +268,40 @@ actor Renderer {
                                                                               colorFormat: .rgba16Float,
                                                                               vertexFunctionName: "vertexShader",
                                                                               fragmentFunctionName: "fragmentShaderQuadShared")
+            
+            // Also build specialized MetalFX pipelines for common iteration counts
+            for iterCount in commonIterationCounts {
+                let config = FunctionConstantConfig(
+                    fractalIterations: Int32(iterCount),
+                    shadowIterations: Int32(max(iterCount - 2, 2)),
+                    debugHierarchical: false
+                )
+                let constants = config.toMTLConstants()
+                
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: 1,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    colorFormat: .rgba16Float,
+                    functionConstants: constants
+                ) {
+                    specializedMetalFXPipelines[iterCount] = pipeline
+                }
+                
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: 1,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    colorFormat: .rgba16Float,
+                    fragmentFunctionName: "fragmentShaderQuadShared",
+                    functionConstants: constants
+                ) {
+                    specializedMetalFXQuadSharedPipelines[iterCount] = pipeline
+                }
+            }
+            print("✓ Built \(specializedMetalFXPipelines.count) specialized MetalFX pipelines")
             
             depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
                                                                                layerRenderer: layerRenderer, 
@@ -232,22 +330,46 @@ actor Renderer {
             fatalError("Unable to load texture. Error info: \(error)")
         }
         
-        // Build tile-based compute pipelines
+        // Build tile-based compute pipelines with function constants for maximum optimization
         do {
             let library = device.makeDefaultLibrary()!
             
-            // 4x4 tile kernel (16x DE reduction)
-            if let kernel4x4 = library.makeFunction(name: "tileRaymarchKernel") {
+            // Create specialized function constants for compute kernels
+            // Using known iteration count allows full loop unrolling in Map()
+            let computeConstants = MTLFunctionConstantValues()
+            var fractalIters: Int32 = 6  // Default fractal iterations
+            var shadowIters: Int32 = 4   // Default shadow iterations
+            var noSafetyBubble: Bool = false
+            var noFurHands: Bool = false
+            var noDebug: Bool = false
+            computeConstants.setConstantValue(&fractalIters, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
+            computeConstants.setConstantValue(&shadowIters, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
+            computeConstants.setConstantValue(&noSafetyBubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+            computeConstants.setConstantValue(&noFurHands, type: .bool, index: FunctionConstantIndex.showFurHands.rawValue)
+            computeConstants.setConstantValue(&noDebug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
+            
+            // 4x4 tile kernel (16x DE reduction) - with function constants
+            if let kernel4x4 = try? library.makeFunction(name: "tileRaymarchKernel", constantValues: computeConstants) {
+                tileRaymarchPipeline4x4 = try device.makeComputePipelineState(function: kernel4x4)
+                print("✓ 4x4 tile kernel specialized with function constants")
+            } else if let kernel4x4 = library.makeFunction(name: "tileRaymarchKernel") {
+                // Fallback to non-specialized
                 tileRaymarchPipeline4x4 = try device.makeComputePipelineState(function: kernel4x4)
             }
             
-            // 2x2 tile kernel (4x DE reduction, higher quality)
-            if let kernel2x2 = library.makeFunction(name: "tileRaymarchKernel2x2") {
+            // 2x2 tile kernel (4x DE reduction, higher quality) - with function constants
+            if let kernel2x2 = try? library.makeFunction(name: "tileRaymarchKernel2x2", constantValues: computeConstants) {
+                tileRaymarchPipeline2x2 = try device.makeComputePipelineState(function: kernel2x2)
+                print("✓ 2x2 tile kernel specialized with function constants")
+            } else if let kernel2x2 = library.makeFunction(name: "tileRaymarchKernel2x2") {
                 tileRaymarchPipeline2x2 = try device.makeComputePipelineState(function: kernel2x2)
             }
             
-            // Adaptive 8x8 hierarchical kernel (3-level cascade, 3-8x speedup)
-            if let kernel8x8 = library.makeFunction(name: "adaptiveHierarchical8x8") {
+            // Adaptive 8x8 hierarchical kernel (3-level cascade, 3-8x speedup) - with function constants
+            if let kernel8x8 = try? library.makeFunction(name: "adaptiveHierarchical8x8", constantValues: computeConstants) {
+                adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
+                print("✓ Adaptive 8x8 hierarchical pipeline specialized with function constants")
+            } else if let kernel8x8 = library.makeFunction(name: "adaptiveHierarchical8x8") {
                 adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
                 print("✓ Adaptive 8x8 hierarchical pipeline ready (3-level cascade)")
             }
@@ -309,10 +431,12 @@ actor Renderer {
         screenshotDepthTexture?.label = "Screenshot Depth"
         
         // Create render pipeline for screenshot (single view, no amplification)
+        // Must use function constants because fragmentShader declares them
         do {
             let library = device.makeDefaultLibrary()!
             let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
-            let fragmentFunction = library.makeFunction(name: "fragmentShader")
+            // Use empty function constants - required once shader declares function constants
+            let fragmentFunction = try library.makeFunction(name: "fragmentShader", constantValues: MTLFunctionConstantValues())
             
             let pipelineDescriptor = MTLRenderPipelineDescriptor()
             pipelineDescriptor.label = "Screenshot Pipeline"
@@ -550,16 +674,23 @@ actor Renderer {
                                               colorFormat: MTLPixelFormat? = nil,
                                               vertexFunctionName: String = "vertexShader",
                                               fragmentFunctionName: String = "fragmentShader",
-                                              usesVertexAmplification: Bool = true) throws -> MTLRenderPipelineState {
+                                              usesVertexAmplification: Bool = true,
+                                              functionConstants: MTLFunctionConstantValues? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object
 
         let library = device.makeDefaultLibrary()
 
         let vertexFunction = library?.makeFunction(name: vertexFunctionName)
-        let fragmentFunction = library?.makeFunction(name: fragmentFunctionName)
+        
+        // IMPORTANT: Once a shader declares function constants, Metal requires using
+        // makeFunction(name:constantValues:) even if no values are being set.
+        // Always provide function constants (empty if nil) for fragment shaders that use them.
+        let fragmentFunction: MTLFunction?
+        let constants = functionConstants ?? MTLFunctionConstantValues()
+        fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "RenderPipeline"
+        pipelineDescriptor.label = functionConstants != nil ? "RenderPipeline_Specialized" : "RenderPipeline"
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
         pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
@@ -571,6 +702,129 @@ actor Renderer {
         pipelineDescriptor.maxVertexAmplificationCount = usesVertexAmplification ? layerRenderer.properties.viewCount : 1
 
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+    }
+    
+    /// Function constant configuration for shader specialization
+    struct FunctionConstantConfig {
+        var fractalIterations: Int32?      // FC index 0
+        var shadowIterations: Int32?       // FC index 1
+        var safetyBubbleEnabled: Bool?     // FC index 2
+        var showFurHands: Bool?            // FC index 3
+        var showHUD: Bool?                 // FC index 4
+        var qualityMode: Int32?            // FC index 5 (0=high, 1=medium, 2=low)
+        var debugHierarchical: Bool?       // FC index 6
+        
+        /// Creates MTLFunctionConstantValues from this config
+        func toMTLConstants() -> MTLFunctionConstantValues {
+            let constants = MTLFunctionConstantValues()
+            
+            if var iterations = fractalIterations {
+                constants.setConstantValue(&iterations, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
+            }
+            if var shadowIters = shadowIterations {
+                constants.setConstantValue(&shadowIters, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
+            }
+            if var bubble = safetyBubbleEnabled {
+                constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+            }
+            if var fur = showFurHands {
+                constants.setConstantValue(&fur, type: .bool, index: FunctionConstantIndex.showFurHands.rawValue)
+            }
+            if var hud = showHUD {
+                constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
+            }
+            if var quality = qualityMode {
+                constants.setConstantValue(&quality, type: .int, index: FunctionConstantIndex.qualityMode.rawValue)
+            }
+            if var debug = debugHierarchical {
+                constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
+            }
+            
+            return constants
+        }
+        
+        /// Creates a config optimized for high performance (iteration=4, no HUD, no fur, no debug)
+        static var highPerformance: FunctionConstantConfig {
+            return FunctionConstantConfig(
+                fractalIterations: 4,
+                shadowIterations: 2,
+                safetyBubbleEnabled: false,
+                showFurHands: false,
+                showHUD: false,
+                qualityMode: 1,  // Medium quality
+                debugHierarchical: false
+            )
+        }
+        
+        /// Creates a config for high quality rendering
+        static var highQuality: FunctionConstantConfig {
+            return FunctionConstantConfig(
+                fractalIterations: 6,
+                shadowIterations: 4,
+                safetyBubbleEnabled: true,
+                showFurHands: true,
+                showHUD: true,
+                qualityMode: 0,  // High quality
+                debugHierarchical: false
+            )
+        }
+    }
+    
+    /// Select the best specialized pipeline for the given iteration count
+    /// Falls back to general pipeline if no specialized version exists
+    func selectPipeline(forIterations iterations: Int, useQuadShared: Bool, useMetalFX: Bool) -> MTLRenderPipelineState {
+        if useMetalFX {
+            if useQuadShared {
+                // Try specialized MetalFX quad-shared first
+                if let specialized = specializedMetalFXQuadSharedPipelines[iterations] {
+                    return specialized
+                }
+                // Fallback to general MetalFX quad-shared
+                return metalFXQuadSharedPipelineState ?? pipelineState
+            } else {
+                // Try specialized MetalFX first
+                if let specialized = specializedMetalFXPipelines[iterations] {
+                    return specialized
+                }
+                // Fallback to general MetalFX
+                return metalFXAmplificationPipelineState ?? pipelineState
+            }
+        } else {
+            if useQuadShared {
+                // Try specialized quad-shared first
+                if let specialized = specializedQuadSharedPipelines[iterations] {
+                    return specialized
+                }
+                // Fallback to general quad-shared
+                return quadSharedPipelineState ?? pipelineState
+            } else {
+                // Try specialized standard first
+                if let specialized = specializedPipelines[iterations] {
+                    return specialized
+                }
+                // Fallback to general pipeline
+                return pipelineState
+            }
+        }
+    }
+    
+    /// Build a specialized pipeline with function constants for compile-time optimization
+    static func buildSpecializedPipeline(device: MTLDevice,
+                                         layerRenderer: LayerRenderer,
+                                         rasterSampleCount: Int,
+                                         mtlVertexDescriptor: MTLVertexDescriptor,
+                                         config: FunctionConstantConfig,
+                                         colorFormat: MTLPixelFormat? = nil,
+                                         fragmentFunctionName: String = "fragmentShader") throws -> MTLRenderPipelineState {
+        return try buildRenderPipelineWithDevice(
+            device: device,
+            layerRenderer: layerRenderer,
+            rasterSampleCount: rasterSampleCount,
+            mtlVertexDescriptor: mtlVertexDescriptor,
+            colorFormat: colorFormat,
+            fragmentFunctionName: fragmentFunctionName,
+            functionConstants: config.toMTLConstants()
+        )
     }
 
     static func buildMesh(device: MTLDevice,
@@ -965,29 +1219,25 @@ actor Renderer {
         // tileSize: 0 = standard per-pixel, 2 = quad-shared (2x2 SIMD), 8 = compute-based (handled above)
         let useQuadShared = (tileSize == 2)
         
-        // Use MetalFX amplification pipeline when upscaling (uses amplification_id, outputs rgba16Float)
+        // Get current iteration count for specialized pipeline selection
+        let currentIterations = appModel.renderSettings.fractalIterations
+        
+        // Use specialized pipeline with fixed iteration count for full loop unrolling
+        // This is THE critical optimization - Map() inner loop can be fully unrolled
         #if canImport(MetalFX)
-        if upscalingEnabled {
-            if useQuadShared, let quadPipeline = metalFXQuadSharedPipelineState {
-                renderEncoder.setRenderPipelineState(quadPipeline)
-            } else if let fxAmpPipeline = metalFXAmplificationPipelineState {
-                renderEncoder.setRenderPipelineState(fxAmpPipeline)
-            } else {
-                renderEncoder.setRenderPipelineState(pipelineState)
-            }
-        } else {
-            if useQuadShared, let quadPipeline = quadSharedPipelineState {
-                renderEncoder.setRenderPipelineState(quadPipeline)
-            } else {
-                renderEncoder.setRenderPipelineState(pipelineState)
-            }
-        }
+        let selectedPipeline = selectPipeline(
+            forIterations: currentIterations,
+            useQuadShared: useQuadShared,
+            useMetalFX: upscalingEnabled
+        )
+        renderEncoder.setRenderPipelineState(selectedPipeline)
         #else
-        if useQuadShared, let quadPipeline = quadSharedPipelineState {
-            renderEncoder.setRenderPipelineState(quadPipeline)
-        } else {
-            renderEncoder.setRenderPipelineState(pipelineState)
-        }
+        let selectedPipeline = selectPipeline(
+            forIterations: currentIterations,
+            useQuadShared: useQuadShared,
+            useMetalFX: false
+        )
+        renderEncoder.setRenderPipelineState(selectedPipeline)
         #endif
 
         renderEncoder.setDepthStencilState(depthState)

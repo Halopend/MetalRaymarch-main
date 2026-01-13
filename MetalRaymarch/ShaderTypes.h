@@ -37,6 +37,19 @@ typedef NS_ENUM(EnumBackingType, TextureIndex)
     TextureIndexColor    = 0
 };
 
+// Function constant indices for shader specialization
+// These allow compile-time optimization by eliminating branches and enabling loop unrolling
+typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
+{
+    FCIndexFractalIterations   = 0,  // int: Fractal iteration count for Map() loop unrolling
+    FCIndexShadowIterations    = 1,  // int: Shadow iteration count
+    FCIndexSafetyBubbleEnabled = 2,  // bool: Safety bubble feature toggle
+    FCIndexShowFurHands        = 3,  // bool: Fur hands feature toggle
+    FCIndexShowHUD             = 4,  // bool: HUD overlay toggle
+    FCIndexQualityMode         = 5,  // int: 0=high, 1=medium, 2=low - controls feature degradation
+    FCIndexDebugHierarchical   = 6,  // bool: Debug visualization toggle
+};
+
 typedef struct
 {
     matrix_float4x4 projectionMatrix;

@@ -28,6 +28,32 @@
 
 using namespace metal;
 
+// === FUNCTION CONSTANTS ===
+// These allow the Metal compiler to specialize shaders at pipeline creation time,
+// eliminating branches and enabling dead code elimination for significant performance gains.
+// The compiler can fully unroll loops with known bounds and remove unused code paths.
+//
+// Use is_function_constant_defined(FC_*) to check if a constant was provided at pipeline creation.
+
+// Fractal iteration counts - controls loop unrolling in hot Map() function
+constant int FC_FRACTAL_ITERATIONS [[function_constant(0)]];
+
+// Shadow iteration counts (typically fractalIterations - 2)
+constant int FC_SHADOW_ITERATIONS [[function_constant(1)]];
+
+// Feature toggles - allows compiler to eliminate entire code paths
+constant bool FC_SAFETY_BUBBLE_ENABLED [[function_constant(2)]];
+
+constant bool FC_SHOW_FUR_HANDS [[function_constant(3)]];
+
+constant bool FC_SHOW_HUD [[function_constant(4)]];
+
+// Quality mode - enables aggressive optimizations for lower quality settings
+constant int FC_QUALITY_MODE [[function_constant(5)]]; // 0=high, 1=medium, 2=low
+
+// Debug mode - can be compiled out entirely in release builds
+constant bool FC_DEBUG_HIERARCHICAL [[function_constant(6)]];
+
 typedef struct
 {
     float3 position [[attribute(VertexAttributePosition)]];
@@ -232,6 +258,9 @@ FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScal
 // Optimized branchless Map function - THE HOTTEST PATH IN THE ENTIRE SHADER
 // Called potentially 50-100+ times per pixel (raymarch + shadows + normals)
 // Every cycle here matters!
+// 
+// FUNCTION CONSTANT VERSION: When FC_FRACTAL_ITERATIONS is defined, the compiler
+// can fully unroll the loop and optimize aggressively.
 FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
 {
     float4 p = float4(pos, 1.0);
@@ -240,31 +269,50 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     // Pre-compute reciprocal for sphere fold (division is expensive)
     float invMinRadius2 = 1.0f / params.minRadius2;
 
-    // Manual unroll hint for known small iteration counts (2-8 typical)
-    // The compiler will unroll if iterations is constexpr-like
-    UNROLL_8
-    for (int i = 0; i < iterations; i++)
-    {
-        // Box fold: clamp and reflect
-        // Using fma where beneficial for single-instruction execution
-        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+    // Use function constant for iteration count when available
+    // This allows the compiler to fully unroll the loop at pipeline creation time
+    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
 
-        // Branchless sphere fold using clamp
-        // r2 = dot product, single instruction on GPU
-        float r2 = dot(p.xyz, p.xyz);
-        // Sphere fold scale factor - clamped reciprocal
-        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
-        p *= t;
+    // UNROLL_FULL when using function constants (compiler knows exact count)
+    // UNROLL_8 as fallback for dynamic iteration count
+    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
+        UNROLL_FULL
+        for (int i = 0; i < loopCount; i++)
+        {
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+            float r2 = dot(p.xyz, p.xyz);
+            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            p *= t;
+            p = fma(p, params.scale, p0);
+        }
+    } else {
+        UNROLL_8
+        for (int i = 0; i < loopCount; i++)
+        {
+            // Box fold: clamp and reflect
+            // Using fma where beneficial for single-instruction execution
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
 
-        // Scale and translate - use fma for xyz, regular mul for w
-        p = fma(p, params.scale, p0);
+            // Branchless sphere fold using clamp
+            // r2 = dot product, single instruction on GPU
+            float r2 = dot(p.xyz, p.xyz);
+            // Sphere fold scale factor - clamped reciprocal
+            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            p *= t;
+
+            // Scale and translate - use fma for xyz, regular mul for w
+            p = fma(p, params.scale, p0);
+        }
     }
     
     // Final distance estimate
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
     // Safety bubble: carve out a sphere around the camera to prevent clipping
-    if (params.bubbleEnabled != 0) {
+    // When is_function_constant_defined is false, this branch is evaluated at runtime
+    // When true, the compiler eliminates the branch entirely
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (bubbleEnabled) {
         float3 toBubble = pos - params.bubbleCenter;
         float bubbleDist = length(toBubble) - params.bubbleRadius;
         d = max(d, -bubbleDist);
@@ -565,17 +613,23 @@ half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
 
 // Ultra-fast shadow with over-relaxation
 // FORCE_INLINE: Called twice per lit pixel (spot + sun)
+// Uses FC_SHADOW_ITERATIONS when defined for compile-time optimization
 FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
 {
-    // Skip shadows in extreme periphery - early out
+    // Skip shadows based on quality mode (compile-time check when FC_QUALITY_MODE defined)
+    const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
+    if (qualityMode >= 2) return 0.65; // Low quality: skip shadows entirely
     if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65;
     
     float res = 1.0;
     float t = 0.08;
     float prevH = 1e10;
     
-    // Very few steps for shadows - unroll completely
-    int steps = int(fma(quality, 2.0, 1.0)); // 1-3 steps
+    // Use function constant for shadow iterations when available
+    // Medium quality (mode 1) uses 2 steps, high quality (mode 0) uses 3
+    const int steps = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? 
+        (qualityMode == 1 ? 2 : 3) : 
+        int(fma(quality, 2.0, 1.0)); // 1-3 steps
     
     UNROLL_4
     for (int i = 0; i < steps; i++)
@@ -805,7 +859,9 @@ kernel void tileRaymarchKernel(
     // Debug visualization: show hierarchical status
     // Green tint = coarse pass found hit (hierarchical worked)
     // Red tint = coarse missed, background/sky
-    if (uniforms.debugHierarchical == 1) {
+    // Use function constant to compile out debug code in release builds
+    const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
+    if (debugHierarchical) {
         if (coarseT < kRayMissThreshold) {
             col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
         } else {
@@ -917,7 +973,9 @@ kernel void tileRaymarchKernel2x2(
     col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
     
     // Debug visualization for 2x2 kernel
-    if (uniforms.debugHierarchical == 1) {
+    // Use function constant to compile out debug code in release builds
+    const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
+    if (debugHierarchical) {
         if (coarseT < kRayMissThreshold) {
             col = mix(col, half3(0.0h, 1.0h, 0.0h), 0.3h);  // Green = hierarchical hit
         } else {
@@ -1039,7 +1097,9 @@ kernel void adaptiveHierarchical8x8(
     col = PostEffects(col, texCoord, half(uniforms.limitFlash));
     
     // Debug visualization
-    if (uniforms.debugHierarchical == 1) {
+    // Use function constant to compile out debug code in release builds
+    const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
+    if (debugHierarchical) {
         // Show tile boundaries
         if (localId.x == 0 || localId.y == 0) {
             col = mix(col, half3(1.0h, 1.0h, 0.0h), 0.5h);
@@ -1347,7 +1407,9 @@ FurHandResult raymarchFurHands(float3 ro, float3 rd, constant FurHandUniforms& f
     result.alpha = 0.0;
     result.normal = float3(0.0, 1.0, 0.0);
     
-    if (furUniforms.showFurHands == 0) return result;
+    // Use function constant when defined - allows compiler to eliminate entire function
+    const bool showFurHands = is_function_constant_defined(FC_SHOW_FUR_HANDS) ? FC_SHOW_FUR_HANDS : (furUniforms.showFurHands != 0);
+    if (!showFurHands) return result;
     
     // Safety: check if at least one hand is tracked
     bool leftTracked = furUniforms.leftHand.isTracked != 0;
@@ -1652,7 +1714,9 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
 
     // Render HUD overlay if enabled
-    if (uniforms.showHUD != 0) {
+    // Use function constant when defined to eliminate this code path entirely
+    const bool showHUD = is_function_constant_defined(FC_SHOW_HUD) ? FC_SHOW_HUD : (uniforms.showHUD != 0);
+    if (showHUD) {
         col = renderHUD(col, float2(in.texCoord), uniforms.activeGesture,
                         uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius);
     }
