@@ -22,8 +22,7 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
 {
     BufferIndexMeshPositions = 0,
     BufferIndexMeshGenerics  = 1,
-    BufferIndexUniforms      = 2,
-    BufferIndexFurHands      = 3
+    BufferIndexUniforms      = 2
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)
@@ -44,10 +43,9 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexFractalIterations   = 0,  // int: Fractal iteration count for Map() loop unrolling
     FCIndexShadowIterations    = 1,  // int: Shadow iteration count
     FCIndexSafetyBubbleEnabled = 2,  // bool: Safety bubble feature toggle
-    FCIndexShowFurHands        = 3,  // bool: Fur hands feature toggle
-    FCIndexShowHUD             = 4,  // bool: HUD overlay toggle
-    FCIndexQualityMode         = 5,  // int: 0=high, 1=medium, 2=low - controls feature degradation
-    FCIndexDebugHierarchical   = 6,  // bool: Debug visualization toggle
+    FCIndexShowHUD             = 3,  // bool: HUD overlay toggle
+    FCIndexQualityMode         = 4,  // int: 0=high, 1=medium, 2=low - controls feature degradation
+    FCIndexDebugHierarchical   = 5,  // bool: Debug visualization toggle
 };
 
 typedef struct
@@ -58,9 +56,6 @@ typedef struct
     matrix_float4x4 inverseProjectionMatrix;
     matrix_float4x4 viewMatrix;           // Pure view matrix (no model transform)
     matrix_float4x4 inverseViewMatrix;    // For world-space ray origin
-    // Temporal reprojection: previous frame matrices
-    matrix_float4x4 prevProjectionMatrix;
-    matrix_float4x4 prevModelViewMatrix;
     float time;
     float minDistance;
     vector_float2 foveaCenter;
@@ -79,7 +74,6 @@ typedef struct
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    int useTemporalReprojection;  // 1 = use previous frame hit distance, 0 = standard
 } Uniforms;
 
 typedef struct
@@ -93,9 +87,6 @@ typedef struct
 {
     matrix_float4x4 invViewMatrix;
     matrix_float4x4 invProjMatrix;
-    // Temporal reprojection matrices
-    matrix_float4x4 prevViewMatrix;
-    matrix_float4x4 prevProjMatrix;
     vector_float3 cameraPos;
     float time;
     vector_float2 resolution;
@@ -113,35 +104,7 @@ typedef struct
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
-    int useTemporalReprojection; // 1 = use previous frame hit distance
 } TileUniforms;
-
-// Hand joint data for fur rendering
-// 26 joints per hand (ARKit HandSkeleton)
-#define HAND_JOINT_COUNT 26
-
-typedef struct
-{
-    vector_float3 position;
-    float radius;              // Joint sphere radius for SDF
-} FurHandJoint;
-
-typedef struct
-{
-    FurHandJoint joints[HAND_JOINT_COUNT];
-    int isTracked;             // 0 = not tracked, 1 = tracked
-    float furDensity;          // Fur strand density (0.5 - 2.0)
-    float furLength;           // Fur strand length in meters (0.005 - 0.02)
-    float furNoiseScale;       // Noise frequency for fur variation
-} FurHandData;
-
-typedef struct
-{
-    FurHandData leftHand;
-    FurHandData rightHand;
-    float time;
-    int showFurHands;          // 0 = hidden, 1 = show fur hands
-} FurHandUniforms;
 
 #endif /* ShaderTypes_h */
 

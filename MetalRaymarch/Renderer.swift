@@ -28,11 +28,10 @@ enum FunctionConstantIndex: Int {
     case fractalIterations = 0
     case shadowIterations = 1
     case safetyBubbleEnabled = 2
-    case showFurHands = 3
-    case showHUD = 4
-    case qualityMode = 5
-    case debugHierarchical = 6
-    case maxRaySteps = 7  // Max ray marching steps for loop unrolling
+    case showHUD = 3
+    case qualityMode = 4
+    case debugHierarchical = 5
+    case maxRaySteps = 6  // Max ray marching steps for loop unrolling
 }
 
 enum RendererError: Error {
@@ -99,24 +98,6 @@ actor Renderer {
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
-    
-    // Temporal reprojection: history buffers for hit distances
-    // Double-buffered: read from previous frame, write to current frame
-    var hitDistanceHistoryTextures: [MTLTexture] = []  // One per eye, ping-pong buffered
-    var hitDistanceHistoryIndex: Int = 0  // Which buffer to read from (0 or 1)
-    var hitDistanceHistorySize: SIMD2<Int> = .zero
-    
-    // Previous frame matrices for reprojection
-    var prevProjectionMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var prevModelViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var prevViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var lastFrameProjectionMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var lastFrameViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    
-    // Fur hand rendering
-    var furHandUniformBuffer: MTLBuffer?
-    var cachedLeftHandAnchor: HandAnchor?
-    var cachedRightHandAnchor: HandAnchor?
     
     // Screenshot capture
     var screenshotTexture: MTLTexture?
@@ -372,12 +353,10 @@ actor Renderer {
             var fractalIters: Int32 = 6  // Default fractal iterations
             var shadowIters: Int32 = 4   // Default shadow iterations
             var noSafetyBubble: Bool = false
-            var noFurHands: Bool = false
             var noDebug: Bool = false
             computeConstants.setConstantValue(&fractalIters, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
             computeConstants.setConstantValue(&shadowIters, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
             computeConstants.setConstantValue(&noSafetyBubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
-            computeConstants.setConstantValue(&noFurHands, type: .bool, index: FunctionConstantIndex.showFurHands.rawValue)
             computeConstants.setConstantValue(&noDebug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
             
             // 4x4 tile kernel (16x DE reduction) - with function constants
@@ -410,11 +389,6 @@ actor Renderer {
             let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
-            
-            // Fur hand uniform buffer
-            let furHandUniformSize = MemoryLayout<FurHandUniforms>.stride
-            furHandUniformBuffer = device.makeBuffer(length: furHandUniformSize, options: .storageModeShared)
-            furHandUniformBuffer?.label = "FurHandUniforms"
             
             print("✓ Tile-based compute pipelines ready (4x4, 2x2, and adaptive 8x8)")
         } catch {
@@ -562,11 +536,6 @@ actor Renderer {
         // Use current uniforms (view 0)
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-        
-        // Bind fur hand uniforms if available
-        if let furBuffer = furHandUniformBuffer {
-            renderEncoder.setFragmentBuffer(furBuffer, offset: 0, index: BufferIndex.furHands.rawValue)
-        }
         
         // Set viewport for screenshot size
         let viewport = MTLViewport(originX: 0, originY: 0, 
@@ -741,11 +710,10 @@ actor Renderer {
         var fractalIterations: Int32?      // FC index 0
         var shadowIterations: Int32?       // FC index 1
         var safetyBubbleEnabled: Bool?     // FC index 2
-        var showFurHands: Bool?            // FC index 3
-        var showHUD: Bool?                 // FC index 4
-        var qualityMode: Int32?            // FC index 5 (0=high, 1=medium, 2=low)
-        var debugHierarchical: Bool?       // FC index 6
-        var maxRaySteps: Int32?            // FC index 7 - max ray marching steps
+        var showHUD: Bool?                 // FC index 3
+        var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
+        var debugHierarchical: Bool?       // FC index 5
+        var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
         
         /// Creates MTLFunctionConstantValues from this config
         func toMTLConstants() -> MTLFunctionConstantValues {
@@ -759,9 +727,6 @@ actor Renderer {
             }
             if var bubble = safetyBubbleEnabled {
                 constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
-            }
-            if var fur = showFurHands {
-                constants.setConstantValue(&fur, type: .bool, index: FunctionConstantIndex.showFurHands.rawValue)
             }
             if var hud = showHUD {
                 constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
@@ -785,7 +750,6 @@ actor Renderer {
                 fractalIterations: 6,
                 shadowIterations: 4,
                 safetyBubbleEnabled: false,
-                showFurHands: false,
                 showHUD: false,
                 qualityMode: 2,  // Low quality
                 debugHierarchical: false,
@@ -799,7 +763,6 @@ actor Renderer {
                 fractalIterations: 16,
                 shadowIterations: 14,
                 safetyBubbleEnabled: true,
-                showFurHands: true,
                 showHUD: true,
                 qualityMode: 0,  // High quality
                 debugHierarchical: false,
@@ -820,7 +783,6 @@ actor Renderer {
                 fractalIterations: Int32(preset.fractalIterations),
                 shadowIterations: Int32(max(preset.fractalIterations - 2, 2)),
                 safetyBubbleEnabled: true,
-                showFurHands: false,
                 showHUD: true,
                 qualityMode: qualityMode,
                 debugHierarchical: false,
@@ -952,10 +914,6 @@ actor Renderer {
         // Get hand anchors at the current time
         let anchors = ht.handAnchors(at: time)
         
-        // Cache anchors for fur hand rendering
-        cachedLeftHandAnchor = anchors.leftHand
-        cachedRightHandAnchor = anchors.rightHand
-        
         // Throttle UI updates to 30Hz to reduce main actor contention (was every frame)
         // But track actual deltaTime since last gesture update for smooth animation
         let gestureUpdateDelta = Float(time - lastHandTrackingUpdateTime)
@@ -975,112 +933,6 @@ actor Renderer {
                     rightAnchor: anchors.rightHand,
                     deltaTime: gestureUpdateDelta
                 )
-            }
-        }
-    }
-    
-    /// Update fur hand uniforms from cached hand anchors
-    private func updateFurHandUniforms(time: Float) {
-        guard let buffer = furHandUniformBuffer else { return }
-        
-        let furUniforms = buffer.contents().bindMemory(to: FurHandUniforms.self, capacity: 1)
-        
-        // Configure fur parameters
-        furUniforms.pointee.time = time
-        furUniforms.pointee.showFurHands = appModel.renderSettings.showFurHands ? 1 : 0
-        
-        // Default fur properties
-        let defaultFurDensity: Float = 1.0
-        let defaultFurLength: Float = 0.012  // 12mm fur
-        let defaultFurNoiseScale: Float = 80.0
-        
-        // Update left hand
-        if let leftAnchor = cachedLeftHandAnchor, leftAnchor.isTracked {
-            furUniforms.pointee.leftHand.isTracked = 1
-            furUniforms.pointee.leftHand.furDensity = defaultFurDensity
-            furUniforms.pointee.leftHand.furLength = defaultFurLength
-            furUniforms.pointee.leftHand.furNoiseScale = defaultFurNoiseScale
-            populateHandJoints(from: leftAnchor, into: &furUniforms.pointee.leftHand)
-        } else {
-            furUniforms.pointee.leftHand.isTracked = 0
-        }
-        
-        // Update right hand
-        if let rightAnchor = cachedRightHandAnchor, rightAnchor.isTracked {
-            furUniforms.pointee.rightHand.isTracked = 1
-            furUniforms.pointee.rightHand.furDensity = defaultFurDensity
-            furUniforms.pointee.rightHand.furLength = defaultFurLength
-            furUniforms.pointee.rightHand.furNoiseScale = defaultFurNoiseScale
-            populateHandJoints(from: rightAnchor, into: &furUniforms.pointee.rightHand)
-        } else {
-            furUniforms.pointee.rightHand.isTracked = 0
-        }
-    }
-    
-    /// Populate joint positions from an ARKit hand anchor
-    private func populateHandJoints(from anchor: HandAnchor, into handData: inout FurHandData) {
-        guard let skeleton = anchor.handSkeleton else { return }
-        
-        let transform = anchor.originFromAnchorTransform
-        
-        // Joint name to index mapping (ARKit HandSkeleton order)
-        // We'll map the 26 ARKit joints to our FurHandData.joints array
-        let jointMappings: [(index: Int, name: HandSkeleton.JointName, radiusScale: Float)] = [
-            (0, .wrist, 2.5),
-            (1, .thumbKnuckle, 1.8),
-            (2, .thumbIntermediateBase, 1.4),
-            (3, .thumbIntermediateTip, 1.0),
-            (4, .thumbTip, 0.8),
-            (5, .indexFingerKnuckle, 1.4),
-            (6, .indexFingerIntermediateBase, 1.0),
-            (7, .indexFingerIntermediateTip, 1.0),
-            (8, .indexFingerTip, 0.8),
-            (9, .middleFingerKnuckle, 1.4),
-            (10, .middleFingerIntermediateBase, 1.0),
-            (11, .middleFingerIntermediateTip, 1.0),
-            (12, .middleFingerTip, 0.8),
-            (13, .ringFingerKnuckle, 1.4),
-            (14, .ringFingerIntermediateBase, 1.0),
-            (15, .ringFingerIntermediateTip, 1.0),
-            (16, .ringFingerTip, 0.8),
-            (17, .littleFingerKnuckle, 1.2),
-            (18, .littleFingerIntermediateBase, 0.9),
-            (19, .littleFingerIntermediateTip, 0.9),
-            (20, .littleFingerTip, 0.7),
-            (21, .forearmWrist, 3.0),
-            (22, .indexFingerMetacarpal, 1.6),
-            (23, .middleFingerMetacarpal, 1.6),
-            (24, .ringFingerMetacarpal, 1.5),
-            (25, .littleFingerMetacarpal, 1.4)
-        ]
-        
-        let baseRadius: Float = 0.008  // 8mm base radius
-        
-        // Access the fixed-size joints array through pointer
-        withUnsafeMutablePointer(to: &handData.joints) { jointsPtr in
-            let joints = UnsafeMutableRawPointer(jointsPtr).bindMemory(to: FurHandJoint.self, capacity: 26)
-            
-            for mapping in jointMappings {
-                let index = mapping.index
-                guard index < 26 else { continue }
-                
-                let joint = skeleton.joint(mapping.name)
-                if joint.isTracked {
-                    let localTransform = joint.anchorFromJointTransform
-                    let worldTransform = transform * localTransform
-                    
-                    let position = SIMD3<Float>(
-                        worldTransform.columns.3.x,
-                        worldTransform.columns.3.y,
-                        worldTransform.columns.3.z
-                    )
-                    
-                    joints[index].position = position
-                    joints[index].radius = baseRadius * mapping.radiusScale
-                } else {
-                    joints[index].position = .zero
-                    joints[index].radius = 0
-                }
             }
         }
     }
@@ -1119,23 +971,13 @@ actor Renderer {
             let inverseModelView = modelView.inverse
             let inverseView = viewMatrix.inverse
             
-            // Get previous frame matrices for temporal reprojection
-            let prevProj = prevProjectionMatrices[viewIndex]
-            let prevModelView = prevModelViewMatrices[viewIndex]
-            
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
                             inverseProjectionMatrix: inverseProjection,
-<<<<<<< HEAD
-                            prevProjectionMatrix: prevProj,
-                            prevModelViewMatrix: prevModelView,
-||||||| e7972d3
-=======
                             viewMatrix: viewMatrix,
                             inverseViewMatrix: inverseView,
->>>>>>> origin/CENTRAL
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
@@ -1152,42 +994,13 @@ actor Renderer {
                             colorIterations: settings.colorIterations,
                             useHierarchical: settings.useHierarchical ? 1 : 0,
                             limitFlash: settings.limitFlash,
-<<<<<<< HEAD
-                            sceneIndex: Int32(settings.sceneIndex),
-                            ifsScale: settings.ifsScale,
-                            ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow,
-                            useTemporalReprojection: settings.useTemporalReprojection ? 1 : 0)
-||||||| e7972d3
-                            sceneIndex: Int32(settings.sceneIndex),
-                            ifsScale: settings.ifsScale,
-                            ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow)
-=======
                             showHUD: settings.showHUD ? 1 : 0,
                             activeGesture: Int32(settings.activeGestureIndex))
->>>>>>> origin/CENTRAL
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
         if drawable.views.count > 1 {
             self.uniforms[0].uniforms.1 = uniforms(forViewIndex: 1)
-        }
-        
-        // Store current matrices for next frame's temporal reprojection
-        for viewIndex in 0..<min(drawable.views.count, 2) {
-            let view = drawable.views[viewIndex]
-            let viewMatrix = (deviceTransform * view.transform).inverse
-            let projection = drawable.computeProjection(viewIndex: viewIndex)
-            let modelView = viewMatrix * modelMatrix
-
-            // Cache last frame matrices for temporal reprojection in compute path
-            lastFrameProjectionMatrices[viewIndex] = prevProjectionMatrices[viewIndex]
-            lastFrameViewMatrices[viewIndex] = prevViewMatrices[viewIndex]
-
-            prevProjectionMatrices[viewIndex] = projection
-            prevModelViewMatrices[viewIndex] = modelView
-            prevViewMatrices[viewIndex] = viewMatrix
         }
 
 //        rotation += 0.01
@@ -1262,9 +1075,6 @@ actor Renderer {
 
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
-        
-        // Update fur hand uniforms
-        self.updateFurHandUniforms(time: Float(time))
 
         self.updateGameState(drawable: drawable)
 
@@ -1367,11 +1177,6 @@ actor Renderer {
         
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-        
-        // Bind fur hand uniforms for fur hand rendering
-        if let furBuffer = furHandUniformBuffer {
-            renderEncoder.setFragmentBuffer(furBuffer, offset: 0, index: BufferIndex.furHands.rawValue)
-        }
 
         // When rendering to MetalFX input, use FULL input texture as viewport.
         // MetalFX input is now physical-sized for performance.
@@ -1646,15 +1451,10 @@ actor Renderer {
         
         // Get camera position from inverse model-view matrix (in model space)
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
-
-        let prevViewMatrix = viewIndex < lastFrameViewMatrices.count ? lastFrameViewMatrices[viewIndex] : matrix_identity_float4x4
-        let prevProjMatrix = viewIndex < lastFrameProjectionMatrices.count ? lastFrameProjectionMatrices[viewIndex] : matrix_identity_float4x4
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
-            prevViewMatrix: prevViewMatrix,
-            prevProjMatrix: prevProjMatrix,
             cameraPos: cameraPos,
             time: Float(appModel.clock.time),
             resolution: SIMD2<Float>(Float(outputTexture.width), Float(outputTexture.height)),
@@ -1671,22 +1471,7 @@ actor Renderer {
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
-<<<<<<< HEAD
-            limitFlash: settings.limitFlash,
-            sceneIndex: Int32(settings.sceneIndex),
-            ifsScale: settings.ifsScale,
-            ifsOffset: settings.ifsOffset,
-            ifsGlow: settings.ifsGlow,
-            useTemporalReprojection: settings.useTemporalReprojection ? 1 : 0
-||||||| e7972d3
-            limitFlash: settings.limitFlash,
-            sceneIndex: Int32(settings.sceneIndex),
-            ifsScale: settings.ifsScale,
-            ifsOffset: settings.ifsOffset,
-            ifsGlow: settings.ifsGlow
-=======
             limitFlash: settings.limitFlash
->>>>>>> origin/CENTRAL
         )
         
         // Copy uniforms to buffer

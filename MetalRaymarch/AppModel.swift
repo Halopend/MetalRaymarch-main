@@ -133,7 +133,6 @@ final class RenderSettings: @unchecked Sendable {
     // HUD display
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    private var _showFurHands: Bool = false          // Render hands as fur (default off)
     private var _useRelativeGestures: Bool = false   // Use relative gestures (delta-based) instead of absolute mapping
 
     // Safety bubble controls
@@ -148,9 +147,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _sdfScaleSuperCoarse: Float = 1.5    // SDF scaling for super-coarse pass (1.0-2.5)
     private var _earlyTermRatio: Float = 0.3         // Early termination convergence ratio (0.1-0.5)
     private var _earlyTermCount: Int = 3             // Steps before early termination (1-5)
-    
-    // Temporal reprojection: use previous frame's hit distance to accelerate raymarching
-    private var _useTemporalReprojection: Bool = true  // Enabled by default for performance
 
     var minDistance: Float {
         get { withLock { _minDistance } }
@@ -272,11 +268,6 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _activeGestureIndex } }
         set { withLock { _activeGestureIndex = newValue } }
     }
-    
-    var showFurHands: Bool {
-        get { withLock { _showFurHands } }
-        set { withLock { _showFurHands = newValue } }
-    }
 
     var useRelativeGestures: Bool {
         get { withLock { _useRelativeGestures } }
@@ -360,13 +351,6 @@ final class RenderSettings: @unchecked Sendable {
         print("[REFINE] earlyTermRatio = \(earlyTermRatio)")
         print("[REFINE] earlyTermCount = \(earlyTermCount)")
         print("[REFINE] ================================")
-    }
-    
-    /// Enable temporal reprojection to use previous frame's hit distance as starting point
-    /// Can reduce raymarch steps by 50-80% for slow-moving scenes
-    var useTemporalReprojection: Bool {
-        get { withLock { _useTemporalReprojection } }
-        set { withLock { _useTemporalReprojection = newValue } }
     }
 }
 
