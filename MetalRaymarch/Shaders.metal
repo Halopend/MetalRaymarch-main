@@ -1146,14 +1146,18 @@ vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]
 }
 
 // Stereo fragment shader - samples from correct array slice based on eye index
+// CRITICAL: Use nearest-neighbor filtering to preserve MetalFX's intelligent edge reconstruction!
+// MetalFX spatial scaler already did sophisticated upscaling - bilinear would blur the result.
 fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[stage_in]],
                                                 texture2d_array<float> sourceTexture [[texture(0)]],
                                                 constant FormatConversionParams& params [[buffer(0)]]) {
-    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+    // NEAREST filtering preserves MetalFX edge reconstruction
+    // Bilinear here would undo all the intelligent upscaling work!
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
                                       address::clamp_to_edge);
     
     // Sample using normalized UVs - works correctly regardless of source texture resolution
-    // aspectCorrection is 1.0 when source has correct screen aspect
+    // aspectCorrection handles physical vs screen aspect ratio difference
     float2 uv = in.texCoord;
     if (params.aspectCorrection != 1.0) {
         uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
@@ -1164,9 +1168,10 @@ fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[st
 }
 
 // Non-stereo fragment shader for backward compatibility
+// Use nearest-neighbor to preserve MetalFX edge reconstruction
 fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
                                           texture2d<float> sourceTexture [[texture(0)]]) {
-    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
                                       address::clamp_to_edge);
     
     float4 color = sourceTexture.sample(textureSampler, in.texCoord);

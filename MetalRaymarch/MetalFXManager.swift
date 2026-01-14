@@ -205,7 +205,12 @@ final class MetalFXManager {
         descriptor.outputHeight = configuration.outputHeight
         descriptor.colorTextureFormat = configuration.colorFormat
         descriptor.outputTextureFormat = configuration.colorFormat
-        descriptor.colorProcessingMode = .linear
+        
+        // Use perceptual mode for better edge detection on complex fractal detail.
+        // Perceptual mode analyzes edges in a way that matches human perception,
+        // which can produce sharper results on organic/mathematical patterns.
+        // Linear mode is technically correct for rgba16Float but perceptual often looks better.
+        descriptor.colorProcessingMode = .perceptual
 
         // These do NOT change per frame – set once
         for _ in scalers.count..<viewCount {
