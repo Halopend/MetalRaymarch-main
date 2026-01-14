@@ -108,7 +108,6 @@ actor Renderer {
 
     let arSession: ARKitSession
     let worldTracking: WorldTrackingProvider
-    var handTracking: HandTrackingProvider?
     let layerRenderer: LayerRenderer
     let appModel: AppModel
 
@@ -255,18 +254,13 @@ actor Renderer {
         }
 
         worldTracking = WorldTrackingProvider()
-        handTracking = HandTrackingProvider()
         arSession = ARKitSession()
     }
 
     private func startARSession() async {
         do {
-            var providers: [any DataProvider] = [worldTracking]
-            if let ht = handTracking {
-                providers.append(ht)
-            }
-            try await arSession.run(providers)
-            print("✓ ARKit session started with world tracking and hand tracking")
+            try await arSession.run([worldTracking])
+            print("✓ ARKit session started with world tracking")
         } catch {
             if !hasLoggedWorldTrackingWarning {
                 print("⚠️ ARKit session failed: \(error)")
@@ -410,32 +404,6 @@ actor Renderer {
         uniformBufferOffset = alignedUniformsSize * uniformBufferIndex
 
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to:UniformsArray.self, capacity:1)
-    }
-    
-    /// Update hand tracking data and process gesture controls
-    private func updateHandTracking(atTime time: TimeInterval) {
-        guard let ht = handTracking else { return }
-        
-        // Only process if hand tracking is running
-        guard ht.state == .running else { return }
-        
-        // Get hand anchors at the current time
-        let anchors = ht.handAnchors(at: time)
-        
-        // Update gesture controller on main actor
-        Task { @MainActor in
-            // Update tracking state for UI
-            appModel.leftHandTracked = anchors.leftHand?.isTracked ?? false
-            appModel.rightHandTracked = anchors.rightHand?.isTracked ?? false
-            
-            // Process gestures
-            if #available(visionOS 2.0, *) {
-                appModel.gestureController?.updateHands(
-                    leftAnchor: anchors.leftHand,
-                    rightAnchor: anchors.rightHand
-                )
-            }
-        }
     }
 
     private func updateGameState(drawable: LayerRenderer.Drawable) {
@@ -582,9 +550,6 @@ actor Renderer {
         #else
         let upscalingEnabled = false
         #endif
-
-        // Update hand tracking and process gestures
-        self.updateHandTracking(atTime: time)
 
         self.updateGameState(drawable: drawable)
 

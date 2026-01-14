@@ -29,20 +29,7 @@ class AppModel {
     var metalFXAvailable: Bool = false
     var metalFXStatus: String = "Unknown"
     
-    // Hand tracking state
-    var handTrackingEnabled: Bool = true
-    var leftHandTracked: Bool = false
-    var rightHandTracked: Bool = false
-    
-    // Gesture controller for mapping hand gestures to parameters
-    var gestureController: GestureController?
-    
     nonisolated let clock = AppClock()
-    
-    init() {
-        // Initialize gesture controller with render settings
-        gestureController = GestureController(renderSettings: renderSettings)
-    }
 }
 
 class RenderSettings {

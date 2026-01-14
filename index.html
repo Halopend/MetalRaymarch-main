@@ -65,14 +65,10 @@
 	<script type="module">
 		import * as THREE from 'three';
 		import { VRButton } from 'three/addons/webxr/VRButton.js';
-		import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
 		let camera, scene, renderer;
 		let fractalMesh;
 		let power = 8.0;
-		let hand1, hand2;
-		let hand1Status = "Disconnected";
-		let hand2Status = "Disconnected";
 		let debugTexture, debugContext; // For VR debugging
 		
 		// Configuration
@@ -228,33 +224,10 @@
 			document.body.appendChild(renderer.domElement);
 
 			// 6. Add VR Button
-			const sessionInit = { optionalFeatures: [ 'local-floor', 'bounded-floor', 'hand-tracking', 'layers' ] };
+			const sessionInit = { optionalFeatures: [ 'local-floor', 'bounded-floor', 'layers' ] };
 			document.body.appendChild(VRButton.createButton(renderer, sessionInit));
 
-			// 7. Setup Hands
-			const handModelFactory = new XRHandModelFactory();
-
-			// Hand 1
-			hand1 = renderer.xr.getHand(0);
-			hand1.add(handModelFactory.createHandModel(hand1, "spheres")); 
-			scene.add(hand1);
-			
-			hand1.addEventListener('connected', (event) => {
-				hand1Status = "Connected: " + (event.data.hand ? "Hand" : "Controller");
-			});
-			hand1.addEventListener('disconnected', () => { hand1Status = "Disconnected"; });
-
-			// Hand 2
-			hand2 = renderer.xr.getHand(1);
-			hand2.add(handModelFactory.createHandModel(hand2, "spheres"));
-			scene.add(hand2);
-			
-			hand2.addEventListener('connected', (event) => {
-				hand2Status = "Connected: " + (event.data.hand ? "Hand" : "Controller");
-			});
-			hand2.addEventListener('disconnected', () => { hand2Status = "Disconnected"; });
-
-			// 8. Setup VR Debug Panel (so we can see what's happening inside the headset)
+			// 7. Setup VR Debug Panel (so we can see what's happening inside the headset)
 			const debugCanvas = document.createElement('canvas');
 			debugCanvas.width = 512;
 			debugCanvas.height = 256;
@@ -323,46 +296,8 @@
 			// Slowly rotate the box itself for effect (optional)
 			fractalMesh.rotation.y = Math.sin(time / 4000) * 0.1;
 
-			// Hand Gesture Logic: Distance between hands controls power
-			let debugText = `L: ${hand1Status}\nR: ${hand2Status}`;
-			
-			if (hand1 && hand2) {
-				// Check if hands are tracking (visible)
-				if (hand1.visible && hand2.visible) {
-					const pos1 = new THREE.Vector3();
-					const pos2 = new THREE.Vector3();
-					
-					// Get world positions of the hand anchors
-					hand1.getWorldPosition(pos1);
-					hand2.getWorldPosition(pos2);
-					
-					const dist = pos1.distanceTo(pos2);
-					
-					debugText += `\nDist: ${dist.toFixed(3)}m\nPower: ${power.toFixed(2)}\nL: ${pos1.x.toFixed(2)},${pos1.y.toFixed(2)},${pos1.z.toFixed(2)}\nR: ${pos2.x.toFixed(2)},${pos2.y.toFixed(2)},${pos2.z.toFixed(2)}`;
-
-					// Map distance (e.g., 0.05m to 0.6m) to power (2.0 to 16.0)
-					if (dist > 0) {
-						// Simple mapping: 5cm = power 2, 60cm = power 16
-						let targetPower = THREE.MathUtils.mapLinear(dist, 0.05, 0.6, 2.0, 16.0);
-						targetPower = THREE.MathUtils.clamp(targetPower, 2.0, 16.0);
-						
-						// Smooth transition (0.05 = slower, more precise feel)
-						power += (targetPower - power) * 0.05;
-						
-						// Update shader and UI
-						fractalMesh.material.uniforms.uPower.value = power;
-						
-						// Update UI if available
-						const powerValue = document.getElementById('powerValue');
-						const powerSlider = document.getElementById('powerSlider');
-						if (powerValue) powerValue.textContent = power.toFixed(1);
-						if (powerSlider) powerSlider.value = power;
-					}
-				} else {
-					debugText += "\nHands not visible.\nPut hands in front of cameras.";
-				}
-			}
-			
+			// Debug panel shows current power value
+			let debugText = `Power: ${power.toFixed(2)}`;
 			updateDebugPanel(debugText);
 
 			renderer.render(scene, camera);
