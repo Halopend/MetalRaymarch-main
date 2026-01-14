@@ -139,7 +139,7 @@ final class GestureController {
     // MARK: - Hand Tracking Updates
     
     /// Update hand data from ARKit hand anchors.
-    /// Called asynchronously at ~30Hz. Sets TARGET values on RenderSettings.
+    /// Called every frame via async dispatch. Sets TARGET values on RenderSettings.
     /// The Renderer's interpolateToTargets() handles smooth animation at 90Hz.
     /// - Parameter deltaTime: Time since last hand tracking update (not used for smoothing anymore)
     @available(visionOS 2.0, *)

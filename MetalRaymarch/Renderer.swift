@@ -448,8 +448,14 @@ actor Renderer {
             return
         }
         
-        // Check authorization status for world sensing
-        let authStatus = await arSession.queryAuthorization(for: [.worldSensing])
+        // First query current authorization status
+        var authStatus = await arSession.queryAuthorization(for: [.worldSensing, .handTracking])
+        
+        // If not determined, REQUEST authorization (this prompts the user)
+        if authStatus[.worldSensing] == .notDetermined || authStatus[.handTracking] == .notDetermined {
+            print("🔐 Requesting ARKit authorization...")
+            authStatus = await arSession.requestAuthorization(for: [.worldSensing, .handTracking])
+        }
         
         if authStatus[.worldSensing] != .allowed {
             print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
@@ -457,9 +463,13 @@ actor Renderer {
             print("   Please ensure NSWorldSensingUsageDescription is in Info.plist and permission is granted.")
         }
         
+        if authStatus[.handTracking] != .allowed {
+            print("⚠️ Hand tracking not authorized. Status: \(String(describing: authStatus[.handTracking]))")
+        }
+        
         do {
             var providers: [any DataProvider] = [worldTracking]
-            if let ht = handTracking {
+            if let ht = handTracking, authStatus[.handTracking] == .allowed {
                 providers.append(ht)
             }
             try await arSession.run(providers)
@@ -912,20 +922,19 @@ actor Renderer {
         // Get hand anchors at the current time
         let anchors = ht.handAnchors(at: time)
         
-        // Throttle UI updates to 30Hz to reduce main actor contention (was every frame)
-        // But track actual deltaTime since last gesture update for smooth animation
+        // Calculate deltaTime for this update
         let gestureUpdateDelta = Float(time - lastHandTrackingUpdateTime)
-        guard time - lastHandTrackingUpdateTime > 0.033 else { return }
+        
+        // Process gestures EVERY FRAME for responsive controls (no throttle)
         lastHandTrackingUpdateTime = time
         
-        // Update gesture controller on main actor with proper deltaTime
-        Task { @MainActor in
-            // Update tracking state for UI
-            appModel.leftHandTracked = anchors.leftHand?.isTracked ?? false
-            appModel.rightHandTracked = anchors.rightHand?.isTracked ?? false
-            
-            // Process gestures with deltaTime for frame-rate independent smoothing
-            if #available(visionOS 2.0, *) {
+        // Process gestures via async dispatch to MainActor
+        // GestureController writes to RenderSettings which is thread-safe
+        if #available(visionOS 2.0, *) {
+            Task { @MainActor in
+                appModel.leftHandTracked = anchors.leftHand?.isTracked ?? false
+                appModel.rightHandTracked = anchors.rightHand?.isTracked ?? false
+                
                 appModel.gestureController?.updateHands(
                     leftAnchor: anchors.leftHand,
                     rightAnchor: anchors.rightHand,
@@ -1660,7 +1669,8 @@ actor Renderer {
         let outputFormat = output.pixelFormat
         
         // Use direct blit when formats match (physical-sized output matches physical drawable)
-        if drawableFormat == outputFormat {
+        // If foveation is active, we MUST use the render pass to apply the rasterization rate map.
+        if drawableFormat == outputFormat && drawable.rasterizationRateMaps.isEmpty {
             // Direct blit when formats match
             guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
             
