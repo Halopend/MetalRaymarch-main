@@ -1162,18 +1162,17 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // When rendering to MetalFX input, use FULL input texture as viewport.
-        // MetalFX input is now physical-sized for performance.
+        // When rendering to MetalFX input, use full input texture as viewport.
+        // MetalFX input is screen-aspect-sized (scaled down) to match projection matrix.
         // When rendering to drawable with foveation, use the virtual viewport from drawable.
         #if canImport(MetalFX)
         let viewports: [MTLViewport]
         if upscalingEnabled,
            let fx = metalFXManager,
            let inputTex = fx.inputTexture {
-            // Render to full MetalFX input texture (physical-sized).
-            // Note: This uses physical aspect ratio which differs slightly from screen aspect.
-            // The projection matrix is based on screen aspect, so there's minor horizontal
-            // compression, but this is acceptable for the performance gain.
+            // Render to full MetalFX input texture (screen-aspect, scaled down).
+            // The projection matrix is based on screen aspect, so this matches correctly.
+            // We fill the entire texture - it's already sized for screen aspect ratio.
             viewports = drawable.views.map { view in
                 let vp = view.textureMap.viewport
                 return MTLViewport(originX: 0.0,
@@ -1295,11 +1294,14 @@ actor Renderer {
         }
 
         // MetalFX input and output sizing:
-        // Use PHYSICAL dimensions for performance, but adjust projection matrix
-        // to match the physical aspect ratio. This gives us:
-        // - Fast rendering (physical-sized textures, ~5.6x fewer pixels)
-        // - No distortion (projection adjusted to match render target)
-        // - No rate map overhead during copy (direct physical→physical)
+        // CRITICAL: MetalFX textures must use SCREEN aspect ratio to match projection matrix!
+        // The projection matrix from drawable.computeProjection() encodes screen FOV.
+        // If we render to physical aspect, the projection is wrong and causes distortion.
+        //
+        // Strategy:
+        // - Input/Output use SCREEN aspect ratio (matches projection matrix)
+        // - Rate map transforms screen coordinates to physical drawable on copy
+        // - This preserves correct spatial projection for VR
         func alignTo16(_ value: Int) -> Int { max(16, (value + 15) & ~15) }
 
         // Get both screen and physical dimensions
@@ -1313,41 +1315,28 @@ actor Renderer {
         let screenAspect = Float(screenWidth) / Float(screenHeight)
         let physicalAspect = Float(physicalWidth) / Float(physicalHeight)
         
-        // KEY FIX: MetalFX output MUST match physical drawable EXACTLY.
-        // This avoids a second bilinear upscale pass that destroys the intelligent
-        // edge reconstruction MetalFX provides.
-        //
-        // The spatial scaler performs sophisticated edge-aware upscaling.
-        // If we then bilinearly sample the output to a different size, we lose
-        // all that work and get blurry results.
-        //
-        // Strategy: 
-        // - Output = exact physical drawable size (enables direct blit, no resampling)
-        // - Input = physical size * scale factor
-        // - Projection correction = render to physical aspect, rate map handles screen mapping
+        // Use SCREEN dimensions for MetalFX to match projection matrix
+        // Output matches screen size, rate map handles physical transformation
+        let outputWidth = alignTo16(screenWidth)
+        let outputHeight = alignTo16(screenHeight)
         
-        // Match physical drawable exactly - no secondary upscaling!
-        let outputWidth = physicalWidth
-        let outputHeight = physicalHeight
+        // Input is scaled-down version of screen size
+        let inputWidth = alignTo16(max(1, Int(round(Double(screenWidth) * Double(metalFXScale)))))
+        let inputHeight = alignTo16(max(1, Int(round(Double(screenHeight) * Double(metalFXScale)))))
         
-        // Input is the scaled-down version
-        let inputWidth = alignTo16(max(1, Int(round(Double(physicalWidth) * Double(metalFXScale)))))
-        let inputHeight = alignTo16(max(1, Int(round(Double(physicalHeight) * Double(metalFXScale)))))
-        
-        // Physical aspect for projection adjustment (renders to physical-sized texture)
-        // Rate map in final copy handles the screen aspect mapping
-        metalFXAspectCorrection = physicalAspect / screenAspect
+        // Store aspect correction (not used in this mode since we use rate map)
+        metalFXAspectCorrection = 1.0
         
         lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
         
         // Debug: print dimensions
         if !hasLoggedFoveationAvailability {
-            print("🔍 MetalFX Config Debug (Physical-matched output - no secondary upscale):")
+            print("🔍 MetalFX Config Debug (Screen-aspect for correct projection):")
             print("   Screen viewport: \(screenWidth) x \(screenHeight) (aspect \(screenAspect))")
             print("   Physical drawable: \(physicalWidth) x \(physicalHeight) (aspect \(physicalAspect))")
             print("   MetalFX input: \(inputWidth) x \(inputHeight) (\(metalFXScale)x scale)")
-            print("   MetalFX output: \(outputWidth) x \(outputHeight) (matches physical exactly)")
-            print("   Aspect correction: \(metalFXAspectCorrection)")
+            print("   MetalFX output: \(outputWidth) x \(outputHeight) (screen-sized)")
+            print("   Rate map handles screen→physical transformation")
             print("   Pixel reduction: render \(inputWidth * inputHeight) vs full \(physicalWidth * physicalHeight) = \(String(format: "%.1f", Float(physicalWidth * physicalHeight) / Float(inputWidth * inputHeight)))x fewer")
             hasLoggedFoveationAvailability = true
         }
@@ -1678,8 +1667,8 @@ actor Renderer {
             blit.endEncoding()
         } else {
             // Need format conversion via render pass - use single stereo pass with vertex amplification
-            // Since MetalFX output now matches physical drawable exactly, we use physical-sized viewports
-            // and DON'T need rate map transformation (it would double-transform!)
+            // MetalFX output is screen-sized, rate map transforms to physical drawable
+            let systemRateMap = drawable.rasterizationRateMaps.first
             
             if formatConversionPipeline == nil {
                 createFormatConversionPipeline(destinationFormat: drawableFormat)
@@ -1692,13 +1681,12 @@ actor Renderer {
             
             let renderPassDescriptor = MTLRenderPassDescriptor()
             
-            // NO rate map - our output already matches physical size
-            // Rate map would cause double-transformation artifacts
-            renderPassDescriptor.rasterizationRateMap = nil
+            // Use rate map to transform screen coordinates to physical drawable
+            renderPassDescriptor.rasterizationRateMap = systemRateMap
             
             // Render to the array texture directly, not a view
             renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDescriptor.colorAttachments[0].loadAction = .dontCare  // We fill entire texture
+            renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             renderPassDescriptor.renderTargetArrayLength = views
             
@@ -1707,13 +1695,13 @@ actor Renderer {
                 return
             }
             
-            // Use PHYSICAL-sized viewports (MetalFX output matches physical drawable)
-            // Each eye fills the full physical texture dimension
-            let viewports = (0..<views).map { _ -> MTLViewport in
-                return MTLViewport(originX: 0.0,
-                                   originY: 0.0,
-                                   width: Double(output.width),
-                                   height: Double(output.height),
+            // Use SCREEN-sized viewports (rate map transforms to physical)
+            let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
+                let vp = view.textureMap.viewport
+                return MTLViewport(originX: vp.originX,
+                                   originY: vp.originY,
+                                   width: vp.width,
+                                   height: vp.height,
                                    znear: 0.0, zfar: 1.0)
             }
             encoder.setViewports(viewports)
@@ -1730,8 +1718,7 @@ actor Renderer {
             // Pass the full array texture - shader samples using eye index from amplification_id
             encoder.setFragmentTexture(output, index: 0)
             
-            // No aspect correction needed - MetalFX output matches physical drawable exactly
-            // Simple 1:1 UV mapping
+            // No aspect correction needed - MetalFX output has correct screen aspect
             var aspectCorrection: Float = 1.0
             encoder.setFragmentBytes(&aspectCorrection, length: MemoryLayout<Float>.size, index: 0)
             
@@ -1747,27 +1734,27 @@ actor Renderer {
         guard let pipeline = depthUpscalePipelineState else { return }
 
         // Depth upscale: low-res input depth → physical-sized drawable depth
-        // This is an actual upscale (unlike color where MetalFX handles it)
-        // We use nearest-neighbor in shader to preserve depth discontinuities
+        // Input depth is screen-aspect-sized (same as MetalFX input)
+        // Rate map transforms screen coordinates to physical drawable
+        let systemRateMap = drawable.rasterizationRateMaps.first
         let views = min(drawable.views.count, src.arrayLength)
-        let destDepth = drawable.depthTextures[0]
 
         let desc = MTLRenderPassDescriptor()
-        // NO rate map - we fill the entire physical depth buffer directly
-        desc.rasterizationRateMap = nil
-        desc.depthAttachment.texture = destDepth
+        desc.rasterizationRateMap = systemRateMap
+        desc.depthAttachment.texture = drawable.depthTextures[0]
         desc.depthAttachment.loadAction = .dontCare
         desc.depthAttachment.storeAction = .store
         desc.renderTargetArrayLength = views
         
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { return }
 
-        // Use PHYSICAL-sized viewports - fill entire depth buffer
-        let viewports = (0..<views).map { _ -> MTLViewport in
-            return MTLViewport(originX: 0.0,
-                               originY: 0.0,
-                               width: Double(destDepth.width),
-                               height: Double(destDepth.height),
+        // Use SCREEN-sized viewports (rate map transforms to physical)
+        let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
+            let vp = view.textureMap.viewport
+            return MTLViewport(originX: vp.originX,
+                               originY: vp.originY,
+                               width: vp.width,
+                               height: vp.height,
                                znear: 0.0, zfar: 1.0)
         }
         encoder.setViewports(viewports)
