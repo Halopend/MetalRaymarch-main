@@ -36,8 +36,10 @@ struct MetalProjectTestApp: App {
         WindowGroup {
             ContentView()
                 .environment(appModel)
+                .glassBackgroundEffect() // Use default glass to avoid unavailable Material symbol
         }
         .defaultSize(width: 600, height: 250)
+        .windowStyle(.plain)
 
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in

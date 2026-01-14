@@ -61,31 +61,6 @@ struct HandData {
     static var zero: HandData { HandData() }
 }
 
-// MARK: - Smoothed Value
-
-/// Value with exponential smoothing - smooth transitions, no jitter
-final class SmoothedValue {
-    var target: Float
-    private(set) var current: Float
-    let smoothing: Float  // 0 = instant, 0.9 = very slow
-    
-    init(initial: Float, smoothing: Float = 0.85) {
-        self.target = initial
-        self.current = initial
-        self.smoothing = smoothing
-    }
-    
-    /// Update current value towards target. Call once per frame.
-    func update() {
-        current = current * smoothing + target * (1 - smoothing)
-    }
-    
-    /// Snap immediately to target (no smoothing)
-    func snap() {
-        current = target
-    }
-}
-
 // MARK: - Two-Hand Gesture State
 
 /// State for a two-hand scale gesture
@@ -106,22 +81,30 @@ struct TwoHandGestureState {
 @MainActor
 final class GestureController {
     
-    // Pinch thresholds with hysteresis (slightly higher than FractalVision for reliability)
-    private let pinchActivateThreshold: Float = 0.90   // Must exceed to start gesture
-    private let pinchReleaseThreshold: Float = 0.75    // Must fall below to end gesture
+    // Pinch thresholds with hysteresis
+    private let pinchActivateThreshold: Float = 0.65   // Must exceed to start gesture
+    private let pinchReleaseThreshold: Float = 0.45    // Must fall below to end gesture
     
-    // Value smoothing (higher = slower/smoother)
-    private let valueSmoothingFactor: Float = 0.85
+    // Ring finger needs lower thresholds (anatomically harder to pinch with thumb)
+    private let ringPinchActivateThreshold: Float = 0.50
+    private let ringPinchReleaseThreshold: Float = 0.30
     
-    // Mandelbox parameter ranges
-    private let minDistanceRange: ClosedRange<Float> = 0.001...3.0
-    private let foldingLimitRange: ClosedRange<Float> = 0.1...5.0
+    // Smoothing speed for frame-rate independent animation (higher = faster convergence)
+    // 12.0 = ~63% convergence in 83ms, feels responsive yet smooth
+    private let valueSmoothingSpeed: Float = 12.0
+    
+    // Hand distance range for DIRECT MAPPING (in meters)
+    // Hands close together = min value, hands far apart = max value
+    private let minHandDistance: Float = 0.05  // 5cm
+    private let maxHandDistance: Float = 0.60  // 60cm
+    // Guardrails to prevent accidental activation when hands are wide apart
+    private let maxStartHandDistance: Float = 0.35  // Require hands within 35cm to start
+    private let maxActiveHandDistance: Float = 0.80 // Allow expansion up to 80cm
+    
+    // Mandelbox parameter ranges - WIDE for exploration
+    private let minDistanceRange: ClosedRange<Float> = 0.001...5.0
+    private let foldingLimitRange: ClosedRange<Float> = 0.1...13.0
     private let sphereRadiusRange: ClosedRange<Float> = 0.01...2.0
-    
-    // IFS parameter ranges
-    private let ifsScaleRange: ClosedRange<Float> = 1.2...2.5
-    private let ifsOffsetRange: ClosedRange<Float> = 0.5...1.5
-    private let ifsGlowRange: ClosedRange<Float> = 0.1...3.0
     
     // Single-hand drag sensitivity
     private let translateSensitivity: Float = 1.0
@@ -131,26 +114,17 @@ final class GestureController {
     private var rightHand: HandData = .zero
     
     // Two-hand gesture states (one per finger pair)
-    private var indexGestureState = TwoHandGestureState()    // minDistance / ifsScale
-    private var middleGestureState = TwoHandGestureState()   // foldingLimit / ifsOffset
-    private var ringGestureState = TwoHandGestureState()     // sphereRadius / ifsGlow
+    private var indexGestureState = TwoHandGestureState()    // minDistance
+    private var middleGestureState = TwoHandGestureState()   // foldingLimit
+    private var ringGestureState = TwoHandGestureState()     // sphereRadius
     
     // Single-hand drag state
     private var rightIndexDragActive: Bool = false
     private var rightIndexDragStartPos: SIMD3<Float> = .zero
     private var rightIndexPrevPos: SIMD3<Float> = .zero
     
-    // Smoothed output values - Mandelbox
-    private var smoothedMinDistance: SmoothedValue!
-    private var smoothedFoldingLimit: SmoothedValue!
-    private var smoothedSphereRadius: SmoothedValue!
-    
-    // Smoothed output values - IFS
-    private var smoothedIFSScale: SmoothedValue!
-    private var smoothedIFSOffset: SmoothedValue!
-    private var smoothedIFSGlow: SmoothedValue!
-    
-    private var smoothedPosition: SIMD3<Float> = .zero
+    // Accumulated position from drag gestures (target position)
+    private var accumulatedPosition: SIMD3<Float> = .zero
     
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
@@ -158,32 +132,23 @@ final class GestureController {
     init(renderSettings: RenderSettings) {
         self.renderSettings = renderSettings
         
-        // Initialize Mandelbox smoothed values
-        smoothedMinDistance = SmoothedValue(initial: renderSettings.minDistance, smoothing: valueSmoothingFactor)
-        smoothedFoldingLimit = SmoothedValue(initial: renderSettings.foldingLimit, smoothing: valueSmoothingFactor)
-        smoothedSphereRadius = SmoothedValue(initial: renderSettings.sphereRadius, smoothing: valueSmoothingFactor)
-        
-        // Initialize IFS smoothed values
-        smoothedIFSScale = SmoothedValue(initial: renderSettings.ifsScale, smoothing: valueSmoothingFactor)
-        smoothedIFSOffset = SmoothedValue(initial: renderSettings.ifsOffset, smoothing: valueSmoothingFactor)
-        smoothedIFSGlow = SmoothedValue(initial: renderSettings.ifsGlow, smoothing: valueSmoothingFactor)
-        
-        smoothedPosition = renderSettings.position
+        // Initialize accumulated position from current settings
+        accumulatedPosition = renderSettings.position
     }
     
     // MARK: - Hand Tracking Updates
     
-    /// Update hand data from ARKit hand anchors
+    /// Update hand data from ARKit hand anchors.
+    /// Called asynchronously at ~30Hz. Sets TARGET values on RenderSettings.
+    /// The Renderer's interpolateToTargets() handles smooth animation at 90Hz.
+    /// - Parameter deltaTime: Time since last hand tracking update (not used for smoothing anymore)
     @available(visionOS 2.0, *)
-    func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?) {
+    func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
         
-        // Process all gesture mappings
+        // Process all gesture mappings (sets targets on RenderSettings)
         processGestures()
-        
-        // Apply smoothed values to settings
-        applySmoothedValues()
     }
     
     @available(visionOS 2.0, *)
@@ -219,19 +184,20 @@ final class GestureController {
         data.palmPosition = jointPosition(.middleFingerMetacarpal)
         
         // Calculate pinch values based on distance between thumb and each finger
-        let pinchMaxDist: Float = 0.08  // 8cm = no pinch
-        let pinchMinDist: Float = 0.02  // 2cm = full pinch
+        // Ring finger has shorter reach to thumb anatomically, so use tighter range
+        let pinchMinDist: Float = 0.02  // 2cm = full pinch (same for all)
         
-        func calculatePinch(fingerTip: SIMD3<Float>) -> Float {
+        func calculatePinch(fingerTip: SIMD3<Float>, maxDist: Float) -> Float {
             let distance = simd_length(data.thumbTip - fingerTip)
-            let normalized = 1.0 - ((distance - pinchMinDist) / (pinchMaxDist - pinchMinDist))
+            let normalized = 1.0 - ((distance - pinchMinDist) / (maxDist - pinchMinDist))
             return simd_clamp(normalized, 0, 1)
         }
         
-        data.indexPinch = calculatePinch(fingerTip: data.indexTip)
-        data.middlePinch = calculatePinch(fingerTip: data.middleTip)
-        data.ringPinch = calculatePinch(fingerTip: data.ringTip)
-        data.pinkyPinch = calculatePinch(fingerTip: data.pinkyTip)
+        // Index/middle have longer reach (8cm range), ring/pinky have shorter reach (6cm range)
+        data.indexPinch = calculatePinch(fingerTip: data.indexTip, maxDist: 0.08)
+        data.middlePinch = calculatePinch(fingerTip: data.middleTip, maxDist: 0.08)
+        data.ringPinch = calculatePinch(fingerTip: data.ringTip, maxDist: 0.06)   // Tighter range for ring
+        data.pinkyPinch = calculatePinch(fingerTip: data.pinkyTip, maxDist: 0.055) // Even tighter for pinky
         
         return data
     }
@@ -241,131 +207,140 @@ final class GestureController {
     private func processGestures() {
         guard let settings = renderSettings else { return }
         
-        let isIFS = settings.sceneIndex == 1
+        // Track active gesture for HUD display
+        var activeDigit = 0
         
-        // TWO-HAND gestures (both hands pinching same finger)
-        // Pass startParameterValue INTO closure to avoid exclusive access conflict
-        // Closure returns true if limit was hit
+        // TWO-HAND gestures - directly set TARGET values on RenderSettings
+        // Renderer handles smoothing in interpolateToTargets()
         
-        // INDEX FINGER: minDistance (Mandelbox) / ifsScale (IFS)
-        processTwoHandGesture(digit: 1, state: &indexGestureState, parameterUpdate: { [weak self] ratio, startValue in
-            guard let self = self else { return false }
-            let newValue = startValue * ratio
-            if isIFS {
-                let clamped = simd_clamp(newValue, self.ifsScaleRange.lowerBound, self.ifsScaleRange.upperBound)
-                self.smoothedIFSScale.target = clamped
-                return newValue != clamped
-            } else {
-                let clamped = simd_clamp(newValue, self.minDistanceRange.lowerBound, self.minDistanceRange.upperBound)
-                self.smoothedMinDistance.target = clamped
-                return newValue != clamped
-            }
-        })
+        // INDEX FINGER: minDistance
+        processTwoHandGesture(
+            digit: 1,
+            state: &indexGestureState,
+            currentTarget: settings.targetMinDistance,
+            range: minDistanceRange
+        ) { newValue in
+            settings.targetMinDistance = newValue
+        }
+        if indexGestureState.isActive { activeDigit = 1 }
         
-        // MIDDLE FINGER: foldingLimit (Mandelbox) / ifsOffset (IFS)
-        processTwoHandGesture(digit: 2, state: &middleGestureState, parameterUpdate: { [weak self] ratio, startValue in
-            guard let self = self else { return false }
-            let newValue = startValue * ratio
-            if isIFS {
-                let clamped = simd_clamp(newValue, self.ifsOffsetRange.lowerBound, self.ifsOffsetRange.upperBound)
-                self.smoothedIFSOffset.target = clamped
-                return newValue != clamped
-            } else {
-                let clamped = simd_clamp(newValue, self.foldingLimitRange.lowerBound, self.foldingLimitRange.upperBound)
-                self.smoothedFoldingLimit.target = clamped
-                return newValue != clamped
-            }
-        })
+        // MIDDLE FINGER: foldingLimit
+        processTwoHandGesture(
+            digit: 2,
+            state: &middleGestureState,
+            currentTarget: settings.targetFoldingLimit,
+            range: foldingLimitRange
+        ) { newValue in
+            settings.targetFoldingLimit = newValue
+        }
+        if middleGestureState.isActive { activeDigit = 2 }
         
-        // RING FINGER: sphereRadius (Mandelbox) / ifsGlow (IFS)
-        processTwoHandGesture(digit: 3, state: &ringGestureState, parameterUpdate: { [weak self] ratio, startValue in
-            guard let self = self else { return false }
-            let newValue = startValue * ratio
-            if isIFS {
-                let clamped = simd_clamp(newValue, self.ifsGlowRange.lowerBound, self.ifsGlowRange.upperBound)
-                self.smoothedIFSGlow.target = clamped
-                return newValue != clamped
-            } else {
-                let clamped = simd_clamp(newValue, self.sphereRadiusRange.lowerBound, self.sphereRadiusRange.upperBound)
-                self.smoothedSphereRadius.target = clamped
-                return newValue != clamped
-            }
-        })
+        // RING FINGER: sphereRadius
+        processTwoHandGesture(
+            digit: 3,
+            state: &ringGestureState,
+            currentTarget: settings.targetSphereRadius,
+            range: sphereRadiusRange
+        ) { newValue in
+            settings.targetSphereRadius = newValue
+        }
+        if ringGestureState.isActive { activeDigit = 3 }
+        
+        // Update active gesture for HUD
+        settings.activeGestureIndex = activeDigit
         
         // SINGLE-HAND gesture: Right index pinch drag → translate
         processRightIndexDrag()
-        
-        // Update smoothing for all values
-        smoothedMinDistance.update()
-        smoothedFoldingLimit.update()
-        smoothedSphereRadius.update()
-        smoothedIFSScale.update()
-        smoothedIFSOffset.update()
-        smoothedIFSGlow.update()
     }
     
-    /// Process a two-hand scale gesture for a specific finger
+    /// Process a two-hand gesture for a specific finger
+    /// Directly sets TARGET values - Renderer handles smoothing
     /// - Parameters:
     ///   - digit: 1=index, 2=middle, 3=ring, 4=pinky
     ///   - state: The gesture state to track
-    ///   - parameterUpdate: Closure called with (scale ratio, start parameter value), returns true if limit hit
-    private func processTwoHandGesture(digit: Int, state: inout TwoHandGestureState, parameterUpdate: (Float, Float) -> Bool) {
+    ///   - currentTarget: The current target value (read from RenderSettings)
+    ///   - range: The valid range for the parameter
+    ///   - setTarget: Closure to set the new target value
+    private func processTwoHandGesture(
+        digit: Int,
+        state: inout TwoHandGestureState,
+        currentTarget: Float,
+        range: ClosedRange<Float>,
+        setTarget: (Float) -> Void
+    ) {
         guard let settings = renderSettings else { return }
         
         let leftPinch = leftHand.pinchStrength(digit: digit)
         let rightPinch = rightHand.pinchStrength(digit: digit)
         
-        // Check if BOTH hands are pinching (with hysteresis)
+        // Use lower thresholds for ring finger (harder to pinch)
+        let activateThresh = (digit == 3) ? ringPinchActivateThreshold : pinchActivateThreshold
+        let releaseThresh = (digit == 3) ? ringPinchReleaseThreshold : pinchReleaseThreshold
+        
+        // Measure hand separation (only meaningful if both tracked)
+        let leftPos = leftHand.pinchPosition(digit: digit)
+        let rightPos = rightHand.pinchPosition(digit: digit)
+        let currentDistance = simd_length(leftPos - rightPos)
+
+        // Check if BOTH hands are pinching (with hysteresis) and within distance guardrails
         let bothActive: Bool
         if state.isActive {
-            // Already active - use release threshold
+            // Already active - allow up to maxActiveHandDistance, use release threshold
             bothActive = leftHand.isTracked && rightHand.isTracked &&
-                         leftPinch >= pinchReleaseThreshold &&
-                         rightPinch >= pinchReleaseThreshold
+                         currentDistance <= maxActiveHandDistance &&
+                         leftPinch >= releaseThresh &&
+                         rightPinch >= releaseThresh
         } else {
-            // Not active - use activate threshold
+            // Not active - require hands to be reasonably close to start
             bothActive = leftHand.isTracked && rightHand.isTracked &&
-                         leftPinch >= pinchActivateThreshold &&
-                         rightPinch >= pinchActivateThreshold
+                         currentDistance <= maxStartHandDistance &&
+                         leftPinch >= activateThresh &&
+                         rightPinch >= activateThresh
         }
         
         // Gesture just started
         if bothActive && !state.isActive {
             state.isActive = true
-            let leftPos = leftHand.pinchPosition(digit: digit)
-            let rightPos = rightHand.pinchPosition(digit: digit)
-            state.startDistance = simd_length(leftPos - rightPos)
-            
-            // Store starting parameter value based on scene
-            let isIFS = settings.sceneIndex == 1
-            switch digit {
-            case 1: state.startParameterValue = isIFS ? settings.ifsScale : settings.minDistance
-            case 2: state.startParameterValue = isIFS ? settings.ifsOffset : settings.foldingLimit
-            case 3: state.startParameterValue = isIFS ? settings.ifsGlow : settings.sphereRadius
-            default: state.startParameterValue = 1.0
-            }
+            state.startDistance = currentDistance
+            state.startParameterValue = currentTarget  // Capture current target when gesture starts
             
             #if DEBUG
-            let mandelboxNames = ["", "minDistance", "foldingLimit", "sphereRadius"]
-            let ifsNames = ["", "ifsScale", "ifsOffset", "ifsGlow"]
-            let paramName = isIFS ? ifsNames[min(digit, 3)] : mandelboxNames[min(digit, 3)]
-            print("🤲 Two-hand \(paramName) gesture STARTED (value: \(state.startParameterValue), distance: \(String(format: "%.2f", state.startDistance * 100))cm)")
+            let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius"]
+            let paramName = paramNames[min(digit, 3)]
+            let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
+            print("🤲 Two-hand \(paramName) gesture STARTED (\(mode))")
             #endif
         }
         
-        // Gesture active - calculate relative scale
+        // Gesture active - set TARGET directly (Renderer smooths to this value)
         if bothActive {
-            let leftPos = leftHand.pinchPosition(digit: digit)
-            let rightPos = rightHand.pinchPosition(digit: digit)
-            let currentDistance = simd_length(leftPos - rightPos)
+            var hitLimit = false
+            var newValue: Float
             
-            // Calculate ratio: how much has distance changed relative to start?
-            // Avoid division by zero
-            let ratio = state.startDistance > 0.01 ? currentDistance / state.startDistance : 1.0
+            if settings.useRelativeGestures {
+                // RELATIVE: Change based on delta from start distance
+                let rangeSpan = range.upperBound - range.lowerBound
+                let distSpan = maxHandDistance - minHandDistance
+                let sensitivity = rangeSpan / distSpan
+                
+                let delta = currentDistance - state.startDistance
+                newValue = state.startParameterValue + (delta * sensitivity)
+                newValue = min(range.upperBound, max(range.lowerBound, newValue))
+                hitLimit = (newValue <= range.lowerBound + 1e-5 || newValue >= range.upperBound - 1e-5)
+                
+            } else {
+                // ABSOLUTE: Map distance directly to 0-1 range
+                let normalizedDistance = simd_clamp(
+                    (currentDistance - minHandDistance) / (maxHandDistance - minHandDistance),
+                    0.0, 1.0
+                )
+                
+                newValue = range.lowerBound + normalizedDistance * (range.upperBound - range.lowerBound)
+                hitLimit = (normalizedDistance <= 0.01 || normalizedDistance >= 0.99)
+            }
             
-            // Pass both ratio AND start value to avoid exclusive access conflict
-            // Returns true if we hit a limit
-            let hitLimit = parameterUpdate(ratio, state.startParameterValue)
+            // Set target value directly - Renderer handles smoothing
+            setTarget(newValue)
             
             // Trigger screen flash when hitting limits
             if hitLimit {
@@ -376,7 +351,7 @@ final class GestureController {
             struct DebugState { static var counter = 0 }
             DebugState.counter += 1
             if DebugState.counter % 60 == 0 {
-                print("🤲 ratio: \(String(format: "%.2f", ratio))× (distance: \(String(format: "%.1f", currentDistance * 100))cm)")
+                // print("🤲 distance: \(String(format: "%.1f", currentDistance * 100))cm")
             }
             #endif
         }
@@ -412,20 +387,22 @@ final class GestureController {
         // Gesture started
         if active && !rightIndexDragActive {
             rightIndexDragActive = true
-            rightIndexDragStartPos = settings.position
+            rightIndexDragStartPos = settings.targetPosition
             rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
+            accumulatedPosition = settings.targetPosition
             #if DEBUG
             print("👆 Right index drag STARTED")
             #endif
         }
         
-        // Gesture active - move position
+        // Gesture active - update target position directly
         if active {
             let currentPos = rightHand.pinchPosition(digit: 1)
             let delta = currentPos - rightIndexPrevPos
             
-            // Apply translation (world space)
-            smoothedPosition = smoothedPosition + delta * translateSensitivity
+            // Apply translation (world space) to target
+            accumulatedPosition = accumulatedPosition + delta * translateSensitivity
+            settings.targetPosition = accumulatedPosition
             rightIndexPrevPos = currentPos
         }
         
@@ -436,26 +413,6 @@ final class GestureController {
             print("👆 Right index drag ENDED")
             #endif
         }
-    }
-    
-    // MARK: - Apply to Settings
-    
-    private func applySmoothedValues() {
-        guard let settings = renderSettings else { return }
-        
-        // Mandelbox parameters
-        settings.minDistance = smoothedMinDistance.current
-        settings.foldingLimit = smoothedFoldingLimit.current
-        settings.sphereRadius = smoothedSphereRadius.current
-        
-        // IFS parameters
-        settings.ifsScale = smoothedIFSScale.current
-        settings.ifsOffset = smoothedIFSOffset.current
-        settings.ifsGlow = smoothedIFSGlow.current
-        
-        // Position smoothing (simple exponential)
-        let posSmoothing: Float = 0.8
-        settings.position = settings.position * posSmoothing + smoothedPosition * (1 - posSmoothing)
     }
     
     // MARK: - Pinch Detection

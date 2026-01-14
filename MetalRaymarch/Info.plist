@@ -21,5 +21,7 @@
 	</dict>
 	<key>NSHandsTrackingUsageDescription</key>
 	<string>Hand tracking is used to interact with the fractal.</string>
+	<key>NSWorldSensingUsageDescription</key>
+	<string>World sensing is used for accurate head position tracking to render the fractal from your perspective.</string>
 </dict>
 </plist>

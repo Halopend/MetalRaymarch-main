@@ -17,8 +17,22 @@ import ARKit
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 
-// Reduce buffer count to 1 to minimize latency and swimming/catch artifacts.
-let maxBuffersInFlight = 1
+// Double buffering for CPU/GPU pipelining.
+// Allows CPU to prepare frame N+1 while GPU renders N.
+// This prevents the 45fps vsync lock while minimizing latency.
+let maxBuffersInFlight = 2
+
+// Function constant indices - must match the indices in Shaders.metal
+// These allow compile-time shader specialization for better performance
+enum FunctionConstantIndex: Int {
+    case fractalIterations = 0
+    case shadowIterations = 1
+    case safetyBubbleEnabled = 2
+    case showHUD = 3
+    case qualityMode = 4
+    case debugHierarchical = 5
+    case maxRaySteps = 6  // Max ray marching steps for loop unrolling
+}
 
 enum RendererError: Error {
     case badVertexDescriptor
@@ -59,9 +73,23 @@ actor Renderer {
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
     
-    // Tile-based compute pipelines (4x4, 2x2, and adaptive 8x8 variants)
-    var tileRaymarchPipeline4x4: MTLComputePipelineState?
-    var tileRaymarchPipeline2x2: MTLComputePipelineState?
+    // === SPECIALIZED PIPELINES BY (iterations, raySteps) ===
+    // Pre-compiled pipelines with fixed iteration and ray step counts for full loop unrolling
+    // This is THE critical optimization - Map() loop and raymarch loop can be fully unrolled
+    // Key: PipelineKey(fractalIterations, maxRaySteps)
+    struct PipelineKey: Hashable {
+        let fractalIterations: Int
+        let maxRaySteps: Int
+    }
+    var specializedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    var specializedQuadSharedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    var specializedMetalFXPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    var specializedMetalFXQuadSharedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    
+    // Cached constant matrices (computed once, reused every frame)
+    private let cachedRotationMatrix: matrix_float4x4
+    
+    // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
     
@@ -69,18 +97,12 @@ actor Renderer {
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
     
-    // Temporal reprojection: history buffers for hit distances
-    // Double-buffered: read from previous frame, write to current frame
-    var hitDistanceHistoryTextures: [MTLTexture] = []  // One per eye, ping-pong buffered
-    var hitDistanceHistoryIndex: Int = 0  // Which buffer to read from (0 or 1)
-    var hitDistanceHistorySize: SIMD2<Int> = .zero
-    
-    // Previous frame matrices for reprojection
-    var prevProjectionMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var prevModelViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var prevViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var lastFrameProjectionMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var lastFrameViewMatrices: [simd_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    // Screenshot capture
+    var screenshotTexture: MTLTexture?
+    var screenshotPipeline: MTLRenderPipelineState?
+    var screenshotDepthTexture: MTLTexture?
+    var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
+    var shouldCaptureScreenshot: Bool = false
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -93,6 +115,7 @@ actor Renderer {
     let rasterSampleCount: Int = 1
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
+    var hasLoggedDeviceAnchorInfo = false
 
     // Device pose smoothing removed — use raw device anchor from drawable for async timewarp
     
@@ -100,6 +123,9 @@ actor Renderer {
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
     var smoothedFPS: Double = 0
+    private var lastFPSUpdateTime: TimeInterval = 0
+    private var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
+    private var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
 
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
@@ -134,15 +160,24 @@ actor Renderer {
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         self.layerRenderer = layerRenderer
         self.device = layerRenderer.device
-        self.commandQueue = self.device.makeCommandQueue()!
+        guard let queue = self.device.makeCommandQueue() else {
+            fatalError("Failed to create command queue")
+        }
+        self.commandQueue = queue
         self.appModel = appModel
+        
+        // Pre-compute constant rotation matrix (never changes)
+        self.cachedRotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
 
         let device = self.device
 
         let uniformBufferSize = alignedUniformsSize * maxBuffersInFlight
 
-        self.dynamicUniformBuffer = self.device.makeBuffer(length:uniformBufferSize,
-                                                           options:[MTLResourceOptions.storageModeShared])!
+        guard let uniformBuffer = self.device.makeBuffer(length: uniformBufferSize,
+                                                          options: [MTLResourceOptions.storageModeShared]) else {
+            fatalError("Failed to create uniform buffer")
+        }
+        self.dynamicUniformBuffer = uniformBuffer
 
         self.dynamicUniformBuffer.label = "UniformBuffer"
 
@@ -172,6 +207,57 @@ actor Renderer {
             print("⚠️ Quad-shared pipeline failed: \(error)")
             quadSharedPipelineState = nil
         }
+        
+        // === BUILD SPECIALIZED PIPELINES FOR COMMON (iterations, raySteps) COMBINATIONS ===
+        // This is THE critical optimization. Both loops can be unrolled:
+        // 1. Map() inner loop (50-100+ calls per pixel × iterations each)
+        // 2. Scene() raymarch loop (1 call per pixel × raySteps iterations)
+        // With fixed counts, the compiler can fully unroll both loops, eliminating:
+        // - Loop counter overhead
+        // - Branch prediction misses  
+        // - Register spilling from loop variables
+        // Expected: 30-50% overall performance improvement
+        
+        // Quality presets: Low (6,32), Mid (9,64), High (12,100), Ultra (16,128)
+        // Only build pipelines for exact preset combinations (4 pipelines, not 16)
+        let qualityPresets = QualityPreset.allCases
+        
+        var pipelineCount = 0
+        print("Building specialized pipelines for \(qualityPresets.count) quality presets...")
+        
+        for preset in qualityPresets {
+            let iterCount = preset.fractalIterations
+            let raySteps = preset.raySteps
+            let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
+            let config = FunctionConstantConfig.forQualityPreset(preset)
+            let constants = config.toMTLConstants()
+            
+            // Standard pipeline
+            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                functionConstants: constants
+            ) {
+                specializedPipelines[key] = pipeline
+                pipelineCount += 1
+                print("  ✓ \(preset.rawValue): FI=\(iterCount), RI=\(raySteps)")
+            }
+            
+            // Quad-shared pipeline
+            if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                fragmentFunctionName: "fragmentShaderQuadShared",
+                functionConstants: constants
+            ) {
+                specializedQuadSharedPipelines[key] = pipeline
+            }
+        }
+        print("✓ Built \(pipelineCount) specialized standard pipelines")
 
         // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
         #if canImport(MetalFX)
@@ -193,6 +279,41 @@ actor Renderer {
                                                                               colorFormat: .rgba16Float,
                                                                               vertexFunctionName: "vertexShader",
                                                                               fragmentFunctionName: "fragmentShaderQuadShared")
+            
+            // Also build specialized MetalFX pipelines for quality presets
+            var metalFXPipelineCount = 0
+            for preset in qualityPresets {
+                let iterCount = preset.fractalIterations
+                let raySteps = preset.raySteps
+                let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
+                let config = FunctionConstantConfig.forQualityPreset(preset)
+                let constants = config.toMTLConstants()
+                    
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: 1,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    colorFormat: .rgba16Float,
+                    functionConstants: constants
+                ) {
+                    specializedMetalFXPipelines[key] = pipeline
+                    metalFXPipelineCount += 1
+                }
+                
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: 1,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    colorFormat: .rgba16Float,
+                    fragmentFunctionName: "fragmentShaderQuadShared",
+                    functionConstants: constants
+                ) {
+                    specializedMetalFXQuadSharedPipelines[key] = pipeline
+                }
+            }
+            print("✓ Built \(metalFXPipelineCount) specialized MetalFX pipelines")
             
             depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
                                                                                layerRenderer: layerRenderer, 
@@ -221,22 +342,27 @@ actor Renderer {
             fatalError("Unable to load texture. Error info: \(error)")
         }
         
-        // Build tile-based compute pipelines
+        // Build tile-based compute pipelines with function constants for maximum optimization
         do {
             let library = device.makeDefaultLibrary()!
             
-            // 4x4 tile kernel (16x DE reduction)
-            if let kernel4x4 = library.makeFunction(name: "tileRaymarchKernel") {
-                tileRaymarchPipeline4x4 = try device.makeComputePipelineState(function: kernel4x4)
-            }
+            // Create specialized function constants for compute kernels
+            // Using known iteration count allows full loop unrolling in Map()
+            let computeConstants = MTLFunctionConstantValues()
+            var fractalIters: Int32 = 6  // Default fractal iterations
+            var shadowIters: Int32 = 4   // Default shadow iterations
+            var noSafetyBubble: Bool = false
+            var noDebug: Bool = false
+            computeConstants.setConstantValue(&fractalIters, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
+            computeConstants.setConstantValue(&shadowIters, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
+            computeConstants.setConstantValue(&noSafetyBubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+            computeConstants.setConstantValue(&noDebug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
             
-            // 2x2 tile kernel (4x DE reduction, higher quality)
-            if let kernel2x2 = library.makeFunction(name: "tileRaymarchKernel2x2") {
-                tileRaymarchPipeline2x2 = try device.makeComputePipelineState(function: kernel2x2)
-            }
-            
-            // Adaptive 8x8 hierarchical kernel (3-level cascade, 3-8x speedup)
-            if let kernel8x8 = library.makeFunction(name: "adaptiveHierarchical8x8") {
+            // Adaptive 8x8 hierarchical kernel (3-level cascade, 3-8x speedup) - with function constants
+            if let kernel8x8 = try? library.makeFunction(name: "adaptiveHierarchical8x8", constantValues: computeConstants) {
+                adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
+                print("✓ Adaptive 8x8 hierarchical pipeline specialized with function constants")
+            } else if let kernel8x8 = library.makeFunction(name: "adaptiveHierarchical8x8") {
                 adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
                 print("✓ Adaptive 8x8 hierarchical pipeline ready (3-level cascade)")
             }
@@ -246,20 +372,91 @@ actor Renderer {
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
             
-            print("✓ Tile-based compute pipelines ready (4x4, 2x2, and adaptive 8x8)")
+            print("✓ Tile-based compute pipeline ready (adaptive 8x8)")
         } catch {
             print("⚠️ Failed to create tile compute pipelines: \(error)")
-            tileRaymarchPipeline4x4 = nil
-            tileRaymarchPipeline2x2 = nil
             adaptiveHierarchicalPipeline8x8 = nil
         }
-
+        
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
+        
+        // Setup screenshot capture pipeline
+        setupScreenshotCapture()
+    }
+    
+    /// Setup screenshot capture resources
+    private func setupScreenshotCapture() {
+        // Create a standard render pipeline for screenshot capture (no vertex amplification)
+        // We'll render a single view at 512x512 for preset thumbnails
+        let screenshotSize = 512
+        
+        // Create screenshot color texture
+        let colorDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: screenshotSize,
+            height: screenshotSize,
+            mipmapped: false
+        )
+        colorDescriptor.usage = [.renderTarget, .shaderRead]
+        colorDescriptor.storageMode = .shared  // Allows CPU read
+        screenshotTexture = device.makeTexture(descriptor: colorDescriptor)
+        screenshotTexture?.label = "Screenshot Color"
+        
+        // Create screenshot depth texture
+        let depthDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .depth32Float,
+            width: screenshotSize,
+            height: screenshotSize,
+            mipmapped: false
+        )
+        depthDescriptor.usage = [.renderTarget]
+        depthDescriptor.storageMode = .private
+        screenshotDepthTexture = device.makeTexture(descriptor: depthDescriptor)
+        screenshotDepthTexture?.label = "Screenshot Depth"
+        
+        // Create render pipeline for screenshot (single view, no amplification)
+        // Must use function constants because fragmentShader declares them
+        do {
+            let library = device.makeDefaultLibrary()!
+            let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
+            // Use empty function constants - required once shader declares function constants
+            let fragmentFunction = try library.makeFunction(name: "fragmentShader", constantValues: MTLFunctionConstantValues())
+            
+            let pipelineDescriptor = MTLRenderPipelineDescriptor()
+            pipelineDescriptor.label = "Screenshot Pipeline"
+            pipelineDescriptor.vertexFunction = vertexFunction
+            pipelineDescriptor.fragmentFunction = fragmentFunction
+            pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            pipelineDescriptor.depthAttachmentPixelFormat = .depth32Float
+            
+            let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
+            pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
+            
+            screenshotPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            print("✓ Screenshot capture pipeline ready")
+        } catch {
+            print("⚠️ Failed to create screenshot pipeline: \(error)")
+        }
     }
 
     private func startARSession() async {
+        // Check if world tracking is supported and authorized
+        guard WorldTrackingProvider.isSupported else {
+            print("⚠️ World tracking is not supported on this device")
+            return
+        }
+        
+        // Check authorization status for world sensing
+        let authStatus = await arSession.queryAuthorization(for: [.worldSensing])
+        
+        if authStatus[.worldSensing] != .allowed {
+            print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
+            print("   Head POSITION tracking will not work - only rotation.")
+            print("   Please ensure NSWorldSensingUsageDescription is in Info.plist and permission is granted.")
+        }
+        
         do {
             var providers: [any DataProvider] = [worldTracking]
             if let ht = handTracking {
@@ -267,6 +464,9 @@ actor Renderer {
             }
             try await arSession.run(providers)
             print("✓ ARKit session started with world tracking and hand tracking")
+            
+            // Log world tracking state
+            print("  World tracking state: \(worldTracking.state)")
         } catch {
             if !hasLoggedWorldTrackingWarning {
                 print("⚠️ ARKit session failed: \(error)")
@@ -279,9 +479,147 @@ actor Renderer {
     static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         Task(executorPreference: RendererTaskExecutor.shared) {
             let renderer = Renderer(layerRenderer, appModel: appModel)
+            
+            // Setup screenshot capture handler
+            await MainActor.run {
+                appModel.captureScreenshotHandler = {
+                    await renderer.captureScreenshot()
+                }
+            }
+            
             await renderer.startARSession()
             await renderer.renderLoop()
         }
+    }
+    
+    /// Request a screenshot capture (async)
+    func captureScreenshot() async -> Data? {
+        return await withCheckedContinuation { continuation in
+            self.pendingScreenshotContinuation = continuation
+            self.shouldCaptureScreenshot = true
+        }
+    }
+    
+    /// Render and capture a screenshot to PNG data
+    private func renderScreenshot() -> Data? {
+        guard let screenshotTexture = screenshotTexture,
+              let screenshotPipeline = screenshotPipeline,
+              let screenshotDepthTexture = screenshotDepthTexture,
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+        
+        // Setup render pass for screenshot
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+        renderPassDescriptor.colorAttachments[0].texture = screenshotTexture
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        renderPassDescriptor.colorAttachments[0].storeAction = .store
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
+        
+        renderPassDescriptor.depthAttachment.texture = screenshotDepthTexture
+        renderPassDescriptor.depthAttachment.loadAction = .clear
+        renderPassDescriptor.depthAttachment.storeAction = .dontCare
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
+        
+        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            return nil
+        }
+        
+        renderEncoder.label = "Screenshot Render Encoder"
+        renderEncoder.setCullMode(.front)
+        renderEncoder.setFrontFacing(.counterClockwise)
+        renderEncoder.setRenderPipelineState(screenshotPipeline)
+        renderEncoder.setDepthStencilState(depthState)
+        
+        // Use current uniforms (view 0)
+        renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+        
+        // Set viewport for screenshot size
+        let viewport = MTLViewport(originX: 0, originY: 0, 
+                                   width: Double(screenshotTexture.width), 
+                                   height: Double(screenshotTexture.height),
+                                   znear: 0, zfar: 1)
+        renderEncoder.setViewport(viewport)
+        
+        // Bind mesh vertices
+        for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
+            guard let layout = element as? MDLVertexBufferLayout, layout.stride != 0 else { continue }
+            let buffer = mesh.vertexBuffers[index]
+            renderEncoder.setVertexBuffer(buffer.buffer, offset: buffer.offset, index: index)
+        }
+        
+        // Bind textures
+        renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
+        
+        // Draw
+        for submesh in mesh.submeshes {
+            renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
+                                                indexCount: submesh.indexCount,
+                                                indexType: submesh.indexType,
+                                                indexBuffer: submesh.indexBuffer.buffer,
+                                                indexBufferOffset: submesh.indexBuffer.offset)
+        }
+        
+        renderEncoder.endEncoding()
+        
+        // Synchronize for CPU read (needed on macOS only, not available on visionOS)
+        #if os(macOS)
+        if let blitEncoder = commandBuffer.makeBlitCommandEncoder() {
+            blitEncoder.synchronize(resource: screenshotTexture)
+            blitEncoder.endEncoding()
+        }
+        #endif
+        
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        
+        // Read texture data and convert to PNG
+        return textureToImageData(screenshotTexture)
+    }
+    
+    /// Convert a Metal texture to PNG image data
+    private func textureToImageData(_ texture: MTLTexture) -> Data? {
+        let width = texture.width
+        let height = texture.height
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        let totalBytes = bytesPerRow * height
+        
+        var pixelData = [UInt8](repeating: 0, count: totalBytes)
+        
+        texture.getBytes(&pixelData,
+                        bytesPerRow: bytesPerRow,
+                        from: MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0),
+                                       size: MTLSize(width: width, height: height, depth: 1)),
+                        mipmapLevel: 0)
+        
+        // Create CGImage from pixel data
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        
+        guard let context = CGContext(data: &pixelData,
+                                      width: width,
+                                      height: height,
+                                      bitsPerComponent: 8,
+                                      bytesPerRow: bytesPerRow,
+                                      space: colorSpace,
+                                      bitmapInfo: bitmapInfo.rawValue),
+              let cgImage = context.makeImage() else {
+            return nil
+        }
+        
+        #if os(visionOS) || os(iOS)
+        let image = UIImage(cgImage: cgImage)
+        return image.pngData()
+        #elseif os(macOS)
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+        guard let tiffData = image.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData) else {
+            return nil
+        }
+        return bitmapRep.representation(using: .png, properties: [:])
+        #endif
     }
 
     static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {
@@ -335,16 +673,23 @@ actor Renderer {
                                               colorFormat: MTLPixelFormat? = nil,
                                               vertexFunctionName: String = "vertexShader",
                                               fragmentFunctionName: String = "fragmentShader",
-                                              usesVertexAmplification: Bool = true) throws -> MTLRenderPipelineState {
+                                              usesVertexAmplification: Bool = true,
+                                              functionConstants: MTLFunctionConstantValues? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object
 
         let library = device.makeDefaultLibrary()
 
         let vertexFunction = library?.makeFunction(name: vertexFunctionName)
-        let fragmentFunction = library?.makeFunction(name: fragmentFunctionName)
+        
+        // IMPORTANT: Once a shader declares function constants, Metal requires using
+        // makeFunction(name:constantValues:) even if no values are being set.
+        // Always provide function constants (empty if nil) for fragment shaders that use them.
+        let fragmentFunction: MTLFunction?
+        let constants = functionConstants ?? MTLFunctionConstantValues()
+        fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "RenderPipeline"
+        pipelineDescriptor.label = functionConstants != nil ? "RenderPipeline_Specialized" : "RenderPipeline"
         pipelineDescriptor.vertexFunction = vertexFunction
         pipelineDescriptor.fragmentFunction = fragmentFunction
         pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
@@ -356,6 +701,151 @@ actor Renderer {
         pipelineDescriptor.maxVertexAmplificationCount = usesVertexAmplification ? layerRenderer.properties.viewCount : 1
 
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+    }
+    
+    /// Function constant configuration for shader specialization
+    struct FunctionConstantConfig {
+        var fractalIterations: Int32?      // FC index 0
+        var shadowIterations: Int32?       // FC index 1
+        var safetyBubbleEnabled: Bool?     // FC index 2
+        var showHUD: Bool?                 // FC index 3
+        var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
+        var debugHierarchical: Bool?       // FC index 5
+        var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
+        
+        /// Creates MTLFunctionConstantValues from this config
+        func toMTLConstants() -> MTLFunctionConstantValues {
+            let constants = MTLFunctionConstantValues()
+            
+            if var iterations = fractalIterations {
+                constants.setConstantValue(&iterations, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
+            }
+            if var shadowIters = shadowIterations {
+                constants.setConstantValue(&shadowIters, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
+            }
+            if var bubble = safetyBubbleEnabled {
+                constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+            }
+            if var hud = showHUD {
+                constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
+            }
+            if var quality = qualityMode {
+                constants.setConstantValue(&quality, type: .int, index: FunctionConstantIndex.qualityMode.rawValue)
+            }
+            if var debug = debugHierarchical {
+                constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
+            }
+            if var raySteps = maxRaySteps {
+                constants.setConstantValue(&raySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
+            }
+            
+            return constants
+        }
+        
+        /// Creates a config optimized for high performance (Low quality preset: FI=6, RI=32)
+        static var highPerformance: FunctionConstantConfig {
+            return FunctionConstantConfig(
+                fractalIterations: 6,
+                shadowIterations: 4,
+                safetyBubbleEnabled: false,
+                showHUD: false,
+                qualityMode: 2,  // Low quality
+                debugHierarchical: false,
+                maxRaySteps: 32
+            )
+        }
+        
+        /// Creates a config for high quality rendering (Ultra quality preset: FI=16, RI=128)
+        static var highQuality: FunctionConstantConfig {
+            return FunctionConstantConfig(
+                fractalIterations: 16,
+                shadowIterations: 14,
+                safetyBubbleEnabled: true,
+                showHUD: true,
+                qualityMode: 0,  // High quality
+                debugHierarchical: false,
+                maxRaySteps: 128
+            )
+        }
+        
+        /// Creates a config for each quality preset
+        static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
+            let qualityMode: Int32
+            switch preset {
+            case .low: qualityMode = 2
+            case .mid: qualityMode = 1  
+            case .high: qualityMode = 0
+            case .ultra: qualityMode = 0
+            }
+            return FunctionConstantConfig(
+                fractalIterations: Int32(preset.fractalIterations),
+                shadowIterations: Int32(max(preset.fractalIterations - 2, 2)),
+                safetyBubbleEnabled: true,
+                showHUD: true,
+                qualityMode: qualityMode,
+                debugHierarchical: false,
+                maxRaySteps: Int32(preset.raySteps)
+            )
+        }
+    }
+    
+    /// Select the best specialized pipeline for the given iteration count and ray steps
+    /// Falls back to general pipeline if no specialized version exists
+    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool, useMetalFX: Bool) -> MTLRenderPipelineState {
+        let key = PipelineKey(fractalIterations: iterations, maxRaySteps: raySteps)
+        
+        if useMetalFX {
+            if useQuadShared {
+                // Try specialized MetalFX quad-shared first
+                if let specialized = specializedMetalFXQuadSharedPipelines[key] {
+                    return specialized
+                }
+                // Fallback to general MetalFX quad-shared
+                return metalFXQuadSharedPipelineState ?? pipelineState
+            } else {
+                // Try specialized MetalFX first
+                if let specialized = specializedMetalFXPipelines[key] {
+                    return specialized
+                }
+                // Fallback to general MetalFX
+                return metalFXAmplificationPipelineState ?? pipelineState
+            }
+        } else {
+            if useQuadShared {
+                // Try specialized quad-shared first
+                if let specialized = specializedQuadSharedPipelines[key] {
+                    return specialized
+                }
+                // Fallback to general quad-shared
+                return quadSharedPipelineState ?? pipelineState
+            } else {
+                // Try specialized standard first
+                if let specialized = specializedPipelines[key] {
+                    return specialized
+                }
+                // Fallback to general pipeline
+                return pipelineState
+            }
+        }
+    }
+    
+    /// Build a specialized pipeline with function constants for compile-time optimization
+    static func buildSpecializedPipeline(device: MTLDevice,
+                                         layerRenderer: LayerRenderer,
+                                         rasterSampleCount: Int,
+                                         mtlVertexDescriptor: MTLVertexDescriptor,
+                                         config: FunctionConstantConfig,
+                                         colorFormat: MTLPixelFormat? = nil,
+                                         fragmentFunctionName: String = "fragmentShader") throws -> MTLRenderPipelineState {
+        return try buildRenderPipelineWithDevice(
+            device: device,
+            layerRenderer: layerRenderer,
+            rasterSampleCount: rasterSampleCount,
+            mtlVertexDescriptor: mtlVertexDescriptor,
+            colorFormat: colorFormat,
+            fragmentFunctionName: fragmentFunctionName,
+            functionConstants: config.toMTLConstants()
+        )
     }
 
     static func buildMesh(device: MTLDevice,
@@ -422,17 +912,24 @@ actor Renderer {
         // Get hand anchors at the current time
         let anchors = ht.handAnchors(at: time)
         
-        // Update gesture controller on main actor
+        // Throttle UI updates to 30Hz to reduce main actor contention (was every frame)
+        // But track actual deltaTime since last gesture update for smooth animation
+        let gestureUpdateDelta = Float(time - lastHandTrackingUpdateTime)
+        guard time - lastHandTrackingUpdateTime > 0.033 else { return }
+        lastHandTrackingUpdateTime = time
+        
+        // Update gesture controller on main actor with proper deltaTime
         Task { @MainActor in
             // Update tracking state for UI
             appModel.leftHandTracked = anchors.leftHand?.isTracked ?? false
             appModel.rightHandTracked = anchors.rightHand?.isTracked ?? false
             
-            // Process gestures
+            // Process gestures with deltaTime for frame-rate independent smoothing
             if #available(visionOS 2.0, *) {
                 appModel.gestureController?.updateHands(
                     leftAnchor: anchors.leftHand,
-                    rightAnchor: anchors.rightHand
+                    rightAnchor: anchors.rightHand,
+                    deltaTime: gestureUpdateDelta
                 )
             }
         }
@@ -443,22 +940,43 @@ actor Renderer {
 
         let settings = appModel.renderSettings
         
-        // Decay the limit flash effect
-        settings.updateLimitFlash(deltaTime: 1.0 / 90.0)  // Assume 90fps
+        // === INTERPOLATE GESTURE-CONTROLLED VALUES ===
+        // This is the SINGLE source of truth for smoothing gesture parameters.
+        // Called every frame at 90Hz for smooth animation regardless of gesture update rate (30Hz).
+        settings.interpolateToTargets(deltaTime: cachedDeltaTime)
         
-        // Smoothing
-        let t: Float = 0.1
-        smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
-        smoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
+        // Decay the limit flash effect using actual deltaTime
+        settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         
-        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
+        // Use already-smoothed position from settings (interpolated above)
+        // Scale gets its own smoothing since it's not gesture-controlled
+        let smoothSpeed: Float = 15.0
+        let smoothFactor = 1.0 - exp(-smoothSpeed * cachedDeltaTime)
+        smoothedPosition = settings.position  // Already smoothed by interpolateToTargets
+        smoothedScale = smoothedScale + (settings.scale - smoothedScale) * smoothFactor
+        
+        // Use cached rotation matrix (constant, computed once in init)
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
         let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
         
-        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
         
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        
+        // One-time logging of device anchor to verify position tracking is working
+        if !hasLoggedDeviceAnchorInfo, let anchor = drawable.deviceAnchor {
+            hasLoggedDeviceAnchorInfo = true
+            let transform = anchor.originFromAnchorTransform
+            let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+            print("📍 Device anchor first frame:")
+            print("   Position: (\(position.x), \(position.y), \(position.z))")
+            print("   isTracked: \(anchor.isTracked)")
+            // If position is exactly (0,0,0), world sensing permission may not be granted
+            if position.x == 0 && position.y == 0 && position.z == 0 {
+                print("   ⚠️ Position is origin - world sensing may not be authorized!")
+            }
+        }
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -468,18 +986,15 @@ actor Renderer {
             
             let modelView = viewMatrix * modelMatrix
             let inverseModelView = modelView.inverse
-            
-            // Get previous frame matrices for temporal reprojection
-            let prevProj = prevProjectionMatrices[viewIndex]
-            let prevModelView = prevModelViewMatrices[viewIndex]
+            let inverseView = viewMatrix.inverse
             
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
                             inverseProjectionMatrix: inverseProjection,
-                            prevProjectionMatrix: prevProj,
-                            prevModelViewMatrix: prevModelView,
+                            viewMatrix: viewMatrix,
+                            inverseViewMatrix: inverseView,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
                             foveaCenter: SIMD2<Float>(0.5, 0.5),
@@ -491,35 +1006,18 @@ actor Renderer {
                             glowIntensity: settings.glowIntensity,
                             foldingLimit: settings.foldingLimit,
                             sphereRadius: settings.sphereRadius,
+                            safetyBubbleRadius: settings.safetyBubbleRadius,
+                            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
                             colorIterations: settings.colorIterations,
                             useHierarchical: settings.useHierarchical ? 1 : 0,
                             limitFlash: settings.limitFlash,
-                            sceneIndex: Int32(settings.sceneIndex),
-                            ifsScale: settings.ifsScale,
-                            ifsOffset: settings.ifsOffset,
-                            ifsGlow: settings.ifsGlow,
-                            useTemporalReprojection: settings.useTemporalReprojection ? 1 : 0)
+                            showHUD: settings.showHUD ? 1 : 0,
+                            activeGesture: Int32(settings.activeGestureIndex))
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
         if drawable.views.count > 1 {
             self.uniforms[0].uniforms.1 = uniforms(forViewIndex: 1)
-        }
-        
-        // Store current matrices for next frame's temporal reprojection
-        for viewIndex in 0..<min(drawable.views.count, 2) {
-            let view = drawable.views[viewIndex]
-            let viewMatrix = (deviceTransform * view.transform).inverse
-            let projection = drawable.computeProjection(viewIndex: viewIndex)
-            let modelView = viewMatrix * modelMatrix
-
-            // Cache last frame matrices for temporal reprojection in compute path
-            lastFrameProjectionMatrices[viewIndex] = prevProjectionMatrices[viewIndex]
-            lastFrameViewMatrices[viewIndex] = prevViewMatrices[viewIndex]
-
-            prevProjectionMatrices[viewIndex] = projection
-            prevModelViewMatrices[viewIndex] = modelView
-            prevViewMatrices[viewIndex] = viewMatrix
         }
 
 //        rotation += 0.01
@@ -545,6 +1043,9 @@ actor Renderer {
 
         guard let drawable = frame.queryDrawable() else { return }
 
+        // Wait for a buffer to become available. With maxBuffersInFlight=2,
+        // this allows CPU/GPU pipelining while preventing frame accumulation.
+        // The 2-buffer setup prevents the 45fps vsync lock that occurred with 1 buffer.
         _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
 
         frame.startSubmission()
@@ -555,17 +1056,23 @@ actor Renderer {
 
         drawable.deviceAnchor = deviceAnchor
 
-        // Calculate deltaTime (clamped) for FPS tracking; pose smoothing removed
+        // Calculate deltaTime (clamped only on the fast side for FPS tracking; pose smoothing removed)
         let rawDelta = lastPresentationTime.map { $0.duration(to: presentationTime).timeInterval } ?? (1.0 / 90.0)
-        let deltaTime = max(1.0 / 240.0, min(1.0 / 30.0, rawDelta))
+        let deltaTime = max(1.0 / 240.0, rawDelta)  // Allow slow frames to surface instead of capping at 30 FPS
+        cachedDeltaTime = Float(deltaTime)  // Cache for use in updateGameState and other methods
 
         // FPS tracking using clamped interval (stable with triple buffering)
         if deltaTime > 0 {
             let instantFPS = 1.0 / deltaTime
             let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * 0.1
             smoothedFPS = updatedFPS
-            Task { @MainActor in
-                appModel.fps = updatedFPS
+            
+            // Throttle UI updates to 4Hz (every 0.25s) to prevent SwiftUI layout thrashing
+            if time - lastFPSUpdateTime > 0.25 {
+                lastFPSUpdateTime = time
+                Task { @MainActor in
+                    appModel.fps = updatedFPS
+                }
             }
         }
         lastPresentationTime = presentationTime
@@ -589,8 +1096,9 @@ actor Renderer {
         self.updateGameState(drawable: drawable)
 
         // Check if using adaptive 8x8 compute pipeline
+        // NOTE: Compute doesn't output depth, so disable when upscaling (reprojection needs depth)
         let tileSize = appModel.renderSettings.tileSize
-        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil
+        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil && !upscalingEnabled
         
         if useAdaptiveCompute {
             // Use compute-based rendering for 8x8 adaptive hierarchical
@@ -657,29 +1165,28 @@ actor Renderer {
         // tileSize: 0 = standard per-pixel, 2 = quad-shared (2x2 SIMD), 8 = compute-based (handled above)
         let useQuadShared = (tileSize == 2)
         
-        // Use MetalFX amplification pipeline when upscaling (uses amplification_id, outputs rgba16Float)
+        // Get current iteration count for specialized pipeline selection
+        let currentIterations = appModel.renderSettings.fractalIterations
+        let currentRaySteps = appModel.renderSettings.maxRaySteps
+        
+        // Use specialized pipeline with fixed iteration count for full loop unrolling
+        // This is THE critical optimization - Map() inner loop can be fully unrolled
         #if canImport(MetalFX)
-        if upscalingEnabled {
-            if useQuadShared, let quadPipeline = metalFXQuadSharedPipelineState {
-                renderEncoder.setRenderPipelineState(quadPipeline)
-            } else if let fxAmpPipeline = metalFXAmplificationPipelineState {
-                renderEncoder.setRenderPipelineState(fxAmpPipeline)
-            } else {
-                renderEncoder.setRenderPipelineState(pipelineState)
-            }
-        } else {
-            if useQuadShared, let quadPipeline = quadSharedPipelineState {
-                renderEncoder.setRenderPipelineState(quadPipeline)
-            } else {
-                renderEncoder.setRenderPipelineState(pipelineState)
-            }
-        }
+        let selectedPipeline = selectPipeline(
+            forIterations: currentIterations,
+            raySteps: currentRaySteps,
+            useQuadShared: useQuadShared,
+            useMetalFX: upscalingEnabled
+        )
+        renderEncoder.setRenderPipelineState(selectedPipeline)
         #else
-        if useQuadShared, let quadPipeline = quadSharedPipelineState {
-            renderEncoder.setRenderPipelineState(quadPipeline)
-        } else {
-            renderEncoder.setRenderPipelineState(pipelineState)
-        }
+        let selectedPipeline = selectPipeline(
+            forIterations: currentIterations,
+            raySteps: currentRaySteps,
+            useQuadShared: useQuadShared,
+            useMetalFX: false
+        )
+        renderEncoder.setRenderPipelineState(selectedPipeline)
         #endif
 
         renderEncoder.setDepthStencilState(depthState)
@@ -689,18 +1196,17 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // When rendering to MetalFX input, use FULL input texture as viewport.
-        // MetalFX input is now physical-sized for performance.
+        // When rendering to MetalFX input, use full input texture as viewport.
+        // MetalFX input is screen-aspect-sized (scaled down) to match projection matrix.
         // When rendering to drawable with foveation, use the virtual viewport from drawable.
         #if canImport(MetalFX)
         let viewports: [MTLViewport]
         if upscalingEnabled,
            let fx = metalFXManager,
            let inputTex = fx.inputTexture {
-            // Render to full MetalFX input texture (physical-sized).
-            // Note: This uses physical aspect ratio which differs slightly from screen aspect.
-            // The projection matrix is based on screen aspect, so there's minor horizontal
-            // compression, but this is acceptable for the performance gain.
+            // Render to full MetalFX input texture (screen-aspect, scaled down).
+            // The projection matrix is based on screen aspect, so this matches correctly.
+            // We fill the entire texture - it's already sized for screen aspect ratio.
             viewports = drawable.views.map { view in
                 let vp = view.textureMap.viewport
                 return MTLViewport(originX: 0.0,
@@ -960,21 +1466,18 @@ actor Renderer {
         
         // Get camera position from inverse model-view matrix (in model space)
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
-
-        let prevViewMatrix = viewIndex < lastFrameViewMatrices.count ? lastFrameViewMatrices[viewIndex] : matrix_identity_float4x4
-        let prevProjMatrix = viewIndex < lastFrameProjectionMatrices.count ? lastFrameProjectionMatrices[viewIndex] : matrix_identity_float4x4
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
-            prevViewMatrix: prevViewMatrix,
-            prevProjMatrix: prevProjMatrix,
             cameraPos: cameraPos,
             time: Float(appModel.clock.time),
             resolution: SIMD2<Float>(Float(outputTexture.width), Float(outputTexture.height)),
             minDistance: settings.minDistance,
             fractalScale: settings.fractalScale,
             sphereRadius: settings.sphereRadius,
+            safetyBubbleRadius: settings.safetyBubbleRadius,
+            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
             foldingLimit: settings.foldingLimit,
             glowIntensity: settings.glowIntensity,
             colorMix: settings.colorMix,
@@ -983,12 +1486,7 @@ actor Renderer {
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
-            limitFlash: settings.limitFlash,
-            sceneIndex: Int32(settings.sceneIndex),
-            ifsScale: settings.ifsScale,
-            ifsOffset: settings.ifsOffset,
-            ifsGlow: settings.ifsGlow,
-            useTemporalReprojection: settings.useTemporalReprojection ? 1 : 0
+            limitFlash: settings.limitFlash
         )
         
         // Copy uniforms to buffer
@@ -1211,8 +1709,7 @@ actor Renderer {
             blit.endEncoding()
         } else {
             // Need format conversion via render pass - use single stereo pass with vertex amplification
-            // Use rate map for OUTPUT coordinate mapping (screen→physical)
-            // MetalFX output has correct screen aspect, rate map handles writing to physical drawable
+            // MetalFX output is screen-sized, rate map transforms to physical drawable
             let systemRateMap = drawable.rasterizationRateMaps.first
             
             if formatConversionPipeline == nil {
@@ -1226,13 +1723,12 @@ actor Renderer {
             
             let renderPassDescriptor = MTLRenderPassDescriptor()
             
-            // Use rate map for output coordinate transformation
+            // Use rate map to transform screen coordinates to physical drawable
             renderPassDescriptor.rasterizationRateMap = systemRateMap
             
             // Render to the array texture directly, not a view
             renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDescriptor.colorAttachments[0].loadAction = .clear
-            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
             renderPassDescriptor.colorAttachments[0].storeAction = .store
             renderPassDescriptor.renderTargetArrayLength = views
             
@@ -1241,7 +1737,7 @@ actor Renderer {
                 return
             }
             
-            // Use screen-sized viewports (rate map transforms to physical)
+            // Use SCREEN-sized viewports (rate map transforms to physical)
             let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
                 let vp = view.textureMap.viewport
                 return MTLViewport(originX: vp.originX,
@@ -1265,7 +1761,6 @@ actor Renderer {
             encoder.setFragmentTexture(output, index: 0)
             
             // No aspect correction needed - MetalFX output has correct screen aspect
-            // Normalized UVs (0-1) sample correctly regardless of texture resolution
             var aspectCorrection: Float = 1.0
             encoder.setFragmentBytes(&aspectCorrection, length: MemoryLayout<Float>.size, index: 0)
             
@@ -1273,6 +1768,8 @@ actor Renderer {
             encoder.endEncoding()
         }
 
+        // Upscale depth so the compositor has matching depth for ASW / reprojection.
+        // Bilinear filtering in the depth pass smooths gradients to reduce shimmer.
         copyFXDepthToDrawableDepth(fxDepth: fx.depthTexture, drawable: drawable, commandBuffer: commandBuffer)
     }
     
@@ -1280,21 +1777,32 @@ actor Renderer {
         guard let src = fxDepth else { return }
         guard let pipeline = depthUpscalePipelineState else { return }
 
-        // Use rate map for output coordinate transformation (screen→physical)
+        // Depth upscale: low-res input depth → drawable depth
+        // NOTE: We're upscaling low-res depth to match the drawable. This can cause
+        // ASW shimmer because the upscaled depth doesn't perfectly match MetalFX's
+        // upscaled color. Using bilinear interpolation helps reduce artifacts.
         let systemRateMap = drawable.rasterizationRateMaps.first
-        let views = min(drawable.views.count, src.arrayLength)
+        let requestedViews = min(drawable.views.count, src.arrayLength)
+        guard requestedViews > 0 else { return }
+        let destDepth = drawable.depthTextures[0]
+        let isArray = destDepth.textureType == .type2DArray
+        let targetViews = isArray ? min(requestedViews, destDepth.arrayLength) : 1
+        if !isArray && requestedViews > 1 {
+            print("⚠️ Depth texture is not array-backed; copying depth for first view only")
+        }
 
         let desc = MTLRenderPassDescriptor()
         desc.rasterizationRateMap = systemRateMap
-        desc.depthAttachment.texture = drawable.depthTextures[0]
-        desc.depthAttachment.loadAction = .dontCare
+        desc.depthAttachment.texture = destDepth
+        desc.depthAttachment.loadAction = .clear
+        desc.depthAttachment.clearDepth = 1.0  // Clear to far plane
         desc.depthAttachment.storeAction = .store
-        desc.renderTargetArrayLength = views
+        desc.renderTargetArrayLength = targetViews
         
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { return }
 
-        // Use screen-sized viewports (rate map transforms to physical)
-        let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
+        // Use SCREEN-sized viewports (rate map transforms to physical)
+        let viewports = drawable.views.prefix(targetViews).map { view -> MTLViewport in
             let vp = view.textureMap.viewport
             return MTLViewport(originX: vp.originX,
                                originY: vp.originY,
@@ -1305,11 +1813,11 @@ actor Renderer {
         encoder.setViewports(viewports)
         
         // Use vertex amplification
-        var viewMappings = (0..<views).map {
+        var viewMappings = (0..<targetViews).map {
             MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
                                               renderTargetArrayIndexOffset: UInt32($0))
         }
-        encoder.setVertexAmplificationCount(views, viewMappings: &viewMappings)
+        encoder.setVertexAmplificationCount(targetViews, viewMappings: &viewMappings)
         
         encoder.label = "Depth Upscale Stereo"
         encoder.setRenderPipelineState(pipeline)
@@ -1366,6 +1874,15 @@ actor Renderer {
                         appModel.immersiveSpaceState = .open
                     }
                 }
+                
+                // Check for pending screenshot request
+                if shouldCaptureScreenshot {
+                    shouldCaptureScreenshot = false
+                    let screenshotData = renderScreenshot()
+                    pendingScreenshotContinuation?.resume(returning: screenshotData)
+                    pendingScreenshotContinuation = nil
+                }
+                
                 autoreleasepool {
                     self.renderFrame()
                 }
