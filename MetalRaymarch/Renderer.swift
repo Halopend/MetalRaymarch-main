@@ -325,12 +325,8 @@ actor Renderer {
         }
         #endif
 
-        // === REVERSE-Z DEPTH STATE ===
-        // Vision Pro compositor expects reverse-Z depth for proper reprojection and passthrough
-        // Reverse-Z: near plane = 1.0, far plane = 0.0
-        // This provides better depth precision for large environments
         let depthStateDescriptor = MTLDepthStencilDescriptor()
-        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.greater  // Reverse-Z: greater = closer
+        depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
         depthStateDescriptor.isDepthWriteEnabled = true
         self.depthState = device.makeDepthStencilState(descriptor:depthStateDescriptor)!
 
@@ -523,7 +519,7 @@ actor Renderer {
         renderPassDescriptor.depthAttachment.texture = screenshotDepthTexture
         renderPassDescriptor.depthAttachment.loadAction = .clear
         renderPassDescriptor.depthAttachment.storeAction = .dontCare
-        renderPassDescriptor.depthAttachment.clearDepth = 0.0  // Reverse-Z: clear to far plane (0.0)
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
         
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             return nil
@@ -984,10 +980,7 @@ actor Renderer {
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
-            // View matrix: (deviceAnchor * eyeTransform).inverse transforms world->view space
             let viewMatrix = (deviceTransform * view.transform).inverse
-            // Get projection from drawable - visionOS handles the projection conventions
-            // We use reverse-Z depth via depthCompareFunction=.greater and clearDepth=0.0
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             let inverseProjection = projection.inverse
             
@@ -1143,7 +1136,7 @@ actor Renderer {
             renderPassDescriptor.depthAttachment.texture = fx.depthTexture
             renderPassDescriptor.depthAttachment.loadAction = .clear
             renderPassDescriptor.depthAttachment.storeAction = .store
-            renderPassDescriptor.depthAttachment.clearDepth = 0.0  // Reverse-Z: clear to far plane
+            renderPassDescriptor.depthAttachment.clearDepth = 1.0
 
             renderPassDescriptor.rasterizationRateMap = nil
             renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
@@ -1287,7 +1280,7 @@ actor Renderer {
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
         renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.clearDepth = 0.0  // Reverse-Z: clear to far plane (0.0)
+        renderPassDescriptor.depthAttachment.clearDepth = 1.0
         
         if let systemMap = drawable.rasterizationRateMaps.first {
             renderPassDescriptor.rasterizationRateMap = systemMap
@@ -1332,20 +1325,6 @@ actor Renderer {
             }
             return false
         }
-        
-        // === IMPORTANT: MetalFX + Foveation Trade-off ===
-        // When foveation is enabled (isFoveationEnabled=true), you CANNOT render to a smaller
-        // resolution and upscale - the rasterizationRateMap dimensions must match the drawable.
-        // 
-        // When using MetalFX upscaling (resolutionScale < 1.0):
-        // - We disable the rate map (rasterizationRateMap = nil) for the render pass
-        // - This loses the foveation benefit (uniform pixel density everywhere)
-        // - MetalFX upscaling adds its own overhead (extra passes, format conversion)
-        // - Net result: may be SLOWER than native resolution with foveation!
-        //
-        // Recommended approach:
-        // - For high-end rendering: use scale=1.0 with foveation (let hardware save work in periphery)
-        // - For lower quality: disable foveation in config and use MetalFX scaling
 
         // MetalFX input and output sizing:
         // CRITICAL: MetalFX textures must use SCREEN aspect ratio to match projection matrix!
@@ -1807,7 +1786,7 @@ actor Renderer {
         desc.rasterizationRateMap = systemRateMap
         desc.depthAttachment.texture = destDepth
         desc.depthAttachment.loadAction = .clear
-        desc.depthAttachment.clearDepth = 0.0  // Reverse-Z: clear to far plane
+        desc.depthAttachment.clearDepth = 1.0  // Clear to far plane
         desc.depthAttachment.storeAction = .store
         desc.renderTargetArrayLength = targetViews
         

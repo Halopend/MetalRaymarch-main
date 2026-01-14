@@ -10,33 +10,21 @@ import CompositorServices
 
 struct ContentStageConfiguration: CompositorLayerConfiguration {
     func makeConfiguration(capabilities: LayerRenderer.Capabilities, configuration: inout LayerRenderer.Configuration) {
-        // === DEPTH FORMAT ===
-        // Use depth32Float for reverse-Z precision (compositor expects reverse-Z)
         configuration.depthFormat = .depth32Float
         configuration.colorFormat = .bgra8Unorm_srgb
 
-        // === FOVEATION ===
-        // Enable foveation for automatic eye-tracked variable rate shading
-        // NOTE: When foveation is enabled, you CANNOT render to smaller resolution
-        // and upscale with MetalFX - the rasterizationRateMap dimensions must match
-        let foveationEnabled = capabilities.supportsFoveation
-        configuration.isFoveationEnabled = foveationEnabled
+        // Enable foveation but don't force foveation-enabled layouts
+        configuration.isFoveationEnabled = capabilities.supportsFoveation
 
-        // === LAYOUT ===
-        // Query supported layouts WITH foveation option if enabled
-        // This ensures we get layouts compatible with the rate maps
-        let layoutOptions: LayerRenderer.Capabilities.SupportedLayoutsOptions = foveationEnabled ? [.foveationEnabled] : []
-        let supportedLayouts = capabilities.supportedLayouts(options: layoutOptions)
+        let supportedLayouts = capabilities.supportedLayouts(options: [])
+
+        configuration.layout = supportedLayouts.contains(.layered) ? .layered : .dedicated
         
-        // Prefer .layered for efficient vertex amplification (single 2-slice array texture)
-        // Fall back to .shared, avoid .dedicated (requires separate render passes per eye)
-        if supportedLayouts.contains(.layered) {
-            configuration.layout = .layered
-        } else if supportedLayouts.contains(.shared) {
-            configuration.layout = .shared
-        } else {
-            configuration.layout = .dedicated
-        }
+        // Ensure we have renderTarget usage for direct rendering
+        configuration.colorFormat = .bgra8Unorm_srgb
+        // Add shaderWrite just in case blit needs it, though usually not required for copy
+        // But definitely need renderTarget
+        // configuration.textureUsage = [.renderTarget, .shaderRead] 
     }
 }
 
