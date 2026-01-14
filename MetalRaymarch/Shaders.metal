@@ -165,11 +165,16 @@ inline int selectAdaptiveLevel(float coarseT) {
     return 3;  // Per-pixel for surface detail
 }
 
-// Convert clip-space depth (z/w in [-1, 1]) into normalized depth [0, 1]
-// so the depth buffer matches what the compositor expects for reprojection.
+// === REVERSE-Z DEPTH ENCODING ===
+// The compositor expects reverse-Z depth for proper reprojection and passthrough.
+// Reverse-Z: near plane = 1.0, far plane = 0.0
+// With reverse-Z projection, clipPos.z/w is already in [1, 0] range (near to far)
+// We just need to clamp it for safety.
 inline float encodeDepthFromClip(float4 clipPos) {
-    float ndc = clipPos.z / clipPos.w;
-    return saturate(ndc * 0.5 + 0.5);
+    // With reverse-Z projection matrix, z/w is already in correct range
+    // Near objects have z/w ≈ 1.0, far objects have z/w ≈ 0.0
+    float depth = clipPos.z / clipPos.w;
+    return saturate(depth);
 }
 
 // Blue noise approximation for temporal stability (better than white noise for reprojection)
@@ -890,8 +895,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     else
     {
-        // No hit - use far plane depth (1.0 for standard Z buffer)
-        output.depth = 1.0;
+        // No hit - use far plane depth (0.0 for reverse-Z)
+        output.depth = 0.0;
 
         if (DEBUG_DEPTH_VISUALIZATION) {
             output.color = float4(0.0, 0.0, 0.0, 1.0);
@@ -948,8 +953,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     else
     {
-        // No hit - use far plane depth (1.0 for standard Z buffer)
-        output.depth = 1.0;
+        // No hit - use far plane depth (0.0 for reverse-Z)
+        output.depth = 0.0;
     }
 
     half fogFactor = half(saturate(exp(-ret.x + 1.5)));
@@ -1077,8 +1082,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     }
     else
     {
-        // No hit - use far plane depth (1.0 for standard Z buffer)
-        output.depth = 1.0;
+        // No hit - use far plane depth (0.0 for reverse-Z)
+        output.depth = 0.0;
     }
     
     half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
