@@ -45,6 +45,11 @@ struct ContentView: View {
                     set: { appModel.renderSettings.resolutionScale = $0 }
                 ), in: 0.25...1.0, step: 0.05)
 
+                Toggle("Prefer foveated (disables MetalFX)", isOn: Binding(
+                    get: { appModel.renderSettings.preferFoveated },
+                    set: { appModel.renderSettings.preferFoveated = $0 }
+                ))
+
                 // Tile-based rendering mode (2x2 quad sharing shadows)
                 HStack {
                     Text("Tile Mode:")

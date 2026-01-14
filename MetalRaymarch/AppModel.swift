@@ -124,6 +124,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 0.67      // MetalFX upscaling: render at 67%, upscale to 100% (sweet spot)
+    private var _preferFoveated: Bool = false        // When true, disable MetalFX and keep system foveation
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
@@ -221,6 +222,12 @@ final class RenderSettings: @unchecked Sendable {
         // Max 1.0 (100%) - no upscaling needed
         // Sweet spot is 0.67-0.75 for best quality/performance balance
         set { withLock { _resolutionScale = max(0.5, min(1.0, newValue)) } }
+    }
+
+    /// Prefer system foveated rendering over MetalFX upscaling (mutually exclusive)
+    var preferFoveated: Bool {
+        get { withLock { _preferFoveated } }
+        set { withLock { _preferFoveated = newValue } }
     }
 
     // 0 = disabled (standard per-pixel raymarch)

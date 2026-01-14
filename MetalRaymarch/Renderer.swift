@@ -45,13 +45,48 @@ extension LayerRenderer.Clock.Instant.Duration {
     }
 }
 
+/// Dedicated render thread using a persistent Thread object with high priority.\n/// This avoids thread hopping and preemption that causes micro-stutters with DispatchQueue.
 final class RendererTaskExecutor: TaskExecutor {
-    private let queue = DispatchQueue(label: "RenderThreadQueue", qos: .userInteractive)
+    private var pendingJobs: [UnownedJob] = []
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var isRunning = true
+    private var renderThread: Thread?
+    
+    init() {
+        // Create a persistent high-priority thread for rendering
+        let executor = self
+        renderThread = Thread { [weak executor] in
+            // Set thread priority to maximum for real-time rendering
+            Thread.current.qualityOfService = .userInteractive
+            Thread.current.threadPriority = 1.0
+            Thread.current.name = "RenderThread"
+            
+            while executor?.isRunning ?? false {
+                // Wait for work
+                executor?.semaphore.wait()
+                
+                // Process all pending jobs
+                while let job = executor?.dequeueJob() {
+                    job.runSynchronously(on: executor!.asUnownedSerialExecutor())
+                }
+            }
+        }
+        renderThread?.qualityOfService = .userInteractive
+        renderThread?.start()
+    }
+    
+    private func dequeueJob() -> UnownedJob? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingJobs.isEmpty ? nil : pendingJobs.removeFirst()
+    }
 
     func enqueue(_ job: UnownedJob) {
-        queue.async {
-          job.runSynchronously(on: self.asUnownedSerialExecutor())
-        }
+        lock.lock()
+        pendingJobs.append(job)
+        lock.unlock()
+        semaphore.signal()
     }
 
     func asUnownedSerialExecutor() -> UnownedTaskExecutor {
@@ -103,6 +138,10 @@ actor Renderer {
     var screenshotDepthTexture: MTLTexture?
     var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
     var shouldCaptureScreenshot: Bool = false
+    
+    // GPU synchronization fence for MetalFX
+    // Ensures scene rendering completes before MetalFX reads the intermediate texture
+    var metalFXFence: MTLFence?
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -381,6 +420,11 @@ actor Renderer {
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
+        
+        // Create GPU synchronization fence for MetalFX
+        // This ensures scene rendering completes before the upscaler reads the texture
+        metalFXFence = device.makeFence()
+        metalFXFence?.label = "MetalFX Sync Fence"
         
         // Setup screenshot capture pipeline
         setupScreenshotCapture()
@@ -1094,7 +1138,13 @@ actor Renderer {
         self.updateDynamicBufferState()
 
         #if canImport(MetalFX)
-        let upscalingEnabled = configureMetalFXIfNeeded(for: drawable)
+        // Remove spatial upscaling from the hot path to keep the render loop lean.
+        // If we ever re-enable MetalFX, wire it through a non-frame-critical path.
+        Task { @MainActor in
+            appModel.metalFXAvailable = false
+            appModel.metalFXStatus = "Disabled (spatial upscaling off hotpath)"
+        }
+        let upscalingEnabled = false
         #else
         let upscalingEnabled = false
         #endif
@@ -1148,6 +1198,7 @@ actor Renderer {
             renderPassDescriptor.depthAttachment.storeAction = .store
             renderPassDescriptor.depthAttachment.clearDepth = 1.0
 
+            // MetalFX spatial scaler requires uniform input; disable rasterization rate map (foveation) here.
             renderPassDescriptor.rasterizationRateMap = nil
             renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
         } else {
@@ -1264,6 +1315,13 @@ actor Renderer {
         }
 
         renderEncoder.popDebugGroup()
+        
+        // Signal fence after fragment work completes (before MetalFX reads the texture)
+        #if canImport(MetalFX)
+        if upscalingEnabled, let fence = metalFXFence {
+            renderEncoder.updateFence(fence, after: .fragment)
+        }
+        #endif
 
         renderEncoder.endEncoding()
 
@@ -1321,6 +1379,15 @@ actor Renderer {
             Task { @MainActor in
                 appModel.metalFXAvailable = false
                 appModel.metalFXStatus = "GPU family not supported"
+            }
+            return false
+        }
+
+        // Explicitly honor foveated preference: skip MetalFX so system rate map stays active.
+        if appModel.renderSettings.preferFoveated {
+            Task { @MainActor in
+                appModel.metalFXAvailable = false
+                appModel.metalFXStatus = "Disabled (prefer foveated)"
             }
             return false
         }
@@ -1651,7 +1718,8 @@ actor Renderer {
         guard let fx = metalFXManager, let output = fx.outputTexture else { return }
 
         do {
-            try fx.encodeSpatialUpscale(commandBuffer: commandBuffer)
+            // Pass the fence so MetalFX waits for scene rendering to complete
+            try fx.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
         } catch {
             print("⚠️ MetalFX upscale failed: \(error)")
             return

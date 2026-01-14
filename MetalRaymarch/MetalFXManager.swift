@@ -91,7 +91,7 @@ final class MetalFXManager {
 
     // MARK: - Encoding
 
-    func encodeSpatialUpscale(commandBuffer: MTLCommandBuffer) throws {
+    func encodeSpatialUpscale(commandBuffer: MTLCommandBuffer, fence: MTLFence? = nil) throws {
         guard
             !inputViews.isEmpty,
             !outputViews.isEmpty,
@@ -104,6 +104,11 @@ final class MetalFXManager {
             let scaler = scalers[eye]
             scaler.colorTexture = inputViews[eye]
             scaler.outputTexture = outputViews[eye]
+            
+            // Set fence so MetalFX waits for scene rendering to complete
+            // This prevents race conditions where the scaler reads before the scene is written
+            scaler.fence = fence
+            
             scaler.encode(commandBuffer: commandBuffer)
         }
     }
