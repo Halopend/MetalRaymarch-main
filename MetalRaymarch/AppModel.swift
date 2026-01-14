@@ -124,7 +124,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 0.5       // MetalFX upscaling: render at 50%, upscale to 100%
-    private var _debugEyeTint: Bool = false          // Force per-eye red/blue debug fill
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
@@ -213,11 +212,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _resolutionScale = max(0.25, min(1.0, newValue)) } }
     }
 
-    var debugEyeTint: Bool {
-        get { withLock { _debugEyeTint } }
-        set { withLock { _debugEyeTint = newValue } }
-    }
-    
     // 0 = disabled (standard per-pixel raymarch)
     // 2 = 2x2 tiles (4x overhead reduction, high quality)
     // 4 = 4x4 tiles (16x overhead reduction, performance mode)

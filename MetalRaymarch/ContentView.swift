@@ -19,8 +19,6 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var appModel = appModel
-        
-        let _ = print("DEBUG: ContentView body re-evaluated. Resolution Scale: \(appModel.renderSettings.resolutionScale)")
 
         VStack {
             VStack(spacing: 10) {

@@ -89,9 +89,7 @@ actor Renderer {
     // Cached constant matrices (computed once, reused every frame)
     private let cachedRotationMatrix: matrix_float4x4
     
-    // Tile-based compute pipelines (4x4, 2x2, and adaptive 8x8 variants)
-    var tileRaymarchPipeline4x4: MTLComputePipelineState?
-    var tileRaymarchPipeline2x2: MTLComputePipelineState?
+    // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
     
@@ -359,23 +357,6 @@ actor Renderer {
             computeConstants.setConstantValue(&noSafetyBubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
             computeConstants.setConstantValue(&noDebug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
             
-            // 4x4 tile kernel (16x DE reduction) - with function constants
-            if let kernel4x4 = try? library.makeFunction(name: "tileRaymarchKernel", constantValues: computeConstants) {
-                tileRaymarchPipeline4x4 = try device.makeComputePipelineState(function: kernel4x4)
-                print("✓ 4x4 tile kernel specialized with function constants")
-            } else if let kernel4x4 = library.makeFunction(name: "tileRaymarchKernel") {
-                // Fallback to non-specialized
-                tileRaymarchPipeline4x4 = try device.makeComputePipelineState(function: kernel4x4)
-            }
-            
-            // 2x2 tile kernel (4x DE reduction, higher quality) - with function constants
-            if let kernel2x2 = try? library.makeFunction(name: "tileRaymarchKernel2x2", constantValues: computeConstants) {
-                tileRaymarchPipeline2x2 = try device.makeComputePipelineState(function: kernel2x2)
-                print("✓ 2x2 tile kernel specialized with function constants")
-            } else if let kernel2x2 = library.makeFunction(name: "tileRaymarchKernel2x2") {
-                tileRaymarchPipeline2x2 = try device.makeComputePipelineState(function: kernel2x2)
-            }
-            
             // Adaptive 8x8 hierarchical kernel (3-level cascade, 3-8x speedup) - with function constants
             if let kernel8x8 = try? library.makeFunction(name: "adaptiveHierarchical8x8", constantValues: computeConstants) {
                 adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
@@ -390,11 +371,9 @@ actor Renderer {
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
             
-            print("✓ Tile-based compute pipelines ready (4x4, 2x2, and adaptive 8x8)")
+            print("✓ Tile-based compute pipeline ready (adaptive 8x8)")
         } catch {
             print("⚠️ Failed to create tile compute pipelines: \(error)")
-            tileRaymarchPipeline4x4 = nil
-            tileRaymarchPipeline2x2 = nil
             adaptiveHierarchicalPipeline8x8 = nil
         }
         
