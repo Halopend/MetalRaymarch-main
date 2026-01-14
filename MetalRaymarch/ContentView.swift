@@ -37,18 +37,7 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 8)
                 
-                Text("Resolution Scale: \(Int(appModel.renderSettings.resolutionScale * 100))%")
-                    .font(.headline)
-
-                Slider(value: Binding(
-                    get: { appModel.renderSettings.resolutionScale },
-                    set: { appModel.renderSettings.resolutionScale = $0 }
-                ), in: 0.25...1.0, step: 0.05)
-
-                Toggle("Prefer foveated (disables MetalFX)", isOn: Binding(
-                    get: { appModel.renderSettings.preferFoveated },
-                    set: { appModel.renderSettings.preferFoveated = $0 }
-                ))
+                // Resolution scale and upscaling controls removed to keep UI focused on native/foveated path.
 
                 // Tile-based rendering mode (2x2 quad sharing shadows)
                 HStack {

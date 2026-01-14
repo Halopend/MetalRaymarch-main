@@ -8,7 +8,7 @@
 //  - TWO-HAND PINCH: Pinch with both hands simultaneously
 //    * Index fingers = minDistance (pull apart = increase)
 //    * Middle fingers = foldingLimit
-//    * Ring fingers = sphereRadius
+//    * Ring fingers = fractalScale
 //  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
 //    * Right hand index = translate position
 //
@@ -82,8 +82,8 @@ struct TwoHandGestureState {
 final class GestureController {
     
     // Pinch thresholds with hysteresis
-    private let pinchActivateThreshold: Float = 0.65   // Must exceed to start gesture
-    private let pinchReleaseThreshold: Float = 0.45    // Must fall below to end gesture
+    private let pinchActivateThreshold: Float = 0.8   // Must exceed to start gesture
+    private let pinchReleaseThreshold: Float = 0.6    // Must fall below to end gesture
     
     // Ring finger needs lower thresholds (anatomically harder to pinch with thumb)
     private let ringPinchActivateThreshold: Float = 0.50
@@ -102,9 +102,9 @@ final class GestureController {
     private let maxActiveHandDistance: Float = 0.80 // Allow expansion up to 80cm
     
     // Mandelbox parameter ranges - WIDE for exploration
-    private let minDistanceRange: ClosedRange<Float> = 0.001...5.0
-    private let foldingLimitRange: ClosedRange<Float> = 0.1...13.0
-    private let sphereRadiusRange: ClosedRange<Float> = 0.01...2.0
+    private let minDistanceRange: ClosedRange<Float> = 0.8...5.0
+    private let foldingLimitRange: ClosedRange<Float> = 0.5...13.0
+    private let fractalScaleRange: ClosedRange<Float> = 1.0...5.0
     
     // Single-hand drag sensitivity
     private let translateSensitivity: Float = 1.0
@@ -122,6 +122,7 @@ final class GestureController {
     private var rightIndexDragActive: Bool = false
     private var rightIndexDragStartPos: SIMD3<Float> = .zero
     private var rightIndexPrevPos: SIMD3<Float> = .zero
+    private var rightIndexPrevPalm: SIMD3<Float> = .zero
     
     // Accumulated position from drag gestures (target position)
     private var accumulatedPosition: SIMD3<Float> = .zero
@@ -235,14 +236,14 @@ final class GestureController {
         }
         if middleGestureState.isActive { activeDigit = 2 }
         
-        // RING FINGER: sphereRadius
+        // RING FINGER: fractalScale
         processTwoHandGesture(
             digit: 3,
             state: &ringGestureState,
-            currentTarget: settings.targetSphereRadius,
-            range: sphereRadiusRange
+            currentTarget: settings.fractalScale,
+            range: fractalScaleRange
         ) { newValue in
-            settings.targetSphereRadius = newValue
+            settings.fractalScale = newValue
         }
         if ringGestureState.isActive { activeDigit = 3 }
         
@@ -305,7 +306,7 @@ final class GestureController {
             state.startParameterValue = currentTarget  // Capture current target when gesture starts
             
             #if DEBUG
-            let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius"]
+            let paramNames = ["", "minDistance", "foldingLimit", "fractalScale"]
             let paramName = paramNames[min(digit, 3)]
             let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
             print("🤲 Two-hand \(paramName) gesture STARTED (\(mode))")
@@ -360,13 +361,13 @@ final class GestureController {
         if !bothActive && state.isActive {
             state.isActive = false
             #if DEBUG
-            let paramName = ["", "minDistance", "foldingLimit", "sphereRadius"][min(digit, 3)]
+            let paramName = ["", "minDistance", "foldingLimit", "fractalScale"][min(digit, 3)]
             print("🤲 Two-hand \(paramName) gesture ENDED")
             #endif
         }
     }
     
-    /// Right-hand index pinch drag → position translate
+    /// Right-hand index pinch drag → position translate (XYZ)
     private func processRightIndexDrag() {
         guard let settings = renderSettings else { return }
         
@@ -381,7 +382,7 @@ final class GestureController {
         if rightIndexDragActive {
             active = rightHand.isTracked && rightPinch >= pinchReleaseThreshold
         } else {
-            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold && !leftHand.isTracked
+            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold
         }
         
         // Gesture started
@@ -389,6 +390,7 @@ final class GestureController {
             rightIndexDragActive = true
             rightIndexDragStartPos = settings.targetPosition
             rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
+            rightIndexPrevPalm = rightHand.palmPosition
             accumulatedPosition = settings.targetPosition
             #if DEBUG
             print("👆 Right index drag STARTED")
@@ -397,13 +399,27 @@ final class GestureController {
         
         // Gesture active - update target position directly
         if active {
-            let currentPos = rightHand.pinchPosition(digit: 1)
-            let delta = currentPos - rightIndexPrevPos
-            
+            // Prefer palm for smoother tracking; fall back to pinch midpoint if palm is zero (not tracked)
+            var currentPos = rightHand.palmPosition
+            if simd_length_squared(currentPos) == 0 { // palm not tracked
+                currentPos = rightHand.pinchPosition(digit: 1)
+            }
+            var previousPos = rightIndexPrevPalm
+            if simd_length_squared(previousPos) == 0 { // previous palm not tracked
+                previousPos = rightIndexPrevPos
+            }
+
+            let rawDelta = currentPos - previousPos
+            // Clamp delta to avoid spikes on sporadic joints
+            let maxStep: Float = 0.05 // 5 cm per frame cap
+            let deltaLength = simd_length(rawDelta)
+            let delta = (deltaLength > maxStep && deltaLength > 0) ? rawDelta * (maxStep / deltaLength) : rawDelta
+
             // Apply translation (world space) to target
             accumulatedPosition = accumulatedPosition + delta * translateSensitivity
             settings.targetPosition = accumulatedPosition
             rightIndexPrevPos = currentPos
+            rightIndexPrevPalm = currentPos
         }
         
         // Gesture ended
