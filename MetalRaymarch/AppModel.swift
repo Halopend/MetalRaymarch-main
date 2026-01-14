@@ -138,6 +138,14 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     
+    // === GESTURE TARGET VALUES ===
+    // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
+    // This decouples gesture detection (30Hz async) from render smoothing (90Hz sync).
+    private var _targetMinDistance: Float = 0.8
+    private var _targetFoldingLimit: Float = 1.0
+    private var _targetSphereRadius: Float = 0.5
+    private var _targetPosition: SIMD3<Float> = .zero
+    
     // === REFINING PARAMETERS (Polychronakis 2024 / Keinert 2014) ===
     // These control the sphere tracing optimization thresholds
     private var _relaxFactor: Float = 1.6            // Over-relaxation multiplier (1.0-2.0)
@@ -278,6 +286,73 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleRadius: Float {
         get { withLock { _safetyBubbleRadius } }
         set { withLock { _safetyBubbleRadius = max(0.05, min(2.5, newValue)) } }
+    }
+    
+    // === GESTURE TARGET VALUES ===
+    // UI/gestures set these asynchronously. Renderer interpolates current → target each frame.
+    // This cleanly separates: (1) intent (targets) from (2) animation (smoothing)
+    
+    var targetMinDistance: Float {
+        get { withLock { _targetMinDistance } }
+        set { withLock { _targetMinDistance = newValue } }
+    }
+    
+    var targetFoldingLimit: Float {
+        get { withLock { _targetFoldingLimit } }
+        set { withLock { _targetFoldingLimit = newValue } }
+    }
+    
+    var targetSphereRadius: Float {
+        get { withLock { _targetSphereRadius } }
+        set { withLock { _targetSphereRadius = newValue } }
+    }
+    
+    var targetPosition: SIMD3<Float> {
+        get { withLock { _targetPosition } }
+        set { withLock { _targetPosition = newValue } }
+    }
+    
+    /// Interpolation speed for gesture-controlled parameters (higher = faster convergence)
+    /// 18.0 = ~63% convergence in 55ms, very responsive while still smooth
+    private let gestureInterpolationSpeed: Float = 18.0
+    
+    /// Called by Renderer every frame to smoothly interpolate current values toward targets.
+    /// This is the ONLY place smoothing happens for gesture parameters - single source of truth.
+    /// Uses frame-rate independent exponential decay for consistent feel at any FPS.
+    /// - Parameter deltaTime: Time since last frame in seconds
+    func interpolateToTargets(deltaTime: Float) {
+        withLock {
+            // Exponential decay: factor = 1 - e^(-speed * dt)
+            // At speed=18, dt=1/90: factor ≈ 0.18 (smooth 90fps)
+            // At speed=18, dt=1/45: factor ≈ 0.33 (catches up on slow frames)
+            let factor = 1.0 - exp(-gestureInterpolationSpeed * deltaTime)
+            
+            _minDistance += (_targetMinDistance - _minDistance) * factor
+            _foldingLimit += (_targetFoldingLimit - _foldingLimit) * factor
+            _sphereRadius += (_targetSphereRadius - _sphereRadius) * factor
+            _position += (_targetPosition - _position) * factor
+        }
+    }
+    
+    /// Snap current values immediately to targets (no smoothing)
+    /// Use when loading presets or resetting state
+    func snapToTargets() {
+        withLock {
+            _minDistance = _targetMinDistance
+            _foldingLimit = _targetFoldingLimit
+            _sphereRadius = _targetSphereRadius
+            _position = _targetPosition
+        }
+    }
+    
+    /// Set all targets at once (for preset loading)
+    func setTargets(minDistance: Float, foldingLimit: Float, sphereRadius: Float, position: SIMD3<Float>) {
+        withLock {
+            _targetMinDistance = minDistance
+            _targetFoldingLimit = foldingLimit
+            _targetSphereRadius = sphereRadius
+            _targetPosition = position
+        }
     }
     
     // === REFINING PARAMETERS ===

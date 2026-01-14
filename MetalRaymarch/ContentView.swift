@@ -127,13 +127,22 @@ struct ContentView: View {
                         DisclosureGroup("Shape Parameters") {
                             VStack(spacing: 8) {
                                 Text("Min Distance")
-                                Slider(value: Binding(get: { appModel.renderSettings.minDistance }, set: { appModel.renderSettings.minDistance = $0 }), in: 0.0001...3.0)
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.targetMinDistance },
+                                    set: { appModel.renderSettings.targetMinDistance = $0 }
+                                ), in: 0.0001...3.0)
 
                                 Text("Box Folding Limit")
-                                Slider(value: Binding(get: { appModel.renderSettings.foldingLimit }, set: { appModel.renderSettings.foldingLimit = $0 }), in: 0.1...5.0)
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.targetFoldingLimit },
+                                    set: { appModel.renderSettings.targetFoldingLimit = $0 }
+                                ), in: 0.1...5.0)
 
                                 Text("Sphere Radius")
-                                Slider(value: Binding(get: { appModel.renderSettings.sphereRadius }, set: { appModel.renderSettings.sphereRadius = $0 }), in: 0.01...2.0)
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.targetSphereRadius },
+                                    set: { appModel.renderSettings.targetSphereRadius = $0 }
+                                ), in: 0.01...2.0)
                             }
                             .padding(.leading, 10)
                         }
@@ -199,14 +208,14 @@ struct ContentView: View {
                         let zDelta = -Float(value.translation.height) * sensitivityZ
                         var newPos = initialPosition
                         newPos.z += zDelta
-                        appModel.renderSettings.position = newPos
+                        appModel.renderSettings.targetPosition = newPos
                     } else {
                         let delta = SIMD3<Float>(Float(value.translation.width) * sensitivityXY, -Float(value.translation.height) * sensitivityXY, 0)
-                        appModel.renderSettings.position = initialPosition + delta
+                        appModel.renderSettings.targetPosition = initialPosition + delta
                     }
                 }
                 .onEnded { _ in
-                    initialPosition = appModel.renderSettings.position
+                    initialPosition = appModel.renderSettings.targetPosition
                 }
         )
         .gesture(
@@ -216,10 +225,10 @@ struct ContentView: View {
                     let zDelta = (Float(value.magnification) - 1.0) * sensitivity
                     var newPos = initialPosition
                     newPos.z += zDelta
-                    appModel.renderSettings.position = newPos
+                    appModel.renderSettings.targetPosition = newPos
                 }
                 .onEnded { _ in
-                    initialPosition = appModel.renderSettings.position
+                    initialPosition = appModel.renderSettings.targetPosition
                 }
         )
     }

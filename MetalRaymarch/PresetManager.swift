@@ -100,6 +100,15 @@ struct FractalPreset: Codable, Identifiable {
         settings.foldingLimit = foldingLimit
         settings.sphereRadius = sphereRadius
         
+        // Also set target values for gesture-controlled parameters
+        // This ensures smooth transitions when loading presets
+        settings.setTargets(
+            minDistance: minDistance,
+            foldingLimit: foldingLimit,
+            sphereRadius: sphereRadius,
+            position: position
+        )
+        
         if includePerformance {
             if let resolutionScale = resolutionScale {
                 settings.resolutionScale = resolutionScale

@@ -921,14 +921,19 @@ actor Renderer {
 
         let settings = appModel.renderSettings
         
+        // === INTERPOLATE GESTURE-CONTROLLED VALUES ===
+        // This is the SINGLE source of truth for smoothing gesture parameters.
+        // Called every frame at 90Hz for smooth animation regardless of gesture update rate (30Hz).
+        settings.interpolateToTargets(deltaTime: cachedDeltaTime)
+        
         // Decay the limit flash effect using actual deltaTime
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         
-        // Frame-rate independent smoothing using exponential decay
-        // speed = 15 means ~63% convergence in 67ms, feels responsive yet smooth
+        // Use already-smoothed position from settings (interpolated above)
+        // Scale gets its own smoothing since it's not gesture-controlled
         let smoothSpeed: Float = 15.0
         let smoothFactor = 1.0 - exp(-smoothSpeed * cachedDeltaTime)
-        smoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * smoothFactor
+        smoothedPosition = settings.position  // Already smoothed by interpolateToTargets
         smoothedScale = smoothedScale + (settings.scale - smoothedScale) * smoothFactor
         
         // Use cached rotation matrix (constant, computed once in init)
