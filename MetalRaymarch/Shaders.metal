@@ -165,6 +165,13 @@ inline int selectAdaptiveLevel(float coarseT) {
     return 3;  // Per-pixel for surface detail
 }
 
+// Convert clip-space depth (z/w in [-1, 1]) into normalized depth [0, 1]
+// so the depth buffer matches what the compositor expects for reprojection.
+inline float encodeDepthFromClip(float4 clipPos) {
+    float ndc = clipPos.z / clipPos.w;
+    return saturate(ndc * 0.5 + 0.5);
+}
+
 // Blue noise approximation for temporal stability (better than white noise for reprojection)
 // FORCE_INLINE: Called every pixel in Scene()
 FORCE_INLINE float blueNoise(float2 uv, float time) {
@@ -872,7 +879,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     {
         float3 p = cameraPos + ret.x * rd;
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = clipPos.z / clipPos.w;
+        output.depth = encodeDepthFromClip(clipPos);
 
         // Debug: visualize depth as grayscale
         if (DEBUG_DEPTH_VISUALIZATION) {
@@ -883,7 +890,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     else
     {
-        output.depth = 1e-7;
+        // No hit - use far plane depth (1.0 for standard Z buffer)
+        output.depth = 1.0;
 
         if (DEBUG_DEPTH_VISUALIZATION) {
             output.color = float4(0.0, 0.0, 0.0, 1.0);
@@ -936,12 +944,12 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
         // Compute clip-space depth and write it out for async timewarp
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = clipPos.z / clipPos.w;
+        output.depth = encodeDepthFromClip(clipPos);
     }
     else
     {
-        // Far plane / no hit: use tiny depth so compositor treats this as far away
-        output.depth = 1e-7;
+        // No hit - use far plane depth (1.0 for standard Z buffer)
+        output.depth = 1.0;
     }
 
     half fogFactor = half(saturate(exp(-ret.x + 1.5)));
@@ -1065,11 +1073,12 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
 
         // Compute clip-space depth and write it out for async timewarp
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = clipPos.z / clipPos.w;
+        output.depth = encodeDepthFromClip(clipPos);
     }
     else
     {
-        output.depth = 1e-7;
+        // No hit - use far plane depth (1.0 for standard Z buffer)
+        output.depth = 1.0;
     }
     
     half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
@@ -1183,9 +1192,12 @@ struct DepthOutput {
 };
 
 // Stereo depth upscale fragment shader
+// Use BILINEAR filtering for depth to reduce shimmer during ASW reprojection.
+// While nearest preserves exact depth discontinuities, bilinear provides
+// smoother depth gradients that ASW can interpolate more accurately.
 fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[stage_in]],
                                                  depth2d_array<float> sourceTexture [[texture(0)]]) {
-    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
+    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
     DepthOutput out;
@@ -1196,7 +1208,7 @@ fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[s
 // Non-stereo depth upscale for backward compatibility
 fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
                                           depth2d<float> sourceTexture [[texture(0)]]) {
-    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
+    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
     DepthOutput out;

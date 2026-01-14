@@ -115,6 +115,7 @@ actor Renderer {
     let rasterSampleCount: Int = 1
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
+    var hasLoggedDeviceAnchorInfo = false
 
     // Device pose smoothing removed — use raw device anchor from drawable for async timewarp
     
@@ -441,6 +442,21 @@ actor Renderer {
     }
 
     private func startARSession() async {
+        // Check if world tracking is supported and authorized
+        guard WorldTrackingProvider.isSupported else {
+            print("⚠️ World tracking is not supported on this device")
+            return
+        }
+        
+        // Check authorization status for world sensing
+        let authStatus = await ARKitSession.queryAuthorization(for: [.worldSensing])
+        
+        if authStatus[.worldSensing] != .allowed {
+            print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
+            print("   Head POSITION tracking will not work - only rotation.")
+            print("   Please ensure NSWorldSensingUsageDescription is in Info.plist and permission is granted.")
+        }
+        
         do {
             var providers: [any DataProvider] = [worldTracking]
             if let ht = handTracking {
@@ -448,6 +464,9 @@ actor Renderer {
             }
             try await arSession.run(providers)
             print("✓ ARKit session started with world tracking and hand tracking")
+            
+            // Log world tracking state
+            print("  World tracking state: \(worldTracking.state)")
         } catch {
             if !hasLoggedWorldTrackingWarning {
                 print("⚠️ ARKit session failed: \(error)")
@@ -944,6 +963,20 @@ actor Renderer {
         
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        
+        // One-time logging of device anchor to verify position tracking is working
+        if !hasLoggedDeviceAnchorInfo, let anchor = drawable.deviceAnchor {
+            hasLoggedDeviceAnchorInfo = true
+            let transform = anchor.originFromAnchorTransform
+            let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+            print("📍 Device anchor first frame:")
+            print("   Position: (\(position.x), \(position.y), \(position.z))")
+            print("   isTracked: \(anchor.isTracked)")
+            // If position is exactly (0,0,0), world sensing permission may not be granted
+            if position.x == 0 && position.y == 0 && position.z == 0 {
+                print("   ⚠️ Position is origin - world sensing may not be authorized!")
+            }
+        }
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -1726,6 +1759,8 @@ actor Renderer {
             encoder.endEncoding()
         }
 
+        // Upscale depth so the compositor has matching depth for ASW / reprojection.
+        // Bilinear filtering in the depth pass smooths gradients to reduce shimmer.
         copyFXDepthToDrawableDepth(fxDepth: fx.depthTexture, drawable: drawable, commandBuffer: commandBuffer)
     }
     
@@ -1733,23 +1768,32 @@ actor Renderer {
         guard let src = fxDepth else { return }
         guard let pipeline = depthUpscalePipelineState else { return }
 
-        // Depth upscale: low-res input depth → physical-sized drawable depth
-        // Input depth is screen-aspect-sized (same as MetalFX input)
-        // Rate map transforms screen coordinates to physical drawable
+        // Depth upscale: low-res input depth → drawable depth
+        // NOTE: We're upscaling low-res depth to match the drawable. This can cause
+        // ASW shimmer because the upscaled depth doesn't perfectly match MetalFX's
+        // upscaled color. Using bilinear interpolation helps reduce artifacts.
         let systemRateMap = drawable.rasterizationRateMaps.first
-        let views = min(drawable.views.count, src.arrayLength)
+        let requestedViews = min(drawable.views.count, src.arrayLength)
+        guard requestedViews > 0 else { return }
+        let destDepth = drawable.depthTextures[0]
+        let isArray = destDepth.textureType == .type2DArray
+        let targetViews = isArray ? min(requestedViews, destDepth.arrayLength) : 1
+        if !isArray && requestedViews > 1 {
+            print("⚠️ Depth texture is not array-backed; copying depth for first view only")
+        }
 
         let desc = MTLRenderPassDescriptor()
         desc.rasterizationRateMap = systemRateMap
-        desc.depthAttachment.texture = drawable.depthTextures[0]
-        desc.depthAttachment.loadAction = .dontCare
+        desc.depthAttachment.texture = destDepth
+        desc.depthAttachment.loadAction = .clear
+        desc.depthAttachment.clearDepth = 1.0  // Clear to far plane
         desc.depthAttachment.storeAction = .store
-        desc.renderTargetArrayLength = views
+        desc.renderTargetArrayLength = targetViews
         
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { return }
 
         // Use SCREEN-sized viewports (rate map transforms to physical)
-        let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
+        let viewports = drawable.views.prefix(targetViews).map { view -> MTLViewport in
             let vp = view.textureMap.viewport
             return MTLViewport(originX: vp.originX,
                                originY: vp.originY,
@@ -1760,11 +1804,11 @@ actor Renderer {
         encoder.setViewports(viewports)
         
         // Use vertex amplification
-        var viewMappings = (0..<views).map {
+        var viewMappings = (0..<targetViews).map {
             MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
                                               renderTargetArrayIndexOffset: UInt32($0))
         }
-        encoder.setVertexAmplificationCount(views, viewMappings: &viewMappings)
+        encoder.setVertexAmplificationCount(targetViews, viewMappings: &viewMappings)
         
         encoder.label = "Depth Upscale Stereo"
         encoder.setRenderPipelineState(pipeline)
