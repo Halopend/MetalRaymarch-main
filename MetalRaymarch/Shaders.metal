@@ -1,6 +1,12 @@
 //
 //  Shaders.metal
 //
+// === DEPTH BUFFER NOTES (CRITICAL FOR REPROJECTION/ASW) ===
+// visionOS projection outputs z/w in [0, 1] range directly.
+// Depth encoding: output.depth = clipPos.z / clipPos.w (no transformation needed)
+// Far plane (no hit): output.depth = 1e-7 (tiny value = far away for compositor)
+// clearDepth in render passes: 1.0
+//
 // Debug flag for depth visualization (set to 1 to enable)
 #define DEBUG_DEPTH_VISUALIZATION 0
 
@@ -165,11 +171,10 @@ inline int selectAdaptiveLevel(float coarseT) {
     return 3;  // Per-pixel for surface detail
 }
 
-// Convert clip-space depth (z/w in [-1, 1]) into normalized depth [0, 1]
-// so the depth buffer matches what the compositor expects for reprojection.
+// visionOS projection outputs z/w in [0, 1] range directly.
+// No transformation needed - just pass through for async timewarp/reprojection.
 inline float encodeDepthFromClip(float4 clipPos) {
-    float ndc = clipPos.z / clipPos.w;
-    return saturate(ndc * 0.5 + 0.5);
+    return clipPos.z / clipPos.w;
 }
 
 // Blue noise approximation for temporal stability (better than white noise for reprojection)
@@ -890,8 +895,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     else
     {
-        // No hit - use far plane depth (1.0 for standard Z buffer)
-        output.depth = 1.0;
+        // No hit - far plane (tiny depth so compositor treats as far away)
+        output.depth = 1e-7;
 
         if (DEBUG_DEPTH_VISUALIZATION) {
             output.color = float4(0.0, 0.0, 0.0, 1.0);
@@ -948,8 +953,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     else
     {
-        // No hit - use far plane depth (1.0 for standard Z buffer)
-        output.depth = 1.0;
+        // No hit - far plane (tiny depth so compositor treats as far away)
+        output.depth = 1e-7;
     }
 
     half fogFactor = half(saturate(exp(-ret.x + 1.5)));
@@ -1077,8 +1082,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     }
     else
     {
-        // No hit - use far plane depth (1.0 for standard Z buffer)
-        output.depth = 1.0;
+        // No hit - far plane (tiny depth so compositor treats as far away)
+        output.depth = 1e-7;
     }
     
     half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));

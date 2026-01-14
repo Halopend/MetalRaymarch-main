@@ -1096,8 +1096,9 @@ actor Renderer {
         self.updateGameState(drawable: drawable)
 
         // Check if using adaptive 8x8 compute pipeline
+        // NOTE: Compute doesn't output depth, so disable when upscaling (reprojection needs depth)
         let tileSize = appModel.renderSettings.tileSize
-        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil
+        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil && !upscalingEnabled
         
         if useAdaptiveCompute {
             // Use compute-based rendering for 8x8 adaptive hierarchical
