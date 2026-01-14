@@ -1328,50 +1328,58 @@ actor Renderer {
         }
 
         // MetalFX input and output sizing:
-        // CRITICAL: MetalFX textures must use SCREEN aspect ratio to match projection matrix!
-        // The projection matrix from drawable.computeProjection() encodes screen FOV.
-        // If we render to physical aspect, the projection is wrong and causes distortion.
+        // CRITICAL: Use SCREEN dimensions to match the projection matrix aspect ratio.
+        // The projection matrix from drawable.computeProjection() is designed for the
+        // screen viewport, so we MUST render to the same aspect ratio for correct
+        // head movement translation.
         //
-        // Strategy:
-        // - Input/Output use SCREEN aspect ratio (matches projection matrix)
-        // - Rate map transforms screen coordinates to physical drawable on copy
-        // - This preserves correct spatial projection for VR
+        // Previous approach used physical dimensions which caused aspect ratio mismatch
+        // and incorrect head movement translation at sub-full resolutions.
         func alignTo16(_ value: Int) -> Int { max(16, (value + 15) & ~15) }
 
-        // Get both screen and physical dimensions
+        // Get screen dimensions from the drawable viewport
+        // This is what the projection matrix is designed for
         let screenViewport = drawable.views[0].textureMap.viewport
         let screenWidth = Int(screenViewport.width)
         let screenHeight = Int(screenViewport.height)
         let physicalWidth = drawable.colorTextures[0].width
         let physicalHeight = drawable.colorTextures[0].height
         
-        // Calculate aspect ratios
+        // Calculate aspect ratios for debugging
         let screenAspect = Float(screenWidth) / Float(screenHeight)
         let physicalAspect = Float(physicalWidth) / Float(physicalHeight)
         
-        // Use SCREEN dimensions for MetalFX to match projection matrix
-        // Output matches screen size, rate map handles physical transformation
-        let outputWidth = alignTo16(screenWidth)
-        let outputHeight = alignTo16(screenHeight)
+        // KEY FIX: Use screen dimensions for MetalFX textures.
+        // This ensures the projection matrix aspect ratio matches the render target,
+        // which is essential for correct head movement translation.
+        //
+        // The output texture should match the screen viewport size so that:
+        // 1. The projection matrix (designed for screen viewport) is correct
+        // 2. Head movement translates correctly in the rendered image
+        // 3. The copy to drawable uses rate map transformation as needed
         
-        // Input is scaled-down version of screen size
-        let inputWidth = alignTo16(max(1, Int(round(Double(screenWidth) * Double(metalFXScale)))))
-        let inputHeight = alignTo16(max(1, Int(round(Double(screenHeight) * Double(metalFXScale)))))
+        // Output at screen resolution (MetalFX will upscale to this)
+        let outputWidth = screenWidth
+        let outputHeight = screenHeight
         
-        // Store aspect correction (not used in this mode since we use rate map)
+        // Input at scaled resolution (what we actually render to)
+        let inputWidth = alignTo16(max(16, Int(round(Double(screenWidth) * Double(metalFXScale)))))
+        let inputHeight = alignTo16(max(16, Int(round(Double(screenHeight) * Double(metalFXScale)))))
+        
+        // Store aspect correction (should be 1.0 now since we use screen dimensions)
         metalFXAspectCorrection = 1.0
         
         lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
         
         // Debug: print dimensions
         if !hasLoggedFoveationAvailability {
-            print("🔍 MetalFX Config Debug (Screen-aspect for correct projection):")
+            print("🔍 MetalFX Config Debug (Screen-based for correct head tracking):")
             print("   Screen viewport: \(screenWidth) x \(screenHeight) (aspect \(screenAspect))")
-            print("   Physical drawable: \(physicalWidth) x \(physicalHeight) (aspect \(physicalAspect))")
-            print("   MetalFX input: \(inputWidth) x \(inputHeight) (\(metalFXScale)x scale)")
-            print("   MetalFX output: \(outputWidth) x \(outputHeight) (screen-sized)")
-            print("   Rate map handles screen→physical transformation")
-            print("   Pixel reduction: render \(inputWidth * inputHeight) vs full \(physicalWidth * physicalHeight) = \(String(format: "%.1f", Float(physicalWidth * physicalHeight) / Float(inputWidth * inputHeight)))x fewer")
+            print("   Physical texture: \(physicalWidth) x \(physicalHeight) (aspect \(physicalAspect))")
+            print("   MetalFX input: \(inputWidth) x \(inputHeight) (aspect \(Float(inputWidth)/Float(inputHeight)))")
+            print("   MetalFX output: \(outputWidth) x \(outputHeight) (matches screen viewport)")
+            print("   Resolution scale: \(metalFXScale)")
+            print("   Render pixel reduction: ~\(String(format: "%.1f", Float(screenWidth * screenHeight) / Float(inputWidth * inputHeight)))x fewer pixels")
             hasLoggedFoveationAvailability = true
         }
 
@@ -1649,8 +1657,8 @@ actor Renderer {
         }
 
         // Copy MetalFX output to drawable.
-        // MetalFX output is physical-sized (matches drawable), so we can copy directly
-        // without rate map transformation. Projection was adjusted to match physical aspect.
+        // MetalFX output is screen-sized (matches projection matrix aspect ratio).
+        // Use rate map transformation when copying to physical drawable if formats differ.
 
         // Copy MetalFX output to drawable using format conversion
         // MetalFX outputs rgba16Float, drawable expects BGRA8Unorm_sRGB
@@ -1659,7 +1667,7 @@ actor Renderer {
         let drawableFormat = drawable.colorTextures[0].pixelFormat
         let outputFormat = output.pixelFormat
         
-        // Use direct blit when formats match (physical-sized output matches physical drawable)
+        // Use direct blit when formats match (screen-sized output to drawable viewport)
         if drawableFormat == outputFormat {
             // Direct blit when formats match
             guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
