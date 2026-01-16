@@ -335,6 +335,27 @@ class PresetManager {
         let preset = FractalPreset.fromSettings(settings, name: name, thumbnailData: thumbnailData)
         presets.insert(preset, at: 0) // Add to beginning (newest first)
         savePresets()
+        
+        // Log all parameters for recovery purposes
+        print("""
+        📸 PRESET SAVED: "\(name)"
+        ─────────────────────────────────────────
+        ID: \(preset.id)
+        Position: (\(preset.position.x), \(preset.position.y), \(preset.position.z))
+        Scale: \(preset.scale)
+        ─────────────────────────────────────────
+        Fractal Scale: \(preset.fractalScale)
+        Folding Limit: \(preset.foldingLimit)
+        Sphere Radius: \(preset.sphereRadius)
+        Min Distance: \(preset.minDistance)
+        ─────────────────────────────────────────
+        Fractal Iterations: \(preset.fractalIterations)
+        Max Ray Steps: \(preset.maxRaySteps)
+        Color Iterations: \(preset.colorIterations)
+        Color Mix: \(preset.colorMix)
+        Glow Intensity: \(preset.glowIntensity)
+        ─────────────────────────────────────────
+        """)
     }
     
     /// Update an existing preset
