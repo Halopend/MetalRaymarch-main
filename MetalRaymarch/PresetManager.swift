@@ -14,6 +14,7 @@ struct FractalPreset: Codable, Identifiable {
     var name: String
     var createdAt: Date
     var thumbnailData: Data?  // PNG image data
+    var rating: Int  // 0-5 stars
     
     // Common settings
     var fractalIterations: Int
@@ -37,16 +38,24 @@ struct FractalPreset: Codable, Identifiable {
     // Safety bubble
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, createdAt, thumbnailData, rating
+        case fractalIterations, maxRaySteps, colorMix, glowIntensity, colorIterations, position, scale
+        case minDistance, fractalScale, foldingLimit, sphereRadius
+        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius
+    }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
         self.thumbnailData = thumbnailData
+        self.rating = 0
         
         // Initialize with defaults
-        self.fractalIterations = 6
-        self.maxRaySteps = 32
+        self.fractalIterations = 9
+        self.maxRaySteps = 64
         self.colorMix = 0.5
         self.glowIntensity = 0.2
         self.colorIterations = 8.0
@@ -57,6 +66,54 @@ struct FractalPreset: Codable, Identifiable {
         self.fractalScale = 2.8
         self.foldingLimit = 1.0
         self.sphereRadius = 0.5
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        thumbnailData = try container.decodeIfPresent(Data.self, forKey: .thumbnailData)
+        rating = try container.decodeIfPresent(Int.self, forKey: .rating) ?? 0
+        fractalIterations = try container.decode(Int.self, forKey: .fractalIterations)
+        maxRaySteps = try container.decode(Int.self, forKey: .maxRaySteps)
+        colorMix = try container.decode(Float.self, forKey: .colorMix)
+        glowIntensity = try container.decode(Float.self, forKey: .glowIntensity)
+        colorIterations = try container.decode(Float.self, forKey: .colorIterations)
+        position = try container.decode(SIMD3<Float>.self, forKey: .position)
+        scale = try container.decode(Float.self, forKey: .scale)
+        minDistance = try container.decode(Float.self, forKey: .minDistance)
+        fractalScale = try container.decode(Float.self, forKey: .fractalScale)
+        foldingLimit = try container.decode(Float.self, forKey: .foldingLimit)
+        sphereRadius = try container.decode(Float.self, forKey: .sphereRadius)
+        resolutionScale = try container.decodeIfPresent(Float.self, forKey: .resolutionScale)
+        tileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
+        safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
+        safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(thumbnailData, forKey: .thumbnailData)
+        try container.encode(rating, forKey: .rating)
+        try container.encode(fractalIterations, forKey: .fractalIterations)
+        try container.encode(maxRaySteps, forKey: .maxRaySteps)
+        try container.encode(colorMix, forKey: .colorMix)
+        try container.encode(glowIntensity, forKey: .glowIntensity)
+        try container.encode(colorIterations, forKey: .colorIterations)
+        try container.encode(position, forKey: .position)
+        try container.encode(scale, forKey: .scale)
+        try container.encode(minDistance, forKey: .minDistance)
+        try container.encode(fractalScale, forKey: .fractalScale)
+        try container.encode(foldingLimit, forKey: .foldingLimit)
+        try container.encode(sphereRadius, forKey: .sphereRadius)
+        try container.encodeIfPresent(resolutionScale, forKey: .resolutionScale)
+        try container.encodeIfPresent(tileSize, forKey: .tileSize)
+        try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
+        try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
     }
     
     /// Create a preset from current render settings
@@ -146,6 +203,7 @@ struct FractalPreset: Codable, Identifiable {
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
     private let presetsKey = "FractalPresets"
+    private let maxBackupCount: Int? = nil  // nil = unlimited retention
     
     /// URL for the presets directory in the app's documents
     private var presetsDirectory: URL {
@@ -162,6 +220,15 @@ class PresetManager {
     
     private var presetsFileURL: URL {
         presetsDirectory.appendingPathComponent("presets.json")
+    }
+
+    /// Directory for timestamped backups
+    private var backupsDirectory: URL {
+        let dir = presetsDirectory.appendingPathComponent("Backups", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
     }
     
     init() {
@@ -182,10 +249,34 @@ class PresetManager {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             presets = try decoder.decode([FractalPreset].self, from: data)
-            // Sort by creation date, newest first
             presets.sort { $0.createdAt > $1.createdAt }
         } catch {
-            print("Failed to load presets: \(error)")
+            print("Failed to load presets: \(error). Trying latest backup…")
+            loadLatestBackup()
+        }
+    }
+
+    /// Attempt to load the most recent backup if the main file is missing or corrupt
+    private func loadLatestBackup() {
+        do {
+            let backups = try FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
+            let latest = backups.sorted { (a, b) -> Bool in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return da > db
+            }.first
+            guard let url = latest else {
+                presets = []
+                return
+            }
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            presets = try decoder.decode([FractalPreset].self, from: data)
+            presets.sort { $0.createdAt > $1.createdAt }
+            print("✅ Loaded presets from backup: \(url.lastPathComponent)")
+        } catch {
+            print("Failed to load presets backup: \(error)")
             presets = []
         }
     }
@@ -200,8 +291,42 @@ class PresetManager {
             encoder.outputFormatting = .prettyPrinted
             let data = try encoder.encode(presets)
             try data.write(to: fileURL)
+            writeBackup(data: data)
         } catch {
             print("Failed to save presets: \(error)")
+        }
+    }
+
+    /// Write a timestamped backup and keep only the newest few
+    private func writeBackup(data: Data) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: Date())
+        let backupURL = backupsDirectory.appendingPathComponent("presets-\(stamp).json")
+        do {
+            try data.write(to: backupURL)
+            if let limit = maxBackupCount {
+                pruneBackups(keeping: limit)
+            }
+        } catch {
+            print("Failed to write presets backup: \(error)")
+        }
+    }
+
+    /// Keep only the newest N backups to avoid unbounded growth
+    private func pruneBackups(keeping count: Int) {
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
+            let sorted = files.sorted { (a, b) -> Bool in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return da > db
+            }
+            for url in sorted.dropFirst(count) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        } catch {
+            print("Failed to prune backups: \(error)")
         }
     }
     
@@ -217,8 +342,18 @@ class PresetManager {
         guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
         
         // Recreate preset with proper ID preservation
-        presets[index] = createPresetWithID(preset.id, name: preset.name, createdAt: preset.createdAt, settings: settings, thumbnailData: thumbnailData ?? preset.thumbnailData)
+        var updated = createPresetWithID(preset.id, name: preset.name, createdAt: preset.createdAt, settings: settings, thumbnailData: thumbnailData ?? preset.thumbnailData)
+        updated.rating = presets[index].rating  // Preserve rating when updating settings
+        presets[index] = updated
         
+        savePresets()
+    }
+
+    /// Update rating for a preset (0-5)
+    func updateRating(_ preset: FractalPreset, rating: Int) {
+        guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
+        let clamped = max(0, min(5, rating))
+        presets[index].rating = clamped
         savePresets()
     }
     
@@ -324,6 +459,7 @@ class PresetManager {
             newPreset.tileSize = importedPreset.tileSize
             newPreset.safetyBubbleEnabled = importedPreset.safetyBubbleEnabled
             newPreset.safetyBubbleRadius = importedPreset.safetyBubbleRadius
+            newPreset.rating = importedPreset.rating
             
             presets.insert(newPreset, at: 0)
             savePresets()

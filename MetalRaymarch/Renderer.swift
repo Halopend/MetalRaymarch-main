@@ -8,9 +8,6 @@
 import CompositorServices
 import Metal
 import MetalKit
-#if canImport(MetalFX)
-import MetalFX
-#endif
 import simd
 import ARKit
 
@@ -102,9 +99,6 @@ actor Renderer {
     var dynamicUniformBuffer: MTLBuffer
     var pipelineState: MTLRenderPipelineState
     var quadSharedPipelineState: MTLRenderPipelineState?  // Quad-shared raymarch (2x2 sharing)
-    var metalFXAmplificationPipelineState: MTLRenderPipelineState?  // Pipeline for amplification rgba16Float (uses amplification_id)
-    var metalFXQuadSharedPipelineState: MTLRenderPipelineState?  // MetalFX + quad-shared
-    var depthUpscalePipelineState: MTLRenderPipelineState?
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
     
@@ -118,8 +112,6 @@ actor Renderer {
     }
     var specializedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
     var specializedQuadSharedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
-    var specializedMetalFXPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
-    var specializedMetalFXQuadSharedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
     
     // Cached constant matrices (computed once, reused every frame)
     private let cachedRotationMatrix: matrix_float4x4
@@ -138,10 +130,6 @@ actor Renderer {
     var screenshotDepthTexture: MTLTexture?
     var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
     var shouldCaptureScreenshot: Bool = false
-    
-    // GPU synchronization fence for MetalFX
-    // Ensures scene rendering completes before MetalFX reads the intermediate texture
-    var metalFXFence: MTLFence?
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -176,25 +164,6 @@ actor Renderer {
     var handTracking: HandTrackingProvider?
     let layerRenderer: LayerRenderer
     let appModel: AppModel
-
-#if canImport(MetalFX)
-    typealias UpscaleConfig = MetalFXManager.Configuration
-#else
-    typealias UpscaleConfig = Any
-#endif
-
-    #if canImport(MetalFX)
-    private var metalFXManager: MetalFXManager?
-    private var formatConversionPipeline: MTLRenderPipelineState?
-    // Aspect ratio correction: physical_aspect / screen_aspect
-    // Applied to projection matrix when rendering to physical-sized MetalFX textures
-    private var metalFXAspectCorrection: Float = 1.0
-    // Keep last output size so we don't recreate MetalFX textures every time the system
-    // nudges the foveated viewport by a few pixels (that churn tanks perf).
-    private var lastMetalFXOutputSize = SIMD2<Int>(repeating: 0)
-    private var lastMetalFXConfig: MetalFXManager.Configuration?
-    private var lastMetalFXViewCount: Int = 0
-    #endif
 
     init(_ layerRenderer: LayerRenderer, appModel: AppModel) {
         self.layerRenderer = layerRenderer
@@ -298,72 +267,6 @@ actor Renderer {
         }
         print("✓ Built \(pipelineCount) specialized standard pipelines")
 
-        // Build MetalFX pipeline (no MSAA) for rendering into MetalFX input textures.
-        #if canImport(MetalFX)
-        do {
-            // Pipeline for vertex amplification rendering to rgba16Float (uses amplification_id)
-            metalFXAmplificationPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
-                                                                              layerRenderer: layerRenderer,
-                                                                              rasterSampleCount: 1,
-                                                                              mtlVertexDescriptor: mtlVertexDescriptor,
-                                                                              colorFormat: .rgba16Float,
-                                                                              vertexFunctionName: "vertexShader",
-                                                                              fragmentFunctionName: "fragmentShader")
-            
-            // MetalFX + quad-shared pipeline
-            metalFXQuadSharedPipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
-                                                                              layerRenderer: layerRenderer,
-                                                                              rasterSampleCount: 1,
-                                                                              mtlVertexDescriptor: mtlVertexDescriptor,
-                                                                              colorFormat: .rgba16Float,
-                                                                              vertexFunctionName: "vertexShader",
-                                                                              fragmentFunctionName: "fragmentShaderQuadShared")
-            
-            // Also build specialized MetalFX pipelines for quality presets
-            var metalFXPipelineCount = 0
-            for preset in qualityPresets {
-                let iterCount = preset.fractalIterations
-                let raySteps = preset.raySteps
-                let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
-                let config = FunctionConstantConfig.forQualityPreset(preset)
-                let constants = config.toMTLConstants()
-                    
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: 1,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    colorFormat: .rgba16Float,
-                    functionConstants: constants
-                ) {
-                    specializedMetalFXPipelines[key] = pipeline
-                    metalFXPipelineCount += 1
-                }
-                
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: 1,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    colorFormat: .rgba16Float,
-                    fragmentFunctionName: "fragmentShaderQuadShared",
-                    functionConstants: constants
-                ) {
-                    specializedMetalFXQuadSharedPipelines[key] = pipeline
-                }
-            }
-            print("✓ Built \(metalFXPipelineCount) specialized MetalFX pipelines")
-            
-            depthUpscalePipelineState = try Renderer.buildDepthUpscalePipeline(device: device, 
-                                                                               layerRenderer: layerRenderer, 
-                                                                               mtlVertexDescriptor: mtlVertexDescriptor)
-        } catch {
-            print("⚠️ Unable to compile MetalFX or Depth Upscale pipeline: \(error)")
-            metalFXAmplificationPipelineState = nil
-            metalFXQuadSharedPipelineState = nil
-        }
-        #endif
-
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
         depthStateDescriptor.isDepthWriteEnabled = true
@@ -420,12 +323,6 @@ actor Renderer {
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
-        
-        // Create GPU synchronization fence for MetalFX
-        // This ensures scene rendering completes before the upscaler reads the texture
-        metalFXFence = device.makeFence()
-        metalFXFence?.label = "MetalFX Sync Fence"
-        
         // Setup screenshot capture pipeline
         setupScreenshotCapture()
     }
@@ -701,25 +598,6 @@ actor Renderer {
         return mtlVertexDescriptor
     }
 
-    static func buildDepthUpscalePipeline(device: MTLDevice,
-                                          layerRenderer: LayerRenderer,
-                                          mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
-        let library = device.makeDefaultLibrary()
-        let vertexFunction = library?.makeFunction(name: "formatConversionVertexStereo")
-        let fragmentFunction = library?.makeFunction(name: "depthUpscaleFragmentStereo")
-
-        let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.label = "DepthUpscaleStereo"
-        pipelineDescriptor.vertexFunction = vertexFunction
-        pipelineDescriptor.fragmentFunction = fragmentFunction
-        
-        pipelineDescriptor.colorAttachments[0].pixelFormat = .invalid
-        pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
-        pipelineDescriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
-        
-        return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-    }
-
     static func buildRenderPipelineWithDevice(device: MTLDevice,
                                               layerRenderer: LayerRenderer,
                                               rasterSampleCount: Int,
@@ -845,41 +723,19 @@ actor Renderer {
     
     /// Select the best specialized pipeline for the given iteration count and ray steps
     /// Falls back to general pipeline if no specialized version exists
-    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool, useMetalFX: Bool) -> MTLRenderPipelineState {
+    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool) -> MTLRenderPipelineState {
         let key = PipelineKey(fractalIterations: iterations, maxRaySteps: raySteps)
         
-        if useMetalFX {
-            if useQuadShared {
-                // Try specialized MetalFX quad-shared first
-                if let specialized = specializedMetalFXQuadSharedPipelines[key] {
-                    return specialized
-                }
-                // Fallback to general MetalFX quad-shared
-                return metalFXQuadSharedPipelineState ?? pipelineState
-            } else {
-                // Try specialized MetalFX first
-                if let specialized = specializedMetalFXPipelines[key] {
-                    return specialized
-                }
-                // Fallback to general MetalFX
-                return metalFXAmplificationPipelineState ?? pipelineState
+        if useQuadShared {
+            if let specialized = specializedQuadSharedPipelines[key] {
+                return specialized
             }
+            return quadSharedPipelineState ?? pipelineState
         } else {
-            if useQuadShared {
-                // Try specialized quad-shared first
-                if let specialized = specializedQuadSharedPipelines[key] {
-                    return specialized
-                }
-                // Fallback to general quad-shared
-                return quadSharedPipelineState ?? pipelineState
-            } else {
-                // Try specialized standard first
-                if let specialized = specializedPipelines[key] {
-                    return specialized
-                }
-                // Fallback to general pipeline
-                return pipelineState
+            if let specialized = specializedPipelines[key] {
+                return specialized
             }
+            return pipelineState
         }
     }
     
@@ -1040,6 +896,13 @@ actor Renderer {
             let modelView = viewMatrix * modelMatrix
             let inverseModelView = modelView.inverse
             let inverseView = viewMatrix.inverse
+
+            // Optional lighting play mode: gently modulate color and glow
+            let baseColorMix = settings.colorMix
+            let baseGlow = settings.glowIntensity
+            let lightingWave = sin(Float(appModel.clock.time) * 1.2)
+            let animatedColorMix = settings.lightingPlay ? clamp(baseColorMix + lightingWave * 0.08, 0.0, 1.0) : baseColorMix
+            let animatedGlow = settings.lightingPlay ? clamp(baseGlow + max(0, lightingWave) * 0.25, 0.0, 2.0) : baseGlow
             
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
@@ -1055,8 +918,8 @@ actor Renderer {
                             fractalIterations: Int32(settings.fractalIterations),
                             maxRaySteps: Int32(settings.maxRaySteps),
                             foveationIntensity: settings.foveationIntensity,
-                            colorMix: settings.colorMix,
-                            glowIntensity: settings.glowIntensity,
+                            colorMix: animatedColorMix,
+                            glowIntensity: animatedGlow,
                             foldingLimit: settings.foldingLimit,
                             sphereRadius: settings.sphereRadius,
                             safetyBubbleRadius: settings.safetyBubbleRadius,
@@ -1136,45 +999,23 @@ actor Renderer {
         }
 
         self.updateDynamicBufferState()
-
-        #if canImport(MetalFX)
-        // Remove spatial upscaling from the hot path to keep the render loop lean.
-        // If we ever re-enable MetalFX, wire it through a non-frame-critical path.
-        Task { @MainActor in
-            appModel.metalFXAvailable = false
-            appModel.metalFXStatus = "Disabled (spatial upscaling off hotpath)"
-        }
-        let upscalingEnabled = false
-        #else
-        let upscalingEnabled = false
-        #endif
-
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
 
         self.updateGameState(drawable: drawable)
 
         // Check if using adaptive 8x8 compute pipeline
-        // NOTE: Compute doesn't output depth, so disable when upscaling (reprojection needs depth)
         let tileSize = appModel.renderSettings.tileSize
-        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil && !upscalingEnabled
+        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil
         
         if useAdaptiveCompute {
             // Use compute-based rendering for 8x8 adaptive hierarchical
             let computeRendered = renderWithAdaptiveCompute(
                 commandBuffer: commandBuffer,
-                drawable: drawable,
-                upscalingEnabled: upscalingEnabled
+                drawable: drawable
             )
             
             if computeRendered {
-                // MetalFX upscaling if enabled
-                #if canImport(MetalFX)
-                if upscalingEnabled {
-                    encodeMetalFXUpscale(commandBuffer: commandBuffer, drawable: drawable)
-                }
-                #endif
-                
                 drawable.encodePresent(commandBuffer: commandBuffer)
                 commandBuffer.commit()
                 frame.endSubmission()
@@ -1184,31 +1025,8 @@ actor Renderer {
         
         // Fall back to fragment-based rendering
         let renderPassDescriptor = MTLRenderPassDescriptor()
-
-        #if canImport(MetalFX)
-        if upscalingEnabled, let fx = metalFXManager, let inputTex = fx.inputTexture {
-            // Render to MetalFX input texture (lower resolution)
-            renderPassDescriptor.colorAttachments[0].texture = inputTex
-            renderPassDescriptor.colorAttachments[0].loadAction = .clear
-            renderPassDescriptor.colorAttachments[0].storeAction = .store
-            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
-
-            renderPassDescriptor.depthAttachment.texture = fx.depthTexture
-            renderPassDescriptor.depthAttachment.loadAction = .clear
-            renderPassDescriptor.depthAttachment.storeAction = .store
-            renderPassDescriptor.depthAttachment.clearDepth = 1.0
-
-            // MetalFX spatial scaler requires uniform input; disable rasterization rate map (foveation) here.
-            renderPassDescriptor.rasterizationRateMap = nil
-            renderPassDescriptor.renderTargetArrayLength = inputTex.arrayLength
-        } else {
-            configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
-        }
-        #else
         configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
-        #endif
 
-        /// Final pass rendering code here
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             fatalError("Failed to create render encoder")
         }
@@ -1221,7 +1039,7 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
-        // Select pipeline based on tile size and MetalFX settings
+        // Select pipeline based on tile size
         // tileSize: 0 = standard per-pixel, 2 = quad-shared (2x2 SIMD), 8 = compute-based (handled above)
         let useQuadShared = (tileSize == 2)
         
@@ -1231,23 +1049,12 @@ actor Renderer {
         
         // Use specialized pipeline with fixed iteration count for full loop unrolling
         // This is THE critical optimization - Map() inner loop can be fully unrolled
-        #if canImport(MetalFX)
         let selectedPipeline = selectPipeline(
             forIterations: currentIterations,
             raySteps: currentRaySteps,
-            useQuadShared: useQuadShared,
-            useMetalFX: upscalingEnabled
+            useQuadShared: useQuadShared
         )
         renderEncoder.setRenderPipelineState(selectedPipeline)
-        #else
-        let selectedPipeline = selectPipeline(
-            forIterations: currentIterations,
-            raySteps: currentRaySteps,
-            useQuadShared: useQuadShared,
-            useMetalFX: false
-        )
-        renderEncoder.setRenderPipelineState(selectedPipeline)
-        #endif
 
         renderEncoder.setDepthStencilState(depthState)
 
@@ -1256,33 +1063,7 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // When rendering to MetalFX input, use full input texture as viewport.
-        // MetalFX input is screen-aspect-sized (scaled down) to match projection matrix.
-        // When rendering to drawable with foveation, use the virtual viewport from drawable.
-        #if canImport(MetalFX)
-        let viewports: [MTLViewport]
-        if upscalingEnabled,
-           let fx = metalFXManager,
-           let inputTex = fx.inputTexture {
-            // Render to full MetalFX input texture (screen-aspect, scaled down).
-            // The projection matrix is based on screen aspect, so this matches correctly.
-            // We fill the entire texture - it's already sized for screen aspect ratio.
-            viewports = drawable.views.map { view in
-                let vp = view.textureMap.viewport
-                return MTLViewport(originX: 0.0,
-                                   originY: 0.0,
-                                   width: Double(inputTex.width),
-                                   height: Double(inputTex.height),
-                                   znear: vp.znear,
-                                   zfar: vp.zfar)
-            }
-        } else {
-            viewports = drawable.views.map { $0.textureMap.viewport }
-        }
-        #else
         let viewports = drawable.views.map { $0.textureMap.viewport }
-        #endif
-
         renderEncoder.setViewports(viewports)
 
         if drawable.views.count > 1 {
@@ -1315,21 +1096,8 @@ actor Renderer {
         }
 
         renderEncoder.popDebugGroup()
-        
-        // Signal fence after fragment work completes (before MetalFX reads the texture)
-        #if canImport(MetalFX)
-        if upscalingEnabled, let fence = metalFXFence {
-            renderEncoder.updateFence(fence, after: .fragment)
-        }
-        #endif
 
         renderEncoder.endEncoding()
-
-        #if canImport(MetalFX)
-        if upscalingEnabled {
-            encodeMetalFXUpscale(commandBuffer: commandBuffer, drawable: drawable)
-        }
-        #endif
 
         drawable.encodePresent(commandBuffer: commandBuffer)
 
@@ -1363,135 +1131,6 @@ actor Renderer {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
     }
-    
-    #if canImport(MetalFX)
-    private func configureMetalFXIfNeeded(for drawable: LayerRenderer.Drawable) -> Bool {
-        guard metalFXAmplificationPipelineState != nil else {
-            Task { @MainActor in
-                appModel.metalFXAvailable = false
-                appModel.metalFXStatus = "MetalFX pipeline not available"
-            }
-            return false
-        }
-        
-        let hasFamilySupport = device.supportsFamily(.apple7) || device.supportsFamily(.metal3)
-        if !hasFamilySupport {
-            Task { @MainActor in
-                appModel.metalFXAvailable = false
-                appModel.metalFXStatus = "GPU family not supported"
-            }
-            return false
-        }
-
-        // Explicitly honor foveated preference: skip MetalFX so system rate map stays active.
-        if appModel.renderSettings.preferFoveated {
-            Task { @MainActor in
-                appModel.metalFXAvailable = false
-                appModel.metalFXStatus = "Disabled (prefer foveated)"
-            }
-            return false
-        }
-        
-        let metalFXScale = appModel.renderSettings.resolutionScale
-        
-        // If scale is 1.0, don't use MetalFX (render at full resolution directly)
-        if metalFXScale >= 0.99 {
-            Task { @MainActor in
-                appModel.metalFXAvailable = true
-                appModel.metalFXStatus = "Disabled (scale=1.0)"
-            }
-            return false
-        }
-
-        // MetalFX input and output sizing:
-        // CRITICAL: MetalFX textures must use SCREEN aspect ratio to match projection matrix!
-        // The projection matrix from drawable.computeProjection() encodes screen FOV.
-        // If we render to physical aspect, the projection is wrong and causes distortion.
-        //
-        // Strategy:
-        // - Input/Output use SCREEN aspect ratio (matches projection matrix)
-        // - Rate map transforms screen coordinates to physical drawable on copy
-        // - This preserves correct spatial projection for VR
-        func alignTo16(_ value: Int) -> Int { max(16, (value + 15) & ~15) }
-
-        // Get both screen and physical dimensions
-        let screenViewport = drawable.views[0].textureMap.viewport
-        let screenWidth = Int(screenViewport.width)
-        let screenHeight = Int(screenViewport.height)
-        let physicalWidth = drawable.colorTextures[0].width
-        let physicalHeight = drawable.colorTextures[0].height
-        
-        // Calculate aspect ratios
-        let screenAspect = Float(screenWidth) / Float(screenHeight)
-        let physicalAspect = Float(physicalWidth) / Float(physicalHeight)
-        
-        // Use SCREEN dimensions for MetalFX to match projection matrix
-        // Output matches screen size, rate map handles physical transformation
-        let outputWidth = alignTo16(screenWidth)
-        let outputHeight = alignTo16(screenHeight)
-        
-        // Input is scaled-down version of screen size
-        let inputWidth = alignTo16(max(1, Int(round(Double(screenWidth) * Double(metalFXScale)))))
-        let inputHeight = alignTo16(max(1, Int(round(Double(screenHeight) * Double(metalFXScale)))))
-        
-        // Store aspect correction (not used in this mode since we use rate map)
-        metalFXAspectCorrection = 1.0
-        
-        lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
-        
-        // Debug: print dimensions
-        if !hasLoggedFoveationAvailability {
-            print("🔍 MetalFX Config Debug (Screen-aspect for correct projection):")
-            print("   Screen viewport: \(screenWidth) x \(screenHeight) (aspect \(screenAspect))")
-            print("   Physical drawable: \(physicalWidth) x \(physicalHeight) (aspect \(physicalAspect))")
-            print("   MetalFX input: \(inputWidth) x \(inputHeight) (\(metalFXScale)x scale)")
-            print("   MetalFX output: \(outputWidth) x \(outputHeight) (screen-sized)")
-            print("   Rate map handles screen→physical transformation")
-            print("   Pixel reduction: render \(inputWidth * inputHeight) vs full \(physicalWidth * physicalHeight) = \(String(format: "%.1f", Float(physicalWidth * physicalHeight) / Float(inputWidth * inputHeight)))x fewer")
-            hasLoggedFoveationAvailability = true
-        }
-
-        let config = MetalFXManager.Configuration(
-            inputWidth: inputWidth,
-            inputHeight: inputHeight,
-            outputWidth: outputWidth,
-            outputHeight: outputHeight,
-            colorFormat: .rgba16Float,
-            depthFormat: layerRenderer.configuration.depthFormat,
-            scale: metalFXScale
-        )
-
-        let viewCount = drawable.views.count
-        let needsUpdate = metalFXManager == nil || config != lastMetalFXConfig || viewCount != lastMetalFXViewCount
-
-        do {
-            if needsUpdate {
-                if let manager = metalFXManager {
-                    try manager.update(configuration: config, viewCount: viewCount)
-                } else {
-                    metalFXManager = try MetalFXManager(device: device, configuration: config, viewCount: viewCount)
-                }
-                lastMetalFXConfig = config
-                lastMetalFXViewCount = viewCount
-            }
-            
-            let available = (metalFXManager?.inputTexture != nil)
-            Task { @MainActor in
-                appModel.metalFXAvailable = available
-                appModel.metalFXStatus = available ? "Active (scale \(metalFXScale))" : "Textures not ready"
-            }
-            return available
-        } catch {
-            print("⚠️ MetalFX configuration failed: \(error)")
-            metalFXManager = nil
-            Task { @MainActor in
-                appModel.metalFXAvailable = false
-                appModel.metalFXStatus = "Failed: \(error)"
-            }
-            return false
-        }
-    }
-    #endif  // canImport(MetalFX)
     
     // MARK: - Adaptive 8x8 Hierarchical Compute Rendering
     
@@ -1664,36 +1303,13 @@ actor Renderer {
     /// Returns true if compute rendering was used
     private func renderWithAdaptiveCompute(
         commandBuffer: MTLCommandBuffer,
-        drawable: LayerRenderer.Drawable,
-        upscalingEnabled: Bool
+        drawable: LayerRenderer.Drawable
     ) -> Bool {
         guard adaptiveHierarchicalPipeline8x8 != nil else { return false }
         
-        // Determine output texture based on whether MetalFX upscaling is active
-        let outputTexture: MTLTexture
-        let needsBlit: Bool
-        
-        #if canImport(MetalFX)
-        if upscalingEnabled, let fx = metalFXManager, let inputTex = fx.inputTexture {
-            // Use MetalFX input texture (already has .shaderWrite)
-            outputTexture = inputTex
-            needsBlit = false  // MetalFX will handle the upscale to drawable
-        } else {
-            // Create our own compute-writable texture and blit to drawable
-            guard let computeTex = ensureComputeOutputTexture(for: drawable) else {
-                return false
-            }
-            outputTexture = computeTex
-            needsBlit = true
-        }
-        #else
-        // Without MetalFX, use our own compute texture
-        guard let computeTex = ensureComputeOutputTexture(for: drawable) else {
+        guard let outputTexture = ensureComputeOutputTexture(for: drawable) else {
             return false
         }
-        outputTexture = computeTex
-        needsBlit = true
-        #endif
         
         // Render each eye
         for viewIndex in 0..<drawable.views.count {
@@ -1705,224 +1321,12 @@ actor Renderer {
             )
         }
         
-        // If not using MetalFX, blit our compute output to drawable
-        if needsBlit {
-            blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable)
-        }
+        // Blit compute output to drawable for presentation
+        blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable)
         
         return true
     }
-    
-    #if canImport(MetalFX)
-    private func encodeMetalFXUpscale(commandBuffer: MTLCommandBuffer, drawable: LayerRenderer.Drawable) {
-        guard let fx = metalFXManager, let output = fx.outputTexture else { return }
 
-        do {
-            // Pass the fence so MetalFX waits for scene rendering to complete
-            try fx.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
-        } catch {
-            print("⚠️ MetalFX upscale failed: \(error)")
-            return
-        }
-
-        // Copy MetalFX output to drawable.
-        // MetalFX output is physical-sized (matches drawable), so we can copy directly
-        // without rate map transformation. Projection was adjusted to match physical aspect.
-
-        // Copy MetalFX output to drawable using format conversion
-        // MetalFX outputs rgba16Float, drawable expects BGRA8Unorm_sRGB
-        let views = min(drawable.views.count, output.arrayLength)
-        
-        let drawableFormat = drawable.colorTextures[0].pixelFormat
-        let outputFormat = output.pixelFormat
-        
-        // Use direct blit when formats match (physical-sized output matches physical drawable)
-        // If foveation is active, we MUST use the render pass to apply the rasterization rate map.
-        if drawableFormat == outputFormat && drawable.rasterizationRateMaps.isEmpty {
-            // Direct blit when formats match
-            guard let blit = commandBuffer.makeBlitCommandEncoder() else { return }
-            
-            for eye in 0..<views {
-                let destinationTexture: MTLTexture
-                let destinationSlice: Int
-                let drawableViewport = drawable.views[eye].textureMap.viewport
-
-                if drawable.colorTextures.count > eye {
-                    // Dedicated layout
-                    destinationTexture = drawable.colorTextures[eye]
-                    destinationSlice = 0
-                } else {
-                    // Layered layout
-                    destinationTexture = drawable.colorTextures[0]
-                    destinationSlice = eye
-                }
-
-                let destOriginX = max(0, Int(drawableViewport.originX.rounded()))
-                let destOriginY = max(0, Int(drawableViewport.originY.rounded()))
-                let maxWidth = max(0, destinationTexture.width - destOriginX)
-                let maxHeight = max(0, destinationTexture.height - destOriginY)
-                let copyWidth = min(output.width, maxWidth)
-                let copyHeight = min(output.height, maxHeight)
-
-                if copyWidth <= 0 || copyHeight <= 0 { continue }
-
-                blit.copy(from: output,
-                          sourceSlice: eye,
-                          sourceLevel: 0,
-                          sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                          sourceSize: MTLSize(width: copyWidth, height: copyHeight, depth: 1),
-                          to: destinationTexture,
-                          destinationSlice: destinationSlice,
-                          destinationLevel: 0,
-                          destinationOrigin: MTLOrigin(x: destOriginX, y: destOriginY, z: 0))
-            }
-            blit.endEncoding()
-        } else {
-            // Need format conversion via render pass - use single stereo pass with vertex amplification
-            // MetalFX output is screen-sized, rate map transforms to physical drawable
-            let systemRateMap = drawable.rasterizationRateMaps.first
-            
-            if formatConversionPipeline == nil {
-                createFormatConversionPipeline(destinationFormat: drawableFormat)
-            }
-            
-            guard let pipeline = formatConversionPipeline else {
-                print("⚠️ Format conversion pipeline not available")
-                return
-            }
-            
-            let renderPassDescriptor = MTLRenderPassDescriptor()
-            
-            // Use rate map to transform screen coordinates to physical drawable
-            renderPassDescriptor.rasterizationRateMap = systemRateMap
-            
-            // Render to the array texture directly, not a view
-            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDescriptor.colorAttachments[0].loadAction = .dontCare
-            renderPassDescriptor.colorAttachments[0].storeAction = .store
-            renderPassDescriptor.renderTargetArrayLength = views
-            
-            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-                print("⚠️ Failed to create render encoder for format conversion")
-                return
-            }
-            
-            // Use SCREEN-sized viewports (rate map transforms to physical)
-            let viewports = drawable.views.prefix(views).map { view -> MTLViewport in
-                let vp = view.textureMap.viewport
-                return MTLViewport(originX: vp.originX,
-                                   originY: vp.originY,
-                                   width: vp.width,
-                                   height: vp.height,
-                                   znear: 0.0, zfar: 1.0)
-            }
-            encoder.setViewports(viewports)
-            
-            // Use vertex amplification to render both eyes
-            var viewMappings = (0..<views).map {
-                MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
-                                                  renderTargetArrayIndexOffset: UInt32($0))
-            }
-            encoder.setVertexAmplificationCount(views, viewMappings: &viewMappings)
-            
-            encoder.label = "Format Conversion Stereo"
-            encoder.setRenderPipelineState(pipeline)
-            // Pass the full array texture - shader samples using eye index from amplification_id
-            encoder.setFragmentTexture(output, index: 0)
-            
-            // No aspect correction needed - MetalFX output has correct screen aspect
-            var aspectCorrection: Float = 1.0
-            encoder.setFragmentBytes(&aspectCorrection, length: MemoryLayout<Float>.size, index: 0)
-            
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-            encoder.endEncoding()
-        }
-
-        // Upscale depth so the compositor has matching depth for ASW / reprojection.
-        // Bilinear filtering in the depth pass smooths gradients to reduce shimmer.
-        copyFXDepthToDrawableDepth(fxDepth: fx.depthTexture, drawable: drawable, commandBuffer: commandBuffer)
-    }
-    
-    func copyFXDepthToDrawableDepth(fxDepth: MTLTexture?, drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer) {
-        guard let src = fxDepth else { return }
-        guard let pipeline = depthUpscalePipelineState else { return }
-
-        // Depth upscale: low-res input depth → drawable depth
-        // NOTE: We're upscaling low-res depth to match the drawable. This can cause
-        // ASW shimmer because the upscaled depth doesn't perfectly match MetalFX's
-        // upscaled color. Using bilinear interpolation helps reduce artifacts.
-        let systemRateMap = drawable.rasterizationRateMaps.first
-        let requestedViews = min(drawable.views.count, src.arrayLength)
-        guard requestedViews > 0 else { return }
-        let destDepth = drawable.depthTextures[0]
-        let isArray = destDepth.textureType == .type2DArray
-        let targetViews = isArray ? min(requestedViews, destDepth.arrayLength) : 1
-        if !isArray && requestedViews > 1 {
-            print("⚠️ Depth texture is not array-backed; copying depth for first view only")
-        }
-
-        let desc = MTLRenderPassDescriptor()
-        desc.rasterizationRateMap = systemRateMap
-        desc.depthAttachment.texture = destDepth
-        desc.depthAttachment.loadAction = .clear
-        desc.depthAttachment.clearDepth = 1.0  // Clear to far plane
-        desc.depthAttachment.storeAction = .store
-        desc.renderTargetArrayLength = targetViews
-        
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: desc) else { return }
-
-        // Use SCREEN-sized viewports (rate map transforms to physical)
-        let viewports = drawable.views.prefix(targetViews).map { view -> MTLViewport in
-            let vp = view.textureMap.viewport
-            return MTLViewport(originX: vp.originX,
-                               originY: vp.originY,
-                               width: vp.width,
-                               height: vp.height,
-                               znear: 0.0, zfar: 1.0)
-        }
-        encoder.setViewports(viewports)
-        
-        // Use vertex amplification
-        var viewMappings = (0..<targetViews).map {
-            MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
-                                              renderTargetArrayIndexOffset: UInt32($0))
-        }
-        encoder.setVertexAmplificationCount(targetViews, viewMappings: &viewMappings)
-        
-        encoder.label = "Depth Upscale Stereo"
-        encoder.setRenderPipelineState(pipeline)
-        encoder.setFragmentTexture(src, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-        encoder.endEncoding()
-    }
-    
-    private func createFormatConversionPipeline(destinationFormat: MTLPixelFormat) {
-        guard let library = device.makeDefaultLibrary() else {
-            print("⚠️ Failed to get default library for format conversion")
-            return
-        }
-        
-        guard let vertexFunc = library.makeFunction(name: "formatConversionVertexStereo"),
-              let fragmentFunc = library.makeFunction(name: "formatConversionFragmentStereo") else {
-            print("⚠️ Format conversion stereo shaders not found")
-            return
-        }
-        
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.label = "Format Conversion Pipeline Stereo"
-        descriptor.vertexFunction = vertexFunc
-        descriptor.fragmentFunction = fragmentFunc
-        descriptor.colorAttachments[0].pixelFormat = destinationFormat
-        descriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
-        
-        do {
-            formatConversionPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-            print("✓ Format conversion stereo pipeline created")
-        } catch {
-            print("⚠️ Failed to create format conversion pipeline: \(error)")
-        }
-    }
-    #endif
 
     func renderLoop() {
         while true {

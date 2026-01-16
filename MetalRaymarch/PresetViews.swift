@@ -12,6 +12,8 @@ struct PresetRowView: View {
     let preset: FractalPreset
     let onLoad: () -> Void
     let onDelete: () -> Void
+    let onRate: (Int) -> Void
+    let onExport: () -> Void
     
     @State private var showDeleteConfirmation = false
     
@@ -59,29 +61,55 @@ struct PresetRowView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                
+                // Rating
+                HStack(spacing: 4) {
+                    ForEach(1...5, id: \.self) { value in
+                        Button {
+                            let newValue = (preset.rating == value) ? 0 : value
+                            onRate(newValue)
+                        } label: {
+                            Image(systemName: value <= preset.rating ? "star.fill" : "star")
+                                .foregroundStyle(value <= preset.rating ? .yellow : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Set rating")
+                    }
+                }
             }
             
             Spacer()
             
             // Actions
-            HStack(spacing: 8) {
-                Button(action: onLoad) {
-                    Image(systemName: "arrow.down.circle")
+            HStack(spacing: 12) {
+                Button(action: onExport) {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                        .labelStyle(.iconOnly)
                         .font(.title2)
                 }
                 .buttonStyle(.plain)
-                .help("Load preset")
-                
-                Button(action: { showDeleteConfirmation = true }) {
-                    Image(systemName: "trash")
-                        .font(.title2)
-                        .foregroundStyle(.red)
+                .help("Export preset")
+
+                Menu {
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title3)
+                        .padding(6)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                .buttonStyle(.plain)
-                .help("Delete preset")
+                .menuStyle(.borderlessButton)
+                .help("More actions")
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { onLoad() }
         .confirmationDialog("Delete Preset?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive, action: onDelete)
             Button("Cancel", role: .cancel) {}
@@ -218,13 +246,23 @@ struct PresetsListView: View {
     @State private var currentThumbnailData: Data?
     @State private var presetToRename: FractalPreset?
     @State private var newName: String = ""
+    @State private var shareItem: ShareItem?
     
     var filteredPresets: [FractalPreset] {
+        let base: [FractalPreset]
         if searchText.isEmpty {
-            return presetManager.presets
+            base = presetManager.presets
+        } else {
+            base = presetManager.presets.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText)
+            }
         }
-        return presetManager.presets.filter { 
-            $0.name.localizedCaseInsensitiveContains(searchText) 
+        // Favorites (higher rating) float to top, then newest
+        return base.sorted { lhs, rhs in
+            if lhs.rating != rhs.rating {
+                return lhs.rating > rhs.rating
+            }
+            return lhs.createdAt > rhs.createdAt
         }
     }
     
@@ -265,6 +303,9 @@ struct PresetsListView: View {
                 ) { name in
                     presetManager.savePreset(name: name, settings: settings, thumbnailData: currentThumbnailData)
                 }
+            }
+            .sheet(item: $shareItem) { item in
+                ShareSheet(activityItems: [item.url])
             }
             .alert("Rename Preset", isPresented: .init(
                 get: { presetToRename != nil },
@@ -323,6 +364,14 @@ struct PresetsListView: View {
                     },
                     onDelete: {
                         presetManager.deletePreset(preset)
+                    },
+                    onRate: { rating in
+                        presetManager.updateRating(preset, rating: rating)
+                    },
+                    onExport: {
+                        if let url = presetManager.exportPreset(preset) {
+                            shareItem = ShareItem(url: url)
+                        }
                     }
                 )
                 .contextMenu {
@@ -339,25 +388,17 @@ struct PresetsListView: View {
                     } label: {
                         Label("Rename", systemImage: "pencil")
                     }
-                    
-                    Divider()
-                    
-                    Button(role: .destructive) {
-                        presetManager.deletePreset(preset)
+
+                    Button {
+                        if let url = presetManager.exportPreset(preset) {
+                            shareItem = ShareItem(url: url)
+                        }
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label("Export", systemImage: "square.and.arrow.up")
                     }
                 }
             }
-            .onDelete { offsets in
-                presetManager.deletePreset(at: offsets)
-            }
         }
-    }
-    
-    /// Call this method to set thumbnail data before showing save sheet
-    func setThumbnailData(_ data: Data?) {
-        currentThumbnailData = data
     }
 }
 
@@ -412,6 +453,39 @@ struct PresetButton: View {
             .presentationDetents([.medium])
         }
     }
+}
+
+// MARK: - Sharing helper
+#if os(iOS) || os(visionOS)
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#elseif os(macOS)
+struct ShareSheet: NSViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeNSViewController(context: Context) -> NSViewController {
+        let controller = NSViewController()
+        let picker = NSSharingServicePicker(items: activityItems)
+        DispatchQueue.main.async {
+            picker.show(relativeTo: .zero, of: controller.view, preferredEdge: .minY)
+        }
+        return controller
+    }
+
+    func updateNSViewController(_ nsViewController: NSViewController, context: Context) {}
+}
+#endif
+
+struct ShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
 }
 
 // MARK: - Preview

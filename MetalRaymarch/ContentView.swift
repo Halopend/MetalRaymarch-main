@@ -14,7 +14,6 @@ struct ContentView: View {
     @State private var speed: Float = 0
     @State private var initialPosition: SIMD3<Float> = .zero
     @State private var initialScale: Float = 1.0
-    @State private var resolutionScale: Float = 0.5
     @State private var cameraMode: Bool = false
 
     var body: some View {
@@ -53,14 +52,6 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                 }
 
-                // Show MetalFX/ upscaling status for easier debugging
-                HStack(spacing: 8) {
-                    Image(systemName: appModel.metalFXAvailable ? "bolt.fill" : "bolt.slash")
-                        .foregroundStyle(appModel.metalFXAvailable ? .yellow : .secondary)
-                    Text(appModel.metalFXStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(.bottom, 16)
 
@@ -88,7 +79,7 @@ struct ContentView: View {
                                     QualityPreset.detect(
                                         fractalIterations: appModel.renderSettings.fractalIterations,
                                         raySteps: appModel.renderSettings.maxRaySteps
-                                    ) ?? .low
+                                    ) ?? .mid
                                 },
                                 set: { preset in
                                     appModel.renderSettings.fractalIterations = preset.fractalIterations
@@ -144,6 +135,17 @@ struct ContentView: View {
                         // Color & Glow Group
                         DisclosureGroup("Color & Glow") {
                             VStack(spacing: 8) {
+                                HStack {
+                                    Button {
+                                        appModel.renderSettings.lightingPlay.toggle()
+                                    } label: {
+                                        Label(appModel.renderSettings.lightingPlay ? "Lighting: Playing" : "Lighting: Paused",
+                                              systemImage: appModel.renderSettings.lightingPlay ? "play.fill" : "play")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    Spacer()
+                                }
+
                                 Text("Color Mix")
                                 Slider(value: Binding(get: { appModel.renderSettings.colorMix }, set: { appModel.renderSettings.colorMix = $0 }), in: 0...1.0)
 

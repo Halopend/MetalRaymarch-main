@@ -62,10 +62,6 @@ class AppModel {
     
     nonisolated let renderSettings = RenderSettings()
     
-    // MetalFX / spatial upscaling state exposed for UI/debugging
-    var metalFXAvailable: Bool = false
-    var metalFXStatus: String = "Unknown"
-    
     // Hand tracking state
     var handTrackingEnabled: Bool = true
     var leftHandTracked: Bool = false
@@ -115,15 +111,16 @@ final class RenderSettings: @unchecked Sendable {
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = .zero
     private var _fractalScale: Float = 2.8
-    private var _fractalIterations: Int = 6         // Slightly higher default for quality
-    private var _maxRaySteps: Int = 32              // Lower = faster (was 48) - target 90fps
+    private var _fractalIterations: Int = 9         // Mid quality default
+    private var _maxRaySteps: Int = 64              // Mid quality default
     private var _foveationIntensity: Float = 1.0    // Gentle shader-side foveation (rate maps handle gaze tracking)
     private var _colorMix: Float = 0.5
     private var _glowIntensity: Float = 0.2
+    private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
-    private var _resolutionScale: Float = 0.67      // MetalFX upscaling: render at 67%, upscale to 100% (sweet spot)
+    private var _resolutionScale: Float = 1.0       // Native resolution (MetalFX removed)
     private var _preferFoveated: Bool = false        // When true, disable MetalFX and keep system foveation
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
@@ -199,6 +196,11 @@ final class RenderSettings: @unchecked Sendable {
     var glowIntensity: Float {
         get { withLock { _glowIntensity } }
         set { withLock { _glowIntensity = newValue } }
+    }
+
+    var lightingPlay: Bool {
+        get { withLock { _lightingPlay } }
+        set { withLock { _lightingPlay = newValue } }
     }
     
     var foldingLimit: Float {
