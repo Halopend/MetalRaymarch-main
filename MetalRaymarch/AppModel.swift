@@ -334,15 +334,47 @@ final class RenderSettings: @unchecked Sendable {
     /// - Parameter deltaTime: Time since last frame in seconds
     func interpolateToTargets(deltaTime: Float) {
         withLock {
+            // Guard against bad deltaTime values that could cause instability
+            let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
+            
             // Exponential decay: factor = 1 - e^(-speed * dt)
             // At speed=18, dt=1/90: factor ≈ 0.18 (smooth 90fps)
             // At speed=18, dt=1/45: factor ≈ 0.33 (catches up on slow frames)
-            let factor = 1.0 - exp(-gestureInterpolationSpeed * deltaTime)
+            let factor = 1.0 - exp(-gestureInterpolationSpeed * clampedDT)
+            
+            // Check for NaN/Inf in targets before interpolating
+            if _targetMinDistance.isNaN || _targetMinDistance.isInfinite {
+                print("⚠️ ANOMALY: targetMinDistance is \(_targetMinDistance), resetting to 0.8")
+                _targetMinDistance = 0.8
+            }
+            if _targetFoldingLimit.isNaN || _targetFoldingLimit.isInfinite {
+                print("⚠️ ANOMALY: targetFoldingLimit is \(_targetFoldingLimit), resetting to 1.0")
+                _targetFoldingLimit = 1.0
+            }
+            if _targetSphereRadius.isNaN || _targetSphereRadius.isInfinite {
+                print("⚠️ ANOMALY: targetSphereRadius is \(_targetSphereRadius), resetting to 0.5")
+                _targetSphereRadius = 0.5
+            }
+            if _targetPosition.x.isNaN || _targetPosition.y.isNaN || _targetPosition.z.isNaN {
+                print("⚠️ ANOMALY: targetPosition contains NaN, resetting to zero")
+                _targetPosition = .zero
+            }
             
             _minDistance += (_targetMinDistance - _minDistance) * factor
             _foldingLimit += (_targetFoldingLimit - _foldingLimit) * factor
             _sphereRadius += (_targetSphereRadius - _sphereRadius) * factor
             _position += (_targetPosition - _position) * factor
+            
+            // Clamp current values to sane ranges as a safety net
+            _minDistance = max(0.1, min(10.0, _minDistance))
+            _foldingLimit = max(0.1, min(20.0, _foldingLimit))
+            _sphereRadius = max(0.05, min(5.0, _sphereRadius))
+            
+            // Clamp position to prevent drifting to infinity
+            let maxPos: Float = 100.0
+            _position.x = max(-maxPos, min(maxPos, _position.x))
+            _position.y = max(-maxPos, min(maxPos, _position.y))
+            _position.z = max(-maxPos, min(maxPos, _position.z))
         }
     }
     

@@ -29,6 +29,8 @@ struct ContentView: View {
                         captureScreenshot: { await appModel.captureScreenshot() },
                         onLoadPreset: { preset in
                             preset.apply(to: appModel.renderSettings)
+                            // Sync gesture controller to prevent jumps when gestures resume
+                            appModel.gestureController?.syncWithSettings()
                         }
                     )
                     

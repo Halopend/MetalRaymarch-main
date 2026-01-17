@@ -104,7 +104,7 @@ final class GestureController {
     // Mandelbox parameter ranges - WIDE for exploration
     private let minDistanceRange: ClosedRange<Float> = 0.8...5.0
     private let foldingLimitRange: ClosedRange<Float> = 0.5...13.0
-    private let fractalScaleRange: ClosedRange<Float> = 1.0...5.0
+    private let sphereRadiusRange: ClosedRange<Float> = 0.1...2.0  // Sphere inversion radius
     
     // Single-hand drag sensitivity
     private let translateSensitivity: Float = 1.0
@@ -135,6 +135,21 @@ final class GestureController {
         
         // Initialize accumulated position from current settings
         accumulatedPosition = renderSettings.position
+    }
+    
+    /// Sync internal state with current render settings.
+    /// Call this after loading a preset to prevent jumps when gestures resume.
+    func syncWithSettings() {
+        guard let settings = renderSettings else { return }
+        accumulatedPosition = settings.targetPosition
+        
+        // Reset all gesture states to avoid stale data
+        indexGestureState = TwoHandGestureState()
+        middleGestureState = TwoHandGestureState()
+        ringGestureState = TwoHandGestureState()
+        rightIndexDragActive = false
+        
+        print("🔄 GestureController synced with settings (pos: \(accumulatedPosition))")
     }
     
     // MARK: - Hand Tracking Updates
@@ -189,6 +204,10 @@ final class GestureController {
         let pinchMinDist: Float = 0.02  // 2cm = full pinch (same for all)
         
         func calculatePinch(fingerTip: SIMD3<Float>, maxDist: Float) -> Float {
+            // Guard against untracked joints (both at zero would give false positive)
+            if simd_length_squared(data.thumbTip) < 1e-6 || simd_length_squared(fingerTip) < 1e-6 {
+                return 0  // Can't determine pinch if joints aren't tracked
+            }
             let distance = simd_length(data.thumbTip - fingerTip)
             let normalized = 1.0 - ((distance - pinchMinDist) / (maxDist - pinchMinDist))
             return simd_clamp(normalized, 0, 1)
@@ -236,14 +255,14 @@ final class GestureController {
         }
         if middleGestureState.isActive { activeDigit = 2 }
         
-        // RING FINGER: fractalScale
+        // RING FINGER: sphereRadius (sphere inversion radius)
         processTwoHandGesture(
             digit: 3,
             state: &ringGestureState,
-            currentTarget: settings.fractalScale,
-            range: fractalScaleRange
+            currentTarget: settings.targetSphereRadius,
+            range: sphereRadiusRange
         ) { newValue in
-            settings.fractalScale = newValue
+            settings.targetSphereRadius = newValue
         }
         if ringGestureState.isActive { activeDigit = 3 }
         
@@ -281,6 +300,11 @@ final class GestureController {
         // Measure hand separation (only meaningful if both tracked)
         let leftPos = leftHand.pinchPosition(digit: digit)
         let rightPos = rightHand.pinchPosition(digit: digit)
+        
+        // Guard against zero positions (tracking glitch)
+        let leftPosValid = simd_length_squared(leftPos) > 1e-6
+        let rightPosValid = simd_length_squared(rightPos) > 1e-6
+        
         let currentDistance = simd_length(leftPos - rightPos)
 
         // Check if BOTH hands are pinching (with hysteresis) and within distance guardrails
@@ -288,12 +312,14 @@ final class GestureController {
         if state.isActive {
             // Already active - allow up to maxActiveHandDistance, use release threshold
             bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         leftPosValid && rightPosValid &&
                          currentDistance <= maxActiveHandDistance &&
                          leftPinch >= releaseThresh &&
                          rightPinch >= releaseThresh
         } else {
             // Not active - require hands to be reasonably close to start
             bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         leftPosValid && rightPosValid &&
                          currentDistance <= maxStartHandDistance &&
                          leftPinch >= activateThresh &&
                          rightPinch >= activateThresh
