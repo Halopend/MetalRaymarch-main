@@ -181,6 +181,20 @@ struct FractalPreset: Codable, Identifiable {
         if let safetyBubbleRadius = safetyBubbleRadius {
             settings.safetyBubbleRadius = safetyBubbleRadius
         }
+        
+        // Log preset load for debugging
+        print("""
+        📂 PRESET LOADED: "\(name)"
+        ─────────────────────────────────────────
+        Position: (\(position.x), \(position.y), \(position.z))
+        Scale: \(scale)
+        ─────────────────────────────────────────
+        Fractal Scale: \(fractalScale)
+        Folding Limit: \(foldingLimit)
+        Sphere Radius: \(sphereRadius)
+        Min Distance: \(minDistance)
+        ─────────────────────────────────────────
+        """)
     }
     
     /// Get the thumbnail as a UIImage (visionOS/iOS) or NSImage (macOS)

@@ -362,7 +362,15 @@ final class GestureController {
             state.isActive = false
             #if DEBUG
             let paramName = ["", "minDistance", "foldingLimit", "fractalScale"][min(digit, 3)]
-            print("🤲 Two-hand \(paramName) gesture ENDED")
+            let reason: String
+            if !leftHand.isTracked || !rightHand.isTracked {
+                reason = "hand tracking lost"
+            } else if leftPinch < releaseThresh || rightPinch < releaseThresh {
+                reason = "pinch released"
+            } else {
+                reason = "hands too far apart"
+            }
+            print("🤲 Two-hand \(paramName) gesture ENDED (\(reason))")
             #endif
         }
     }

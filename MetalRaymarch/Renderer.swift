@@ -901,8 +901,8 @@ actor Renderer {
             let baseColorMix = settings.colorMix
             let baseGlow = settings.glowIntensity
             let lightingWave = sin(Float(appModel.clock.time) * 1.2)
-            let animatedColorMix = settings.lightingPlay ? clamp(baseColorMix + lightingWave * 0.08, 0.0, 1.0) : baseColorMix
-            let animatedGlow = settings.lightingPlay ? clamp(baseGlow + max(0, lightingWave) * 0.25, 0.0, 2.0) : baseGlow
+            let animatedColorMix = settings.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
+            let animatedGlow = settings.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
             
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
@@ -1353,6 +1353,11 @@ actor Renderer {
                 if shouldCaptureScreenshot {
                     shouldCaptureScreenshot = false
                     let screenshotData = renderScreenshot()
+                    if screenshotData != nil {
+                        print("📷 Screenshot captured (\(screenshotData!.count) bytes)")
+                    } else {
+                        print("⚠️ Screenshot capture FAILED")
+                    }
                     pendingScreenshotContinuation?.resume(returning: screenshotData)
                     pendingScreenshotContinuation = nil
                 }

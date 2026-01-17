@@ -426,8 +426,15 @@ struct PresetButton: View {
             // Quick save button
             Button {
                 Task {
+                    // Capture screenshot AND snapshot current settings at the same moment
+                    print("📷 Capturing screenshot for preset...")
                     capturedThumbnail = await captureScreenshot()
                     quickSaveName = "Preset \(presetManager.presets.count + 1)"
+                    if capturedThumbnail != nil {
+                        print("✅ Screenshot ready, showing save dialog")
+                    } else {
+                        print("⚠️ No screenshot captured")
+                    }
                     showQuickSave = true
                 }
             } label: {
