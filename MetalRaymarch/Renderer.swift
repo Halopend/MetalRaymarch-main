@@ -968,15 +968,15 @@ actor Renderer {
 
         let presentationTime = drawable.frameTiming.presentationTime
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
-        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
-
-        // Skip frame if no device anchor (tracking not ready) - avoids system warning
-        guard let deviceAnchor = deviceAnchor else {
-            inFlightSemaphore.signal()  // Release the semaphore we acquired
-            frame.endSubmission()
-            return
-        }
         
+        // Only query device anchor if world tracking is actually running
+        let deviceAnchor: DeviceAnchor?
+        if worldTracking.state == .running {
+            deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+        } else {
+            deviceAnchor = nil
+        }
+
         drawable.deviceAnchor = deviceAnchor
 
         // Calculate deltaTime (clamped only on the fast side for FPS tracking; pose smoothing removed)

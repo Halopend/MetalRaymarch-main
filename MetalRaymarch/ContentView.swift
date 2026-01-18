@@ -172,6 +172,14 @@ struct ContentView: View {
 
                                 Text("Foveation Intensity")
                                 Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
+                                
+                                Divider()
+                                
+                                Toggle("Relative Gestures", isOn: Binding(
+                                    get: { appModel.renderSettings.useRelativeGestures },
+                                    set: { appModel.renderSettings.useRelativeGestures = $0 }
+                                ))
+                                .help("Relative: fine-tune from current value. Absolute: hand distance maps directly to range.")
                             }
                             .padding(.leading, 10)
                         }

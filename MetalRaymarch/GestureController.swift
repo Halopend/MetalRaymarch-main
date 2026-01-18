@@ -149,7 +149,9 @@ final class GestureController {
         ringGestureState = TwoHandGestureState()
         rightIndexDragActive = false
         
-        print("🔄 GestureController synced with settings (pos: \(accumulatedPosition))")
+        #if DEBUG
+        print("🔄 GestureController synced with settings")
+        #endif
     }
     
     // MARK: - Hand Tracking Updates
