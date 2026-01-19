@@ -928,7 +928,8 @@ actor Renderer {
                             useHierarchical: settings.useHierarchical ? 1 : 0,
                             limitFlash: settings.limitFlash,
                             showHUD: settings.showHUD ? 1 : 0,
-                            activeGesture: Int32(settings.activeGestureIndex))
+                            activeGesture: Int32(settings.activeGestureIndex),
+                            fractalType: settings.fractalType.rawValue)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -1200,7 +1201,8 @@ actor Renderer {
             maxRaySteps: Int32(settings.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
-            limitFlash: settings.limitFlash
+            limitFlash: settings.limitFlash,
+            fractalType: settings.fractalType.rawValue
         )
         
         // Copy uniforms to buffer

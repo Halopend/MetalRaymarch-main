@@ -324,6 +324,189 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     return d;
 }
 
+// =============================================================================
+// KALEIDOSCOPIC IFS FRACTAL - Based on Knighty's work (Fractal Forums)
+// Reference: http://blog.hvidtfeldts.net/index.php/2011/08/distance-estimated-3d-fractals-iii-folding-space/
+//
+// This implements a proper IFS (Iterated Function System) fractal using:
+// 1. Plane folds (reflections) for symmetry
+// 2. Scaling about a point
+// 3. Proper DE tracking via the running derivative
+//
+// The "Apollonian" name is kept for UI but this is actually a Kaleidoscopic IFS
+// which produces similar sphere-packing aesthetics with correct convergence.
+// =============================================================================
+
+// Apollonian/IFS parameters - optimized for register usage
+struct ApollonianParams {
+    float scale;           // Scaling factor (typically 2.0-3.0)
+    float3 offset;         // Scaling center offset
+    float3 bubbleCenter;
+    float bubbleRadius;
+    int bubbleEnabled;
+};
+
+// Create Apollonian parameters
+FORCE_INLINE ApollonianParams makeApollonianParams(float scale, float3 offset,
+                                                    float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
+    ApollonianParams params;
+    params.scale = scale;
+    params.offset = offset;
+    params.bubbleCenter = bubbleCenter;
+    params.bubbleRadius = bubbleRadius;
+    params.bubbleEnabled = bubbleEnabled;
+    return params;
+}
+
+// Sierpinski tetrahedron / Kaleidoscopic IFS distance function
+// This is a well-understood fractal with proper DE convergence
+// Based on Syntopia/Fragmentarium implementation
+FORCE_INLINE float MapApollonian(float3 pos, ApollonianParams params, int iterations, float foldingLimit) 
+{
+    float3 z = pos;
+    float dr = 1.0;  // Running derivative for proper DE
+    
+    // Scale and offset from params
+    float Scale = params.scale;
+    float3 Offset = params.offset;
+    
+    // Use function constant for iteration count when available
+    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? 
+        min(FC_FRACTAL_ITERATIONS, 15) : min(iterations, 15);
+    
+    // Main IFS iteration loop
+    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
+        UNROLL_FULL
+        for (int n = 0; n < loopCount; n++) {
+            // Fold 1: Reflect across plane x+y=0
+            // if(z.x+z.y<0) z.xy = -z.yx;
+            // Branchless version:
+            z.xy -= 2.0 * min(0.0, z.x + z.y) * float2(0.5, 0.5);
+            z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
+            
+            // Fold 2: Reflect across plane x+z=0  
+            z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
+            
+            // Fold 3: Reflect across plane y+z=0
+            z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
+            
+            // Scale and translate
+            z = z * Scale - Offset * (Scale - 1.0);
+            
+            // Track derivative for proper DE
+            dr = dr * abs(Scale) + 1.0;
+        }
+    } else {
+        UNROLL_8
+        for (int n = 0; n < loopCount; n++) {
+            // Same operations with unroll hint
+            z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
+            z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
+            z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
+            
+            z = z * Scale - Offset * (Scale - 1.0);
+            dr = dr * abs(Scale) + 1.0;
+        }
+    }
+    
+    // Distance estimate - the key formula from the papers
+    // DE = distance_to_point / accumulated_derivative
+    float d = (length(z) - 2.0) / dr;
+    
+    // Safety bubble
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? 
+        FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (bubbleEnabled) {
+        float bubbleDist = length(pos - params.bubbleCenter) - params.bubbleRadius;
+        d = max(d, -bubbleDist);
+    }
+    
+    return d;
+}
+
+// Apollonian/IFS color function - orbit trap coloring
+half3 ColourApollonian(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale) 
+{
+    float3 z = pos;
+    float3 Offset = float3(1.0, 1.0, 1.0);
+    float Scale = scale;
+    
+    // Orbit trap variables
+    float minDist = 1e10;
+    float3 trapPos = z;
+    
+    int steps = max(int(float(colorIters) * quality), 2);
+    steps = min(steps, 10);
+    
+    for (int n = 0; n < steps; n++) {
+        // Tetrahedron folds
+        z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
+        z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
+        z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
+        
+        // Scale and translate
+        z = z * Scale - Offset * (Scale - 1.0);
+        
+        // Track orbit trap
+        float d = dot(z, z);
+        if (d < minDist) {
+            minDist = d;
+            trapPos = z;
+        }
+    }
+    
+    // Generate colors from orbit trap
+    half trapNorm = half(saturate(sqrt(minDist) * 0.5));
+    half posNorm = half(saturate(length(trapPos) * 0.2));
+    
+    // Color palette - ethereal blue/purple 
+    half3 col1 = half3(0.1h, 0.3h, 0.8h);   // Deep blue
+    half3 col2 = half3(0.6h, 0.2h, 0.7h);   // Purple
+    half3 col3 = half3(0.9h, 0.6h, 0.3h);   // Gold
+    
+    half3 finalColor = mix(mix(col1, col2, trapNorm), col3, posNorm);
+    
+    // Alternative palette
+    half3 altColor = half3(posNorm * 0.8h, trapNorm, 0.4h + 0.5h * posNorm);
+    
+    return mix(finalColor, altColor, half(colorMix));
+}
+
+// Simplified Apollonian color overload with default parameters
+inline half3 ColourApollonian(float3 pos, float distance, float gTime, float quality) {
+    // Default parameters that produce good results
+    return ColourApollonian(pos, quality, 0.5, 1.0, 8, 1.5);
+}
+
+// =============================================================================
+// UNIFIED MAP FUNCTION - Dispatches to correct fractal based on type
+// =============================================================================
+
+// Unified distance function that selects fractal type at runtime
+// fractalType: 0 = Mandelbox, 1 = Apollonian/Kaleidoscopic IFS
+FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
+{
+    if (fractalType == 1) {
+        // Kaleidoscopic IFS fractal (labeled "Apollonian" in UI)
+        // Uses tetrahedron symmetry folds + scaling
+        // Scale: 2.0 is classic Sierpinski, higher values create more detail
+        // Offset: (1,1,1) is standard tetrahedron vertex
+        ApollonianParams aParams = makeApollonianParams(
+            2.0,                        // Scale factor (2.0 = classic Sierpinski)
+            float3(1.0, 1.0, 1.0),      // Offset (tetrahedron vertex)
+            params.bubbleCenter,
+            params.bubbleRadius,
+            params.bubbleEnabled
+        );
+        return MapApollonian(pos, aParams, iterations, foldingLimit);
+    } else {
+        // Mandelbox (default)
+        return Map(pos, params, foldingLimit, iterations);
+    }
+}
+
+// =============================================================================
+
 // Optimized colour function using half precision
 half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
@@ -359,17 +542,17 @@ half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad
 
 // Fast normal using forward differences (3 Map calls instead of 4 with central diff)
 // This is called for every hit pixel - force inline to avoid call stack overhead
-FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
+FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
 {
     // Epsilon scales with distance to maintain relative precision
     float e = distance * 0.001;
-    float d = Map(pos, params, foldingLimit, iterations);
+    float d = MapUnified(pos, params, foldingLimit, iterations, fractalType);
     // Forward difference gradient - 3 Map calls
     // GPU can potentially parallelize these since they're independent
     float3 gradient = float3(
-        Map(pos + float3(e,0,0), params, foldingLimit, iterations) - d,
-        Map(pos + float3(0,e,0), params, foldingLimit, iterations) - d,
-        Map(pos + float3(0,0,e), params, foldingLimit, iterations) - d
+        MapUnified(pos + float3(e,0,0), params, foldingLimit, iterations, fractalType) - d,
+        MapUnified(pos + float3(0,e,0), params, foldingLimit, iterations, fractalType) - d,
+        MapUnified(pos + float3(0,0,e), params, foldingLimit, iterations, fractalType) - d
     );
     // Fast normalize - rsqrt is single instruction on GPU
     return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
@@ -378,7 +561,7 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
 // === SUPER-COARSE RAYMARCH (for 8x8 tiles) ===
 // Very fast approximate raymarch - 12 steps with aggressive stepping
 // Used for initial distance estimation in large tiles
-FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations)
+FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
 {
     float t = max(startT, 0.05);
     
@@ -387,7 +570,7 @@ FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float fo
     for(int j = 0; j < 12; j++)
     {
         float3 p = fma(rD, float3(t), rO);
-        float h = Map(p, params, foldingLimit, iterations);
+        float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
         
         // Loose threshold - we just need approximate distance
         if(UNLIKELY(h < 0.1)) return t;
@@ -486,7 +669,7 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
 // Standard sphere tracing - reliable, no aggressive optimizations
 // This is the main raymarch loop - optimize for typical case (many steps, eventual hit)
 // When FC_MAX_RAY_STEPS is defined, the compiler can optimize the loop more aggressively
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
 {
     // Use temporally stable blue noise dithering for reprojection
     float dither = blueNoise(fragCoord, time) * 0.015;
@@ -506,7 +689,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
         {
             float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
             float3 p = fma(rD, float3(t), rO);
-            float h = Map(p, params, foldingLimit, iterations);
+            float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
             
             if(UNLIKELY(h < threshold)) {
                 return float2(t, saturate(glow * 0.25));
@@ -525,7 +708,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
             float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
             
             float3 p = fma(rD, float3(t), rO);  // p = rO + t * rD using fma
-            float h = Map(p, params, foldingLimit, iterations);
+            float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
             
             // LIKELY: Most rays eventually hit the fractal
             if(UNLIKELY(h < threshold))
@@ -650,7 +833,7 @@ half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
 // Ultra-fast shadow with over-relaxation
 // FORCE_INLINE: Called twice per lit pixel (spot + sun)
 // Uses FC_SHADOW_ITERATIONS when defined for compile-time optimization
-FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations)
+FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
 {
     // Skip shadows based on quality mode (compile-time check when FC_QUALITY_MODE defined)
     const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
@@ -670,7 +853,7 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
     UNROLL_4
     for (int i = 0; i < steps; i++)
     {
-        float h = Map(fma(rd, float3(t), ro), params, foldingLimit, iterations);
+        float h = MapUnified(fma(rd, float3(t), ro), params, foldingLimit, iterations, fractalType);
         
         // Soft shadow calculation - min is single instruction
         res = min(res, 10.0 * h / t);
@@ -707,7 +890,7 @@ struct TileHitData {
 
 // Per-pixel normal calculation - fast tetrahedron method (4 samples, better accuracy)
 // FORCE_INLINE critical - called for every lit pixel
-FORCE_INLINE float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations)
+FORCE_INLINE float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
 {
     float e = max(distance * 0.0005, 0.0001);
     
@@ -715,10 +898,10 @@ FORCE_INLINE float3 GetNormalFast(float3 pos, float distance, FractalParams para
     // The h vectors form a tetrahedron, giving unbiased gradient
     float2 h = float2(1.0, -1.0) * e;
     float3 gradient = 
-        h.xyy * Map(pos + h.xyy, params, foldingLimit, iterations) +
-        h.yyx * Map(pos + h.yyx, params, foldingLimit, iterations) +
-        h.yxy * Map(pos + h.yxy, params, foldingLimit, iterations) +
-        h.xxx * Map(pos + h.xxx, params, foldingLimit, iterations);
+        h.xyy * MapUnified(pos + h.xyy, params, foldingLimit, iterations, fractalType) +
+        h.yyx * MapUnified(pos + h.yyx, params, foldingLimit, iterations, fractalType) +
+        h.yxy * MapUnified(pos + h.yxy, params, foldingLimit, iterations, fractalType) +
+        h.xxx * MapUnified(pos + h.xxx, params, foldingLimit, iterations, fractalType);
     
     // rsqrt is faster than normalize on GPU (single instruction vs sqrt+div)
     return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
@@ -786,11 +969,12 @@ kernel void adaptiveHierarchical8x8(
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
     
+    int fractalType = uniforms.fractalType;
     float gTime = uniforms.time * 0.01 + 15.00;
     
     // Use the SAME Scene() function as fragment shader for correctness
     float2 ret = Scene(cameraPos, rd, pixelCenter, 1.0, uniforms.maxRaySteps, 
-                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time);
+                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
     
     float adjustedDist = ret.x;
     float glow = ret.y;
@@ -798,7 +982,7 @@ kernel void adaptiveHierarchical8x8(
     
     if (ret.x < kRayMissThreshold) {
         float3 p = cameraPos + adjustedDist * rd;
-        float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
+        float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         
         // Lighting (same as fragment shader)
         float3 spotLight = CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
@@ -810,15 +994,20 @@ kernel void adaptiveHierarchical8x8(
         FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
                                                         cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
         
-        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+        half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+        half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         
         float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
-                    uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
+        // Choose coloring based on fractal type
+        if (fractalType == 1) {
+            col = ColourApollonian(p, adjustedDist, gTime, 1.0);
+        } else {
+            col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
+                        uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
+        }
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
         // Specular
@@ -869,14 +1058,15 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
-    // === Mandelbox Scene ===
+    // === Get fractal type and parameters ===
+    int fractalType = uniforms.fractalType;
     float quality = 1.0;
     int lodIterations = max(int(uniforms.fractalIterations), 2);
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
 
     // Standard analytic sphere tracing
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     
     half3 col = half3(0.0h);
 
@@ -910,7 +1100,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
         float3 nor;
         if (quality > kMinQualityForNormals) {
-            nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations);
+            nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         } else {
             nor = normalize(p - cameraPos);
         }
@@ -925,14 +1115,19 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
                                                             cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
 
-            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
-            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations));
+            half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+            half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
 
             float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
-            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
+            // Choose coloring based on fractal type
+            if (fractalType == 1) {
+                col = ColourApollonian(p, ret.x, gTime, quality);
+            } else {
+                col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
+            }
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
 
             if (quality > kMinQualityForSpecular) {
@@ -944,7 +1139,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             }
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
-            col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
+            if (fractalType == 1) {
+                col = ColourApollonian(p, ret.x, gTime, quality) * diffuse;
+            } else {
+                col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
+            }
         }
 
         // Compute clip-space depth and write it out for async timewarp

@@ -19,9 +19,84 @@ struct ContentView: View {
     var body: some View {
         @Bindable var appModel = appModel
 
+        ZStack {
+            // Main content
+            VStack {
+                // Recording indicator at top center
+                if let recorder = appModel.parameterRecorder {
+                    if recorder.isRecording {
+                        RecordingIndicatorView(recorder: recorder)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .padding(.top, 8)
+                    } else if recorder.isPlaying || recorder.isPaused {
+                        PlaybackIndicatorView(recorder: recorder) {
+                            recorder.stopPlayback()
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .padding(.top, 8)
+                    }
+                }
+                
+                // Menu content (toggleable)
+                if appModel.isMenuVisible {
+                    menuContent
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                }
+                
+                Spacer()
+            }
+            .animation(.easeInOut(duration: 0.3), value: appModel.isMenuVisible)
+            .animation(.easeInOut(duration: 0.2), value: appModel.parameterRecorder?.isRecording)
+            .animation(.easeInOut(duration: 0.2), value: appModel.parameterRecorder?.isPlaying)
+        }
+        .padding(40)
+        .gesture(
+            TapGesture(count: 2)
+                .onEnded {
+                    cameraMode.toggle()
+                }
+        )
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    let sensitivityXY: Float = 0.002
+                    let sensitivityZ: Float = 0.004
+                    if cameraMode {
+                        // Dolly camera along Z with drag Y
+                        let zDelta = -Float(value.translation.height) * sensitivityZ
+                        var newPos = initialPosition
+                        newPos.z += zDelta
+                        appModel.renderSettings.targetPosition = newPos
+                    } else {
+                        let delta = SIMD3<Float>(Float(value.translation.width) * sensitivityXY, -Float(value.translation.height) * sensitivityXY, 0)
+                        appModel.renderSettings.targetPosition = initialPosition + delta
+                    }
+                }
+                .onEnded { _ in
+                    initialPosition = appModel.renderSettings.targetPosition
+                }
+        )
+        .gesture(
+            MagnifyGesture()
+                .onChanged { value in
+                    let sensitivity: Float = 1.0
+                    let zDelta = (Float(value.magnification) - 1.0) * sensitivity
+                    var newPos = initialPosition
+                    newPos.z += zDelta
+                    appModel.renderSettings.targetPosition = newPos
+                }
+                .onEnded { _ in
+                    initialPosition = appModel.renderSettings.targetPosition
+                }
+        )
+    }
+    
+    // MARK: - Menu Content
+    
+    private var menuContent: some View {
         VStack {
             VStack(spacing: 10) {
-                // Presets button at the top
+                // Presets and Recordings buttons at the top
                 HStack {
                     PresetButton(
                         presetManager: appModel.presetManager,
@@ -34,7 +109,18 @@ struct ContentView: View {
                         }
                     )
                     
+                    if let recorder = appModel.parameterRecorder {
+                        RecordingButton(recorder: recorder) { recording in
+                            recorder.startPlayback(recording)
+                        }
+                    }
+                    
                     Spacer()
+                    
+                    // Menu visibility hint
+                    Text("👆 Middle→Palm: Toggle")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.bottom, 8)
                 
@@ -70,6 +156,21 @@ struct ContentView: View {
                                 appModel.clock.speed = Double(speed)
                             }
                         })
+
+                        // Fractal type picker
+                        Group {
+                            Text("Fractal Type")
+                                .font(.headline)
+                            
+                            Picker("Fractal", selection: Binding(
+                                get: { appModel.renderSettings.fractalType },
+                                set: { appModel.renderSettings.fractalType = $0 }
+                            )) {
+                                Text("Mandelbox").tag(FractalType.mandelbox)
+                                Text("Apollonian").tag(FractalType.apollonian)
+                            }
+                            .pickerStyle(.segmented)
+                        }
 
                         // Quality preset picker
                         Group {
@@ -184,6 +285,20 @@ struct ContentView: View {
                             .padding(.leading, 10)
                         }
 
+                        // Gesture hints
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Gesture Controls:")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            Text("✊ Left fist: Start/stop recording")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("👆 Right middle→palm: Toggle menu")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 8)
+
                         Text("FPS: \(appModel.fps, specifier: "%.1f")")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -197,46 +312,6 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(40)
-        .gesture(
-            TapGesture(count: 2)
-                .onEnded {
-                    cameraMode.toggle()
-                }
-        )
-        .gesture(
-            DragGesture()
-                .onChanged { value in
-                    let sensitivityXY: Float = 0.002
-                    let sensitivityZ: Float = 0.004
-                    if cameraMode {
-                        // Dolly camera along Z with drag Y
-                        let zDelta = -Float(value.translation.height) * sensitivityZ
-                        var newPos = initialPosition
-                        newPos.z += zDelta
-                        appModel.renderSettings.targetPosition = newPos
-                    } else {
-                        let delta = SIMD3<Float>(Float(value.translation.width) * sensitivityXY, -Float(value.translation.height) * sensitivityXY, 0)
-                        appModel.renderSettings.targetPosition = initialPosition + delta
-                    }
-                }
-                .onEnded { _ in
-                    initialPosition = appModel.renderSettings.targetPosition
-                }
-        )
-        .gesture(
-            MagnifyGesture()
-                .onChanged { value in
-                    let sensitivity: Float = 1.0
-                    let zDelta = (Float(value.magnification) - 1.0) * sensitivity
-                    var newPos = initialPosition
-                    newPos.z += zDelta
-                    appModel.renderSettings.targetPosition = newPos
-                }
-                .onEnded { _ in
-                    initialPosition = appModel.renderSettings.targetPosition
-                }
-        )
     }
 }
 

@@ -11,6 +11,8 @@
 //    * Ring fingers = fractalScale
 //  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
 //    * Right hand index = translate position
+//  - LEFT HAND FIST: Start/stop parameter recording
+//  - RIGHT HAND MIDDLE FINGER TO PALM: Toggle menu visibility
 //
 
 import Foundation
@@ -28,6 +30,14 @@ struct HandData {
     var ringTip: SIMD3<Float> = .zero
     var pinkyTip: SIMD3<Float> = .zero
     var palmPosition: SIMD3<Float> = .zero
+    var palmCenter: SIMD3<Float> = .zero  // Center of palm for gesture detection
+    
+    // Additional joint positions for advanced gestures
+    var indexKnuckle: SIMD3<Float> = .zero
+    var middleKnuckle: SIMD3<Float> = .zero
+    var ringKnuckle: SIMD3<Float> = .zero
+    var pinkyKnuckle: SIMD3<Float> = .zero
+    var wrist: SIMD3<Float> = .zero
     
     // Pinch values (0-1, 1 = fully pinched)
     var indexPinch: Float = 0
@@ -56,6 +66,55 @@ struct HandData {
         case 4: return pinkyPinch
         default: return indexPinch
         }
+    }
+    
+    /// Calculate fist strength (0-1, 1 = fully closed fist)
+    /// Based on how close all fingertips are to the palm center
+    func fistStrength() -> Float {
+        guard simd_length_squared(palmCenter) > 1e-6 else { return 0 }
+        
+        // Measure distance from each fingertip to palm center
+        let indexDist = simd_length(indexTip - palmCenter)
+        let middleDist = simd_length(middleTip - palmCenter)
+        let ringDist = simd_length(ringTip - palmCenter)
+        let pinkyDist = simd_length(pinkyTip - palmCenter)
+        let thumbDist = simd_length(thumbTip - palmCenter)
+        
+        // Fist threshold distances (in meters)
+        let closedDist: Float = 0.03  // 3cm = fully closed
+        let openDist: Float = 0.12    // 12cm = fully open
+        
+        // Calculate strength for each finger
+        func fingerStrength(_ dist: Float) -> Float {
+            let normalized = 1.0 - ((dist - closedDist) / (openDist - closedDist))
+            return simd_clamp(normalized, 0, 1)
+        }
+        
+        let strengths = [
+            fingerStrength(indexDist),
+            fingerStrength(middleDist),
+            fingerStrength(ringDist),
+            fingerStrength(pinkyDist),
+            fingerStrength(thumbDist)
+        ]
+        
+        // Return minimum strength (all fingers must be curled for a fist)
+        return strengths.min() ?? 0
+    }
+    
+    /// Check if middle finger is touching palm (for menu toggle)
+    func middleFingerTouchingPalm() -> Float {
+        guard simd_length_squared(palmCenter) > 1e-6,
+              simd_length_squared(middleTip) > 1e-6 else { return 0 }
+        
+        let distance = simd_length(middleTip - palmCenter)
+        
+        // Touch threshold (in meters)
+        let touchDist: Float = 0.04   // 4cm = touching
+        let awayDist: Float = 0.10    // 10cm = clearly away
+        
+        let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
+        return simd_clamp(normalized, 0, 1)
     }
     
     static var zero: HandData { HandData() }
@@ -127,6 +186,22 @@ final class GestureController {
     // Accumulated position from drag gestures (target position)
     private var accumulatedPosition: SIMD3<Float> = .zero
     
+    // === FIST GESTURE STATE (Left hand - recording) ===
+    private var leftFistActive: Bool = false
+    private let fistActivateThreshold: Float = 0.75   // Must exceed to start fist gesture
+    private let fistReleaseThreshold: Float = 0.5     // Must fall below to end fist gesture
+    
+    // === MENU TOGGLE GESTURE STATE (Right hand - middle finger to palm) ===
+    private var menuToggleActive: Bool = false
+    private var menuToggleCooldown: Float = 0  // Prevent rapid toggling
+    private let menuToggleActivateThreshold: Float = 0.8
+    private let menuToggleReleaseThreshold: Float = 0.5
+    private let menuToggleCooldownDuration: Float = 1.0  // 1 second cooldown
+    
+    // Gesture callbacks
+    var onRecordingToggle: (() -> Void)?
+    var onMenuToggle: (() -> Void)?
+    
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
     
@@ -148,6 +223,8 @@ final class GestureController {
         middleGestureState = TwoHandGestureState()
         ringGestureState = TwoHandGestureState()
         rightIndexDragActive = false
+        leftFistActive = false
+        menuToggleActive = false
         
         #if DEBUG
         print("🔄 GestureController synced with settings")
@@ -165,8 +242,17 @@ final class GestureController {
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
         
+        // Update cooldown timer
+        if menuToggleCooldown > 0 {
+            menuToggleCooldown -= deltaTime
+        }
+        
         // Process all gesture mappings (sets targets on RenderSettings)
         processGestures()
+        
+        // Process special gestures
+        processLeftFistGesture()
+        processMenuToggleGesture()
     }
     
     @available(visionOS 2.0, *)
@@ -198,8 +284,22 @@ final class GestureController {
         data.ringTip = jointPosition(.ringFingerTip)
         data.pinkyTip = jointPosition(.littleFingerTip)
         
+        // Knuckle positions for fist detection
+        data.indexKnuckle = jointPosition(.indexFingerKnuckle)
+        data.middleKnuckle = jointPosition(.middleFingerKnuckle)
+        data.ringKnuckle = jointPosition(.ringFingerKnuckle)
+        data.pinkyKnuckle = jointPosition(.littleFingerKnuckle)
+        data.wrist = jointPosition(.wrist)
+        
         // Palm position (use wrist or middle metacarpal)
         data.palmPosition = jointPosition(.middleFingerMetacarpal)
+        
+        // Palm center (average of metacarpals for more accurate palm detection)
+        let indexMeta = jointPosition(.indexFingerMetacarpal)
+        let middleMeta = jointPosition(.middleFingerMetacarpal)
+        let ringMeta = jointPosition(.ringFingerMetacarpal)
+        let pinkyMeta = jointPosition(.littleFingerMetacarpal)
+        data.palmCenter = (indexMeta + middleMeta + ringMeta + pinkyMeta) * 0.25
         
         // Calculate pinch values based on distance between thumb and each finger
         // Ring finger has shorter reach to thumb anatomically, so use tighter range
@@ -222,6 +322,84 @@ final class GestureController {
         data.pinkyPinch = calculatePinch(fingerTip: data.pinkyTip, maxDist: 0.055) // Even tighter for pinky
         
         return data
+    }
+    
+    // MARK: - Special Gesture Processing
+    
+    /// Process left hand fist gesture for recording toggle
+    private func processLeftFistGesture() {
+        guard leftHand.isTracked else {
+            if leftFistActive {
+                leftFistActive = false
+                #if DEBUG
+                print("✊ Left fist: tracking lost")
+                #endif
+            }
+            return
+        }
+        
+        let fistStrength = leftHand.fistStrength()
+        
+        // Check for fist with hysteresis
+        let shouldBeActive: Bool
+        if leftFistActive {
+            shouldBeActive = fistStrength >= fistReleaseThreshold
+        } else {
+            shouldBeActive = fistStrength >= fistActivateThreshold
+        }
+        
+        // Gesture state changed
+        if shouldBeActive && !leftFistActive {
+            // Fist just activated - trigger recording toggle
+            leftFistActive = true
+            onRecordingToggle?()
+            #if DEBUG
+            print("✊ Left fist ACTIVATED - toggling recording")
+            #endif
+        } else if !shouldBeActive && leftFistActive {
+            // Fist released
+            leftFistActive = false
+            #if DEBUG
+            print("✊ Left fist RELEASED")
+            #endif
+        }
+    }
+    
+    /// Process right hand middle finger to palm gesture for menu toggle
+    private func processMenuToggleGesture() {
+        guard rightHand.isTracked else {
+            if menuToggleActive {
+                menuToggleActive = false
+            }
+            return
+        }
+        
+        // Skip if on cooldown
+        guard menuToggleCooldown <= 0 else { return }
+        
+        let touchStrength = rightHand.middleFingerTouchingPalm()
+        
+        // Check for touch with hysteresis
+        let shouldBeActive: Bool
+        if menuToggleActive {
+            shouldBeActive = touchStrength >= menuToggleReleaseThreshold
+        } else {
+            shouldBeActive = touchStrength >= menuToggleActivateThreshold
+        }
+        
+        // Gesture state changed
+        if shouldBeActive && !menuToggleActive {
+            // Touch just activated - trigger menu toggle
+            menuToggleActive = true
+            menuToggleCooldown = menuToggleCooldownDuration
+            onMenuToggle?()
+            #if DEBUG
+            print("👆 Menu toggle ACTIVATED")
+            #endif
+        } else if !shouldBeActive && menuToggleActive {
+            // Touch released
+            menuToggleActive = false
+        }
     }
     
     // MARK: - Gesture Processing

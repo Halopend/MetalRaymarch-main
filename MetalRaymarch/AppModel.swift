@@ -75,6 +75,12 @@ class AppModel {
     // Preset management
     let presetManager = PresetManager()
     
+    // Parameter recording
+    var parameterRecorder: ParameterRecorder?
+    
+    // Menu visibility (toggled by gesture)
+    var isMenuVisible: Bool = true
+    
     // Screenshot capture (set by Renderer)
     var captureScreenshotHandler: (() async -> Data?)?
     
@@ -82,13 +88,72 @@ class AppModel {
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings)
         
+        // Initialize parameter recorder
+        parameterRecorder = ParameterRecorder(renderSettings: renderSettings)
+        
+        // Setup gesture callbacks
+        gestureController?.onRecordingToggle = { [weak self] in
+            self?.toggleRecording()
+        }
+        
+        gestureController?.onMenuToggle = { [weak self] in
+            self?.toggleMenu()
+        }
+        
         // Add built-in presets if this is first launch
         presetManager.addBuiltInPresetsIfNeeded()
+    }
+    
+    /// Toggle recording state
+    func toggleRecording() {
+        guard let recorder = parameterRecorder else { return }
+        
+        if recorder.isRecording {
+            let _ = recorder.stopRecording()
+        } else if recorder.isIdle {
+            recorder.startRecording()
+        }
+    }
+    
+    /// Toggle menu visibility
+    func toggleMenu() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isMenuVisible.toggle()
+        }
+        print("📋 Menu visibility: \(isMenuVisible ? "shown" : "hidden")")
     }
     
     /// Capture a screenshot for preset thumbnails
     func captureScreenshot() async -> Data? {
         return await captureScreenshotHandler?()
+    }
+    
+    /// Update the recorder (call from render loop)
+    func updateRecorder(deltaTime: Float) {
+        guard let recorder = parameterRecorder else { return }
+        
+        // Update recording if active
+        if recorder.isRecording {
+            recorder.update()
+        }
+        
+        // Update playback if active
+        if recorder.isPlaying {
+            recorder.updatePlayback(deltaTime: deltaTime)
+        }
+    }
+}
+
+// Fractal type enum matching ShaderTypes.h
+enum FractalType: Int32 {
+    case mandelbox = 0
+    case apollonian = 1
+    
+    var displayName: String {
+        switch self {
+        case .mandelbox: return "Mandelbox"
+        case .apollonian: return "Apollonian"
+        }
     }
 }
 
@@ -121,6 +186,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 1.0       // Native resolution (MetalFX removed)
+    private var _fractalType: FractalType = .mandelbox  // Current fractal type
     private var _preferFoveated: Bool = false        // When true, disable MetalFX and keep system foveation
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
@@ -224,6 +290,11 @@ final class RenderSettings: @unchecked Sendable {
         // Max 1.0 (100%) - no upscaling needed
         // Sweet spot is 0.67-0.75 for best quality/performance balance
         set { withLock { _resolutionScale = max(0.5, min(1.0, newValue)) } }
+    }
+    
+    var fractalType: FractalType {
+        get { withLock { _fractalType } }
+        set { withLock { _fractalType = newValue } }
     }
 
     /// Prefer system foveated rendering over MetalFX upscaling (mutually exclusive)
