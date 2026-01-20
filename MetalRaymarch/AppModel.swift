@@ -49,6 +49,7 @@ enum QualityPreset: String, CaseIterable {
 @Observable
 class AppModel {
     let immersiveSpaceID = "ImmersiveSpace"
+    let menuWindowID = "MenuWindow"
     
     enum ImmersiveSpaceState {
         case closed
@@ -78,8 +79,9 @@ class AppModel {
     // Parameter recording
     var parameterRecorder: ParameterRecorder?
     
-    // Menu visibility (toggled by gesture)
-    var isMenuVisible: Bool = true
+    // Menu window visibility (toggled by gesture)
+    // We hide content and glass to simulate window close while preserving position/size
+    var isMenuWindowVisible: Bool = true
     
     // Screenshot capture (set by Renderer)
     var captureScreenshotHandler: (() async -> Data?)?
@@ -97,7 +99,7 @@ class AppModel {
         }
         
         gestureController?.onMenuToggle = { [weak self] in
-            self?.toggleMenu()
+            self?.toggleMenuWindow()
         }
         
         // Add built-in presets if this is first launch
@@ -115,12 +117,12 @@ class AppModel {
         }
     }
     
-    /// Toggle menu visibility
-    func toggleMenu() {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            isMenuVisible.toggle()
+    /// Toggle menu window visibility (hides content while preserving window position/size)
+    func toggleMenuWindow() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isMenuWindowVisible.toggle()
         }
-        print("📋 Menu visibility: \(isMenuVisible ? "shown" : "hidden")")
+        print("📋 Menu window: \(isMenuWindowVisible ? "shown" : "hidden")")
     }
     
     /// Capture a screenshot for preset thumbnails

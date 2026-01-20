@@ -37,15 +37,12 @@ struct ContentView: View {
                     }
                 }
                 
-                // Menu content (toggleable)
-                if appModel.isMenuVisible {
-                    menuContent
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
-                }
+                // Menu content
+                menuContent
                 
                 Spacer()
             }
-            .animation(.easeInOut(duration: 0.3), value: appModel.isMenuVisible)
+            .animation(.easeInOut(duration: 0.3), value: appModel.isMenuWindowVisible)
             .animation(.easeInOut(duration: 0.2), value: appModel.parameterRecorder?.isRecording)
             .animation(.easeInOut(duration: 0.2), value: appModel.parameterRecorder?.isPlaying)
         }
@@ -89,6 +86,14 @@ struct ContentView: View {
                     initialPosition = appModel.renderSettings.targetPosition
                 }
         )
+        // Hide content when menu window is "closed" (preserves window position/size)
+        .opacity(appModel.isMenuWindowVisible ? 1 : 0)
+        .allowsHitTesting(appModel.isMenuWindowVisible)
+        .background {
+            if appModel.isMenuWindowVisible {
+                Color.clear.glassBackgroundEffect()
+            }
+        }
     }
     
     // MARK: - Menu Content

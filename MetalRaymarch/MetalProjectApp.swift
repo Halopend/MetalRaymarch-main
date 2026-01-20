@@ -33,13 +33,14 @@ struct MetalProjectTestApp: App {
     @State private var appModel = AppModel()
 
     var body: some Scene {
-        WindowGroup {
+        Window(appModel.menuWindowID, id: appModel.menuWindowID) {
             ContentView()
                 .environment(appModel)
-                .glassBackgroundEffect() // Use default glass to avoid unavailable Material symbol
+                // Glass background is applied conditionally in ContentView based on visibility
         }
         .defaultSize(width: 600, height: 250)
         .windowStyle(.plain)
+        .windowResizability(.contentSize)
 
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
