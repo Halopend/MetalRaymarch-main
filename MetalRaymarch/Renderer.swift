@@ -383,27 +383,24 @@ actor Renderer {
     }
 
     private func startARSession() async {
-        // Check if world tracking is supported and authorized
+        // We only request head-tracking permission so we can keep the request minimal
         guard WorldTrackingProvider.isSupported else {
             print("⚠️ World tracking is not supported on this device")
             return
         }
-        
-        // First query current authorization status
+
+        print("ℹ️ Requesting only world sensing (for pose) plus hand tracking; no extra sensors requested.")
         var authStatus = await arSession.queryAuthorization(for: [.worldSensing, .handTracking])
-        
-        // If not determined, REQUEST authorization (this prompts the user)
         if authStatus[.worldSensing] == .notDetermined || authStatus[.handTracking] == .notDetermined {
-            print("🔐 Requesting ARKit authorization...")
+            print("🔐 Requesting ARKit world-sensing + hand-tracking authorization")
             authStatus = await arSession.requestAuthorization(for: [.worldSensing, .handTracking])
         }
-        
+
         if authStatus[.worldSensing] != .allowed {
             print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
-            print("   Head POSITION tracking will not work - only rotation.")
-            print("   Please ensure NSWorldSensingUsageDescription is in Info.plist and permission is granted.")
+            print("   Pose will be limited (rotation only)")
         }
-        
+
         if authStatus[.handTracking] != .allowed {
             print("⚠️ Hand tracking not authorized. Status: \(String(describing: authStatus[.handTracking]))")
         }

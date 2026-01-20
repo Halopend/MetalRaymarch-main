@@ -325,7 +325,7 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
 }
 
 // =============================================================================
-// KALEIDOSCOPIC IFS FRACTAL - Based on Knighty's work (Fractal Forums)
+// TRIFORCE IFS FRACTAL - Based on Knighty's work (Fractal Forums)
 // Reference: http://blog.hvidtfeldts.net/index.php/2011/08/distance-estimated-3d-fractals-iii-folding-space/
 //
 // This implements a proper IFS (Iterated Function System) fractal using:
@@ -333,12 +333,12 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
 // 2. Scaling about a point
 // 3. Proper DE tracking via the running derivative
 //
-// The "Apollonian" name is kept for UI but this is actually a Kaleidoscopic IFS
-// which produces similar sphere-packing aesthetics with correct convergence.
+// The "Triforce" branch is a kaleidoscopic IFS with dense recursive detail and
+// sphere-packing aesthetics.
 // =============================================================================
 
-// Apollonian/IFS parameters - optimized for register usage
-struct ApollonianParams {
+// Triforce/IFS parameters - optimized for register usage
+struct TriforceParams {
     float scale;           // Scaling factor (typically 2.0-3.0)
     float3 offset;         // Scaling center offset
     float3 bubbleCenter;
@@ -346,10 +346,10 @@ struct ApollonianParams {
     int bubbleEnabled;
 };
 
-// Create Apollonian parameters
-FORCE_INLINE ApollonianParams makeApollonianParams(float scale, float3 offset,
-                                                    float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
-    ApollonianParams params;
+// Create Triforce parameters
+FORCE_INLINE TriforceParams makeTriforceParams(float scale, float3 offset,
+                                                float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
+    TriforceParams params;
     params.scale = scale;
     params.offset = offset;
     params.bubbleCenter = bubbleCenter;
@@ -361,7 +361,7 @@ FORCE_INLINE ApollonianParams makeApollonianParams(float scale, float3 offset,
 // Sierpinski tetrahedron / Kaleidoscopic IFS distance function
 // This is a well-understood fractal with proper DE convergence
 // Based on Syntopia/Fragmentarium implementation
-FORCE_INLINE float MapApollonian(float3 pos, ApollonianParams params, int iterations, float foldingLimit) 
+FORCE_INLINE float MapTriforce(float3 pos, TriforceParams params, int iterations, float foldingLimit) 
 {
     float3 z = pos;
     float dr = 1.0;  // Running derivative for proper DE
@@ -424,8 +424,8 @@ FORCE_INLINE float MapApollonian(float3 pos, ApollonianParams params, int iterat
     return d;
 }
 
-// Apollonian/IFS color function - orbit trap coloring
-half3 ColourApollonian(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale) 
+// Triforce/IFS color function - orbit trap coloring
+half3 ColourTriforce(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale) 
 {
     float3 z = pos;
     float3 Offset = float3(1.0, 1.0, 1.0);
@@ -472,10 +472,48 @@ half3 ColourApollonian(float3 pos, float quality, float colorMix, float foldingL
     return mix(finalColor, altColor, half(colorMix));
 }
 
-// Simplified Apollonian color overload with default parameters
-inline half3 ColourApollonian(float3 pos, float distance, float gTime, float quality) {
+// Simplified Triforce color overload with default parameters
+inline half3 ColourTriforce(float3 pos, float distance, float gTime, float quality) {
     // Default parameters that produce good results
-    return ColourApollonian(pos, quality, 0.5, 1.0, 8, 1.5);
+    return ColourTriforce(pos, quality, 0.5, 1.0, 8, 1.5);
+}
+
+// Animated Triforce zoom/rotation to keep motion feeling infinite without camera teleporting
+struct TriforceMotion {
+    float3 origin;
+    float3 direction;
+    int iterations;
+    int maxSteps;
+};
+
+FORCE_INLINE TriforceMotion applyTriforceMotion(float3 origin, float3 direction, int baseIterations, int baseMaxSteps, float time) {
+    // Slow oscillating zoom; exp2 keeps multiplicative layering stable
+    float zoomPhase = time * 0.12f;
+    float zoom = exp2(sin(zoomPhase) * 0.85f);  // ~0.55x to ~1.9x
+
+    // Gentle spin to avoid repetitive tiling
+    float spin = time * 0.05f;
+    float s = sin(spin);
+    float c = cos(spin);
+
+    float3 rotatedOrigin = float3(origin.x * c - origin.z * s, origin.y, origin.x * s + origin.z * c);
+    float3 rotatedDir = float3(direction.x * c - direction.z * s, direction.y, direction.x * s + direction.z * c);
+
+    // Apply zoom uniformly to origin; keep direction normalized after rotation
+    rotatedOrigin *= zoom;
+    rotatedDir = normalize(rotatedDir);
+
+    // Boost iterations/steps when zooming in to maintain detail, but clamp for perf
+    float lodBoost = clamp(log2(zoom), -2.0f, 3.0f);
+    int iterations = clamp(baseIterations + int(round(lodBoost * 2.5f)), 3, 20);
+    int maxSteps = clamp(int(round(float(baseMaxSteps) * (1.0f + lodBoost * 0.5f))), 8, 512);
+
+    TriforceMotion motion;
+    motion.origin = rotatedOrigin;
+    motion.direction = rotatedDir;
+    motion.iterations = iterations;
+    motion.maxSteps = maxSteps;
+    return motion;
 }
 
 // =============================================================================
@@ -483,22 +521,22 @@ inline half3 ColourApollonian(float3 pos, float distance, float gTime, float qua
 // =============================================================================
 
 // Unified distance function that selects fractal type at runtime
-// fractalType: 0 = Mandelbox, 1 = Apollonian/Kaleidoscopic IFS
+// fractalType: 0 = Mandelbox, 1 = Triforce/Kaleidoscopic IFS
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
 {
     if (fractalType == 1) {
-        // Kaleidoscopic IFS fractal (labeled "Apollonian" in UI)
+        // Kaleidoscopic IFS fractal ("Triforce" in UI)
         // Uses tetrahedron symmetry folds + scaling
         // Scale: 2.0 is classic Sierpinski, higher values create more detail
         // Offset: (1,1,1) is standard tetrahedron vertex
-        ApollonianParams aParams = makeApollonianParams(
+        TriforceParams aParams = makeTriforceParams(
             2.0,                        // Scale factor (2.0 = classic Sierpinski)
             float3(1.0, 1.0, 1.0),      // Offset (tetrahedron vertex)
             params.bubbleCenter,
             params.bubbleRadius,
             params.bubbleEnabled
         );
-        return MapApollonian(pos, aParams, iterations, foldingLimit);
+        return MapTriforce(pos, aParams, iterations, foldingLimit);
     } else {
         // Mandelbox (default)
         return Map(pos, params, foldingLimit, iterations);
@@ -966,14 +1004,27 @@ kernel void adaptiveHierarchical8x8(
     float3 cameraPos = uniforms.cameraPos;
     
     int lodIterations = max(uniforms.fractalIterations, 2);
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
-    
+    int maxSteps = uniforms.maxRaySteps;
     int fractalType = uniforms.fractalType;
+
+    float3 marchOrigin = cameraPos;
+    float3 marchDir = rd;
+
+    if (fractalType == 1) {
+        TriforceMotion motion = applyTriforceMotion(marchOrigin, marchDir, lodIterations, maxSteps, uniforms.time);
+        marchOrigin = motion.origin;
+        marchDir = motion.direction;
+        lodIterations = motion.iterations;
+        maxSteps = motion.maxSteps;
+    }
+
+    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
+                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+
     float gTime = uniforms.time * 0.01 + 15.00;
     
     // Use the SAME Scene() function as fragment shader for correctness
-    float2 ret = Scene(cameraPos, rd, pixelCenter, 1.0, uniforms.maxRaySteps, 
+    float2 ret = Scene(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps, 
                        uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
     
     float adjustedDist = ret.x;
@@ -981,7 +1032,7 @@ kernel void adaptiveHierarchical8x8(
     half3 col = half3(0.0h);
     
     if (ret.x < kRayMissThreshold) {
-        float3 p = cameraPos + adjustedDist * rd;
+        float3 p = marchOrigin + adjustedDist * marchDir;
         float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         
         // Lighting (same as fragment shader)
@@ -992,7 +1043,7 @@ kernel void adaptiveHierarchical8x8(
         
         int shadowIterations = max(lodIterations - 2, 2);
         FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                                        cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
         
         half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
@@ -1003,7 +1054,7 @@ kernel void adaptiveHierarchical8x8(
         
         // Choose coloring based on fractal type
         if (fractalType == 1) {
-            col = ColourApollonian(p, adjustedDist, gTime, 1.0);
+            col = ColourTriforce(p, adjustedDist, gTime, 1.0);
         } else {
             col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
                         uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
@@ -1011,7 +1062,7 @@ kernel void adaptiveHierarchical8x8(
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
         // Specular
-        float3 ref = reflect(rd, nor);
+        float3 ref = reflect(marchDir, nor);
         float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
@@ -1062,17 +1113,30 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     int fractalType = uniforms.fractalType;
     float quality = 1.0;
     int lodIterations = max(int(uniforms.fractalIterations), 2);
+    int maxSteps = uniforms.maxRaySteps;
+
+    float3 marchOrigin = cameraPos;
+    float3 marchDir = rd;
+
+    if (fractalType == 1) {
+        TriforceMotion motion = applyTriforceMotion(marchOrigin, marchDir, lodIterations, maxSteps, time);
+        marchOrigin = motion.origin;
+        marchDir = motion.direction;
+        lodIterations = motion.iterations;
+        maxSteps = motion.maxSteps;
+    }
+
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
 
     // Standard analytic sphere tracing
-    float2 ret = Scene(cameraPos, rd, fragCoord, quality, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    float2 ret = Scene(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     
     half3 col = half3(0.0h);
 
     if (ret.x < kRayMissThreshold)
     {
-        float3 p = cameraPos + ret.x * rd;
+        float3 p = marchOrigin + ret.x * marchDir;
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
         output.depth = encodeDepthFromClip(clipPos);
 
@@ -1096,13 +1160,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     if (ret.x < kRayMissThreshold)
     {
-        float3 p = cameraPos + ret.x * rd;
+        float3 p = marchOrigin + ret.x * marchDir;
 
         float3 nor;
         if (quality > kMinQualityForNormals) {
             nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         } else {
-            nor = normalize(p - cameraPos);
+            nor = normalize(p - marchOrigin);
         }
 
         if (quality > 0.4) {
@@ -1113,7 +1177,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
             int shadowIterations = max(lodIterations - 2, 2);
             FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                                            cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
 
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
@@ -1124,14 +1188,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
             // Choose coloring based on fractal type
             if (fractalType == 1) {
-                col = ColourApollonian(p, ret.x, gTime, quality);
+                col = ColourTriforce(p, ret.x, gTime, quality);
             } else {
                 col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             }
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
 
             if (quality > kMinQualityForSpecular) {
-                float3 ref = reflect(rd, nor);
+                float3 ref = reflect(marchDir, nor);
                 float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
                 float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
                 col += half3(specSpot) * shaSpot * bri;
@@ -1140,7 +1204,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
             if (fractalType == 1) {
-                col = ColourApollonian(p, ret.x, gTime, quality) * diffuse;
+                col = ColourTriforce(p, ret.x, gTime, quality) * diffuse;
             } else {
                 col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
             }
@@ -1216,13 +1280,26 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
+    int fractalType = uniforms.fractalType;
     int lodIterations = max(int(uniforms.fractalIterations), 2);
+    int maxSteps = uniforms.maxRaySteps;
+
+    float3 marchOrigin = cameraPos;
+    float3 marchDir = rd;
+    if (fractalType == 1) {
+        TriforceMotion motion = applyTriforceMotion(marchOrigin, marchDir, lodIterations, maxSteps, time);
+        marchOrigin = motion.origin;
+        marchDir = motion.direction;
+        lodIterations = motion.iterations;
+        maxSteps = motion.maxSteps;
+    }
+
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
     
     // === STANDARD RAYMARCH (every pixel) ===
     // The hierarchical coarse/fine approach doesn't help due to SIMD lockstep execution
-    float2 ret = Scene(cameraPos, rd, fragCoord, 1.0, uniforms.maxRaySteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time);
+    float2 ret = Scene(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     float adjustedDist = ret.x;
     float glow = ret.y;
     
@@ -1230,10 +1307,10 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     if (ret.x < kRayMissThreshold)
     {
-        float3 p = cameraPos + adjustedDist * rd;
+        float3 p = marchOrigin + adjustedDist * marchDir;
         
         // Per-pixel normal (needed for quality)
-        float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations);
+        float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         
         // === QUAD-SHARED SHADOWS ===
         // Shadows are expensive (many SDF evaluations) but vary slowly across a 2x2 quad
@@ -1243,7 +1320,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         int shadowIterations = max(lodIterations - 2, 2);
         FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                                        cameraPos, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
         
         float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
         float3 spot = spotLight - p;
@@ -1252,8 +1329,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         if (quadLaneId == 0) {
             // Only leader computes shadows - expensive!
-            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
-            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations));
+            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         }
         
         // Broadcast shadow values to all 4 pixels in quad
@@ -1265,11 +1342,15 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
+        if (fractalType == 1) {
+            col = ColourTriforce(p, adjustedDist, gTime, 1.0);
+        } else {
+            col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
+        }
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
         // Specular
-        float3 ref = reflect(rd, nor);
+        float3 ref = reflect(marchDir, nor);
         float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;

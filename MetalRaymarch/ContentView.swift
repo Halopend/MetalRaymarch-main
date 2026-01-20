@@ -167,7 +167,7 @@ struct ContentView: View {
                                 set: { appModel.renderSettings.fractalType = $0 }
                             )) {
                                 Text("Mandelbox").tag(FractalType.mandelbox)
-                                Text("Apollonian").tag(FractalType.apollonian)
+                                Text("Triforce").tag(FractalType.triforce)
                             }
                             .pickerStyle(.segmented)
                         }

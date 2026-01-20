@@ -147,12 +147,12 @@ class AppModel {
 // Fractal type enum matching ShaderTypes.h
 enum FractalType: Int32 {
     case mandelbox = 0
-    case apollonian = 1
+    case triforce = 1
     
     var displayName: String {
         switch self {
         case .mandelbox: return "Mandelbox"
-        case .apollonian: return "Apollonian"
+        case .triforce: return "Triforce"
         }
     }
 }
