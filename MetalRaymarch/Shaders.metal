@@ -517,14 +517,213 @@ FORCE_INLINE TriforceMotion applyTriforceMotion(float3 origin, float3 direction,
 }
 
 // =============================================================================
+// NEGATIVE -1.5 MANDELBOX - Organic, dense variant with rough textures
+// Reference: https://sites.google.com/site/mandelbox/negative-1-5-mandelbox
+//
+// Using a negative scale (-1.5) creates an inverted folding behavior that:
+// - Prevents floating boxes on corners
+// - Creates denser, more connected structures  
+// - Produces organic, rough-looking surfaces (like rocks, coral, trees)
+// - Mimics Kleinian, Koch snowflake, and Cantor dust fractals
+// =============================================================================
+
+// Parameters specific to Negative Mandelbox
+struct NegativeMandelboxParams {
+    float scale;              // Fixed at -1.5 for this variant
+    float foldingLimit;       // Box folding limit (default 1.0)
+    float minRadius2;         // Sphere folding min radius squared
+    float fixedRadius2;       // Sphere folding fixed radius squared
+    float3 bubbleCenter;
+    float bubbleRadius;
+    int bubbleEnabled;
+};
+
+// Create parameters for Negative -1.5 Mandelbox
+FORCE_INLINE NegativeMandelboxParams makeNegativeMandelboxParams(float foldingLimit, float minRadius, float fixedRadius,
+                                                                   float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
+    NegativeMandelboxParams params;
+    params.scale = -1.5;  // The key parameter - negative scale!
+    params.foldingLimit = foldingLimit;
+    params.minRadius2 = minRadius * minRadius;
+    params.fixedRadius2 = fixedRadius * fixedRadius;
+    params.bubbleCenter = bubbleCenter;
+    params.bubbleRadius = bubbleRadius;
+    params.bubbleEnabled = bubbleEnabled;
+    return params;
+}
+
+// Negative -1.5 Mandelbox distance estimator
+// The negative scale inverts the folding direction, creating denser, more organic structures
+FORCE_INLINE float MapNegativeMandelbox(float3 pos, NegativeMandelboxParams params, int iterations) 
+{
+    float4 p = float4(pos, 1.0);
+    float4 p0 = p;
+    
+    // Pre-compute for sphere fold
+    float scale = params.scale;  // -1.5
+    float minRadius2 = params.minRadius2;
+    float fixedRadius2 = params.fixedRadius2;
+    float foldingLimit = params.foldingLimit;
+    
+    // Use function constant for iteration count when available
+    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
+    
+    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
+        UNROLL_FULL
+        for (int i = 0; i < loopCount; i++)
+        {
+            // Box fold: if component > foldingLimit, reflect it
+            p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+            
+            // Sphere fold with minRadius and fixedRadius
+            float r2 = dot(p.xyz, p.xyz);
+            if (r2 < minRadius2) {
+                // Inside inner sphere - scale by fixedRadius2/minRadius2
+                float temp = fixedRadius2 / minRadius2;
+                p *= temp;
+            } else if (r2 < fixedRadius2) {
+                // Between inner and outer sphere - scale by fixedRadius2/r2
+                float temp = fixedRadius2 / r2;
+                p *= temp;
+            }
+            // Outside fixedRadius - no scaling
+            
+            // Scale and translate (using negative scale!)
+            p = p * scale + p0;
+        }
+    } else {
+        UNROLL_8
+        for (int i = 0; i < loopCount; i++)
+        {
+            // Box fold
+            p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+            
+            // Sphere fold
+            float r2 = dot(p.xyz, p.xyz);
+            if (r2 < minRadius2) {
+                float temp = fixedRadius2 / minRadius2;
+                p *= temp;
+            } else if (r2 < fixedRadius2) {
+                float temp = fixedRadius2 / r2;
+                p *= temp;
+            }
+            
+            // Scale and translate with negative scale
+            p = p * scale + p0;
+        }
+    }
+    
+    // Distance estimate
+    // For negative scale, we need abs(scale) in the denominator
+    float d = length(p.xyz) / p.w * pow(abs(scale), float(-loopCount));
+    
+    // Safety bubble
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? 
+        FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (bubbleEnabled) {
+        float bubbleDist = length(pos - params.bubbleCenter) - params.bubbleRadius;
+        d = max(d, -bubbleDist);
+    }
+    
+    return d;
+}
+
+// Negative Mandelbox coloring - organic earthy palette
+// The negative scale creates more "rough" organic surfaces, so we use
+// earthy tones: mossy greens, rust browns, stone grays
+half3 ColourNegativeMandelbox(float3 pos, float quality, float foldingLimit, float minRadius2, float fixedRadius2, int colorIters) 
+{
+    float4 p = float4(pos, 1.0);
+    float4 p0 = p;
+    float scale = -1.5;
+    
+    // Orbit trap variables for coloring
+    float minDist = 1e10;
+    float3 trapPos = pos;
+    float orbitSum = 0.0;
+    
+    int steps = max(int(float(colorIters) * quality), 2);
+    steps = min(steps, 12);
+    
+    for (int i = 0; i < steps; i++)
+    {
+        // Box fold
+        p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+        
+        // Sphere fold
+        float r2 = dot(p.xyz, p.xyz);
+        if (r2 < minRadius2) {
+            float temp = fixedRadius2 / minRadius2;
+            p *= temp;
+        } else if (r2 < fixedRadius2) {
+            float temp = fixedRadius2 / r2;
+            p *= temp;
+        }
+        
+        // Scale
+        p = p * scale + p0;
+        
+        // Track orbit trap
+        float d = length(p.xyz);
+        if (d < minDist) {
+            minDist = d;
+            trapPos = p.xyz;
+        }
+        orbitSum += d;
+    }
+    
+    // Generate colors from orbit trap
+    half trapNorm = half(saturate(minDist * 0.15));
+    half posNorm = half(saturate(length(trapPos) * 0.08));
+    half orbitNorm = half(saturate(orbitSum / float(steps) * 0.05));
+    
+    // Organic color palette - earthy, mossy, stone-like
+    half3 col1 = half3(0.15h, 0.25h, 0.10h);  // Dark moss green
+    half3 col2 = half3(0.45h, 0.30h, 0.15h);  // Rust brown  
+    half3 col3 = half3(0.35h, 0.35h, 0.32h);  // Stone gray
+    half3 col4 = half3(0.6h, 0.5h, 0.35h);    // Sand/lichen
+    
+    // Mix colors based on orbit trap values
+    half3 baseColor = mix(col1, col2, trapNorm);
+    baseColor = mix(baseColor, col3, posNorm);
+    baseColor = mix(baseColor, col4, orbitNorm * 0.5h);
+    
+    // Add some variation based on position
+    half3 posColor = half3(
+        half(0.3 + 0.2 * sin(pos.x * 5.0)),
+        half(0.25 + 0.15 * sin(pos.y * 4.0 + 1.0)),
+        half(0.2 + 0.1 * sin(pos.z * 6.0 + 2.0))
+    );
+    
+    return mix(baseColor, posColor, 0.3h);
+}
+
+// Simplified overload for ColourNegativeMandelbox
+inline half3 ColourNegativeMandelbox(float3 pos, float distance, float gTime, float quality) {
+    return ColourNegativeMandelbox(pos, quality, 1.0, 0.25 * 0.25, 1.0 * 1.0, 8);
+}
+
+// =============================================================================
 // UNIFIED MAP FUNCTION - Dispatches to correct fractal based on type
 // =============================================================================
 
 // Unified distance function that selects fractal type at runtime
-// fractalType: 0 = Mandelbox, 1 = Triforce/Kaleidoscopic IFS
+// fractalType: 0 = Mandelbox, 1 = Triforce/Kaleidoscopic IFS, 2 = Negative -1.5 Mandelbox
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
 {
-    if (fractalType == 1) {
+    if (fractalType == 2) {
+        // Negative -1.5 Mandelbox - organic, dense variant
+        // Uses fixed scale of -1.5 for the distinctive negative mandelbox look
+        NegativeMandelboxParams negParams = makeNegativeMandelboxParams(
+            foldingLimit,
+            0.25,                      // minRadius (default for -1.5 mandelbox)
+            1.0,                       // fixedRadius
+            params.bubbleCenter,
+            params.bubbleRadius,
+            params.bubbleEnabled
+        );
+        return MapNegativeMandelbox(pos, negParams, iterations);
+    } else if (fractalType == 1) {
         // Kaleidoscopic IFS fractal ("Triforce" in UI)
         // Uses tetrahedron symmetry folds + scaling
         // Scale: 2.0 is classic Sierpinski, higher values create more detail
@@ -1055,6 +1254,8 @@ kernel void adaptiveHierarchical8x8(
         // Choose coloring based on fractal type
         if (fractalType == 1) {
             col = ColourTriforce(p, adjustedDist, gTime, 1.0);
+        } else if (fractalType == 2) {
+            col = ColourNegativeMandelbox(p, adjustedDist, gTime, 1.0);
         } else {
             col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
                         uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
@@ -1189,6 +1390,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             // Choose coloring based on fractal type
             if (fractalType == 1) {
                 col = ColourTriforce(p, ret.x, gTime, quality);
+            } else if (fractalType == 2) {
+                col = ColourNegativeMandelbox(p, ret.x, gTime, quality);
             } else {
                 col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             }
@@ -1205,6 +1408,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
             if (fractalType == 1) {
                 col = ColourTriforce(p, ret.x, gTime, quality) * diffuse;
+            } else if (fractalType == 2) {
+                col = ColourNegativeMandelbox(p, ret.x, gTime, quality) * diffuse;
             } else {
                 col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
             }
@@ -1344,6 +1549,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         if (fractalType == 1) {
             col = ColourTriforce(p, adjustedDist, gTime, 1.0);
+        } else if (fractalType == 2) {
+            col = ColourNegativeMandelbox(p, adjustedDist, gTime, 1.0);
         } else {
             col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
         }

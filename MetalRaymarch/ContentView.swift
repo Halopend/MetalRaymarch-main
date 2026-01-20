@@ -173,6 +173,7 @@ struct ContentView: View {
                             )) {
                                 Text("Mandelbox").tag(FractalType.mandelbox)
                                 Text("Triforce").tag(FractalType.triforce)
+                                Text("Neg. Mandelbox").tag(FractalType.negativeMandelbox)
                             }
                             .pickerStyle(.segmented)
                         }

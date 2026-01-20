@@ -150,11 +150,13 @@ class AppModel {
 enum FractalType: Int32 {
     case mandelbox = 0
     case triforce = 1
+    case negativeMandelbox = 2  // Scale = -1.5 Mandelbox (organic, dense)
     
     var displayName: String {
         switch self {
         case .mandelbox: return "Mandelbox"
         case .triforce: return "Triforce"
+        case .negativeMandelbox: return "Negative Mandelbox"
         }
     }
 }
