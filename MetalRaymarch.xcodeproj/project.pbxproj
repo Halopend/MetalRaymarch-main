@@ -150,6 +150,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = MetalRayMarchDemo;
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -180,6 +181,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = MetalRayMarchDemo;
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "";
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -236,7 +236,8 @@ struct FractalParams {
     float4 scale;
     float absScalem1;
     float absScalePow;
-    float minRadius2;
+    float minRadius2;       // sphereRadius² - used for sphere fold
+    float minDistanceVal;   // original minDistance parameter - used for scale computation
     float3 bubbleCenter;
     float bubbleRadius;
     int bubbleEnabled;
@@ -253,6 +254,7 @@ FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScal
     params.absScalem1 = abs(fractalScale - 1.0);
     params.absScalePow = powr(max(abs(fractalScale), kPowEpsilon), float(1 - iterations));
     params.minRadius2 = sphereRadius * sphereRadius;
+    params.minDistanceVal = minRad2Val;  // Store for negative mandelbox
     params.bubbleCenter = bubbleCenter;
     params.bubbleRadius = bubbleRadius;
     params.bubbleEnabled = bubbleEnabled;
@@ -527,95 +529,70 @@ FORCE_INLINE TriforceMotion applyTriforceMotion(float3 origin, float3 direction,
 // - Mimics Kleinian, Koch snowflake, and Cantor dust fractals
 // =============================================================================
 
-// Parameters specific to Negative Mandelbox
-struct NegativeMandelboxParams {
-    float scale;              // Fixed at -1.5 for this variant
-    float foldingLimit;       // Box folding limit (default 1.0)
-    float minRadius2;         // Sphere folding min radius squared
-    float fixedRadius2;       // Sphere folding fixed radius squared
-    float3 bubbleCenter;
-    float bubbleRadius;
-    int bubbleEnabled;
-};
-
-// Create parameters for Negative -1.5 Mandelbox
-FORCE_INLINE NegativeMandelboxParams makeNegativeMandelboxParams(float foldingLimit, float minRadius, float fixedRadius,
-                                                                   float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
-    NegativeMandelboxParams params;
-    params.scale = -1.5;  // The key parameter - negative scale!
-    params.foldingLimit = foldingLimit;
-    params.minRadius2 = minRadius * minRadius;
-    params.fixedRadius2 = fixedRadius * fixedRadius;
-    params.bubbleCenter = bubbleCenter;
-    params.bubbleRadius = bubbleRadius;
-    params.bubbleEnabled = bubbleEnabled;
-    return params;
-}
-
 // Negative -1.5 Mandelbox distance estimator
-// The negative scale inverts the folding direction, creating denser, more organic structures
-FORCE_INLINE float MapNegativeMandelbox(float3 pos, NegativeMandelboxParams params, int iterations) 
+// Uses the SAME algorithm as standard Mandelbox but with scale fixed at -1.5
+// This ensures visual consistency with the reference images
+FORCE_INLINE float MapNegativeMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations) 
 {
+    // Override scale to -1.5 for negative mandelbox
+    // The scale needs to be divided by minDistanceVal (same as standard Mandelbox)
+    // This controls the overall structure/density
+    const float negScale = -1.5;
+    
+    // Recompute scale params for -1.5 (same formula as makeFractalParams)
+    // Uses minDistanceVal from params (not minRadius2 which is sphereRadius²)
+    float invMinRad = 1.0f / params.minDistanceVal;
+    float4 scale = float4(negScale * invMinRad);
+    scale.w = abs(scale.w);
+    float absScalem1 = abs(negScale - 1.0);  // = 2.5
+    float absScalePow = pow(abs(negScale), float(1 - iterations));  // 1.5^(1-iters)
+    
+    // Sphere fold uses params.minRadius2 (= sphereRadius²)
+    float minRad2 = params.minRadius2;
+    
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
     
-    // Pre-compute for sphere fold
-    float scale = params.scale;  // -1.5
-    float minRadius2 = params.minRadius2;
-    float fixedRadius2 = params.fixedRadius2;
-    float foldingLimit = params.foldingLimit;
-    
+    // Pre-compute reciprocal for sphere fold (division is expensive)
+    float invMinRadius2 = 1.0f / minRad2;
+
     // Use function constant for iteration count when available
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-    
+
     if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
         UNROLL_FULL
         for (int i = 0; i < loopCount; i++)
         {
-            // Box fold: if component > foldingLimit, reflect it
-            p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+            // Box fold: clamp and reflect (same as standard Mandelbox)
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
             
-            // Sphere fold with minRadius and fixedRadius
+            // Branchless sphere fold using clamp (same as standard Mandelbox)
             float r2 = dot(p.xyz, p.xyz);
-            if (r2 < minRadius2) {
-                // Inside inner sphere - scale by fixedRadius2/minRadius2
-                float temp = fixedRadius2 / minRadius2;
-                p *= temp;
-            } else if (r2 < fixedRadius2) {
-                // Between inner and outer sphere - scale by fixedRadius2/r2
-                float temp = fixedRadius2 / r2;
-                p *= temp;
-            }
-            // Outside fixedRadius - no scaling
+            float t = clamp(1.0f / max(r2, minRad2), 1.0f, invMinRadius2);
+            p *= t;
             
-            // Scale and translate (using negative scale!)
-            p = p * scale + p0;
+            // Scale and translate with negative scale
+            p = fma(p, scale, p0);
         }
     } else {
         UNROLL_8
         for (int i = 0; i < loopCount; i++)
         {
             // Box fold
-            p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
             
             // Sphere fold
             float r2 = dot(p.xyz, p.xyz);
-            if (r2 < minRadius2) {
-                float temp = fixedRadius2 / minRadius2;
-                p *= temp;
-            } else if (r2 < fixedRadius2) {
-                float temp = fixedRadius2 / r2;
-                p *= temp;
-            }
+            float t = clamp(1.0f / max(r2, minRad2), 1.0f, invMinRadius2);
+            p *= t;
             
             // Scale and translate with negative scale
-            p = p * scale + p0;
+            p = fma(p, scale, p0);
         }
     }
     
-    // Distance estimate
-    // For negative scale, we need abs(scale) in the denominator
-    float d = length(p.xyz) / p.w * pow(abs(scale), float(-loopCount));
+    // Distance estimate - SAME formula as standard Mandelbox
+    float d = (length(p.xyz) - absScalem1) / p.w - absScalePow;
     
     // Safety bubble
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? 
@@ -628,79 +605,281 @@ FORCE_INLINE float MapNegativeMandelbox(float3 pos, NegativeMandelboxParams para
     return d;
 }
 
-// Negative Mandelbox coloring - organic earthy palette
-// The negative scale creates more "rough" organic surfaces, so we use
-// earthy tones: mossy greens, rust browns, stone grays
-half3 ColourNegativeMandelbox(float3 pos, float quality, float foldingLimit, float minRadius2, float fixedRadius2, int colorIters) 
+// Negative Mandelbox coloring - uses same algorithm as standard but with -1.5 scale
+// Produces organic, rough textures typical of negative scale mandelbox
+half3 ColourNegativeMandelbox(float3 pos, float quality, float minRad2Val, float foldingLimit, float sphereRadius, int colorIters) 
 {
-    float4 p = float4(pos, 1.0);
-    float4 p0 = p;
-    float scale = -1.5;
-    
-    // Orbit trap variables for coloring
-    float minDist = 1e10;
-    float3 trapPos = pos;
-    float orbitSum = 0.0;
+    // Use -1.5 scale for negative mandelbox
+    const float negScale = -1.5;
+    float4 scale = float4(negScale) / minRad2Val;
+    scale.w = abs(scale.w);
+    float minRadius2 = sphereRadius * sphereRadius;
+    float invMinRadius2 = 1.0 / minRadius2;
+
+    float3 p = pos;
+    float3 p0 = p;
+    float trap = 1.0;
     
     int steps = max(int(float(colorIters) * quality), 2);
     steps = min(steps, 12);
     
     for (int i = 0; i < steps; i++)
     {
-        // Box fold
-        p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+        // Box fold (same as standard)
+        p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
         
-        // Sphere fold
-        float r2 = dot(p.xyz, p.xyz);
-        if (r2 < minRadius2) {
-            float temp = fixedRadius2 / minRadius2;
-            p *= temp;
-        } else if (r2 < fixedRadius2) {
-            float temp = fixedRadius2 / r2;
-            p *= temp;
-        }
+        // Sphere fold (branchless, same as standard)
+        float r2 = dot(p, p);
+        p *= clamp(1.0 / max(r2, minRadius2), 1.0, invMinRadius2);
         
-        // Scale
-        p = p * scale + p0;
-        
-        // Track orbit trap
-        float d = length(p.xyz);
-        if (d < minDist) {
-            minDist = d;
-            trapPos = p.xyz;
-        }
-        orbitSum += d;
+        // Scale with -1.5
+        p = p * scale.xyz + p0;
+        trap = min(trap, r2);
     }
     
-    // Generate colors from orbit trap
-    half trapNorm = half(saturate(minDist * 0.15));
-    half posNorm = half(saturate(length(trapPos) * 0.08));
-    half orbitNorm = half(saturate(orbitSum / float(steps) * 0.05));
+    // Use same color mapping as standard Mandelbox
+    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
     
-    // Organic color palette - earthy, mossy, stone-like
-    half3 col1 = half3(0.15h, 0.25h, 0.10h);  // Dark moss green
-    half3 col2 = half3(0.45h, 0.30h, 0.15h);  // Rust brown  
-    half3 col3 = half3(0.35h, 0.35h, 0.32h);  // Stone gray
-    half3 col4 = half3(0.6h, 0.5h, 0.35h);    // Sand/lichen
+    // Organic color palette for negative mandelbox - earthy, mossy tones
+    // These colors complement the rough, organic textures of negative scale
+    half3 col1 = half3(0.2h, 0.35h, 0.15h);   // Moss green
+    half3 col2 = half3(0.5h, 0.35h, 0.2h);    // Rust/bark brown
+    half3 col3 = half3(0.4h, 0.38h, 0.35h);   // Stone gray
     
-    // Mix colors based on orbit trap values
-    half3 baseColor = mix(col1, col2, trapNorm);
-    baseColor = mix(baseColor, col3, posNorm);
-    baseColor = mix(baseColor, col4, orbitNorm * 0.5h);
+    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
     
-    // Add some variation based on position
-    half3 posColor = half3(
-        half(0.3 + 0.2 * sin(pos.x * 5.0)),
-        half(0.25 + 0.15 * sin(pos.y * 4.0 + 1.0)),
-        half(0.2 + 0.1 * sin(pos.z * 6.0 + 2.0))
-    );
+    // Alternative palette with more variation
+    half3 altColor = half3(c.y * 0.4h, c.x * 0.5h + 0.1h, 0.3h + 0.2h * c.y);
     
-    return mix(baseColor, posColor, 0.3h);
+    return mix(finalColor, altColor, 0.4h);
 }
 
-// Simplified overload for ColourNegativeMandelbox
-inline half3 ColourNegativeMandelbox(float3 pos, float distance, float gTime, float quality) {
-    return ColourNegativeMandelbox(pos, quality, 1.0, 0.25 * 0.25, 1.0 * 1.0, 8);
+// =============================================================================
+// SYMMETRY-BASED MOVEMENT - Find directions that bisect fractal symmetry
+// =============================================================================
+// These functions extract symmetry information from fractal iteration to guide
+// camera/object movement along aesthetically pleasing paths.
+
+// Symmetry information extracted from fractal evaluation
+struct SymmetryInfo {
+    float3 primaryAxis;     // Best movement direction (toward symmetry center)
+    float3 secondaryAxis;   // Perpendicular alternative direction
+    float3 tertiaryAxis;    // Third option (cross of primary/secondary)
+    float symmetryStrength; // 0-1: how symmetric the local region is (1 = very symmetric)
+    uint foldMask;          // Bitmask of which folds were active during iteration
+    int dominantFoldCount;  // Which fold fired most often
+};
+
+// Triforce/IFS explicit symmetry axes (fold plane normals)
+constant float3 TRIFORCE_SYMMETRY_AXES[4] = {
+    float3(0.7071067811865476, 0.7071067811865476, 0.0),   // x+y=0 plane normal (normalized)
+    float3(0.7071067811865476, 0.0, 0.7071067811865476),   // x+z=0 plane normal
+    float3(0.0, 0.7071067811865476, 0.7071067811865476),   // y+z=0 plane normal
+    float3(0.5773502691896258, 0.5773502691896258, 0.5773502691896258)  // Diagonal (1,1,1) normalized
+};
+
+// Mandelbox symmetry axes (box fold planes + sphere)
+constant float3 MANDELBOX_SYMMETRY_AXES[6] = {
+    float3(1.0, 0.0, 0.0),   // X axis (box fold)
+    float3(0.0, 1.0, 0.0),   // Y axis (box fold)
+    float3(0.0, 0.0, 1.0),   // Z axis (box fold)
+    float3(0.7071067811865476, 0.7071067811865476, 0.0),   // XY diagonal
+    float3(0.7071067811865476, 0.0, 0.7071067811865476),   // XZ diagonal
+    float3(0.0, 0.7071067811865476, 0.7071067811865476)    // YZ diagonal
+};
+
+// Extract symmetry axes from Mandelbox fold operations
+// Cost: ~same as one Map() call, can piggyback on existing evaluation
+FORCE_INLINE SymmetryInfo GetSymmetryAxesMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations) 
+{
+    SymmetryInfo info;
+    float4 p = float4(pos, 1.0);
+    float4 p0 = p;
+    
+    // Track fold activations per axis
+    uint foldMask = 0;
+    int3 foldCounts = int3(0);  // Count folds per axis (x, y, z)
+    float3 foldDirectionSum = float3(0.0);  // Weighted direction accumulator
+    int sphereFoldCount = 0;
+    
+    float invMinRadius2 = 1.0f / params.minRadius2;
+    int loopCount = min(iterations, 8);  // Limit for symmetry detection
+    
+    for (int i = 0; i < loopCount; i++) {
+        // Box fold - track which axes hit the fold boundary
+        float3 preFold = p.xyz;
+        float3 clamped = clamp(p.xyz, -foldingLimit, foldingLimit);
+        
+        // Detect which axes were clamped (folded)
+        float3 delta = abs(preFold) - foldingLimit;
+        float weight = 1.0 / float(i + 1);  // Earlier folds weighted more
+        
+        if (delta.x > 0.0) { 
+            foldMask |= (1u << 0); 
+            foldCounts.x++; 
+            foldDirectionSum.x += sign(preFold.x) * weight;
+        }
+        if (delta.y > 0.0) { 
+            foldMask |= (1u << 1); 
+            foldCounts.y++; 
+            foldDirectionSum.y += sign(preFold.y) * weight;
+        }
+        if (delta.z > 0.0) { 
+            foldMask |= (1u << 2); 
+            foldCounts.z++; 
+            foldDirectionSum.z += sign(preFold.z) * weight;
+        }
+        
+        p.xyz = clamped * 2.0 - p.xyz;
+        
+        // Sphere fold - track if inner sphere was hit
+        float r2 = dot(p.xyz, p.xyz);
+        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+        if (r2 < params.minRadius2) {
+            foldMask |= (1u << 3);
+            sphereFoldCount++;
+        }
+        
+        p *= t;
+        p = fma(p, params.scale, p0);
+    }
+    
+    // Primary axis: direction toward symmetry center based on fold accumulation
+    float foldLen = length(foldDirectionSum);
+    if (foldLen > 0.001) {
+        info.primaryAxis = foldDirectionSum / foldLen;
+    } else {
+        // No dominant fold direction - use position-based fallback
+        info.primaryAxis = -normalize(pos + float3(0.001));
+    }
+    
+    // Find which fold fired most - that's the dominant symmetry plane
+    info.dominantFoldCount = 0;
+    int maxCount = foldCounts.x;
+    if (foldCounts.y > maxCount) { maxCount = foldCounts.y; info.dominantFoldCount = 1; }
+    if (foldCounts.z > maxCount) { maxCount = foldCounts.z; info.dominantFoldCount = 2; }
+    
+    // Secondary axis: perpendicular to primary, favoring the least-active fold axis
+    float3 leastActive = MANDELBOX_SYMMETRY_AXES[info.dominantFoldCount];
+    float3 up = (abs(dot(info.primaryAxis, leastActive)) < 0.9) ? leastActive : float3(0, 1, 0);
+    info.secondaryAxis = normalize(cross(info.primaryAxis, up));
+    
+    // Tertiary: orthogonal to both
+    info.tertiaryAxis = normalize(cross(info.primaryAxis, info.secondaryAxis));
+    
+    // Symmetry strength: balanced folds = high symmetry
+    // If all axes fold equally, we're at a highly symmetric point
+    float totalFolds = float(foldCounts.x + foldCounts.y + foldCounts.z + sphereFoldCount);
+    float maxFolds = float(max(max(foldCounts.x, foldCounts.y), foldCounts.z));
+    info.symmetryStrength = (totalFolds > 0.0) ? (1.0 - maxFolds / totalFolds) : 0.5;
+    info.foldMask = foldMask;
+    
+    return info;
+}
+
+// Extract symmetry for Triforce/Kaleidoscopic IFS - uses explicit fold planes
+FORCE_INLINE SymmetryInfo GetSymmetryAxesTriforce(float3 pos, float scale, int iterations)
+{
+    SymmetryInfo info;
+    float3 z = pos;
+    
+    // Track which fold planes were crossed
+    uint foldMask = 0;
+    int3 foldCounts = int3(0);  // Counts for each of 3 fold planes
+    float3 Offset = float3(1.0, 1.0, 1.0);
+    
+    int loopCount = min(iterations, 8);
+    
+    for (int n = 0; n < loopCount; n++) {
+        // Track each fold
+        if (z.x + z.y < 0.0) { foldMask |= (1u << 0); foldCounts.x++; z.xy = -z.yx; }
+        if (z.x + z.z < 0.0) { foldMask |= (1u << 1); foldCounts.y++; z.xz = -z.zx; }
+        if (z.y + z.z < 0.0) { foldMask |= (1u << 2); foldCounts.z++; z.yz = -z.zy; }
+        
+        z = z * scale - Offset * (scale - 1.0);
+    }
+    
+    // Determine which symmetry sector we're in and pick appropriate axis
+    // The fold with the LEAST activations indicates we're aligned with that symmetry plane
+    info.dominantFoldCount = 0;
+    int minCount = foldCounts.x;
+    if (foldCounts.y < minCount) { minCount = foldCounts.y; info.dominantFoldCount = 1; }
+    if (foldCounts.z < minCount) { minCount = foldCounts.z; info.dominantFoldCount = 2; }
+    
+    // Primary axis: the symmetry plane we're most aligned with
+    info.primaryAxis = TRIFORCE_SYMMETRY_AXES[info.dominantFoldCount];
+    
+    // Secondary: next least-active fold plane
+    int secondIdx = (info.dominantFoldCount + 1) % 3;
+    info.secondaryAxis = TRIFORCE_SYMMETRY_AXES[secondIdx];
+    
+    // Tertiary: the diagonal direction (always valid for tetrahedron)
+    info.tertiaryAxis = TRIFORCE_SYMMETRY_AXES[3];
+    
+    // Symmetry strength based on balance of folds
+    float totalFolds = float(foldCounts.x + foldCounts.y + foldCounts.z);
+    float variance = abs(float(foldCounts.x) - totalFolds/3.0) + 
+                     abs(float(foldCounts.y) - totalFolds/3.0) +
+                     abs(float(foldCounts.z) - totalFolds/3.0);
+    info.symmetryStrength = saturate(1.0 - variance / (totalFolds + 1.0));
+    info.foldMask = foldMask;
+    
+    return info;
+}
+
+// Unified symmetry detection - dispatches based on fractal type
+// fractalType: 0 = Mandelbox, 1 = Triforce, 2 = Negative Mandelbox
+FORCE_INLINE SymmetryInfo GetSymmetryAxes(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType)
+{
+    if (fractalType == 1) {
+        return GetSymmetryAxesTriforce(pos, 2.0, iterations);
+    } else {
+        // Mandelbox and Negative Mandelbox use same fold structure
+        return GetSymmetryAxesMandelbox(pos, params, foldingLimit, iterations);
+    }
+}
+
+// Choose a movement direction with optional randomness for equivalent paths
+// Returns a direction that follows fractal symmetry
+// randomSeed: use time or frame number for temporal variation
+FORCE_INLINE float3 ChooseSymmetryDirection(SymmetryInfo info, float randomSeed, float biasTowardPrimary)
+{
+    // Hash for pseudo-random choice
+    float h = fract(sin(randomSeed * 12.9898) * 43758.5453);
+    
+    // When symmetry is strong, multiple directions are equally valid - use randomness
+    // When symmetry is weak, prefer the primary (most distinct) axis
+    float primaryWeight = mix(0.33, 0.8, 1.0 - info.symmetryStrength);
+    primaryWeight = mix(primaryWeight, 1.0, biasTowardPrimary);
+    
+    if (h < primaryWeight) {
+        return info.primaryAxis;
+    } else if (h < primaryWeight + (1.0 - primaryWeight) * 0.5) {
+        return info.secondaryAxis;
+    } else {
+        return info.tertiaryAxis;
+    }
+}
+
+// Smooth direction interpolation for animation
+// Blends from current direction toward a new symmetry-aligned direction
+FORCE_INLINE float3 BlendTowardSymmetry(float3 currentDir, float3 targetSymmetryDir, float blendFactor)
+{
+    // Spherical interpolation for smooth direction changes
+    float d = dot(currentDir, targetSymmetryDir);
+    
+    // Handle near-parallel and anti-parallel cases
+    if (d > 0.9999) return targetSymmetryDir;
+    if (d < -0.9999) {
+        // Opposite directions - blend through perpendicular
+        float3 perp = normalize(cross(currentDir, float3(0, 1, 0)));
+        if (length(perp) < 0.001) perp = normalize(cross(currentDir, float3(1, 0, 0)));
+        return normalize(mix(currentDir, perp, blendFactor));
+    }
+    
+    // Slerp approximation (cheaper than true slerp)
+    float3 blended = normalize(mix(currentDir, targetSymmetryDir, blendFactor));
+    return blended;
 }
 
 // =============================================================================
@@ -713,16 +892,8 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
 {
     if (fractalType == 2) {
         // Negative -1.5 Mandelbox - organic, dense variant
-        // Uses fixed scale of -1.5 for the distinctive negative mandelbox look
-        NegativeMandelboxParams negParams = makeNegativeMandelboxParams(
-            foldingLimit,
-            0.25,                      // minRadius (default for -1.5 mandelbox)
-            1.0,                       // fixedRadius
-            params.bubbleCenter,
-            params.bubbleRadius,
-            params.bubbleEnabled
-        );
-        return MapNegativeMandelbox(pos, negParams, iterations);
+        // Uses the same algorithm as standard Mandelbox but with scale fixed at -1.5
+        return MapNegativeMandelbox(pos, params, foldingLimit, iterations);
     } else if (fractalType == 1) {
         // Kaleidoscopic IFS fractal ("Triforce" in UI)
         // Uses tetrahedron symmetry folds + scaling
@@ -1255,7 +1426,7 @@ kernel void adaptiveHierarchical8x8(
         if (fractalType == 1) {
             col = ColourTriforce(p, adjustedDist, gTime, 1.0);
         } else if (fractalType == 2) {
-            col = ColourNegativeMandelbox(p, adjustedDist, gTime, 1.0);
+            col = ColourNegativeMandelbox(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations));
         } else {
             col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
                         uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
@@ -1391,7 +1562,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             if (fractalType == 1) {
                 col = ColourTriforce(p, ret.x, gTime, quality);
             } else if (fractalType == 2) {
-                col = ColourNegativeMandelbox(p, ret.x, gTime, quality);
+                col = ColourNegativeMandelbox(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             } else {
                 col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
             }
@@ -1409,7 +1580,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             if (fractalType == 1) {
                 col = ColourTriforce(p, ret.x, gTime, quality) * diffuse;
             } else if (fractalType == 2) {
-                col = ColourNegativeMandelbox(p, ret.x, gTime, quality) * diffuse;
+                col = ColourNegativeMandelbox(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
             } else {
                 col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
             }
@@ -1550,7 +1721,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         if (fractalType == 1) {
             col = ColourTriforce(p, adjustedDist, gTime, 1.0);
         } else if (fractalType == 2) {
-            col = ColourNegativeMandelbox(p, adjustedDist, gTime, 1.0);
+            col = ColourNegativeMandelbox(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
         } else {
             col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
         }
@@ -1706,4 +1877,201 @@ fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]]
     DepthOutput out;
     out.depth = sourceTexture.sample(textureSampler, in.texCoord);
     return out;
+}
+
+// =============================================================================
+// SYMMETRY MOVEMENT COMPUTE KERNEL
+// =============================================================================
+// Updates movement state based on fractal symmetry at current position.
+// Run once per frame (single thread) - extremely lightweight.
+// Output can drive camera animation on the CPU side.
+
+// GPU-side symmetry movement state (matches SymmetryMovementState in ShaderTypes.h)
+struct SymmetryMovementStateGPU {
+    float3 currentDirection;
+    float3 targetDirection;
+    float3 primaryAxis;
+    float3 secondaryAxis;
+    float3 tertiaryAxis;
+    float blendProgress;
+    float blendDuration;
+    float timeSinceLastUpdate;
+    float updateInterval;
+    float symmetryStrength;
+    uint foldMask;
+    float movementSpeed;
+    int preferredAxisIndex;
+};
+
+// Uniforms for symmetry update kernel
+struct SymmetryUpdateUniforms {
+    float3 currentPosition;     // Current camera/object position
+    float deltaTime;            // Frame time in seconds
+    float minDistance;          // Fractal minDistance param
+    float fractalScale;         // Fractal scale param
+    float foldingLimit;         // Box fold limit
+    float sphereRadius;         // Sphere fold radius
+    int fractalIterations;      // Iteration count
+    int fractalType;            // 0=Mandelbox, 1=Triforce, 2=Negative
+    float randomSeed;           // For direction choice (e.g., time)
+};
+
+// Single-thread compute kernel to update symmetry movement state
+// Dispatch with [1,1,1] - runs once per frame
+kernel void updateSymmetryMovement(
+    device SymmetryMovementStateGPU* state [[buffer(0)]],
+    constant SymmetryUpdateUniforms& uniforms [[buffer(1)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid != 0) return;  // Single thread only
+    
+    SymmetryMovementStateGPU s = *state;
+    
+    // Update timing
+    s.timeSinceLastUpdate += uniforms.deltaTime;
+    
+    // Check if we need to recalculate symmetry
+    bool needsUpdate = (s.timeSinceLastUpdate >= s.updateInterval);
+    
+    // Also update if we're done blending and symmetry is weak (might have moved to new region)
+    if (s.blendProgress >= 1.0 && s.symmetryStrength < 0.3) {
+        needsUpdate = true;
+    }
+    
+    if (needsUpdate) {
+        s.timeSinceLastUpdate = 0.0;
+        
+        // Build fractal params for symmetry evaluation
+        FractalParams params = makeFractalParams(
+            uniforms.minDistance,
+            uniforms.fractalScale,
+            uniforms.sphereRadius,
+            uniforms.fractalIterations,
+            float3(0.0),  // No bubble center needed for symmetry
+            0.0,          // No bubble radius
+            0             // Bubble disabled
+        );
+        
+        // Get symmetry information at current position
+        SymmetryInfo symInfo = GetSymmetryAxes(
+            uniforms.currentPosition,
+            params,
+            uniforms.foldingLimit,
+            uniforms.fractalIterations,
+            uniforms.fractalType
+        );
+        
+        // Store axes for external use
+        s.primaryAxis = symInfo.primaryAxis;
+        s.secondaryAxis = symInfo.secondaryAxis;
+        s.tertiaryAxis = symInfo.tertiaryAxis;
+        s.symmetryStrength = symInfo.symmetryStrength;
+        s.foldMask = symInfo.foldMask;
+        
+        // Choose new target direction
+        if (s.preferredAxisIndex >= 0 && s.preferredAxisIndex <= 2) {
+            // User-specified preference
+            if (s.preferredAxisIndex == 0) s.targetDirection = symInfo.primaryAxis;
+            else if (s.preferredAxisIndex == 1) s.targetDirection = symInfo.secondaryAxis;
+            else s.targetDirection = symInfo.tertiaryAxis;
+        } else {
+            // Auto-select with randomness for equally valid paths
+            s.targetDirection = ChooseSymmetryDirection(symInfo, uniforms.randomSeed, 0.5);
+        }
+        
+        // Reset blend progress
+        s.blendProgress = 0.0;
+        
+        // Adjust update interval based on symmetry strength
+        // High symmetry = slower updates (stable region)
+        // Low symmetry = faster updates (transitional region)
+        s.updateInterval = mix(0.3, 1.0, s.symmetryStrength);
+    }
+    
+    // Blend current direction toward target
+    if (s.blendProgress < 1.0) {
+        float blendSpeed = uniforms.deltaTime / max(s.blendDuration, 0.01);
+        s.blendProgress = min(s.blendProgress + blendSpeed, 1.0);
+        
+        // Smooth easing
+        float t = s.blendProgress;
+        t = t * t * (3.0 - 2.0 * t);  // Smoothstep
+        
+        s.currentDirection = BlendTowardSymmetry(s.currentDirection, s.targetDirection, t);
+    }
+    
+    // Write back
+    *state = s;
+}
+
+// Alternative: Per-pixel symmetry visualization for debugging
+// Shows symmetry axes as colored overlay
+fragment half4 debugSymmetryVisualization(
+    ColorInOut in [[stage_in]],
+    constant UniformsArray& uniformsArray [[buffer(BufferIndexUniforms)]],
+    ushort ampId [[amplification_id]])
+{
+    Uniforms uniforms = uniformsArray.uniforms[ampId];
+    
+    // Ray setup (same as main fragment shader)
+    float4x4 invModelView = uniforms.inverseModelViewMatrix;
+    float4x4 invProj = uniforms.inverseProjectionMatrix;
+    
+    float2 ndc = in.texCoord * 2.0 - 1.0;
+    float4 clipNear = float4(ndc, -1.0, 1.0);
+    float4 clipFar = float4(ndc, 1.0, 1.0);
+    float4 viewNear = invProj * clipNear;
+    float4 viewFar = invProj * clipFar;
+    viewNear /= viewNear.w;
+    viewFar /= viewFar.w;
+    
+    float3 rO = (invModelView * viewNear).xyz;
+    float3 rD = normalize((invModelView * viewFar).xyz - rO);
+    
+    // Build params
+    FractalParams params = makeFractalParams(
+        uniforms.minDistance,
+        uniforms.fractalScale,
+        uniforms.sphereRadius,
+        uniforms.fractalIterations,
+        float3(0.0), 0.0, 0
+    );
+    
+    // Quick raymarch to find surface
+    float t = 0.05;
+    for (int i = 0; i < 32; i++) {
+        float3 p = rO + rD * t;
+        float d = MapUnified(p, params, uniforms.foldingLimit, uniforms.fractalIterations, uniforms.fractalType);
+        if (d < 0.01) break;
+        if (t > 10.0) break;
+        t += d;
+    }
+    
+    if (t > 10.0) {
+        return half4(0.0h, 0.0h, 0.05h, 1.0h);  // Background
+    }
+    
+    float3 hitPos = rO + rD * t;
+    
+    // Get symmetry at hit point
+    SymmetryInfo sym = GetSymmetryAxes(
+        hitPos, params, uniforms.foldingLimit, 
+        uniforms.fractalIterations, uniforms.fractalType
+    );
+    
+    // Visualize: color based on dominant axis alignment
+    half3 col;
+    col.r = half(abs(dot(sym.primaryAxis, float3(1,0,0))));
+    col.g = half(abs(dot(sym.primaryAxis, float3(0,1,0))));
+    col.b = half(abs(dot(sym.primaryAxis, float3(0,0,1))));
+    
+    // Brightness based on symmetry strength
+    col *= half(0.5 + 0.5 * sym.symmetryStrength);
+    
+    // Add fold mask visualization as subtle pattern
+    if ((sym.foldMask & 1u) != 0u) col.r += 0.1h;
+    if ((sym.foldMask & 2u) != 0u) col.g += 0.1h;
+    if ((sym.foldMask & 4u) != 0u) col.b += 0.1h;
+    
+    return half4(col, 1.0h);
 }

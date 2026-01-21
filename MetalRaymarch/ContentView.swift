@@ -15,6 +15,11 @@ struct ContentView: View {
     @State private var initialPosition: SIMD3<Float> = .zero
     @State private var initialScale: Float = 1.0
     @State private var cameraMode: Bool = false
+    
+    /// Get parameter ranges for current fractal type
+    private var parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
+        appModel.gestureController?.getParameterRanges() ?? (0.1...5.0, 0.1...13.0, 0.1...2.0)
+    }
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -37,6 +42,7 @@ struct ContentView: View {
                     }
                 }
                 
+             
                 // Menu content
                 menuContent
                 
@@ -169,7 +175,14 @@ struct ContentView: View {
                             
                             Picker("Fractal", selection: Binding(
                                 get: { appModel.renderSettings.fractalType },
-                                set: { appModel.renderSettings.fractalType = $0 }
+                                set: { newType in
+                                    let oldType = appModel.renderSettings.fractalType
+                                    appModel.renderSettings.fractalType = newType
+                                    // Apply default parameters when switching fractal types
+                                    if oldType != newType {
+                                        appModel.gestureController?.applyFractalDefaults()
+                                    }
+                                }
                             )) {
                                 Text("Mandelbox").tag(FractalType.mandelbox)
                                 Text("Triforce").tag(FractalType.triforce)
@@ -217,26 +230,26 @@ struct ContentView: View {
                         Text("Fractal Scale")
                         Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
 
-                        // Shape Parameters Group
+                        // Shape Parameters Group - ranges adjust per fractal type
                         DisclosureGroup("Shape Parameters") {
                             VStack(spacing: 8) {
-                                Text("Min Distance")
+                                Text("Min Distance (\(String(format: "%.2f", appModel.renderSettings.targetMinDistance)))")
                                 Slider(value: Binding(
                                     get: { appModel.renderSettings.targetMinDistance },
                                     set: { appModel.renderSettings.targetMinDistance = $0 }
-                                ), in: 0.0001...3.0)
+                                ), in: parameterRanges.minDistance)
 
-                                Text("Box Folding Limit")
+                                Text("Box Folding Limit (\(String(format: "%.2f", appModel.renderSettings.targetFoldingLimit)))")
                                 Slider(value: Binding(
                                     get: { appModel.renderSettings.targetFoldingLimit },
                                     set: { appModel.renderSettings.targetFoldingLimit = $0 }
-                                ), in: 0.1...5.0)
+                                ), in: parameterRanges.foldingLimit)
 
-                                Text("Sphere Radius")
+                                Text("Sphere Radius (\(String(format: "%.2f", appModel.renderSettings.targetSphereRadius)))")
                                 Slider(value: Binding(
                                     get: { appModel.renderSettings.targetSphereRadius },
                                     set: { appModel.renderSettings.targetSphereRadius = $0 }
-                                ), in: 0.01...2.0)
+                                ), in: parameterRanges.sphereRadius)
                             }
                             .padding(.leading, 10)
                         }
@@ -287,6 +300,49 @@ struct ContentView: View {
                                     set: { appModel.renderSettings.useRelativeGestures = $0 }
                                 ))
                                 .help("Relative: fine-tune from current value. Absolute: hand distance maps directly to range.")
+                            }
+                            .padding(.leading, 10)
+                        }
+                        
+                        // Symmetry Movement (auto-pilot along fractal symmetry)
+                        DisclosureGroup("Symmetry Movement") {
+                            VStack(spacing: 8) {
+                                Toggle("Enable Symmetry Travel", isOn: Binding(
+                                    get: { appModel.renderSettings.symmetryMovementEnabled },
+                                    set: { appModel.renderSettings.symmetryMovementEnabled = $0 }
+                                ))
+                                .help("Auto-navigate along fractal symmetry axes for hypnotic exploration")
+                                
+                                if appModel.renderSettings.symmetryMovementEnabled {
+                                    Text("Speed: \(appModel.renderSettings.symmetryMovementSpeed, specifier: "%.2f")")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.symmetryMovementSpeed },
+                                        set: { appModel.renderSettings.symmetryMovementSpeed = $0 }
+                                    ), in: 0.05...1.0)
+                                    
+                                    Text("Direction Change Interval: \(appModel.renderSettings.symmetryUpdateInterval, specifier: "%.1f")s")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.symmetryUpdateInterval },
+                                        set: { appModel.renderSettings.symmetryUpdateInterval = $0 }
+                                    ), in: 0.2...2.0)
+                                    
+                                    Text("Blend Smoothness: \(appModel.renderSettings.symmetryBlendDuration, specifier: "%.1f")s")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.symmetryBlendDuration },
+                                        set: { appModel.renderSettings.symmetryBlendDuration = $0 }
+                                    ), in: 0.1...1.0)
+                                    
+                                    Picker("Axis Preference", selection: Binding(
+                                        get: { appModel.renderSettings.symmetryPreferredAxis },
+                                        set: { appModel.renderSettings.symmetryPreferredAxis = $0 }
+                                    )) {
+                                        Text("Auto").tag(-1)
+                                        Text("Primary").tag(0)
+                                        Text("Secondary").tag(1)
+                                        Text("Tertiary").tag(2)
+                                    }
+                                    .pickerStyle(.segmented)
+                                }
                             }
                             .padding(.leading, 10)
                         }

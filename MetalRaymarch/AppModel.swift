@@ -206,6 +206,13 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     
+    // Symmetry-based movement controls
+    private var _symmetryMovementEnabled: Bool = false  // Auto-move along fractal symmetry axes
+    private var _symmetryMovementSpeed: Float = 0.3     // World units per second
+    private var _symmetryUpdateInterval: Float = 0.5    // Seconds between direction recalculations
+    private var _symmetryBlendDuration: Float = 0.5     // Seconds to blend to new direction
+    private var _symmetryPreferredAxis: Int = -1        // -1=auto, 0=primary, 1=secondary, 2=tertiary
+    
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
     // This decouples gesture detection (30Hz async) from render smoothing (90Hz sync).
@@ -373,6 +380,39 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleRadius: Float {
         get { withLock { _safetyBubbleRadius } }
         set { withLock { _safetyBubbleRadius = max(0.05, min(2.5, newValue)) } }
+    }
+    
+    // === SYMMETRY MOVEMENT SETTINGS ===
+    // Auto-move the camera/position along fractal symmetry axes for hypnotic exploration
+    
+    /// Enable/disable automatic symmetry-based movement
+    var symmetryMovementEnabled: Bool {
+        get { withLock { _symmetryMovementEnabled } }
+        set { withLock { _symmetryMovementEnabled = newValue } }
+    }
+    
+    /// Speed of symmetry movement in world units per second (0.05 - 1.0)
+    var symmetryMovementSpeed: Float {
+        get { withLock { _symmetryMovementSpeed } }
+        set { withLock { _symmetryMovementSpeed = max(0.05, min(1.0, newValue)) } }
+    }
+    
+    /// How often to recalculate symmetry axes in seconds (0.2 - 2.0)
+    var symmetryUpdateInterval: Float {
+        get { withLock { _symmetryUpdateInterval } }
+        set { withLock { _symmetryUpdateInterval = max(0.2, min(2.0, newValue)) } }
+    }
+    
+    /// Time to blend between direction changes in seconds (0.1 - 1.0)
+    var symmetryBlendDuration: Float {
+        get { withLock { _symmetryBlendDuration } }
+        set { withLock { _symmetryBlendDuration = max(0.1, min(1.0, newValue)) } }
+    }
+    
+    /// Preferred axis for movement: -1=auto (random when symmetric), 0=primary, 1=secondary, 2=tertiary
+    var symmetryPreferredAxis: Int {
+        get { withLock { _symmetryPreferredAxis } }
+        set { withLock { _symmetryPreferredAxis = max(-1, min(2, newValue)) } }
     }
     
     // === GESTURE TARGET VALUES ===

@@ -160,10 +160,84 @@ final class GestureController {
     private let maxStartHandDistance: Float = 0.35  // Require hands within 35cm to start
     private let maxActiveHandDistance: Float = 0.80 // Allow expansion up to 80cm
     
-    // Mandelbox parameter ranges - WIDE for exploration
-    private let minDistanceRange: ClosedRange<Float> = 0.8...5.0
-    private let foldingLimitRange: ClosedRange<Float> = 0.5...13.0
-    private let sphereRadiusRange: ClosedRange<Float> = 0.1...2.0  // Sphere inversion radius
+    // ==========================================================================
+    // PER-FRACTAL PARAMETER RANGES
+    // Each fractal type has different optimal parameter ranges
+    // ==========================================================================
+    
+    /// Parameter ranges for a specific fractal type
+    struct FractalParamRanges {
+        let minDistance: ClosedRange<Float>
+        let foldingLimit: ClosedRange<Float>
+        let sphereRadius: ClosedRange<Float>
+        let fractalScale: ClosedRange<Float>
+        
+        // Default values when switching to this fractal
+        let defaultMinDistance: Float
+        let defaultFoldingLimit: Float
+        let defaultSphereRadius: Float
+        let defaultFractalScale: Float
+    }
+    
+    /// Get parameter ranges for current fractal type
+    private func currentRanges() -> FractalParamRanges {
+        guard let settings = renderSettings else {
+            return Self.mandelboxRanges
+        }
+        
+        switch settings.fractalType {
+        case .mandelbox:
+            return Self.mandelboxRanges
+        case .triforce:
+            return Self.triforceRanges
+        case .negativeMandelbox:
+            return Self.negativeMandelboxRanges
+        }
+    }
+    
+    // STANDARD MANDELBOX (positive scale ~2-3)
+    // - Large exploration ranges for dramatic parameter sweeps
+    // - Scale controls overall density, foldingLimit controls box boundaries
+    private static let mandelboxRanges = FractalParamRanges(
+        minDistance: 0.8...5.0,           // minRadius² - affects sphere fold cutoff
+        foldingLimit: 0.5...13.0,         // Box fold boundary - wide range
+        sphereRadius: 0.1...2.0,          // Sphere inversion radius
+        fractalScale: 1.5...4.0,          // Typical positive scale range
+        defaultMinDistance: 0.8,
+        defaultFoldingLimit: 1.0,
+        defaultSphereRadius: 0.5,
+        defaultFractalScale: 2.8
+    )
+    
+    // NEGATIVE MANDELBOX (scale = -1.5)
+    // - Tighter ranges because -1.5 scale is very sensitive
+    // - Small changes create big visual differences
+    // - Reference: https://sites.google.com/site/mandelbox/negative-1-5-mandelbox
+    // - Standard params: s=-1.5, r=0.5 (minRad²=0.25), f=1.0
+    private static let negativeMandelboxRanges = FractalParamRanges(
+        minDistance: 0.1...1.0,           // minRadius² - tighter range (0.25 typical)
+        foldingLimit: 0.5...2.0,          // Box fold - tighter (1.0 typical)
+        sphereRadius: 0.3...1.0,          // Sphere radius (0.5 typical)
+        fractalScale: 1.5...4.0,          // Scale (not directly used, -1.5 is fixed)
+        defaultMinDistance: 0.25,         // r² where r=0.5
+        defaultFoldingLimit: 1.0,
+        defaultSphereRadius: 0.5,
+        defaultFractalScale: 2.8          // UI only - actual scale is -1.5
+    )
+    
+    // TRIFORCE / KALEIDOSCOPIC IFS
+    // - Scale drives complexity, offset controls position in IFS space
+    // - foldingLimit affects tetrahedron fold intensity
+    private static let triforceRanges = FractalParamRanges(
+        minDistance: 0.5...3.0,           // Not used much in IFS
+        foldingLimit: 0.5...5.0,          // Fold intensity
+        sphereRadius: 0.1...2.0,          // Not used much in IFS
+        fractalScale: 1.5...4.0,          // IFS scale factor
+        defaultMinDistance: 1.0,
+        defaultFoldingLimit: 1.0,
+        defaultSphereRadius: 0.5,
+        defaultFractalScale: 2.0
+    )
     
     // Single-hand drag sensitivity
     private let translateSensitivity: Float = 1.0
@@ -229,6 +303,36 @@ final class GestureController {
         #if DEBUG
         print("🔄 GestureController synced with settings")
         #endif
+    }
+    
+    /// Apply default parameter values for the current fractal type.
+    /// Call this when switching fractal types to get good starting values.
+    func applyFractalDefaults() {
+        guard let settings = renderSettings else { return }
+        let ranges = currentRanges()
+        
+        settings.targetMinDistance = ranges.defaultMinDistance
+        settings.targetFoldingLimit = ranges.defaultFoldingLimit
+        settings.targetSphereRadius = ranges.defaultSphereRadius
+        settings.fractalScale = ranges.defaultFractalScale
+        
+        // Also update the immediate values for instant feedback
+        settings.minDistance = ranges.defaultMinDistance
+        settings.foldingLimit = ranges.defaultFoldingLimit
+        settings.sphereRadius = ranges.defaultSphereRadius
+        
+        // Reset gesture states
+        syncWithSettings()
+        
+        #if DEBUG
+        print("🎛️ Applied defaults for \(settings.fractalType): minDist=\(ranges.defaultMinDistance), fold=\(ranges.defaultFoldingLimit), sphere=\(ranges.defaultSphereRadius)")
+        #endif
+    }
+    
+    /// Get the parameter ranges for the current fractal type (for UI sliders)
+    func getParameterRanges() -> (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
+        let ranges = currentRanges()
+        return (ranges.minDistance, ranges.foldingLimit, ranges.sphereRadius)
     }
     
     // MARK: - Hand Tracking Updates
@@ -410,6 +514,9 @@ final class GestureController {
         // Track active gesture for HUD display
         var activeDigit = 0
         
+        // Get parameter ranges for current fractal type
+        let ranges = currentRanges()
+        
         // TWO-HAND gestures - directly set TARGET values on RenderSettings
         // Renderer handles smoothing in interpolateToTargets()
         
@@ -418,7 +525,7 @@ final class GestureController {
             digit: 1,
             state: &indexGestureState,
             currentTarget: settings.targetMinDistance,
-            range: minDistanceRange
+            range: ranges.minDistance
         ) { newValue in
             settings.targetMinDistance = newValue
         }
@@ -429,7 +536,7 @@ final class GestureController {
             digit: 2,
             state: &middleGestureState,
             currentTarget: settings.targetFoldingLimit,
-            range: foldingLimitRange
+            range: ranges.foldingLimit
         ) { newValue in
             settings.targetFoldingLimit = newValue
         }
@@ -440,7 +547,7 @@ final class GestureController {
             digit: 3,
             state: &ringGestureState,
             currentTarget: settings.targetSphereRadius,
-            range: sphereRadiusRange
+            range: ranges.sphereRadius
         ) { newValue in
             settings.targetSphereRadius = newValue
         }
