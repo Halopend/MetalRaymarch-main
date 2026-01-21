@@ -99,6 +99,7 @@ class AppModel {
         }
         
         gestureController?.onMenuToggle = { [weak self] in
+            print("📋 onMenuToggle callback fired!")
             self?.toggleMenuWindow()
         }
         

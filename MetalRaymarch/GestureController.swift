@@ -268,8 +268,8 @@ final class GestureController {
     // === MENU TOGGLE GESTURE STATE (Right hand - middle finger to palm) ===
     private var menuToggleActive: Bool = false
     private var menuToggleCooldown: Float = 0  // Prevent rapid toggling
-    private let menuToggleActivateThreshold: Float = 0.8
-    private let menuToggleReleaseThreshold: Float = 0.5
+    private let menuToggleActivateThreshold: Float = 0.65  // Lowered from 0.8 for easier activation
+    private let menuToggleReleaseThreshold: Float = 0.4    // Lowered from 0.5
     private let menuToggleCooldownDuration: Float = 1.0  // 1 second cooldown
     
     // Gesture callbacks
@@ -474,6 +474,9 @@ final class GestureController {
         guard rightHand.isTracked else {
             if menuToggleActive {
                 menuToggleActive = false
+                #if DEBUG
+                print("👆 Menu toggle: right hand tracking lost")
+                #endif
             }
             return
         }
@@ -482,6 +485,13 @@ final class GestureController {
         guard menuToggleCooldown <= 0 else { return }
         
         let touchStrength = rightHand.middleFingerTouchingPalm()
+        
+        #if DEBUG
+        // Log touch strength periodically for debugging (every ~30 frames when strength > 0.3)
+        if touchStrength > 0.3 {
+            print("👆 Menu gesture - touchStrength: \(String(format: "%.2f", touchStrength)), active: \(menuToggleActive), cooldown: \(String(format: "%.2f", menuToggleCooldown))")
+        }
+        #endif
         
         // Check for touch with hysteresis
         let shouldBeActive: Bool
