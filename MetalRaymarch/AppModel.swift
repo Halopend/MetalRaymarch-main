@@ -126,6 +126,17 @@ class AppModel {
         print("📋 Menu window: \(isMenuWindowVisible ? "shown" : "hidden")")
     }
     
+    /// Ensure window content is visible - call when exiting immersive mode or on app launch
+    /// This prevents the window from being invisible when gestures toggled it hidden during immersive mode
+    func ensureWindowContentVisible() {
+        if !isMenuWindowVisible {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isMenuWindowVisible = true
+            }
+            print("📋 Menu window restored to visible state")
+        }
+    }
+    
     /// Capture a screenshot for preset thumbnails
     func captureScreenshot() async -> Data? {
         return await captureScreenshotHandler?()

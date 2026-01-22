@@ -19,6 +19,11 @@ struct ToggleImmersiveSpaceButton: View {
                 switch appModel.immersiveSpaceState {
                     case .open:
                         appModel.immersiveSpaceState = .inTransition
+                        
+                        // Ensure window content is visible BEFORE dismissing immersive space
+                        // This prevents the user from seeing an empty window
+                        appModel.ensureWindowContentVisible()
+                        
                         await dismissImmersiveSpace()
                         // Don't set immersiveSpaceState to .closed because there
                         // are multiple paths to ImmersiveView.onDisappear().
