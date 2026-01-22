@@ -241,11 +241,30 @@ struct FractalParams {
     float3 bubbleCenter;
     float bubbleRadius;
     int bubbleEnabled;
+    float bubbleShape;      // 0 = sphere, 1 = cube, intermediate = morph
 };
+
+// === SAFETY BUBBLE DISTANCE FUNCTION ===
+// Computes distance to safety bubble, morphing between sphere and axis-aligned cube
+// Cube does NOT rotate with view - only translates (provides stable reference frame)
+FORCE_INLINE float safetyBubbleDistance(float3 pos, float3 bubbleCenter, float bubbleRadius, float bubbleShape) {
+    float3 p = pos - bubbleCenter;
+    
+    // Sphere distance (signed, negative inside)
+    float sphereDist = length(p) - bubbleRadius;
+    
+    // Axis-aligned cube distance (Chebyshev distance - max of absolute components)
+    // No rotation - cube stays aligned with world axes for stable visual reference
+    float3 d = abs(p) - float3(bubbleRadius);
+    float cubeDist = length(max(d, 0.0)) + min(max(d.x, max(d.y, d.z)), 0.0);
+    
+    // Smooth morph between sphere and cube based on bubbleShape parameter
+    return mix(sphereDist, cubeDist, bubbleShape);
+}
 
 // FORCE_INLINE: This is called per-pixel, must not have call overhead
 FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScale, float sphereRadius, int iterations,
-                                              float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
+                                              float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape) {
     FractalParams params;
     // Compute scale once, store in register-friendly float4
     float invMinRad = 1.0f / minRad2Val;
@@ -258,6 +277,7 @@ FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScal
     params.bubbleCenter = bubbleCenter;
     params.bubbleRadius = bubbleRadius;
     params.bubbleEnabled = bubbleEnabled;
+    params.bubbleShape = bubbleShape;
     return params;
 }
 
@@ -314,13 +334,12 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     // Final distance estimate
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
-    // Safety bubble: carve out a sphere around the camera to prevent clipping
+    // Safety bubble: carve out a shape around the camera to prevent clipping
     // When is_function_constant_defined is false, this branch is evaluated at runtime
     // When true, the compiler eliminates the branch entirely
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
     if (bubbleEnabled) {
-        float3 toBubble = pos - params.bubbleCenter;
-        float bubbleDist = length(toBubble) - params.bubbleRadius;
+        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
         d = max(d, -bubbleDist);
     }
     return d;
@@ -346,17 +365,19 @@ struct TriforceParams {
     float3 bubbleCenter;
     float bubbleRadius;
     int bubbleEnabled;
+    float bubbleShape;     // 0 = sphere, 1 = cube, intermediate = morph
 };
 
 // Create Triforce parameters
 FORCE_INLINE TriforceParams makeTriforceParams(float scale, float3 offset,
-                                                float3 bubbleCenter, float bubbleRadius, int bubbleEnabled) {
+                                                float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape) {
     TriforceParams params;
     params.scale = scale;
     params.offset = offset;
     params.bubbleCenter = bubbleCenter;
     params.bubbleRadius = bubbleRadius;
     params.bubbleEnabled = bubbleEnabled;
+    params.bubbleShape = bubbleShape;
     return params;
 }
 
@@ -419,7 +440,7 @@ FORCE_INLINE float MapTriforce(float3 pos, TriforceParams params, int iterations
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? 
         FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
     if (bubbleEnabled) {
-        float bubbleDist = length(pos - params.bubbleCenter) - params.bubbleRadius;
+        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
         d = max(d, -bubbleDist);
     }
     
@@ -598,7 +619,7 @@ FORCE_INLINE float MapNegativeMandelbox(float3 pos, FractalParams params, float 
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? 
         FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
     if (bubbleEnabled) {
-        float bubbleDist = length(pos - params.bubbleCenter) - params.bubbleRadius;
+        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
         d = max(d, -bubbleDist);
     }
     
@@ -904,7 +925,8 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
             float3(1.0, 1.0, 1.0),      // Offset (tetrahedron vertex)
             params.bubbleCenter,
             params.bubbleRadius,
-            params.bubbleEnabled
+            params.bubbleEnabled,
+            params.bubbleShape
         );
         return MapTriforce(pos, aParams, iterations, foldingLimit);
     } else {
@@ -1389,7 +1411,7 @@ kernel void adaptiveHierarchical8x8(
     }
 
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
     float gTime = uniforms.time * 0.01 + 15.00;
     
@@ -1413,7 +1435,7 @@ kernel void adaptiveHierarchical8x8(
         
         int shadowIterations = max(lodIterations - 2, 2);
         FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
         
         half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
@@ -1499,7 +1521,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
 
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
     // Standard analytic sphere tracing
     float2 ret = Scene(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
@@ -1549,7 +1571,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
             int shadowIterations = max(lodIterations - 2, 2);
             FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                                            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
@@ -1671,7 +1693,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     }
 
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
     
     // === STANDARD RAYMARCH (every pixel) ===
     // The hierarchical coarse/fine approach doesn't help due to SIMD lockstep execution
@@ -1696,7 +1718,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         int shadowIterations = max(lodIterations - 2, 2);
         FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled);
+                                                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
         
         float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
         float3 spot = spotLight - p;
@@ -1949,7 +1971,8 @@ kernel void updateSymmetryMovement(
             uniforms.fractalIterations,
             float3(0.0),  // No bubble center needed for symmetry
             0.0,          // No bubble radius
-            0             // Bubble disabled
+            0,            // Bubble disabled
+            0.0           // Bubble shape (not used)
         );
         
         // Get symmetry information at current position
@@ -2034,7 +2057,7 @@ fragment half4 debugSymmetryVisualization(
         uniforms.fractalScale,
         uniforms.sphereRadius,
         uniforms.fractalIterations,
-        float3(0.0), 0.0, 0
+        float3(0.0), 0.0, 0, 0.0
     );
     
     // Quick raymarch to find surface

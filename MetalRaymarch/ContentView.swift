@@ -290,6 +290,9 @@ struct ContentView: View {
                                 Text("Safety Bubble Radius: \(appModel.renderSettings.safetyBubbleRadius, specifier: "%.2f")m")
                                 Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleRadius }, set: { appModel.renderSettings.safetyBubbleRadius = $0 }), in: 0.05...2.5)
 
+                                Text("Shape: \(appModel.renderSettings.safetyBubbleShape < 0.33 ? "Sphere" : (appModel.renderSettings.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
+                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleShape }, set: { appModel.renderSettings.safetyBubbleShape = $0 }), in: 0...1)
+
                                 Text("Foveation Intensity")
                                 Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
                                 

@@ -217,6 +217,7 @@ final class RenderSettings: @unchecked Sendable {
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
+    private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
     
     // Symmetry-based movement controls
     private var _symmetryMovementEnabled: Bool = false  // Auto-move along fractal symmetry axes
@@ -392,6 +393,13 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleRadius: Float {
         get { withLock { _safetyBubbleRadius } }
         set { withLock { _safetyBubbleRadius = max(0.05, min(2.5, newValue)) } }
+    }
+    
+    /// Shape of the safety bubble (0 = sphere, 1 = cube, intermediate = morph)
+    /// Cube does not rotate with view, only translates with position
+    var safetyBubbleShape: Float {
+        get { withLock { _safetyBubbleShape } }
+        set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
     }
     
     // === SYMMETRY MOVEMENT SETTINGS ===

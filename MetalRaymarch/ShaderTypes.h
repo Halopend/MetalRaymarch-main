@@ -117,6 +117,7 @@ typedef struct
     float sphereRadius;      // Sphere folding radius (default 0.5)
     float safetyBubbleRadius; // Safety bubble radius (meters)
     int safetyBubbleEnabled;  // Enable safety bubble (0/1)
+    float safetyBubbleShape;  // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
     float colorIterations;   // How many iterations contribute to color
     int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
@@ -144,6 +145,7 @@ typedef struct
     float sphereRadius;
     float safetyBubbleRadius; // Safety bubble radius (meters)
     int safetyBubbleEnabled;  // Enable safety bubble (0/1)
+    float safetyBubbleShape;  // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
     float foldingLimit;
     float glowIntensity;
     float colorMix;
