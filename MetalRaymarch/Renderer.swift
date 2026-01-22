@@ -1057,6 +1057,10 @@ actor Renderer {
         // Decay the limit flash effect using actual deltaTime
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         
+        // === COLOR SCHEME TRANSITION UPDATE ===
+        // Smoothly transition between color schemes
+        settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
+        
         // Use already-smoothed position from settings (interpolated above)
         // Scale gets its own smoothing since it's not gesture-controlled
         let smoothSpeed: Float = 15.0
@@ -1104,6 +1108,9 @@ actor Renderer {
             let animatedColorMix = settings.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
             let animatedGlow = settings.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
             
+            // Get color scheme parameters (handles transitions internally)
+            let colorSchemeParams = settings.getColorSchemeParams()
+            
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
@@ -1130,7 +1137,8 @@ actor Renderer {
                             limitFlash: settings.limitFlash,
                             showHUD: settings.showHUD ? 1 : 0,
                             activeGesture: Int32(settings.activeGestureIndex),
-                            fractalType: settings.fractalType.rawValue)
+                            fractalType: settings.fractalType.rawValue,
+                            colorScheme: colorSchemeParams)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -1383,6 +1391,9 @@ actor Renderer {
         // Get camera position from inverse model-view matrix (in model space)
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
         
+        // Get color scheme parameters
+        let colorSchemeParams = settings.getColorSchemeParams()
+        
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
@@ -1404,7 +1415,8 @@ actor Renderer {
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
             limitFlash: settings.limitFlash,
-            fractalType: settings.fractalType.rawValue
+            fractalType: settings.fractalType.rawValue,
+            colorScheme: colorSchemeParams
         )
         
         // Copy uniforms to buffer

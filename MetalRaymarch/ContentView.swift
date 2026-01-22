@@ -257,6 +257,80 @@ struct ContentView: View {
                         // Color & Glow Group
                         DisclosureGroup("Color & Glow") {
                             VStack(spacing: 8) {
+                                // Color scheme picker
+                                Text("Color Scheme")
+                                    .font(.headline)
+                                
+                                // Grid of color scheme buttons
+                                LazyVGrid(columns: [
+                                    GridItem(.flexible()),
+                                    GridItem(.flexible()),
+                                    GridItem(.flexible()),
+                                    GridItem(.flexible())
+                                ], spacing: 8) {
+                                    ForEach(ColorScheme.allCases, id: \.rawValue) { scheme in
+                                        Button {
+                                            appModel.renderSettings.transitionToColorScheme(scheme)
+                                        } label: {
+                                            VStack(spacing: 4) {
+                                                Image(systemName: scheme.icon)
+                                                    .font(.title2)
+                                                Text(scheme.displayName)
+                                                    .font(.caption2)
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .tint(appModel.renderSettings.colorScheme == scheme ? .blue : .secondary)
+                                    }
+                                }
+                                
+                                Divider()
+                                
+                                // Auto-transition controls
+                                Toggle("Auto-Cycle Schemes", isOn: Binding(
+                                    get: { appModel.renderSettings.colorSchemeAutoTransition },
+                                    set: { appModel.renderSettings.colorSchemeAutoTransition = $0 }
+                                ))
+                                
+                                if appModel.renderSettings.colorSchemeAutoTransition {
+                                    Text("Cycle Interval: \(appModel.renderSettings.colorSchemeAutoInterval, specifier: "%.0f")s")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.colorSchemeAutoInterval },
+                                        set: { appModel.renderSettings.colorSchemeAutoInterval = $0 }
+                                    ), in: 5...120)
+                                }
+                                
+                                Text("Transition Duration: \(appModel.renderSettings.colorSchemeTransitionDuration, specifier: "%.1f")s")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.colorSchemeTransitionDuration },
+                                    set: { appModel.renderSettings.colorSchemeTransitionDuration = $0 }
+                                ), in: 0.5...10)
+                                
+                                Divider()
+                                
+                                // Post-processing overrides
+                                Text("Saturation: \(appModel.renderSettings.colorSchemeSaturation, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.colorSchemeSaturation },
+                                    set: { appModel.renderSettings.colorSchemeSaturation = $0 }
+                                ), in: 0...3)
+                                
+                                Text("Contrast: \(appModel.renderSettings.colorSchemeContrast, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.colorSchemeContrast },
+                                    set: { appModel.renderSettings.colorSchemeContrast = $0 }
+                                ), in: 0.5...2)
+                                
+                                Text("Gamma: \(appModel.renderSettings.colorSchemeGamma, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.colorSchemeGamma },
+                                    set: { appModel.renderSettings.colorSchemeGamma = $0 }
+                                ), in: 0.2...1)
+                                
+                                Divider()
+                                
                                 HStack {
                                     Button {
                                         appModel.renderSettings.lightingPlay.toggle()

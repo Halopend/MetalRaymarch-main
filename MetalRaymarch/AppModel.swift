@@ -173,6 +173,150 @@ enum FractalType: Int32 {
     }
 }
 
+// Color scheme enum with built-in presets matching ShaderTypes.h
+enum ColorScheme: Int32, CaseIterable {
+    case classic = 0        // Original Mandelbox colors (red/gray/gold)
+    case ocean = 1          // Deep blues and teals
+    case fire = 2           // Warm oranges and reds
+    case forest = 3         // Greens and browns
+    case nebula = 4         // Purple/pink cosmic
+    case mono = 5           // Grayscale with subtle tints
+    case aurora = 6         // Northern lights (greens/blues/purples)
+    case volcanic = 7       // Dark with lava accents
+    
+    var displayName: String {
+        switch self {
+        case .classic: return "Classic"
+        case .ocean: return "Ocean"
+        case .fire: return "Fire"
+        case .forest: return "Forest"
+        case .nebula: return "Nebula"
+        case .mono: return "Mono"
+        case .aurora: return "Aurora"
+        case .volcanic: return "Volcanic"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .classic: return "paintpalette"
+        case .ocean: return "water.waves"
+        case .fire: return "flame"
+        case .forest: return "leaf"
+        case .nebula: return "sparkles"
+        case .mono: return "circle.lefthalf.filled"
+        case .aurora: return "rainbow"
+        case .volcanic: return "mountain.2"
+        }
+    }
+    
+    // Get the color palette for this scheme (col1, col2, col3, altColor1, altMixFactors)
+    // VIBRANT palettes - high saturation primary colors for bold, colorful fractals
+    var palette: (color1: SIMD3<Float>, color2: SIMD3<Float>, color3: SIMD3<Float>, 
+                  altColor1: SIMD3<Float>, altMixFactors: SIMD3<Float>) {
+        switch self {
+        case .classic:
+            // Vibrant red, electric blue, bright gold
+            return (SIMD3<Float>(1.0, 0.1, 0.1),    // Bright red
+                    SIMD3<Float>(0.2, 0.4, 0.9),    // Electric blue
+                    SIMD3<Float>(1.0, 0.8, 0.0),    // Bright gold
+                    SIMD3<Float>(0.0, 0.2, 0.8),    // Alt blue
+                    SIMD3<Float>(1.0, 1.0, 0.5))    // Alt mix factors
+                    
+        case .ocean:
+            // Electric blues, vibrant teals, bright cyan
+            return (SIMD3<Float>(0.0, 0.3, 1.0),    // Electric blue
+                    SIMD3<Float>(0.0, 0.9, 0.8),    // Bright teal
+                    SIMD3<Float>(0.4, 1.0, 1.0),    // Bright cyan
+                    SIMD3<Float>(0.1, 0.5, 1.0),    // Sky blue
+                    SIMD3<Float>(0.6, 1.0, 0.3))
+                    
+        case .fire:
+            // Intense oranges, reds, bright yellows
+            return (SIMD3<Float>(1.0, 0.2, 0.0),    // Bright red-orange
+                    SIMD3<Float>(1.0, 0.6, 0.0),    // Vivid orange
+                    SIMD3<Float>(1.0, 1.0, 0.2),    // Bright yellow
+                    SIMD3<Float>(0.9, 0.1, 0.0),    // Pure red
+                    SIMD3<Float>(1.0, 0.8, 0.5))
+                    
+        case .forest:
+            // Vibrant greens, rich browns, lime accents
+            return (SIMD3<Float>(0.1, 0.8, 0.2),    // Bright green
+                    SIMD3<Float>(0.6, 0.4, 0.1),    // Rich brown
+                    SIMD3<Float>(0.8, 1.0, 0.2),    // Lime green
+                    SIMD3<Float>(0.2, 0.6, 0.1),    // Forest green
+                    SIMD3<Float>(0.8, 0.9, 0.4))
+                    
+        case .nebula:
+            // Vivid purple, hot pink, electric blue
+            return (SIMD3<Float>(0.6, 0.0, 1.0),    // Vivid purple
+                    SIMD3<Float>(1.0, 0.2, 0.6),    // Hot pink
+                    SIMD3<Float>(0.2, 0.6, 1.0),    // Electric blue
+                    SIMD3<Float>(0.8, 0.1, 0.9),    // Magenta
+                    SIMD3<Float>(1.0, 1.0, 0.5))
+                    
+        case .mono:
+            // High contrast black and white with blue tint
+            return (SIMD3<Float>(0.1, 0.1, 0.15),   // Near black (blue tint)
+                    SIMD3<Float>(0.5, 0.5, 0.55),   // Mid gray
+                    SIMD3<Float>(1.0, 1.0, 0.95),   // Near white (warm)
+                    SIMD3<Float>(0.3, 0.35, 0.4),   // Cool gray
+                    SIMD3<Float>(1.0, 1.0, 0.2))
+                    
+        case .aurora:
+            // Neon greens, electric blues, vivid purples
+            return (SIMD3<Float>(0.0, 1.0, 0.4),    // Neon green
+                    SIMD3<Float>(0.0, 0.6, 1.0),    // Electric blue
+                    SIMD3<Float>(0.8, 0.2, 1.0),    // Vivid purple
+                    SIMD3<Float>(0.0, 0.9, 0.7),    // Bright teal
+                    SIMD3<Float>(0.9, 1.2, 0.6))
+                    
+        case .volcanic:
+            // Deep blacks with bright lava oranges and reds
+            return (SIMD3<Float>(0.05, 0.02, 0.02), // Near black
+                    SIMD3<Float>(1.0, 0.3, 0.0),    // Bright orange
+                    SIMD3<Float>(1.0, 0.8, 0.1),    // Lava yellow
+                    SIMD3<Float>(0.8, 0.1, 0.0),    // Deep red
+                    SIMD3<Float>(1.5, 0.7, 0.4))
+        }
+    }
+    
+    // Suggested post-processing for this scheme - BOOSTED saturation values
+    var postProcessing: (saturation: Float, contrast: Float, gamma: Float) {
+        switch self {
+        case .classic:  return (2.0, 1.15, 0.45)   // Boosted saturation
+        case .ocean:    return (1.8, 1.12, 0.48)
+        case .fire:     return (2.2, 1.2, 0.42)    // Extra vibrant
+        case .forest:   return (1.8, 1.1, 0.5)
+        case .nebula:   return (2.3, 1.15, 0.42)   // Very saturated
+        case .mono:     return (0.6, 1.3, 0.46)    // Low saturation, high contrast
+        case .aurora:   return (2.5, 1.15, 0.4)    // Maximum vibrancy
+        case .volcanic: return (2.0, 1.35, 0.38)   // High contrast for drama
+        }
+    }
+    
+    // Create shader-compatible ColorSchemeParams
+    func toShaderParams(colorMix: Float, transitionProgress: Float = 1.0, previousScheme: ColorScheme? = nil) -> ColorSchemeParams {
+        let pal = palette
+        let pp = postProcessing
+        return ColorSchemeParams(
+            color1: pal.color1,
+            color2: pal.color2,
+            color3: pal.color3,
+            altColor1: pal.altColor1,
+            altMixFactors: pal.altMixFactors,
+            saturation: pp.saturation,
+            contrast: pp.contrast,
+            gamma: pp.gamma,
+            brightness: 0.0,
+            transitionProgress: transitionProgress,
+            previousScheme: previousScheme?.rawValue ?? self.rawValue,
+            currentScheme: self.rawValue,
+            _padding: 0
+        )
+    }
+}
+
 // RenderSettings uses os_unfair_lock for minimal lock overhead
 // This is the fastest synchronization primitive on Apple platforms
 // NSLock has ~2-3x more overhead due to Objective-C dispatch
@@ -225,6 +369,18 @@ final class RenderSettings: @unchecked Sendable {
     private var _symmetryUpdateInterval: Float = 0.5    // Seconds between direction recalculations
     private var _symmetryBlendDuration: Float = 0.5     // Seconds to blend to new direction
     private var _symmetryPreferredAxis: Int = -1        // -1=auto, 0=primary, 1=secondary, 2=tertiary
+    
+    // === COLOR SCHEME ===
+    // Controls the color palette and post-processing for fractal coloring
+    private var _colorScheme: ColorScheme = .classic     // Current color scheme
+    private var _targetColorScheme: ColorScheme = .classic // Target for transitions
+    private var _colorSchemeTransitionProgress: Float = 1.0 // 0 = previous, 1 = current (complete)
+    private var _colorSchemeTransitionDuration: Float = 2.0 // Seconds to transition between schemes
+    private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes
+    private var _colorSchemeAutoInterval: Float = 30.0      // Seconds between auto-transitions
+    private var _colorSchemeSaturation: Float = 2.0         // Color saturation override (boosted)
+    private var _colorSchemeContrast: Float = 1.15          // Contrast override (boosted)
+    private var _colorSchemeGamma: Float = 0.45             // Gamma override (slightly darker for richer colors)
     
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
@@ -433,6 +589,142 @@ final class RenderSettings: @unchecked Sendable {
     var symmetryPreferredAxis: Int {
         get { withLock { _symmetryPreferredAxis } }
         set { withLock { _symmetryPreferredAxis = max(-1, min(2, newValue)) } }
+    }
+    
+    // === COLOR SCHEME SETTINGS ===
+    // Controls the color palette and transitions for fractal coloring
+    
+    /// Current color scheme (or target when transitioning)
+    var colorScheme: ColorScheme {
+        get { withLock { _colorScheme } }
+        set { 
+            withLock { 
+                if _colorScheme != newValue {
+                    _targetColorScheme = newValue
+                    _colorSchemeTransitionProgress = 0.0
+                }
+            } 
+        }
+    }
+    
+    /// Previous color scheme (for transitions)
+    var previousColorScheme: ColorScheme {
+        get { withLock { _colorScheme } }
+    }
+    
+    /// Transition progress (0 = start, 1 = complete)
+    var colorSchemeTransitionProgress: Float {
+        get { withLock { _colorSchemeTransitionProgress } }
+        set { withLock { _colorSchemeTransitionProgress = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Duration of color scheme transitions in seconds
+    var colorSchemeTransitionDuration: Float {
+        get { withLock { _colorSchemeTransitionDuration } }
+        set { withLock { _colorSchemeTransitionDuration = max(0.1, min(10.0, newValue)) } }
+    }
+    
+    /// Enable auto-cycling through color schemes
+    var colorSchemeAutoTransition: Bool {
+        get { withLock { _colorSchemeAutoTransition } }
+        set { withLock { _colorSchemeAutoTransition = newValue } }
+    }
+    
+    /// Seconds between auto-transitions
+    var colorSchemeAutoInterval: Float {
+        get { withLock { _colorSchemeAutoInterval } }
+        set { withLock { _colorSchemeAutoInterval = max(5.0, min(120.0, newValue)) } }
+    }
+    
+    /// Saturation override (independent of scheme default)
+    var colorSchemeSaturation: Float {
+        get { withLock { _colorSchemeSaturation } }
+        set { withLock { _colorSchemeSaturation = max(0.0, min(3.0, newValue)) } }
+    }
+    
+    /// Contrast override
+    var colorSchemeContrast: Float {
+        get { withLock { _colorSchemeContrast } }
+        set { withLock { _colorSchemeContrast = max(0.5, min(2.0, newValue)) } }
+    }
+    
+    /// Gamma override
+    var colorSchemeGamma: Float {
+        get { withLock { _colorSchemeGamma } }
+        set { withLock { _colorSchemeGamma = max(0.2, min(1.0, newValue)) } }
+    }
+    
+    /// Update color scheme transitions. Call once per frame.
+    func updateColorSchemeTransition(deltaTime: Float) {
+        withLock {
+            if _colorSchemeTransitionProgress < 1.0 {
+                let step = deltaTime / _colorSchemeTransitionDuration
+                _colorSchemeTransitionProgress = min(1.0, _colorSchemeTransitionProgress + step)
+                
+                // When transition completes, update current scheme
+                if _colorSchemeTransitionProgress >= 1.0 {
+                    _colorScheme = _targetColorScheme
+                }
+            }
+        }
+    }
+    
+    /// Get shader parameters for the current color scheme state
+    func getColorSchemeParams() -> ColorSchemeParams {
+        return withLock {
+            let currentPal = _targetColorScheme.palette
+            let previousPal = _colorScheme.palette
+            
+            // Interpolate between previous and target palettes
+            let t = _colorSchemeTransitionProgress
+            let color1 = simd_mix(previousPal.color1, currentPal.color1, SIMD3<Float>(repeating: t))
+            let color2 = simd_mix(previousPal.color2, currentPal.color2, SIMD3<Float>(repeating: t))
+            let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
+            let altColor1 = simd_mix(previousPal.altColor1, currentPal.altColor1, SIMD3<Float>(repeating: t))
+            let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
+            
+            return ColorSchemeParams(
+                color1: color1,
+                color2: color2,
+                color3: color3,
+                altColor1: altColor1,
+                altMixFactors: altMixFactors,
+                saturation: _colorSchemeSaturation,
+                contrast: _colorSchemeContrast,
+                gamma: _colorSchemeGamma,
+                brightness: 0.0,
+                transitionProgress: t,
+                previousScheme: _colorScheme.rawValue,
+                currentScheme: _targetColorScheme.rawValue,
+                _padding: 0
+            )
+        }
+    }
+    
+    /// Manually trigger a transition to a new scheme
+    func transitionToColorScheme(_ scheme: ColorScheme) {
+        withLock {
+            if _targetColorScheme != scheme {
+                // Current becomes previous
+                _colorScheme = _targetColorScheme
+                _targetColorScheme = scheme
+                _colorSchemeTransitionProgress = 0.0
+            }
+        }
+    }
+    
+    /// Cycle to the next color scheme
+    func nextColorScheme() {
+        withLock {
+            let allSchemes = ColorScheme.allCases
+            let currentIndex = allSchemes.firstIndex(of: _targetColorScheme) ?? 0
+            let nextIndex = (currentIndex + 1) % allSchemes.count
+            let nextScheme = allSchemes[nextIndex]
+            
+            _colorScheme = _targetColorScheme
+            _targetColorScheme = nextScheme
+            _colorSchemeTransitionProgress = 0.0
+        }
     }
     
     // === GESTURE TARGET VALUES ===

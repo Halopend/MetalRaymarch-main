@@ -447,7 +447,56 @@ FORCE_INLINE float MapTriforce(float3 pos, TriforceParams params, int iterations
     return d;
 }
 
-// Triforce/IFS color function - orbit trap coloring
+// Triforce/IFS color function with color scheme support
+half3 ColourTriforceWithScheme(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale, ColorSchemeParams scheme) 
+{
+    float3 z = pos;
+    float3 Offset = float3(1.0, 1.0, 1.0);
+    float Scale = scale;
+    
+    // Orbit trap variables
+    float minDist = 1e10;
+    float3 trapPos = z;
+    
+    int steps = max(int(float(colorIters) * quality), 2);
+    steps = min(steps, 10);
+    
+    for (int n = 0; n < steps; n++) {
+        // Tetrahedron folds
+        z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
+        z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
+        z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
+        
+        // Scale and translate
+        z = z * Scale - Offset * (Scale - 1.0);
+        
+        // Track orbit trap
+        float d = dot(z, z);
+        if (d < minDist) {
+            minDist = d;
+            trapPos = z;
+        }
+    }
+    
+    // Generate colors from orbit trap
+    half trapNorm = half(saturate(sqrt(minDist) * 0.5));
+    half posNorm = half(saturate(length(trapPos) * 0.2));
+    
+    // Use color scheme
+    half3 col1 = half3(scheme.color1);
+    half3 col2 = half3(scheme.color2);
+    half3 col3 = half3(scheme.color3);
+    
+    half3 finalColor = mix(mix(col1, col2, trapNorm), col3, posNorm);
+    
+    // Alternative palette using scheme factors
+    half3 altFactors = half3(scheme.altMixFactors);
+    half3 altColor = half3(posNorm * altFactors.x, trapNorm * altFactors.y, altFactors.z + 0.5h * posNorm);
+    
+    return mix(finalColor, altColor, half(colorMix));
+}
+
+// Original Triforce/IFS color function - orbit trap coloring
 half3 ColourTriforce(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale) 
 {
     float3 z = pos;
@@ -626,8 +675,79 @@ FORCE_INLINE float MapNegativeMandelbox(float3 pos, FractalParams params, float 
     return d;
 }
 
-// Negative Mandelbox coloring - uses same algorithm as standard but with -1.5 scale
-// Produces organic, rough textures typical of negative scale mandelbox
+// Negative Mandelbox coloring with color scheme support
+// Enhanced with more vibrant colors and better depth variation
+half3 ColourNegativeMandelboxWithScheme(float3 pos, float quality, float minRad2Val, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme) 
+{
+    // Use -1.5 scale for negative mandelbox
+    const float negScale = -1.5;
+    float4 scale = float4(negScale) / minRad2Val;
+    scale.w = abs(scale.w);
+    float minRadius2 = sphereRadius * sphereRadius;
+    float invMinRadius2 = 1.0 / minRadius2;
+
+    float3 p = pos;
+    float3 p0 = p;
+    float trap = 1.0;
+    float minTrap = 1.0;
+    float3 trapPos = p;  // Track position at minimum trap
+    
+    int steps = max(int(float(colorIters) * quality), 2);
+    steps = min(steps, 12);
+    
+    for (int i = 0; i < steps; i++)
+    {
+        // Box fold
+        p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
+        
+        // Sphere fold
+        float r2 = dot(p, p);
+        p *= clamp(1.0 / max(r2, minRadius2), 1.0, invMinRadius2);
+        
+        // Scale with -1.5
+        p = p * scale.xyz + p0;
+        
+        // Track orbit trap with position
+        if (r2 < minTrap) {
+            minTrap = r2;
+            trapPos = p;
+        }
+        trap = min(trap, r2);
+    }
+    
+    // Enhanced color mapping with more channels
+    half logVal = 0.3333h * log(half(dot(p, p))) - 1.0h;
+    half trapVal = sqrt(half(trap));
+    half posVal = half(length(trapPos) * 0.15);  // Position-based variation
+    half depthVal = half(saturate(length(p - p0) * 0.1));  // How far orbit traveled
+    
+    half2 c = saturate(half2(logVal, trapVal));
+    
+    // Use color scheme but add extra variation for negative mandelbox
+    half3 col1 = half3(scheme.color1);
+    half3 col2 = half3(scheme.color2);
+    half3 col3 = half3(scheme.color3);
+    
+    // Mix in depth-based color shift for more visual interest
+    half3 depthTint = half3(0.1h, 0.2h, 0.3h) * depthVal;
+    col1 += depthTint;
+    col2 += depthTint * 0.5h;
+    
+    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
+    
+    // Enhanced alternative with position influence
+    half3 altFactors = half3(scheme.altMixFactors);
+    half3 altColor = half3(
+        c.x * altFactors.x + posVal * 0.2h,
+        c.y * altFactors.y + depthVal * 0.3h,
+        altFactors.z + 0.3h * c.y + posVal * 0.15h
+    );
+    
+    // More aggressive mixing for negative mandelbox
+    return mix(finalColor, altColor, 0.45h);
+}
+
+// Original negative mandelbox coloring for backward compatibility
 half3 ColourNegativeMandelbox(float3 pos, float quality, float minRad2Val, float foldingLimit, float sphereRadius, int colorIters) 
 {
     // Use -1.5 scale for negative mandelbox
@@ -936,8 +1056,75 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
 }
 
 // =============================================================================
+// COLOR SCHEME FUNCTIONS
+// =============================================================================
 
-// Optimized colour function using half precision
+// Apply color scheme to base color values (c.x = log-based, c.y = trap-based)
+FORCE_INLINE half3 applyColorScheme(half2 c, float colorMix, ColorSchemeParams scheme)
+{
+    // Extract colors from scheme
+    half3 col1 = half3(scheme.color1);
+    half3 col2 = half3(scheme.color2);
+    half3 col3 = half3(scheme.color3);
+    
+    // Primary color from palette blending
+    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
+    
+    // Alternative color using mix factors
+    half3 altFactors = half3(scheme.altMixFactors);
+    half3 altColor = half3(c.x * altFactors.x, c.y * altFactors.y, altFactors.z + 0.3h * c.y);
+    
+    return mix(finalColor, altColor, half(colorMix));
+}
+
+// Apply post-processing (saturation, contrast, gamma) from color scheme
+FORCE_INLINE half3 applyColorPostProcessing(half3 color, ColorSchemeParams scheme)
+{
+    // Saturation adjustment
+    half luma = dot(color, half3(0.299h, 0.587h, 0.114h));
+    color = mix(half3(luma), color, half(scheme.saturation));
+    
+    // Contrast adjustment (around 0.5 midpoint)
+    color = (color - 0.5h) * half(scheme.contrast) + 0.5h;
+    
+    // Brightness
+    color += half(scheme.brightness);
+    
+    // Gamma correction
+    color = pow(max(color, half3(kPowEpsilonHalf)), half3(scheme.gamma));
+    
+    return saturate(color);
+}
+
+// =============================================================================
+
+// Optimized colour function using half precision with color scheme support
+half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme) 
+{
+    float4 scale = float4(fractalScale) / minRad2Val;
+    scale.w = abs(scale.w);
+    float minRadius2 = sphereRadius * sphereRadius;
+
+    float3 p = pos;
+    float3 p0 = p;
+    float trap = 1.0;
+    
+    int steps = max(int(float(colorIters) * quality), 2);
+    for (int i = 0; i < steps; i++)
+    {
+        p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
+        float r2 = dot(p, p);
+        p *= clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
+        p = p * scale.xyz + p0;
+        trap = min(trap, r2);
+    }
+    
+    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
+    
+    return applyColorScheme(c, colorMix, scheme);
+}
+
+// Original colour function for backward compatibility
 half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters) 
 {
     float4 scale = float4(fractalScale) / minRad2Val;
@@ -960,7 +1147,7 @@ half3 Colour(float3 pos, float sphereR, float gTime, float quality, float minRad
     
     half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
     
-    // Half precision colors
+    // Half precision colors (classic palette)
     half3 col1 = half3(0.8h, 0.0h, 0.0h);
     half3 col2 = half3(0.4h, 0.4h, 0.5h);
     half3 col3 = half3(0.5h, 0.3h, 0.0h);
@@ -1162,13 +1349,42 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
 
 // =============================================================================
 
-// Simplified post effects using half precision
+// Post effects with color scheme support
+half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half limitFlash = 0.0h)
+{
+    // Saturation adjustment from scheme
+    half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
+    rgb = mix(half3(luma), rgb, half(scheme.saturation));
+    
+    // Brightness and contrast from scheme
+    rgb += half(scheme.brightness);
+    rgb = mix(half3(0.5h), rgb, half(scheme.contrast));
+    
+    // Simplified vignette
+    half2 q = xy * (1.0h - xy);
+    half vignetteBase = max(16.0h * q.x * q.y, kPowEpsilonHalf);
+    rgb *= 0.5h + 0.5h * powr(vignetteBase, 0.2h);
+    
+    // Limit flash effect - bright edge glow when parameter hits min/max
+    if (limitFlash > 0.01h) {
+        half2 edgeDist = abs(xy - 0.5h) * 2.0h;
+        half edge = max(edgeDist.x, edgeDist.y);
+        half edgeGlow = powr(edge, 2.0h) * limitFlash;
+        half3 flashColor = half3(1.0h, 0.4h, 0.1h);
+        rgb = mix(rgb, flashColor, edgeGlow * 0.8h);
+    }
+    
+    // Gamma from scheme
+    return powr(max(rgb, half3(kPowEpsilonHalf)), half3(scheme.gamma));
+}
+
+// Simplified post effects using half precision (legacy, uses constants)
 half3 PostEffects(half3 rgb, half2 xy, half limitFlash = 0.0h)
 {
     // Combined contrast/saturation/brightness in fewer ops
     half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
-    rgb = mix(half3(luma), rgb, 1.5h) * 1.5h; // saturation + brightness
-    rgb = mix(half3(0.5h), rgb, 1.08h);       // contrast
+    rgb = mix(half3(luma), rgb, kSaturation) * 1.5h; // saturation + brightness
+    rgb = mix(half3(0.5h), rgb, kContrast);       // contrast
     
     // Simplified vignette
     half2 q = xy * (1.0h - xy);
@@ -1444,14 +1660,14 @@ kernel void adaptiveHierarchical8x8(
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        // Choose coloring based on fractal type
+        // Choose coloring based on fractal type (using color scheme)
         if (fractalType == 1) {
-            col = ColourTriforce(p, adjustedDist, gTime, 1.0);
+            col = ColourTriforceWithScheme(p, 1.0, uniforms.colorMix, uniforms.foldingLimit, int(uniforms.colorIterations), uniforms.fractalScale, uniforms.colorScheme);
         } else if (fractalType == 2) {
-            col = ColourNegativeMandelbox(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations));
+            col = ColourNegativeMandelboxWithScheme(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme);
         } else {
-            col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
-                        uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, uniforms.colorIterations);
+            col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
+                        uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme);
         }
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
@@ -1472,11 +1688,11 @@ kernel void adaptiveHierarchical8x8(
     col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
     col = clamp(col, half3(0.0h), half3(2.0h));
     
-    // Apply PostEffects to match fragment shader exactly
-    // (saturation, contrast, vignette, gamma)
+    // Apply PostEffects with color scheme support
+    // (saturation, contrast, vignette, gamma from color scheme)
     // Compute approximate texCoord for vignette (0-1 range)
     half2 texCoord = half2(pixelCenter / uniforms.resolution);
-    col = PostEffects(col, texCoord, half(uniforms.limitFlash));
+    col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash));
     
     // Debug visualization
     // Use function constant to compile out debug code in release builds
@@ -1580,13 +1796,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
-            // Choose coloring based on fractal type
+            // Choose coloring based on fractal type (using color scheme)
             if (fractalType == 1) {
-                col = ColourTriforce(p, ret.x, gTime, quality);
+                col = ColourTriforceWithScheme(p, quality, uniforms.colorMix, uniforms.foldingLimit, max(int(uniforms.colorIterations * quality), 2), uniforms.fractalScale, uniforms.colorScheme);
             } else if (fractalType == 2) {
-                col = ColourNegativeMandelbox(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
+                col = ColourNegativeMandelboxWithScheme(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme);
             } else {
-                col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2));
+                col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme);
             }
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
 
@@ -1600,11 +1816,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
             if (fractalType == 1) {
-                col = ColourTriforce(p, ret.x, gTime, quality) * diffuse;
+                col = ColourTriforceWithScheme(p, quality, uniforms.colorMix, uniforms.foldingLimit, 2, uniforms.fractalScale, uniforms.colorScheme) * diffuse;
             } else if (fractalType == 2) {
-                col = ColourNegativeMandelbox(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
+                col = ColourNegativeMandelboxWithScheme(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, 2, uniforms.colorScheme) * diffuse;
             } else {
-                col = Colour(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2) * diffuse;
+                col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2, uniforms.colorScheme) * diffuse;
             }
         }
 
@@ -1627,9 +1843,9 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     col = clamp(col, half3(0.0h), half3(2.0h));
 
     if (quality > kMinQualityForPostFX) {
-        col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
+        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash));
     } else {
-        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(kGamma));
+        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
     }
 
     // Render HUD overlay if enabled
@@ -1740,12 +1956,13 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
+        // Choose coloring based on fractal type (using color scheme)
         if (fractalType == 1) {
-            col = ColourTriforce(p, adjustedDist, gTime, 1.0);
+            col = ColourTriforceWithScheme(p, 1.0, uniforms.colorMix, uniforms.foldingLimit, max(int(uniforms.colorIterations), 2), uniforms.fractalScale, uniforms.colorScheme);
         } else if (fractalType == 2) {
-            col = ColourNegativeMandelbox(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
+            col = ColourNegativeMandelboxWithScheme(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme);
         } else {
-            col = Colour(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2));
+            col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme);
         }
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
@@ -1774,7 +1991,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     col = clamp(col, half3(0.0h), half3(2.0h));
     
-    col = PostEffects(col, half2(in.texCoord), half(uniforms.limitFlash));
+    col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash));
     
     output.color = float4(float3(col), 1.0);
     
