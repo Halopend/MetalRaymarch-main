@@ -135,7 +135,7 @@ struct ContentView: View {
                 }
                 .padding(.bottom, 8)
                 
-                // Resolution scale and upscaling controls removed to keep UI focused on native/foveated path.
+                // Render scale control lives in Safety & Render Options.
 
                 // Tile-based rendering mode (2x2 quad sharing shadows)
                 HStack {
@@ -427,6 +427,13 @@ struct ContentView: View {
 
                                 Text("Foveation Intensity")
                                 Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
+
+                                Text("Render Scale (MetalFX): \(appModel.renderSettings.resolutionScale, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.resolutionScale },
+                                    set: { appModel.renderSettings.resolutionScale = $0 }
+                                ), in: 0.5...1.0)
+                                .help("Lower values render at reduced resolution and upscale with MetalFX")
                                 
                                 Divider()
                                 

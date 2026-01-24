@@ -59,6 +59,9 @@ class AppModel {
     
     var immersiveSpaceState = ImmersiveSpaceState.closed
 
+    // App activity state (used to avoid submitting GPU work while backgrounded)
+    nonisolated(unsafe) var isAppActive: Bool = true
+
     var fps: Double = 0
     
     nonisolated let renderSettings = RenderSettings()
@@ -420,9 +423,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
-    private var _resolutionScale: Float = 1.0       // Native resolution (MetalFX removed)
+    private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
     private var _fractalType: FractalType = .mandelbox  // Current fractal type
-    private var _preferFoveated: Bool = false        // When true, disable MetalFX and keep system foveation
+    private var _preferFoveated: Bool = false        // Legacy flag (no longer mutually exclusive)
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
@@ -557,7 +560,7 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _fractalType = newValue } }
     }
 
-    /// Prefer system foveated rendering over MetalFX upscaling (mutually exclusive)
+    /// Prefer system foveated rendering over MetalFX upscaling (legacy; now allowed together)
     var preferFoveated: Bool {
         get { withLock { _preferFoveated } }
         set { withLock { _preferFoveated = newValue } }

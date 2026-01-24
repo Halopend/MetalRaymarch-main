@@ -71,7 +71,12 @@ struct MetalProjectTestApp: App {
             // Handle app becoming active from background/terminated state
             if newPhase == .active {
                 Task { @MainActor in
+                    appModel.isAppActive = true
                     appModel.ensureWindowContentVisible()
+                }
+            } else {
+                Task { @MainActor in
+                    appModel.isAppActive = false
                 }
             }
         }
