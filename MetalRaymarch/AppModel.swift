@@ -183,6 +183,9 @@ enum ColorScheme: Int32, CaseIterable {
     case mono = 5           // Grayscale with subtle tints
     case aurora = 6         // Northern lights (greens/blues/purples)
     case volcanic = 7       // Dark with lava accents
+    case neonCyber = 8      // Neon cyberpunk (hot pink/cyan/purple)
+    case neonSunset = 9     // Neon sunset (orange/magenta/violet)
+    case neonMatrix = 10    // Neon matrix (bright greens/black)
     
     var displayName: String {
         switch self {
@@ -194,6 +197,9 @@ enum ColorScheme: Int32, CaseIterable {
         case .mono: return "Mono"
         case .aurora: return "Aurora"
         case .volcanic: return "Volcanic"
+        case .neonCyber: return "Neon Cyber"
+        case .neonSunset: return "Neon Sunset"
+        case .neonMatrix: return "Neon Matrix"
         }
     }
     
@@ -207,6 +213,17 @@ enum ColorScheme: Int32, CaseIterable {
         case .mono: return "circle.lefthalf.filled"
         case .aurora: return "rainbow"
         case .volcanic: return "mountain.2"
+        case .neonCyber: return "bolt.circle.fill"
+        case .neonSunset: return "sun.horizon.fill"
+        case .neonMatrix: return "chevron.left.forwardslash.chevron.right"
+        }
+    }
+    
+    // Returns true if this scheme uses neon HSV mode
+    var isNeonMode: Bool {
+        switch self {
+        case .neonCyber, .neonSunset, .neonMatrix: return true
+        default: return false
         }
     }
     
@@ -278,27 +295,72 @@ enum ColorScheme: Int32, CaseIterable {
                     SIMD3<Float>(1.0, 0.8, 0.1),    // Lava yellow
                     SIMD3<Float>(0.8, 0.1, 0.0),    // Deep red
                     SIMD3<Float>(1.5, 0.7, 0.4))
+                    
+        case .neonCyber:
+            // Cyberpunk neon - hot pink, electric cyan, purple
+            return (SIMD3<Float>(1.0, 0.0, 0.6),    // Hot pink
+                    SIMD3<Float>(0.0, 1.0, 1.0),    // Electric cyan
+                    SIMD3<Float>(0.6, 0.0, 1.0),    // Purple
+                    SIMD3<Float>(1.0, 0.3, 0.8),    // Magenta
+                    SIMD3<Float>(1.0, 1.0, 0.8))
+                    
+        case .neonSunset:
+            // Neon sunset - orange, magenta, violet
+            return (SIMD3<Float>(1.0, 0.4, 0.0),    // Neon orange
+                    SIMD3<Float>(1.0, 0.0, 0.5),    // Magenta
+                    SIMD3<Float>(0.5, 0.0, 1.0),    // Violet
+                    SIMD3<Float>(1.0, 0.6, 0.2),    // Light orange
+                    SIMD3<Float>(1.2, 0.9, 0.7))
+                    
+        case .neonMatrix:
+            // Matrix green on black
+            return (SIMD3<Float>(0.0, 1.0, 0.0),    // Pure neon green
+                    SIMD3<Float>(0.0, 0.6, 0.2),    // Dark green
+                    SIMD3<Float>(0.5, 1.0, 0.5),    // Light green
+                    SIMD3<Float>(0.0, 0.8, 0.3),    // Medium green
+                    SIMD3<Float>(0.8, 1.0, 0.6))
         }
     }
     
     // Suggested post-processing for this scheme - BOOSTED saturation values
     var postProcessing: (saturation: Float, contrast: Float, gamma: Float) {
         switch self {
-        case .classic:  return (2.0, 1.15, 0.45)   // Boosted saturation
-        case .ocean:    return (1.8, 1.12, 0.48)
-        case .fire:     return (2.2, 1.2, 0.42)    // Extra vibrant
-        case .forest:   return (1.8, 1.1, 0.5)
-        case .nebula:   return (2.3, 1.15, 0.42)   // Very saturated
-        case .mono:     return (0.6, 1.3, 0.46)    // Low saturation, high contrast
-        case .aurora:   return (2.5, 1.15, 0.4)    // Maximum vibrancy
-        case .volcanic: return (2.0, 1.35, 0.38)   // High contrast for drama
+        case .classic:    return (2.0, 1.15, 0.45)   // Boosted saturation
+        case .ocean:      return (1.8, 1.12, 0.48)
+        case .fire:       return (2.2, 1.2, 0.42)    // Extra vibrant
+        case .forest:     return (1.8, 1.1, 0.5)
+        case .nebula:     return (2.3, 1.15, 0.42)   // Very saturated
+        case .mono:       return (0.6, 1.3, 0.46)    // Low saturation, high contrast
+        case .aurora:     return (2.5, 1.15, 0.4)    // Maximum vibrancy
+        case .volcanic:   return (2.0, 1.35, 0.38)   // High contrast for drama
+        case .neonCyber:  return (2.8, 1.2, 0.38)    // Extreme saturation for neon
+        case .neonSunset: return (2.6, 1.25, 0.4)    // Warm neon
+        case .neonMatrix: return (3.0, 1.4, 0.35)    // Maximum green intensity
+        }
+    }
+    
+    // Neon mode parameters (only used when isNeonMode is true)
+    var neonParams: (hueFreq: Float, hueOffset: Float, bandFreq: Float, stripeFreq: Float, 
+                     stripeStrength: Float, glowSharpness: Float, satPower: Float) {
+        switch self {
+        case .neonCyber:
+            return (3.0, 0.83, 10.0, 8.0, 0.5, 3.5, 0.35)  // Pink-cyan hue range
+        case .neonSunset:
+            return (2.5, 0.05, 6.0, 5.0, 0.4, 3.0, 0.4)    // Orange-violet range
+        case .neonMatrix:
+            return (1.0, 0.33, 12.0, 10.0, 0.6, 4.0, 0.3)  // Tight green hue, strong bands
+        default:
+            return (3.0, 0.0, 8.0, 6.0, 0.4, 3.0, 0.4)     // Default values
         }
     }
     
     // Create shader-compatible ColorSchemeParams
-    func toShaderParams(colorMix: Float, transitionProgress: Float = 1.0, previousScheme: ColorScheme? = nil) -> ColorSchemeParams {
+    func toShaderParams(colorMix: Float, transitionProgress: Float = 1.0, previousScheme: ColorScheme? = nil,
+                        animTime: Float = 0.0, hueCycleSpeed: Float = 0.0, pulseSpeed: Float = 0.0,
+                        pulseAmount: Float = 0.0, glowIntensity: Float = 0.0, bloomStrength: Float = 0.0) -> ColorSchemeParams {
         let pal = palette
         let pp = postProcessing
+        let neon = neonParams
         return ColorSchemeParams(
             color1: pal.color1,
             color2: pal.color2,
@@ -309,6 +371,20 @@ enum ColorScheme: Int32, CaseIterable {
             contrast: pp.contrast,
             gamma: pp.gamma,
             brightness: 0.0,
+            neonIntensity: isNeonMode ? 1.0 : 0.0,
+            hueFrequency: neon.hueFreq,
+            hueOffset: neon.hueOffset,
+            bandFrequency: neon.bandFreq,
+            stripeFrequency: neon.stripeFreq,
+            stripeStrength: neon.stripeStrength,
+            glowSharpness: neon.glowSharpness,
+            saturationPower: neon.satPower,
+            animTime: animTime,
+            hueCycleSpeed: hueCycleSpeed,
+            pulseSpeed: pulseSpeed,
+            pulseAmount: pulseAmount,
+            glowIntensity: glowIntensity,
+            bloomStrength: bloomStrength,
             transitionProgress: transitionProgress,
             previousScheme: previousScheme?.rawValue ?? self.rawValue,
             currentScheme: self.rawValue,
@@ -340,7 +416,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _maxRaySteps: Int = 64              // Mid quality default
     private var _foveationIntensity: Float = 1.0    // Gentle shader-side foveation (rate maps handle gaze tracking)
     private var _colorMix: Float = 0.5
-    private var _glowIntensity: Float = 0.2
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
@@ -378,9 +453,19 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeTransitionDuration: Float = 2.0 // Seconds to transition between schemes
     private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes
     private var _colorSchemeAutoInterval: Float = 30.0      // Seconds between auto-transitions
+    private var _colorSchemeAutoTimer: Float = 0.0          // Timer for auto-transitions
     private var _colorSchemeSaturation: Float = 2.0         // Color saturation override (boosted)
-    private var _colorSchemeContrast: Float = 1.15          // Contrast override (boosted)
-    private var _colorSchemeGamma: Float = 0.45             // Gamma override (slightly darker for richer colors)
+    private var _colorSchemeContrast: Float = 1.05          // Contrast override (default 1.05)
+    private var _colorSchemeGamma: Float = 0.5              // Gamma override (default 0.5)
+    
+    // === DYNAMIC COLOR ANIMATION ===
+    // All animation effects default to OFF (0.0) so user must enable them
+    private var _colorAnimTime: Float = 0.0                 // Running animation time
+    private var _hueCycleSpeed: Float = 0.0                 // Hue rotation speed (0 = off, 0.05 = slow, 0.2 = fast)
+    private var _pulseSpeed: Float = 0.0                    // Pulse frequency (0 = off, 0.3 = slow, 1.0 = fast)
+    private var _pulseAmount: Float = 0.0                   // Pulse intensity (0 = off, 0.15 = subtle)
+    private var _glowIntensity: Float = 0.0                 // Ray-step glow (0 = off, 0.3 = moderate)
+    private var _bloomStrength: Float = 0.0                 // Bloom effect (0 = off, 0.2 = subtle)
     
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
@@ -437,11 +522,6 @@ final class RenderSettings: @unchecked Sendable {
     var colorMix: Float {
         get { withLock { _colorMix } }
         set { withLock { _colorMix = newValue } }
-    }
-    
-    var glowIntensity: Float {
-        get { withLock { _glowIntensity } }
-        set { withLock { _glowIntensity = newValue } }
     }
 
     var lightingPlay: Bool {
@@ -654,9 +734,43 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _colorSchemeGamma = max(0.2, min(1.0, newValue)) } }
     }
     
-    /// Update color scheme transitions. Call once per frame.
+    /// Hue cycle speed (rotations per second, 0 = static)
+    var hueCycleSpeed: Float {
+        get { withLock { _hueCycleSpeed } }
+        set { withLock { _hueCycleSpeed = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Pulse animation speed (Hz)
+    var pulseSpeed: Float {
+        get { withLock { _pulseSpeed } }
+        set { withLock { _pulseSpeed = max(0.0, min(2.0, newValue)) } }
+    }
+    
+    /// Pulse animation amount (0-1)
+    var pulseAmount: Float {
+        get { withLock { _pulseAmount } }
+        set { withLock { _pulseAmount = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Ray-step based glow intensity (0-1)
+    var glowIntensity: Float {
+        get { withLock { _glowIntensity } }
+        set { withLock { _glowIntensity = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Bloom effect strength (0-1)
+    var bloomStrength: Float {
+        get { withLock { _bloomStrength } }
+        set { withLock { _bloomStrength = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Update color scheme transitions and animation time. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
         withLock {
+            // Update animation time
+            _colorAnimTime += deltaTime
+            
+            // Handle ongoing transition
             if _colorSchemeTransitionProgress < 1.0 {
                 let step = deltaTime / _colorSchemeTransitionDuration
                 _colorSchemeTransitionProgress = min(1.0, _colorSchemeTransitionProgress + step)
@@ -664,6 +778,23 @@ final class RenderSettings: @unchecked Sendable {
                 // When transition completes, update current scheme
                 if _colorSchemeTransitionProgress >= 1.0 {
                     _colorScheme = _targetColorScheme
+                }
+            }
+            
+            // Handle auto-cycling
+            if _colorSchemeAutoTransition && _colorSchemeTransitionProgress >= 1.0 {
+                _colorSchemeAutoTimer += deltaTime
+                if _colorSchemeAutoTimer >= _colorSchemeAutoInterval {
+                    _colorSchemeAutoTimer = 0.0
+                    // Transition to next scheme
+                    let allSchemes = ColorScheme.allCases
+                    if let currentIndex = allSchemes.firstIndex(of: _targetColorScheme) {
+                        let nextIndex = (allSchemes.distance(from: allSchemes.startIndex, to: currentIndex) + 1) % allSchemes.count
+                        let nextScheme = allSchemes[allSchemes.index(allSchemes.startIndex, offsetBy: nextIndex)]
+                        _colorScheme = _targetColorScheme
+                        _targetColorScheme = nextScheme
+                        _colorSchemeTransitionProgress = 0.0
+                    }
                 }
             }
         }
@@ -674,6 +805,8 @@ final class RenderSettings: @unchecked Sendable {
         return withLock {
             let currentPal = _targetColorScheme.palette
             let previousPal = _colorScheme.palette
+            let currentNeon = _targetColorScheme.neonParams
+            let previousNeon = _colorScheme.neonParams
             
             // Interpolate between previous and target palettes
             let t = _colorSchemeTransitionProgress
@@ -682,6 +815,20 @@ final class RenderSettings: @unchecked Sendable {
             let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
             let altColor1 = simd_mix(previousPal.altColor1, currentPal.altColor1, SIMD3<Float>(repeating: t))
             let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
+            
+            // Interpolate neon intensity (0 for non-neon, 1 for neon)
+            let prevNeonIntensity: Float = _colorScheme.isNeonMode ? 1.0 : 0.0
+            let currNeonIntensity: Float = _targetColorScheme.isNeonMode ? 1.0 : 0.0
+            let neonIntensity = prevNeonIntensity + (currNeonIntensity - prevNeonIntensity) * t
+            
+            // Interpolate neon parameters
+            let hueFreq = previousNeon.hueFreq + (currentNeon.hueFreq - previousNeon.hueFreq) * t
+            let hueOffset = previousNeon.hueOffset + (currentNeon.hueOffset - previousNeon.hueOffset) * t
+            let bandFreq = previousNeon.bandFreq + (currentNeon.bandFreq - previousNeon.bandFreq) * t
+            let stripeFreq = previousNeon.stripeFreq + (currentNeon.stripeFreq - previousNeon.stripeFreq) * t
+            let stripeStrength = previousNeon.stripeStrength + (currentNeon.stripeStrength - previousNeon.stripeStrength) * t
+            let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
+            let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
             
             return ColorSchemeParams(
                 color1: color1,
@@ -693,6 +840,20 @@ final class RenderSettings: @unchecked Sendable {
                 contrast: _colorSchemeContrast,
                 gamma: _colorSchemeGamma,
                 brightness: 0.0,
+                neonIntensity: neonIntensity,
+                hueFrequency: hueFreq,
+                hueOffset: hueOffset,
+                bandFrequency: bandFreq,
+                stripeFrequency: stripeFreq,
+                stripeStrength: stripeStrength,
+                glowSharpness: glowSharpness,
+                saturationPower: satPower,
+                animTime: _colorAnimTime,
+                hueCycleSpeed: _hueCycleSpeed,
+                pulseSpeed: _pulseSpeed,
+                pulseAmount: _pulseAmount,
+                glowIntensity: _glowIntensity,
+                bloomStrength: _bloomStrength,
                 transitionProgress: t,
                 previousScheme: _colorScheme.rawValue,
                 currentScheme: _targetColorScheme.rawValue,

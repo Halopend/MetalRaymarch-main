@@ -261,14 +261,15 @@ struct ContentView: View {
                                 Text("Color Scheme")
                                     .font(.headline)
                                 
-                                // Grid of color scheme buttons
+                                // Standard schemes
+                                Text("Standard").font(.subheadline).foregroundColor(.secondary)
                                 LazyVGrid(columns: [
                                     GridItem(.flexible()),
                                     GridItem(.flexible()),
                                     GridItem(.flexible()),
                                     GridItem(.flexible())
                                 ], spacing: 8) {
-                                    ForEach(ColorScheme.allCases, id: \.rawValue) { scheme in
+                                    ForEach(ColorScheme.allCases.filter { !$0.isNeonMode }, id: \.rawValue) { scheme in
                                         Button {
                                             appModel.renderSettings.transitionToColorScheme(scheme)
                                         } label: {
@@ -283,6 +284,31 @@ struct ContentView: View {
                                         }
                                         .buttonStyle(.bordered)
                                         .tint(appModel.renderSettings.colorScheme == scheme ? .blue : .secondary)
+                                    }
+                                }
+                                
+                                // Neon schemes with special styling
+                                Text("Neon").font(.subheadline).foregroundColor(.pink)
+                                LazyVGrid(columns: [
+                                    GridItem(.flexible()),
+                                    GridItem(.flexible()),
+                                    GridItem(.flexible())
+                                ], spacing: 8) {
+                                    ForEach(ColorScheme.allCases.filter { $0.isNeonMode }, id: \.rawValue) { scheme in
+                                        Button {
+                                            appModel.renderSettings.transitionToColorScheme(scheme)
+                                        } label: {
+                                            VStack(spacing: 4) {
+                                                Image(systemName: scheme.icon)
+                                                    .font(.title2)
+                                                Text(scheme.displayName)
+                                                    .font(.caption2)
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .tint(appModel.renderSettings.colorScheme == scheme ? .pink : .purple)
                                     }
                                 }
                                 
@@ -331,6 +357,41 @@ struct ContentView: View {
                                 
                                 Divider()
                                 
+                                // === COLOR ANIMATION CONTROLS ===
+                                Text("Color Animation").font(.headline)
+                                
+                                Text("Hue Cycle Speed: \(appModel.renderSettings.hueCycleSpeed, specifier: "%.3f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.hueCycleSpeed },
+                                    set: { appModel.renderSettings.hueCycleSpeed = $0 }
+                                ), in: 0...0.5)
+                                
+                                Text("Pulse Speed: \(appModel.renderSettings.pulseSpeed, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.pulseSpeed },
+                                    set: { appModel.renderSettings.pulseSpeed = $0 }
+                                ), in: 0...2)
+                                
+                                Text("Pulse Amount: \(appModel.renderSettings.pulseAmount, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.pulseAmount },
+                                    set: { appModel.renderSettings.pulseAmount = $0 }
+                                ), in: 0...1)
+                                
+                                Text("Glow Intensity: \(appModel.renderSettings.glowIntensity, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.glowIntensity },
+                                    set: { appModel.renderSettings.glowIntensity = $0 }
+                                ), in: 0...1)
+                                
+                                Text("Bloom Strength: \(appModel.renderSettings.bloomStrength, specifier: "%.2f")")
+                                Slider(value: Binding(
+                                    get: { appModel.renderSettings.bloomStrength },
+                                    set: { appModel.renderSettings.bloomStrength = $0 }
+                                ), in: 0...1)
+
+                                Divider()
+                                
                                 HStack {
                                     Button {
                                         appModel.renderSettings.lightingPlay.toggle()
@@ -344,9 +405,6 @@ struct ContentView: View {
 
                                 Text("Color Mix")
                                 Slider(value: Binding(get: { appModel.renderSettings.colorMix }, set: { appModel.renderSettings.colorMix = $0 }), in: 0...1.0)
-
-                                Text("Glow Intensity")
-                                Slider(value: Binding(get: { appModel.renderSettings.glowIntensity }, set: { appModel.renderSettings.glowIntensity = $0 }), in: 0...2.0)
 
                                 Text("Color Iterations: \(appModel.renderSettings.colorIterations, specifier: "%.0f")")
                                 Slider(value: Binding(get: { appModel.renderSettings.colorIterations }, set: { appModel.renderSettings.colorIterations = $0 }), in: 4...16, step: 1)

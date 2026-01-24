@@ -67,7 +67,10 @@ typedef NS_ENUM(EnumBackingType, ColorSchemeType)
     ColorSchemeMono              = 5,  // Grayscale with subtle tints
     ColorSchemeAurora            = 6,  // Northern lights (greens/blues/purples)
     ColorSchemeVolcanic          = 7,  // Dark with lava accents
-    ColorSchemeCount             = 8,  // Number of schemes (for bounds checking)
+    ColorSchemeNeonCyber         = 8,  // Neon cyberpunk (hot pink/cyan/purple)
+    ColorSchemeNeonSunset        = 9,  // Neon sunset (orange/magenta/violet)
+    ColorSchemeNeonMatrix        = 10, // Neon matrix (bright greens/black)
+    ColorSchemeCount             = 11, // Number of schemes (for bounds checking)
 };
 
 // Color scheme parameters passed to shader
@@ -85,9 +88,27 @@ typedef struct
     
     // Post-processing adjustments
     float saturation;                 // Color saturation multiplier (default 1.5)
-    float contrast;                   // Contrast adjustment (default 1.08)
-    float gamma;                      // Gamma correction (default 0.47)
+    float contrast;                   // Contrast adjustment (default 1.05)
+    float gamma;                      // Gamma correction (default 0.5)
     float brightness;                 // Brightness offset (default 0.0)
+    
+    // Neon mode parameters (HSV-based orbit trap coloring)
+    float neonIntensity;              // 0 = off, 1 = full neon mode
+    float hueFrequency;               // Frequency of hue variation (default 3.0)
+    float hueOffset;                  // Base hue offset (default 0.0)
+    float bandFrequency;              // Distance band frequency for glow rings (default 8.0)
+    float stripeFrequency;            // Iteration stripe frequency (default 6.0)
+    float stripeStrength;             // Stripe intensity (default 0.4)
+    float glowSharpness;              // How sharp the bright cores are (default 3.0)
+    float saturationPower;            // Power for saturation curve, <1 flattens to 1.0 (default 0.4)
+    
+    // Dynamic animation parameters
+    float animTime;                   // Current animation time (seconds)
+    float hueCycleSpeed;              // Speed of hue rotation (0 = static, 0.1 = slow)
+    float pulseSpeed;                 // Speed of brightness/saturation pulse (0 = static)
+    float pulseAmount;                // Amount of pulse effect (0-1)
+    float glowIntensity;              // Ray-step based glow intensity (0-1)
+    float bloomStrength;              // Cheap bloom effect strength (0-1)
     
     // Animation/transition
     float transitionProgress;         // 0-1: blend from previous to current scheme

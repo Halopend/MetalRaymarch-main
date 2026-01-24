@@ -447,7 +447,60 @@ FORCE_INLINE float MapTriforce(float3 pos, TriforceParams params, int iterations
     return d;
 }
 
-// Triforce/IFS color function with color scheme support
+// =============================================================================
+// COLOR SCHEME FUNCTIONS (must be before color functions that use them)
+// =============================================================================
+
+// HSV to RGB conversion (h, s, v all in 0-1 range)
+FORCE_INLINE half3 hsv2rgb(half h, half s, half v)
+{
+    half3 rgb = clamp(abs(fract(h + half3(0.0h, 2.0h/3.0h, 1.0h/3.0h)) * 6.0h - 3.0h) - 1.0h, 0.0h, 1.0h);
+    return v * mix(half3(1.0h), rgb, s);
+}
+
+// Neon orbit trap coloring - creates vibrant, glowing neon bands
+// Based on: trapMin (min distance to trap), trapIter (normalized iteration), trapAngle (angle-based)
+FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAngle, ColorSchemeParams scheme)
+{
+    half d = saturate(trapMin);
+    half it = saturate(trapIter);
+    half ang = fract(trapAngle);
+    
+    // Hue: base from angle (creates swirling color bands)
+    half h = fract(ang * half(scheme.hueFrequency) + half(scheme.hueOffset));
+    // Modulate with distance for color shifts away from trap
+    h += 0.25h * pow(1.0h - d, 0.7h);
+    h = fract(h);
+    
+    // Saturation: flatten toward 1.0 with power curve (neon wants near-max)
+    half s = pow(1.0h - d, half(scheme.saturationPower));
+    
+    // Value: sharp bright cores with stripe modulation
+    half vCore = pow(1.0h - d, half(scheme.glowSharpness));
+    
+    // Add iteration-based stripes for extra visual interest
+    half vStripe = 0.5h + 0.5h * cos(6.28318h * it * half(scheme.stripeFrequency));
+    half v = saturate(mix(vCore, 1.0h, half(scheme.stripeStrength) * vStripe));
+    
+    // Distance banding for glowing "rings"
+    half band = fract(d * half(scheme.bandFrequency));
+    v *= 0.7h + 0.3h * (1.0h - band * band);  // Soft glow at band edges
+    
+    // Convert HSV to RGB
+    half3 rgb = hsv2rgb(h, s, v);
+    
+    // Tint toward scheme colors for palette coherence
+    half3 col1 = half3(scheme.color1);
+    half3 col2 = half3(scheme.color2);
+    half3 tint = mix(col1, col2, h);
+    rgb = mix(rgb, rgb * tint * 2.0h, 0.3h);
+    
+    return rgb;
+}
+
+// =============================================================================
+
+// Triforce/IFS color function with color scheme support and neon mode
 half3 ColourTriforceWithScheme(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale, ColorSchemeParams scheme) 
 {
     float3 z = pos;
@@ -457,6 +510,7 @@ half3 ColourTriforceWithScheme(float3 pos, float quality, float colorMix, float 
     // Orbit trap variables
     float minDist = 1e10;
     float3 trapPos = z;
+    int trapIter = 0;
     
     int steps = max(int(float(colorIters) * quality), 2);
     steps = min(steps, 10);
@@ -470,15 +524,36 @@ half3 ColourTriforceWithScheme(float3 pos, float quality, float colorMix, float 
         // Scale and translate
         z = z * Scale - Offset * (Scale - 1.0);
         
-        // Track orbit trap
+        // Track orbit trap with iteration
         float d = dot(z, z);
         if (d < minDist) {
             minDist = d;
             trapPos = z;
+            trapIter = n;
         }
     }
     
-    // Generate colors from orbit trap
+    // Check if neon mode is active
+    if (scheme.neonIntensity > 0.01f) {
+        half trapMin = half(saturate(sqrt(minDist) * 0.3));
+        half trapIterNorm = half(float(trapIter) / float(steps));
+        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f);
+        
+        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
+        
+        if (scheme.neonIntensity < 0.99f) {
+            half trapNorm = half(saturate(sqrt(minDist) * 0.5));
+            half posNorm = half(saturate(length(trapPos) * 0.2));
+            half3 col1 = half3(scheme.color1);
+            half3 col2 = half3(scheme.color2);
+            half3 col3 = half3(scheme.color3);
+            half3 standardColor = mix(mix(col1, col2, trapNorm), col3, posNorm);
+            return mix(standardColor, neonColor, half(scheme.neonIntensity));
+        }
+        return neonColor;
+    }
+    
+    // Generate colors from orbit trap (standard mode)
     half trapNorm = half(saturate(sqrt(minDist) * 0.5));
     half posNorm = half(saturate(length(trapPos) * 0.2));
     
@@ -690,6 +765,7 @@ half3 ColourNegativeMandelboxWithScheme(float3 pos, float quality, float minRad2
     float3 p0 = p;
     float trap = 1.0;
     float minTrap = 1.0;
+    int trapIter = 0;
     float3 trapPos = p;  // Track position at minimum trap
     
     int steps = max(int(float(colorIters) * quality), 2);
@@ -707,15 +783,41 @@ half3 ColourNegativeMandelboxWithScheme(float3 pos, float quality, float minRad2
         // Scale with -1.5
         p = p * scale.xyz + p0;
         
-        // Track orbit trap with position
+        // Track orbit trap with iteration and position
         if (r2 < minTrap) {
             minTrap = r2;
+            trapIter = i;
             trapPos = p;
         }
         trap = min(trap, r2);
     }
     
-    // Enhanced color mapping with more channels
+    // Check if neon mode is active
+    if (scheme.neonIntensity > 0.01f) {
+        // Compute neon orbit trap metrics with extra depth variation for negative mandelbox
+        half trapMin = half(sqrt(trap));
+        half trapIterNorm = half(float(trapIter) / float(steps));
+        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f);
+        
+        // Add depth influence for negative mandelbox's organic structures
+        half depthVal = half(saturate(length(p - p0) * 0.08));
+        trapMin = mix(trapMin, depthVal, 0.3h);
+        
+        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
+        
+        if (scheme.neonIntensity < 0.99f) {
+            // Blend with standard coloring
+            half2 c = saturate(half2(0.3333h * log(half(dot(p, p))) - 1.0h, sqrt(half(trap))));
+            half3 col1 = half3(scheme.color1);
+            half3 col2 = half3(scheme.color2);
+            half3 col3 = half3(scheme.color3);
+            half3 standardColor = mix(mix(col1, col2, c.y), col3, c.x);
+            return mix(standardColor, neonColor, half(scheme.neonIntensity));
+        }
+        return neonColor;
+    }
+    
+    // Standard enhanced color mapping with more channels
     half logVal = 0.3333h * log(half(dot(p, p))) - 1.0h;
     half trapVal = sqrt(half(trap));
     half posVal = half(length(trapPos) * 0.15);  // Position-based variation
@@ -1056,7 +1158,7 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
 }
 
 // =============================================================================
-// COLOR SCHEME FUNCTIONS
+// ADDITIONAL COLOR SCHEME FUNCTIONS
 // =============================================================================
 
 // Apply color scheme to base color values (c.x = log-based, c.y = trap-based)
@@ -1099,6 +1201,7 @@ FORCE_INLINE half3 applyColorPostProcessing(half3 color, ColorSchemeParams schem
 // =============================================================================
 
 // Optimized colour function using half precision with color scheme support
+// Enhanced with neon mode orbit trap tracking
 half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme) 
 {
     float4 scale = float4(fractalScale) / minRad2Val;
@@ -1108,6 +1211,9 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
     float3 p = pos;
     float3 p0 = p;
     float trap = 1.0;
+    float minTrap = 1.0;
+    int trapIter = 0;
+    float3 trapPos = p;
     
     int steps = max(int(float(colorIters) * quality), 2);
     for (int i = 0; i < steps; i++)
@@ -1116,11 +1222,35 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
         float r2 = dot(p, p);
         p *= clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
         p = p * scale.xyz + p0;
+        
+        // Track orbit trap with iteration and position
+        if (r2 < minTrap) {
+            minTrap = r2;
+            trapIter = i;
+            trapPos = p;
+        }
         trap = min(trap, r2);
     }
     
-    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
+    // Check if neon mode is active
+    if (scheme.neonIntensity > 0.01f) {
+        // Compute neon orbit trap metrics
+        half trapMin = half(sqrt(trap));
+        half trapIterNorm = half(float(trapIter) / float(steps));
+        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f); // Normalized to 0-1
+        
+        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
+        
+        // If neonIntensity < 1, blend with standard coloring
+        if (scheme.neonIntensity < 0.99f) {
+            half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
+            half3 standardColor = applyColorScheme(c, colorMix, scheme);
+            return mix(standardColor, neonColor, half(scheme.neonIntensity));
+        }
+        return neonColor;
+    }
     
+    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
     return applyColorScheme(c, colorMix, scheme);
 }
 
@@ -1349,16 +1479,73 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
 
 // =============================================================================
 
-// Post effects with color scheme support
-half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half limitFlash = 0.0h)
+// Post effects with color scheme support and dynamic animation
+half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half limitFlash = 0.0h, half rayGlow = 0.0h)
 {
-    // Saturation adjustment from scheme
+    // === DYNAMIC HUE CYCLING ===
+    // Rotate hue over time for animated color shifts
+    // Use full precision for time calculation to avoid quantization artifacts
+    if (scheme.hueCycleSpeed > 0.001f) {
+        // Keep angle calculation in float precision, wrap to [0, 2π] to prevent precision loss
+        float rawAngle = scheme.animTime * scheme.hueCycleSpeed * 6.28318f;
+        float wrappedAngle = fmod(rawAngle, 6.28318f);  // Wrap to avoid large values
+        half hueAngle = half(wrappedAngle);
+        half cosH = cos(hueAngle);
+        half sinH = sin(hueAngle);
+        // Simplified hue rotation (YIQ-like transform)
+        half3 yiq;
+        yiq.x = dot(rgb, half3(0.299h, 0.587h, 0.114h));  // Luma (Y)
+        yiq.y = dot(rgb, half3(0.596h, -0.274h, -0.322h)); // I
+        yiq.z = dot(rgb, half3(0.211h, -0.523h, 0.312h));  // Q
+        // Rotate I and Q
+        half newY = yiq.y * cosH - yiq.z * sinH;
+        half newZ = yiq.y * sinH + yiq.z * cosH;
+        // Convert back to RGB
+        rgb.r = yiq.x + 0.956h * newY + 0.621h * newZ;
+        rgb.g = yiq.x - 0.272h * newY - 0.647h * newZ;
+        rgb.b = yiq.x - 1.106h * newY + 1.703h * newZ;
+        rgb = saturate(rgb);
+    }
+    
+    // === PULSE ANIMATION ===
+    // Add breathing/pulsing effect to saturation
+    half pulse = 1.0h;
+    if (scheme.pulseSpeed > 0.001f && scheme.pulseAmount > 0.001f) {
+        // Use float precision for time calculation, wrap to avoid precision loss
+        float rawPulseAngle = scheme.animTime * scheme.pulseSpeed * 6.28318f;
+        float wrappedPulseAngle = fmod(rawPulseAngle, 6.28318f);
+        half pulseWave = 0.5h + 0.5h * sin(half(wrappedPulseAngle));
+        pulse = 1.0h + half(scheme.pulseAmount) * (pulseWave - 0.5h);
+    }
+    
+    // Saturation adjustment from scheme (with pulse)
     half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
-    rgb = mix(half3(luma), rgb, half(scheme.saturation));
+    half satMult = half(scheme.saturation) * pulse;
+    rgb = mix(half3(luma), rgb, satMult);
     
     // Brightness and contrast from scheme
     rgb += half(scheme.brightness);
     rgb = mix(half3(0.5h), rgb, half(scheme.contrast));
+    
+    // === RAY-STEP GLOW (cheap bloom approximation) ===
+    // Points near the fractal (high ray steps) get a soft glow
+    if (rayGlow > 0.01h && scheme.glowIntensity > 0.001f) {
+        half glowAmount = rayGlow * half(scheme.glowIntensity);
+        // Additive glow based on the brightest channel
+        half maxC = max(max(rgb.r, rgb.g), rgb.b);
+        half3 glowColor = rgb * (1.0h + glowAmount * 2.0h);
+        rgb = mix(rgb, glowColor, glowAmount * 0.5h);
+    }
+    
+    // === BLOOM EFFECT (cheap screen-space approximation) ===
+    if (scheme.bloomStrength > 0.001f) {
+        // Bright areas bloom more - threshold based
+        half brightness = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+        half bloomThreshold = 0.7h;
+        half bloomAmount = max(0.0h, brightness - bloomThreshold) * half(scheme.bloomStrength);
+        // Desaturate and brighten for bloom
+        rgb += bloomAmount * half3(0.3h, 0.3h, 0.35h);
+    }
     
     // Simplified vignette
     half2 q = xy * (1.0h - xy);
@@ -1692,7 +1879,7 @@ kernel void adaptiveHierarchical8x8(
     // (saturation, contrast, vignette, gamma from color scheme)
     // Compute approximate texCoord for vignette (0-1 range)
     half2 texCoord = half2(pixelCenter / uniforms.resolution);
-    col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash));
+    col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash), glowH);
     
     // Debug visualization
     // Use function constant to compile out debug code in release builds
@@ -1843,7 +2030,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     col = clamp(col, half3(0.0h), half3(2.0h));
 
     if (quality > kMinQualityForPostFX) {
-        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash));
+        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glow);
     } else {
         col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
     }
@@ -1991,7 +2178,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     col = clamp(col, half3(0.0h), half3(2.0h));
     
-    col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash));
+    col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glowH);
     
     output.color = float4(float3(col), 1.0);
     
