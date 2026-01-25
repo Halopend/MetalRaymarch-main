@@ -166,12 +166,14 @@ enum FractalType: Int32, Codable {
     case mandelbox = 0
     case triforce = 1
     case negativeMandelbox = 2  // Scale = -1.5 Mandelbox (organic, dense)
+    case orbitDensity = 3       // 3D orbit-density variant (Buddhabrot-style)
     
     var displayName: String {
         switch self {
         case .mandelbox: return "Mandelbox"
         case .triforce: return "Triforce"
         case .negativeMandelbox: return "Negative Mandelbox"
+        case .orbitDensity: return "Orbit Density"
         }
     }
 }

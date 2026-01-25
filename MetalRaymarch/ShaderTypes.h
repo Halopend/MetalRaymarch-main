@@ -54,6 +54,7 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMandelbox         = 0,
     FractalTypeTriforce          = 1,
     FractalTypeNegativeMandelbox = 2,  // Scale = -1.5 Mandelbox (organic, dense)
+    FractalTypeOrbitDensity       = 3,  // 3D orbit-density variant (Buddhabrot-style)
 };
 
 // Color scheme selection (built-in presets)
@@ -183,8 +184,8 @@ typedef struct
     int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int showHUD;             // Show in-world HUD overlay (0/1)
-    int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    int fractalType;         // 0 = Mandelbox, 1 = Triforce, 2 = Negative Mandelbox (-1.5 scale)
+    int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
+    int fractalType;         // 0=Mandelbox, 1=Triforce, 2=Negative Mandelbox, 3=Orbit Density
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } Uniforms;
 
@@ -217,7 +218,7 @@ typedef struct
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
-    int fractalType;             // 0 = Mandelbox, 1 = Triforce, 2 = Negative Mandelbox
+    int fractalType;             // 0=Mandelbox, 1=Triforce, 2=Negative Mandelbox, 3=Orbit Density
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 

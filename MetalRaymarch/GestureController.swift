@@ -193,6 +193,8 @@ final class GestureController {
             return Self.triforceRanges
         case .negativeMandelbox:
             return Self.negativeMandelboxRanges
+        case .orbitDensity:
+            return Self.mandelboxRanges
         }
     }
     

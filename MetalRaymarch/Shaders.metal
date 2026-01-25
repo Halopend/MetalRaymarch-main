@@ -1130,7 +1130,7 @@ FORCE_INLINE float3 BlendTowardSymmetry(float3 currentDir, float3 targetSymmetry
 // =============================================================================
 
 // Unified distance function that selects fractal type at runtime
-// fractalType: 0 = Mandelbox, 1 = Triforce/Kaleidoscopic IFS, 2 = Negative -1.5 Mandelbox
+// fractalType: 0 = Mandelbox, 1 = Triforce/Kaleidoscopic IFS, 2 = Negative -1.5 Mandelbox, 3 = Orbit Density
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
 {
     if (fractalType == 2) {
@@ -1155,6 +1155,56 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
         // Mandelbox (default)
         return Map(pos, params, foldingLimit, iterations);
     }
+}
+
+// =============================================================================
+// ORBIT DENSITY (BUDDHABROT-STYLE) - 3D VARIANT
+// Computes a density value at a point based on escaping orbit behavior.
+// Not a true SDF; intended for volumetric accumulation.
+// =============================================================================
+
+FORCE_INLINE float OrbitDensityMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations, thread float &trap)
+{
+    float4 p = float4(pos, 1.0);
+    float4 p0 = p;
+    float invMinRadius2 = 1.0f / params.minRadius2;
+
+    float density = 0.0f;
+    float escaped = 0.0f;
+    trap = 1e9;
+
+    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
+
+    UNROLL_8
+    for (int i = 0; i < loopCount; i++)
+    {
+        // Box fold
+        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+
+        // Sphere fold
+        float r2 = dot(p.xyz, p.xyz);
+        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+        p *= t;
+
+        // Scale and translate
+        p = fma(p, params.scale, p0);
+
+        float r2b = dot(p.xyz, p.xyz);
+        trap = min(trap, r2b);
+        float r = sqrt(r2b);
+
+        // Density contribution decays with radius
+        density += exp(-r * 0.6f);
+
+        // Escape check
+        if (r2b > 64.0f) {
+            escaped = 1.0f;
+            break;
+        }
+    }
+
+    if (escaped < 0.5f) return 0.0f;
+    return density / float(loopCount);
 }
 
 // =============================================================================
@@ -1926,6 +1976,73 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
+    // Orbit-density volume rendering (Buddhabrot-style 3D)
+    if (fractalType == 3) {
+        const int orbitSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxSteps;
+        int orbitIters = max(lodIterations, 4);
+
+        float t = 0.0f;
+        float maxT = 8.0f;
+        float stepSize = 0.04f;
+
+        float trans = 1.0f;
+        float3 accum = float3(0.0);
+        float firstHitT = -1.0f;
+
+        float densityScale = 2.0f + uniforms.glowIntensity * 6.0f;
+
+        for (int i = 0; i < orbitSteps; i++)
+        {
+            float3 p = marchOrigin + t * marchDir;
+            float trap = 0.0f;
+            float density = OrbitDensityMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters, trap);
+
+            if (density > 0.0f) {
+                float alpha = saturate(density * densityScale);
+                if (alpha > 0.01f && firstHitT < 0.0f) {
+                    firstHitT = t;
+                }
+
+                half2 c = half2(half(saturate(density)), half(saturate(density * 0.7f)));
+                half3 sample = applyColorScheme(c, uniforms.colorMix, uniforms.colorScheme);
+                sample = applyColorPostProcessing(sample, uniforms.colorScheme);
+                accum += float3(sample) * alpha * trans;
+
+                trans *= (1.0f - alpha);
+                if (trans < 0.02f) break;
+            }
+
+            t += stepSize;
+            if (t > maxT) break;
+        }
+
+        half3 col = half3(saturate(accum));
+        half glow = half(saturate(1.0f - trans));
+
+        if (firstHitT > 0.0f) {
+            float3 p = marchOrigin + firstHitT * marchDir;
+            float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
+            output.depth = encodeDepthFromClip(clipPos);
+        } else {
+            output.depth = 1e-7;
+        }
+
+        if (quality > kMinQualityForPostFX) {
+            col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glow);
+        } else {
+            col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
+        }
+
+        const bool showHUD = is_function_constant_defined(FC_SHOW_HUD) ? FC_SHOW_HUD : (uniforms.showHUD != 0);
+        if (showHUD) {
+            col = renderHUD(col, float2(in.texCoord), uniforms.activeGesture,
+                            uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius);
+        }
+
+        output.color = float4(float3(col), 1.0);
+        return output;
+    }
+
     // Standard analytic sphere tracing
     float2 ret = Scene(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     
@@ -2097,6 +2214,62 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
 
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+
+    // Orbit-density volume rendering (Buddhabrot-style 3D)
+    if (fractalType == 3) {
+        const int orbitSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxSteps;
+        int orbitIters = max(lodIterations, 4);
+
+        float t = 0.0f;
+        float maxT = 8.0f;
+        float stepSize = 0.04f;
+
+        float trans = 1.0f;
+        float3 accum = float3(0.0);
+        float firstHitT = -1.0f;
+
+        float densityScale = 2.0f + uniforms.glowIntensity * 6.0f;
+
+        for (int i = 0; i < orbitSteps; i++)
+        {
+            float3 p = marchOrigin + t * marchDir;
+            float trap = 0.0f;
+            float density = OrbitDensityMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters, trap);
+
+            if (density > 0.0f) {
+                float alpha = saturate(density * densityScale);
+                if (alpha > 0.01f && firstHitT < 0.0f) {
+                    firstHitT = t;
+                }
+
+                half2 c = half2(half(saturate(density)), half(saturate(density * 0.7f)));
+                half3 sample = applyColorScheme(c, uniforms.colorMix, uniforms.colorScheme);
+                sample = applyColorPostProcessing(sample, uniforms.colorScheme);
+                accum += float3(sample) * alpha * trans;
+
+                trans *= (1.0f - alpha);
+                if (trans < 0.02f) break;
+            }
+
+            t += stepSize;
+            if (t > maxT) break;
+        }
+
+        half3 col = half3(saturate(accum));
+        half glowH = half(saturate(1.0f - trans));
+
+        if (firstHitT > 0.0f) {
+            float3 p = marchOrigin + firstHitT * marchDir;
+            float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
+            output.depth = encodeDepthFromClip(clipPos);
+        } else {
+            output.depth = 1e-7;
+        }
+
+        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glowH);
+        output.color = float4(float3(col), 1.0);
+        return output;
+    }
     
     // === STANDARD RAYMARCH (every pixel) ===
     // The hierarchical coarse/fine approach doesn't help due to SIMD lockstep execution

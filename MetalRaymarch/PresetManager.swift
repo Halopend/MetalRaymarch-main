@@ -602,6 +602,50 @@ extension PresetManager {
             nebulabrot.position = SIMD3<Float>(0.0, 0.1, -1.6)
             return nebulabrot
         }
+
+        // Orbit Density (3D Buddhabrot-style)
+        ensurePreset(named: "Orbit Density") {
+            var orbit = FractalPreset(name: "Orbit Density")
+            orbit.fractalType = .orbitDensity
+            orbit.colorScheme = .nebula
+            orbit.colorSchemeSaturation = 2.2
+            orbit.colorSchemeContrast = 1.1
+            orbit.colorSchemeGamma = 0.6
+            orbit.fractalIterations = 10
+            orbit.maxRaySteps = 128
+            orbit.fractalScale = 2.4
+            orbit.foldingLimit = 1.1
+            orbit.sphereRadius = 0.6
+            orbit.minDistance = 0.7
+            orbit.colorIterations = 8
+            orbit.colorMix = 0.55
+            orbit.glowIntensity = 0.45
+            orbit.scale = 1.0
+            orbit.position = SIMD3<Float>(0.0, 0.0, -1.4)
+            return orbit
+        }
+
+        // Taurus66 Rotbox (approx) - tuned from Mandelbulber settings
+        ensurePreset(named: "Taurus66 Rotbox") {
+            var rotbox = FractalPreset(name: "Taurus66 Rotbox")
+            rotbox.fractalType = .negativeMandelbox
+            rotbox.colorScheme = .fire
+            rotbox.colorSchemeSaturation = 2.0
+            rotbox.colorSchemeContrast = 1.15
+            rotbox.colorSchemeGamma = 0.55
+            rotbox.fractalIterations = 12
+            rotbox.maxRaySteps = 128
+            rotbox.fractalScale = 2.8
+            rotbox.foldingLimit = 1.0
+            rotbox.sphereRadius = 0.5
+            rotbox.minDistance = 0.4
+            rotbox.colorIterations = 10
+            rotbox.colorMix = 0.6
+            rotbox.glowIntensity = 0.1
+            rotbox.scale = 1.0
+            rotbox.position = SIMD3<Float>(0.0, 0.0, -1.6)
+            return rotbox
+        }
         
         savePresets()
     }

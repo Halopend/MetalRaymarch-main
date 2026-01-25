@@ -857,6 +857,7 @@ actor Renderer {
         fractalType: FractalType,
         foldingLimit: Float,
         minRadius2: Float,
+        fractalScale: Float,
         iterations: Int
     ) -> (primary: SIMD3<Float>, secondary: SIMD3<Float>, tertiary: SIMD3<Float>, strength: Float) {
         
@@ -895,8 +896,8 @@ actor Renderer {
             var foldDirSum = SIMD3<Float>.zero
             
             let invMinRadius2 = 1.0 / minRadius2
-            let fractalScale: Float = fractalType == .negativeMandelbox ? -1.5 : 2.8
-            let scale = SIMD4<Float>(repeating: fractalScale / minRadius2)
+            let scaleValue: Float = fractalType == .negativeMandelbox ? -1.5 : fractalScale
+            let scale = SIMD4<Float>(repeating: scaleValue / minRadius2)
             
             for i in 0..<min(iterations, 8) {
                 let weight = 1.0 / Float(i + 1)
@@ -963,6 +964,7 @@ actor Renderer {
                 fractalType: settings.fractalType,
                 foldingLimit: settings.foldingLimit,
                 minRadius2: minRadius2,
+                fractalScale: settings.fractalScale,
                 iterations: settings.fractalIterations
             )
             

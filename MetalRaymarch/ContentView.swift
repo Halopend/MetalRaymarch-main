@@ -187,6 +187,7 @@ struct ContentView: View {
                                 Text("Mandelbox").tag(FractalType.mandelbox)
                                 Text("Triforce").tag(FractalType.triforce)
                                 Text("Neg. Mandelbox").tag(FractalType.negativeMandelbox)
+                                Text("Orbit Density").tag(FractalType.orbitDensity)
                             }
                             .pickerStyle(.segmented)
                         }
@@ -347,7 +348,7 @@ struct ContentView: View {
                                 Slider(value: Binding(
                                     get: { appModel.renderSettings.colorSchemeContrast },
                                     set: { appModel.renderSettings.colorSchemeContrast = $0 }
-                                ), in: 0.5...2)
+                                ), in: 0.8...1.2)
                                 
                                 Text("Gamma: \(appModel.renderSettings.colorSchemeGamma, specifier: "%.2f")")
                                 Slider(value: Binding(
