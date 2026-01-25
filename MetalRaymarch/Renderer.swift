@@ -720,10 +720,11 @@ actor Renderer {
         static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
             let qualityMode: Int32
             switch preset {
-            case .low: qualityMode = 2
-            case .mid: qualityMode = 1  
-            case .high: qualityMode = 0
-            case .ultra: qualityMode = 0
+            case .iter6: qualityMode = 2
+            case .iter9: qualityMode = 1
+            case .iter10: qualityMode = 1
+            case .iter12: qualityMode = 0
+            case .iter16: qualityMode = 0
             }
             return FunctionConstantConfig(
                 fractalIterations: Int32(preset.fractalIterations),
@@ -1074,6 +1075,13 @@ actor Renderer {
         // Smoothly transition between color schemes
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
         
+        // === AUDIO REACTIVE UPDATE ===
+        // Pull audio level from analyzer if in audio-reactive mode
+        if settings.lightingMode == .audioReactive && appModel.audioAnalyzer.isCapturing {
+            let combinedLevel = appModel.audioAnalyzer.level * 0.6 + appModel.audioAnalyzer.bassLevel * 0.4
+            settings.audioLevel = combinedLevel
+        }
+        
         // Use already-smoothed position from settings (interpolated above)
         // Scale gets its own smoothing since it's not gesture-controlled
         let smoothSpeed: Float = 15.0
@@ -1151,6 +1159,8 @@ actor Renderer {
                             showHUD: settings.showHUD ? 1 : 0,
                             activeGesture: Int32(settings.activeGestureIndex),
                             fractalType: settings.fractalType.rawValue,
+                            lightingMode: settings.lightingMode.rawValue,
+                            audioLevel: settings.audioLevel,
                             colorScheme: colorSchemeParams)
         }
 
@@ -1264,10 +1274,10 @@ actor Renderer {
         
         // Fall back to fragment-based rendering
         let renderPassDescriptor = MTLRenderPassDescriptor()
+        var metalFXInputSize: SIMD2<Int>?
 #if canImport(MetalFX)
         let systemMap = drawable.rasterizationRateMaps.first
         var metalFXContext: (manager: MetalFXManager, inputWidth: Int, inputHeight: Int)?
-        var metalFXInputSize: SIMD2<Int>?
         if wantsMetalFX {
             metalFXContext = updateMetalFXManager(
                 drawable: drawable,
@@ -1721,6 +1731,8 @@ actor Renderer {
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
             limitFlash: settings.limitFlash,
             fractalType: settings.fractalType.rawValue,
+            lightingMode: settings.lightingMode.rawValue,
+            audioLevel: settings.audioLevel,
             colorScheme: colorSchemeParams
         )
         

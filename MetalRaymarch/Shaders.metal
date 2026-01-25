@@ -1912,6 +1912,55 @@ float3 CameraPath(float t)
     return p;
 }
 
+// =============================================================================
+// LIGHTING MODE HELPERS
+// Compute spotlight position based on lighting mode:
+//   0 = Static: Fixed position, no animation
+//   1 = Animated: Original pulsing/moving spotlight
+//   2 = Audio Reactive: Position and intensity respond to audio level
+// =============================================================================
+
+FORCE_INLINE float3 computeSpotLightPosition(float gTime, int lightingMode, float audioLevel)
+{
+    if (lightingMode == 0) {
+        // Static: Fixed spotlight at a pleasant position
+        return float3(2.0, 1.5, 2.0);
+    }
+    else if (lightingMode == 2) {
+        // Audio Reactive: Base position + audio-driven movement
+        float3 basePos = float3(1.5, 1.0, 1.5);
+        // Audio pulses the light outward and adds vertical bounce
+        float pulse = audioLevel * 2.0;
+        float3 audioOffset = float3(
+            sin(gTime * 2.0) * pulse,
+            audioLevel * 1.5,  // Vertical bounce with audio
+            cos(gTime * 2.0) * pulse
+        );
+        return basePos + audioOffset;
+    }
+    else {
+        // Animated (default): Original pulsing behavior
+        return CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+    }
+}
+
+// Compute lighting intensity multiplier based on mode
+FORCE_INLINE float computeLightingIntensity(float gTime, int lightingMode, float audioLevel)
+{
+    if (lightingMode == 0) {
+        // Static: Constant brightness
+        return 1.0;
+    }
+    else if (lightingMode == 2) {
+        // Audio Reactive: Intensity follows audio with some base level
+        return 0.5 + audioLevel * 1.5;  // Range 0.5 to 2.0
+    }
+    else {
+        // Animated: Gentle pulsing
+        return 0.9 + sin(gTime * 1.5) * 0.15;  // Range 0.75 to 1.05
+    }
+}
+
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
 // Three-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
 // Dramatically reduces total Map() evaluations while maintaining quality
@@ -1992,8 +2041,9 @@ kernel void adaptiveHierarchical8x8(
         float3 p = marchOrigin + adjustedDist * marchDir;
         float3 nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         
-        // Lighting (same as fragment shader)
-        float3 spotLight = CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+        // Lighting with mode-based behavior
+        float3 spotLight = computeSpotLightPosition(gTime, uniforms.lightingMode, uniforms.audioLevel);
+        float lightIntensity = computeLightingIntensity(gTime, uniforms.lightingMode, uniforms.audioLevel);
         float3 spot = spotLight - p;
         float atten = length(spot);
         spot /= atten;
@@ -2006,7 +2056,7 @@ kernel void adaptiveHierarchical8x8(
         half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         
         float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
         // Choose coloring based on fractal type (using color scheme)
@@ -2022,7 +2072,7 @@ kernel void adaptiveHierarchical8x8(
         
         // Specular
         float3 ref = reflect(marchDir, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
         float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
@@ -2474,7 +2524,9 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
                                                         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
         
-        float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+        // Lighting with mode-based behavior
+        float3 spotLight = computeSpotLightPosition(gTime, uniforms.lightingMode, uniforms.audioLevel);
+        float lightIntensity = computeLightingIntensity(gTime, uniforms.lightingMode, uniforms.audioLevel);
         float3 spot = spotLight - p;
         float atten = length(spot);
         spot /= atten;
@@ -2491,7 +2543,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         // Per-pixel lighting with shared shadows
         float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
         // Choose coloring based on fractal type (using color scheme)
@@ -2506,7 +2558,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         // Specular
         float3 ref = reflect(marchDir, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
         float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;

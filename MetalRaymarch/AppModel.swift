@@ -11,26 +11,29 @@ import os  // For os_unfair_lock - fastest available lock primitive
 
 /// Quality preset that bundles fractal iterations and ray steps
 enum QualityPreset: String, CaseIterable {
-    case low = "Low"
-    case mid = "Mid"
-    case high = "High"
-    case ultra = "Ultra"
+    case iter6 = "6"
+    case iter9 = "9"
+    case iter10 = "10"
+    case iter12 = "12"
+    case iter16 = "16"
     
     var fractalIterations: Int {
         switch self {
-        case .low: return 6
-        case .mid: return 9
-        case .high: return 12
-        case .ultra: return 16
+        case .iter6: return 6
+        case .iter9: return 9
+        case .iter10: return 10
+        case .iter12: return 12
+        case .iter16: return 16
         }
     }
     
     var raySteps: Int {
         switch self {
-        case .low: return 32
-        case .mid: return 64
-        case .high: return 100
-        case .ultra: return 128
+        case .iter6: return 32
+        case .iter9: return 64
+        case .iter10: return 80
+        case .iter12: return 100
+        case .iter16: return 128
         }
     }
     
@@ -66,6 +69,9 @@ class AppModel {
     
     nonisolated let renderSettings = RenderSettings()
     
+    // Audio analyzer for reactive lighting
+    let audioAnalyzer = AudioAnalyzer()
+    
     // Hand tracking state
     var handTrackingEnabled: Bool = true
     var leftHandTracked: Bool = false
@@ -89,12 +95,18 @@ class AppModel {
     // Screenshot capture (set by Renderer)
     var captureScreenshotHandler: (() async -> Data?)?
     
+    // SharePlay session for collaborative fractal exploration
+    var shareSession: FractalShareSession?
+    
     init() {
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings)
         
         // Initialize parameter recorder
         parameterRecorder = ParameterRecorder(renderSettings: renderSettings)
+        
+        // Initialize SharePlay session
+        shareSession = FractalShareSession(renderSettings: renderSettings)
         
         // Setup gesture callbacks
         gestureController?.onRecordingToggle = { [weak self] in
@@ -108,6 +120,9 @@ class AppModel {
         
         // Add built-in presets if this is first launch
         presetManager.addBuiltInPresetsIfNeeded()
+        
+        // Configure SharePlay session listener
+        shareSession?.configureGroupSessions()
     }
     
     /// Toggle recording state
@@ -174,6 +189,21 @@ enum FractalType: Int32, Codable {
         case .triforce: return "Triforce"
         case .negativeMandelbox: return "Negative Mandelbox"
         case .orbitDensity: return "Orbit Density"
+        }
+    }
+}
+
+// Lighting mode controls animated light movement and audio reactivity
+enum LightingMode: Int32, CaseIterable, Codable {
+    case staticLight = 0    // Lights stay fixed (no wobble, no animation)
+    case animated = 1       // Original animated lighting (pulsing, moving spotlight)
+    case audioReactive = 2  // Lights respond to audio/music input
+    
+    var displayName: String {
+        switch self {
+        case .staticLight: return "Static"
+        case .animated: return "Animated"
+        case .audioReactive: return "Audio Reactive"
         }
     }
 }
@@ -422,6 +452,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _foveationIntensity: Float = 1.0    // Gentle shader-side foveation (rate maps handle gaze tracking)
     private var _colorMix: Float = 0.5
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
+    private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
+    private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
@@ -532,6 +564,16 @@ final class RenderSettings: @unchecked Sendable {
     var lightingPlay: Bool {
         get { withLock { _lightingPlay } }
         set { withLock { _lightingPlay = newValue } }
+    }
+    
+    var lightingMode: LightingMode {
+        get { withLock { _lightingMode } }
+        set { withLock { _lightingMode = newValue } }
+    }
+    
+    var audioLevel: Float {
+        get { withLock { _audioLevel } }
+        set { withLock { _audioLevel = max(0.0, min(1.0, newValue)) } }
     }
     
     var foldingLimit: Float {

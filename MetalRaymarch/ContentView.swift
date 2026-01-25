@@ -156,6 +156,12 @@ struct ContentView: View {
 
             ToggleImmersiveSpaceButton()
             
+            // SharePlay Controls
+            if let shareSession = appModel.shareSession {
+                SharePlayControlsView(shareSession: shareSession, appModel: appModel)
+                    .padding(.vertical, 8)
+            }
+            
             if appModel.immersiveSpaceState == .open {
                 ScrollView {
                     VStack(spacing: 12) {
@@ -202,7 +208,7 @@ struct ContentView: View {
                                     QualityPreset.detect(
                                         fractalIterations: appModel.renderSettings.fractalIterations,
                                         raySteps: appModel.renderSettings.maxRaySteps
-                                    ) ?? .mid
+                                    ) ?? .iter9
                                 },
                                 set: { preset in
                                     appModel.renderSettings.fractalIterations = preset.fractalIterations
@@ -393,15 +399,72 @@ struct ContentView: View {
 
                                 Divider()
                                 
+                                // Lighting Mode Picker (Static / Animated / Audio Reactive)
                                 HStack {
-                                    Button {
-                                        appModel.renderSettings.lightingPlay.toggle()
-                                    } label: {
-                                        Label(appModel.renderSettings.lightingPlay ? "Lighting: Playing" : "Lighting: Paused",
-                                              systemImage: appModel.renderSettings.lightingPlay ? "play.fill" : "play")
-                                    }
-                                    .buttonStyle(.borderedProminent)
+                                    Text("Lighting")
                                     Spacer()
+                                    Picker("Lighting", selection: Binding(
+                                        get: { appModel.renderSettings.lightingMode },
+                                        set: { appModel.renderSettings.lightingMode = $0 }
+                                    )) {
+                                        ForEach(LightingMode.allCases, id: \.rawValue) { mode in
+                                            Text(mode.displayName).tag(mode)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .frame(maxWidth: 200)
+                                }
+                                
+                                // Audio level slider (only visible in Audio Reactive mode)
+                                if appModel.renderSettings.lightingMode == .audioReactive {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            // Audio capture toggle
+                                            Button {
+                                                if appModel.audioAnalyzer.isCapturing {
+                                                    appModel.audioAnalyzer.stopCapture()
+                                                } else {
+                                                    appModel.audioAnalyzer.startCapture()
+                                                }
+                                            } label: {
+                                                Label(
+                                                    appModel.audioAnalyzer.isCapturing ? "Stop Mic" : "Start Mic",
+                                                    systemImage: appModel.audioAnalyzer.isCapturing ? "mic.fill" : "mic"
+                                                )
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(appModel.audioAnalyzer.isCapturing ? .red : .purple)
+                                            
+                                            Spacer()
+                                            
+                                            // Audio level indicator
+                                            if appModel.audioAnalyzer.isCapturing {
+                                                HStack(spacing: 2) {
+                                                    ForEach(0..<10, id: \.self) { i in
+                                                        Rectangle()
+                                                            .fill(Float(i) / 10.0 < appModel.audioAnalyzer.level ? Color.green : Color.gray.opacity(0.3))
+                                                            .frame(width: 4, height: 16)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        if let error = appModel.audioAnalyzer.errorMessage {
+                                            Text(error)
+                                                .font(.caption)
+                                                .foregroundStyle(.red)
+                                        }
+                                        
+                                        if !appModel.audioAnalyzer.isCapturing {
+                                            Text("Manual Level: \(appModel.renderSettings.audioLevel, specifier: "%.2f")")
+                                            Slider(value: Binding(
+                                                get: { appModel.renderSettings.audioLevel },
+                                                set: { appModel.renderSettings.audioLevel = $0 }
+                                            ), in: 0...1)
+                                            .tint(.purple)
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
                                 }
 
                                 Text("Color Mix")
@@ -516,6 +579,130 @@ struct ContentView: View {
                     .padding(.horizontal)
                 }
             }
+        }
+    }
+}
+
+// MARK: - SharePlay Controls View
+
+struct SharePlayControlsView: View {
+    @Bindable var shareSession: FractalShareSession
+    var appModel: AppModel
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            // Connection status and main action button
+            HStack {
+                // Status indicator
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 10, height: 10)
+                    
+                    Text(statusText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                // Main action button
+                Button {
+                    Task {
+                        switch shareSession.state {
+                        case .inactive:
+                            await shareSession.startSharing()
+                        default:
+                            shareSession.stopSharing()
+                        }
+                    }
+                } label: {
+                    Label(
+                        buttonText,
+                        systemImage: buttonIcon
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(buttonTint)
+            }
+            
+            // Role picker (only when connected)
+            if case .connected = shareSession.state {
+                HStack {
+                    Text("Role:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    
+                    Picker("Role", selection: $shareSession.role) {
+                        ForEach(SharePlayRole.allCases, id: \.self) { role in
+                            Text(role.rawValue).tag(role)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 220)
+                }
+                
+                // Role explanation
+                Text(roleExplanation)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+    
+    // MARK: - Computed Properties
+    
+    private var statusColor: Color {
+        switch shareSession.state {
+        case .inactive: return .gray
+        case .waiting: return .yellow
+        case .connected: return .green
+        case .error: return .red
+        }
+    }
+    
+    private var statusText: String {
+        switch shareSession.state {
+        case .inactive: return "Not sharing"
+        case .waiting: return "Waiting for others..."
+        case .connected(let count): return "\(count) connected"
+        case .error(let msg): return "Error: \(msg)"
+        }
+    }
+    
+    private var buttonText: String {
+        switch shareSession.state {
+        case .inactive: return "Share via FaceTime"
+        default: return "Stop Sharing"
+        }
+    }
+    
+    private var buttonIcon: String {
+        switch shareSession.state {
+        case .inactive: return "shareplay"
+        default: return "shareplay.slash"
+        }
+    }
+    
+    private var buttonTint: Color {
+        switch shareSession.state {
+        case .inactive: return .blue
+        default: return .red
+        }
+    }
+    
+    private var roleExplanation: String {
+        switch shareSession.role {
+        case .driver:
+            return "You control the view. Others follow your perspective."
+        case .viewer:
+            return "You follow the driver's view. Your inputs are local only."
+        case .collaborative:
+            return "Everyone can control. Last change wins."
         }
     }
 }
