@@ -646,6 +646,51 @@ extension PresetManager {
             rotbox.position = SIMD3<Float>(0.0, 0.0, -1.6)
             return rotbox
         }
+
+        // Yip Yip Martians - fuzzy, playful chaos inspired by Sesame Street's aliens
+        // Now enhanced with Nebulabrot multi-channel rendering & 3D orbit traps!
+        ensurePreset(named: "Yip Yip Martians") {
+            var yipyip = FractalPreset(name: "Yip Yip Martians")
+            yipyip.fractalType = .orbitDensity  // Nebulabrot-style ethereal volume
+            yipyip.colorScheme = .neonSunset    // Orange/magenta/violet - playful retro
+            yipyip.colorSchemeSaturation = 2.6  // Vibrant retro 70s/80s colors
+            yipyip.colorSchemeContrast = 0.95   // Soft, fuzzy contrast like their fur
+            yipyip.colorSchemeGamma = 0.5       // Balanced for multi-channel glow
+            yipyip.fractalIterations = 12       // More iterations for richer RGB channels
+            yipyip.maxRaySteps = 110            // More steps for detailed volume
+            yipyip.fractalScale = 2.4           // Wobbly, blobby alien scale
+            yipyip.foldingLimit = 1.25          // Extra folding = fuzzy texture
+            yipyip.sphereRadius = 0.65          // Rounder shapes like their heads
+            yipyip.minDistance = 0.85           // Space between blobs
+            yipyip.colorIterations = 8          // Color cycling rhythm
+            yipyip.colorMix = 0.55              // Orbit trap influence for structure
+            yipyip.glowIntensity = 0.45         // Ethereal glow - "uh huh uh huh"
+            yipyip.scale = 0.85
+            yipyip.position = SIMD3<Float>(0.0, 0.15, -1.25)
+            return yipyip
+        }
+
+        // Deep Nebula - showcase the multi-channel Nebulabrot technique
+        ensurePreset(named: "Deep Nebula") {
+            var nebula = FractalPreset(name: "Deep Nebula")
+            nebula.fractalType = .orbitDensity
+            nebula.colorScheme = .nebula        // Astronomical false-color
+            nebula.colorSchemeSaturation = 2.3
+            nebula.colorSchemeContrast = 1.05
+            nebula.colorSchemeGamma = 0.55
+            nebula.fractalIterations = 16       // High iterations for rich RGB separation
+            nebula.maxRaySteps = 140            // Dense volume sampling
+            nebula.fractalScale = 2.3
+            nebula.foldingLimit = 1.15
+            nebula.sphereRadius = 0.55
+            nebula.minDistance = 0.75
+            nebula.colorIterations = 12
+            nebula.colorMix = 0.7               // Strong orbit trap influence
+            nebula.glowIntensity = 0.35
+            nebula.scale = 1.0
+            nebula.position = SIMD3<Float>(0.0, 0.0, -1.5)
+            return nebula
+        }
         
         savePresets()
     }

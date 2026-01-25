@@ -1208,6 +1208,118 @@ FORCE_INLINE float OrbitDensityMandelbox(float3 pos, FractalParams params, float
 }
 
 // =============================================================================
+// NEBULABROT 3D - Multi-channel orbit density with 3D orbit traps
+// Inspired by Melinda Green's Nebulabrot technique and iq's 3D orbit traps.
+// Uses different iteration counts for RGB channels (like Hubble false-color)
+// plus geometric orbit traps (sphere, cylinder, plane) for structure.
+// =============================================================================
+
+struct NebulaResult {
+    float3 density;     // RGB channel densities (different iteration depths)
+    float3 traps;       // Orbit trap distances (sphere, cylinder, plane)
+    float escape;       // Did the orbit escape?
+    float depth;        // How deep into the fractal (iteration count at escape)
+};
+
+FORCE_INLINE NebulaResult NebulabrotMandelbox(float3 pos, FractalParams params, float foldingLimit, int baseIterations)
+{
+    NebulaResult result;
+    result.density = float3(0.0);
+    result.traps = float3(1e9);
+    result.escape = 0.0;
+    result.depth = 0.0;
+
+    float4 p = float4(pos, 1.0);
+    float4 p0 = p;
+    float invMinRadius2 = 1.0f / params.minRadius2;
+
+    // Multi-channel iteration thresholds (Nebulabrot technique)
+    // Blue = short orbits (fast escape), Green = medium, Red = long (deep escape)
+    int blueMax = max(baseIterations / 3, 2);       // Short orbits ~33%
+    int greenMax = max(baseIterations * 2 / 3, 4);  // Medium orbits ~66%
+    int redMax = baseIterations;                     // Full iterations
+
+    // Orbit trap geometry parameters
+    float3 sphereCenter = float3(0.0, 0.0, 0.0);    // Sphere trap at origin
+    float3 cylAxis = normalize(float3(0.0, 1.0, 0.0)); // Cylinder along Y
+    float3 planeNormal = normalize(float3(1.0, 0.0, 1.0)); // Diagonal plane
+
+    float densityB = 0.0, densityG = 0.0, densityR = 0.0;
+    float sphereTrap = 1e9, cylTrap = 1e9, planeTrap = 1e9;
+    int escapeIter = redMax;
+
+    NO_UNROLL
+    for (int i = 0; i < redMax; i++)
+    {
+        // Box fold
+        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+
+        // Sphere fold
+        float r2 = dot(p.xyz, p.xyz);
+        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+        p *= t;
+
+        // Scale and translate
+        p = fma(p, params.scale, p0);
+
+        float r2b = dot(p.xyz, p.xyz);
+        float r = sqrt(r2b);
+
+        // === 3D ORBIT TRAPS (iq technique) ===
+        // Track minimum distance from orbit to geometric shapes
+
+        // Sphere trap: distance to center point
+        float dSphere = length(p.xyz - sphereCenter);
+        sphereTrap = min(sphereTrap, dSphere);
+
+        // Cylinder trap: distance to axis line
+        float3 toPoint = p.xyz;
+        float alongAxis = dot(toPoint, cylAxis);
+        float3 nearestOnAxis = alongAxis * cylAxis;
+        float dCyl = length(toPoint - nearestOnAxis);
+        cylTrap = min(cylTrap, dCyl);
+
+        // Plane trap: distance to plane
+        float dPlane = abs(dot(p.xyz, planeNormal));
+        planeTrap = min(planeTrap, dPlane);
+
+        // === DENSITY ACCUMULATION ===
+        // Exponential decay contribution at each orbit point
+        float contrib = exp(-r * 0.5);
+
+        // Accumulate by channel based on iteration depth
+        if (i < blueMax)  densityB += contrib * 1.5;  // Blue channel emphasis
+        if (i < greenMax) densityG += contrib * 1.2;  // Green channel
+        densityR += contrib;                           // Red always accumulates
+
+        // Escape check
+        if (r2b > 64.0f) {
+            result.escape = 1.0f;
+            escapeIter = i + 1;
+            break;
+        }
+    }
+
+    // Only count escaping orbits (true Buddhabrot)
+    if (result.escape < 0.5f) {
+        result.density = float3(0.0);
+        result.traps = float3(1e9);
+        return result;
+    }
+
+    // Normalize densities by their respective iteration counts
+    result.density.x = densityR / float(redMax);     // Red = deep structure
+    result.density.y = densityG / float(greenMax);   // Green = medium
+    result.density.z = densityB / float(blueMax);    // Blue = surface glow
+
+    // Normalize trap distances
+    result.traps = float3(sphereTrap, cylTrap, planeTrap);
+    result.depth = float(escapeIter) / float(redMax);
+
+    return result;
+}
+
+// =============================================================================
 // ADDITIONAL COLOR SCHEME FUNCTIONS
 // =============================================================================
 
@@ -1976,36 +2088,74 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
-    // Orbit-density volume rendering (Buddhabrot-style 3D)
+    // Orbit-density volume rendering (Nebulabrot-style 3D)
+    // Enhanced with multi-channel iteration counts and 3D orbit traps
     if (fractalType == 3) {
         const int orbitSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxSteps;
-        int orbitIters = max(lodIterations, 4);
+        int orbitIters = max(lodIterations, 6);  // Minimum 6 for meaningful RGB channels
 
         float t = 0.0f;
         float maxT = 8.0f;
-        float stepSize = 0.04f;
+        float stepSize = 0.035f;  // Slightly finer for more detail
 
         float trans = 1.0f;
         float3 accum = float3(0.0);
         float firstHitT = -1.0f;
 
-        float densityScale = 2.0f + uniforms.glowIntensity * 6.0f;
+        float densityScale = 1.5f + uniforms.glowIntensity * 5.0f;
+        float trapInfluence = uniforms.colorMix;  // Use colorMix to blend trap coloring
 
         for (int i = 0; i < orbitSteps; i++)
         {
             float3 p = marchOrigin + t * marchDir;
-            float trap = 0.0f;
-            float density = OrbitDensityMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters, trap);
+            
+            // Use enhanced Nebulabrot with multi-channel densities and orbit traps
+            NebulaResult nebula = NebulabrotMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters);
 
-            if (density > 0.0f) {
-                float alpha = saturate(density * densityScale);
+            if (nebula.escape > 0.5f) {
+                // Compute RGB from multi-channel densities (Nebulabrot false-color)
+                float3 nebulaRGB = nebula.density;
+                
+                // Incorporate orbit traps for structural detail
+                // Sphere trap adds central glow, cylinder trap adds streaks, plane trap adds layers
+                float sphereFactor = exp(-nebula.traps.x * 0.8f);
+                float cylFactor = exp(-nebula.traps.y * 0.6f);
+                float planeFactor = exp(-nebula.traps.z * 0.4f);
+                
+                // Mix trap colors with nebula density
+                float3 trapColor = float3(
+                    sphereFactor * 0.4f + cylFactor * 0.3f,   // Red: sphere + cylinder
+                    cylFactor * 0.5f + planeFactor * 0.2f,    // Green: cylinder + plane
+                    planeFactor * 0.6f + sphereFactor * 0.2f  // Blue: plane + sphere
+                );
+                
+                // Blend nebula density with orbit trap colors
+                float3 combined = mix(nebulaRGB, nebulaRGB + trapColor * 0.5f, trapInfluence);
+                
+                float totalDensity = (combined.x + combined.y + combined.z) / 3.0f;
+                float alpha = saturate(totalDensity * densityScale);
+                
                 if (alpha > 0.01f && firstHitT < 0.0f) {
                     firstHitT = t;
                 }
 
-                half2 c = half2(half(saturate(density)), half(saturate(density * 0.7f)));
+                // Apply color scheme to the nebula RGB
+                // Map combined density to color scheme parameters
+                half2 c = half2(half(saturate(combined.x)), half(saturate(combined.y * 0.8f + combined.z * 0.2f)));
                 half3 sample = applyColorScheme(c, uniforms.colorMix, uniforms.colorScheme);
+                
+                // Tint with nebula RGB for that false-color astronomical look
+                sample *= half3(0.5h + half(combined.x) * 0.5h, 
+                               0.5h + half(combined.y) * 0.5h, 
+                               0.5h + half(combined.z) * 0.5h);
+                
                 sample = applyColorPostProcessing(sample, uniforms.colorScheme);
+                
+                // Depth-based color shift (deeper = redder, like Hubble images)
+                float depthShift = nebula.depth;
+                sample.x += half(depthShift * 0.1f);
+                sample.z -= half(depthShift * 0.05f);
+                
                 accum += float3(sample) * alpha * trans;
 
                 trans *= (1.0f - alpha);
@@ -2215,36 +2365,64 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
-    // Orbit-density volume rendering (Buddhabrot-style 3D)
+    // Orbit-density volume rendering (Nebulabrot-style 3D)
+    // Enhanced with multi-channel iteration counts and 3D orbit traps
     if (fractalType == 3) {
         const int orbitSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxSteps;
-        int orbitIters = max(lodIterations, 4);
+        int orbitIters = max(lodIterations, 6);
 
         float t = 0.0f;
         float maxT = 8.0f;
-        float stepSize = 0.04f;
+        float stepSize = 0.035f;
 
         float trans = 1.0f;
         float3 accum = float3(0.0);
         float firstHitT = -1.0f;
 
-        float densityScale = 2.0f + uniforms.glowIntensity * 6.0f;
+        float densityScale = 1.5f + uniforms.glowIntensity * 5.0f;
+        float trapInfluence = uniforms.colorMix;
 
         for (int i = 0; i < orbitSteps; i++)
         {
             float3 p = marchOrigin + t * marchDir;
-            float trap = 0.0f;
-            float density = OrbitDensityMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters, trap);
+            
+            NebulaResult nebula = NebulabrotMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters);
 
-            if (density > 0.0f) {
-                float alpha = saturate(density * densityScale);
+            if (nebula.escape > 0.5f) {
+                float3 nebulaRGB = nebula.density;
+                
+                float sphereFactor = exp(-nebula.traps.x * 0.8f);
+                float cylFactor = exp(-nebula.traps.y * 0.6f);
+                float planeFactor = exp(-nebula.traps.z * 0.4f);
+                
+                float3 trapColor = float3(
+                    sphereFactor * 0.4f + cylFactor * 0.3f,
+                    cylFactor * 0.5f + planeFactor * 0.2f,
+                    planeFactor * 0.6f + sphereFactor * 0.2f
+                );
+                
+                float3 combined = mix(nebulaRGB, nebulaRGB + trapColor * 0.5f, trapInfluence);
+                
+                float totalDensity = (combined.x + combined.y + combined.z) / 3.0f;
+                float alpha = saturate(totalDensity * densityScale);
+                
                 if (alpha > 0.01f && firstHitT < 0.0f) {
                     firstHitT = t;
                 }
 
-                half2 c = half2(half(saturate(density)), half(saturate(density * 0.7f)));
+                half2 c = half2(half(saturate(combined.x)), half(saturate(combined.y * 0.8f + combined.z * 0.2f)));
                 half3 sample = applyColorScheme(c, uniforms.colorMix, uniforms.colorScheme);
+                
+                sample *= half3(0.5h + half(combined.x) * 0.5h, 
+                               0.5h + half(combined.y) * 0.5h, 
+                               0.5h + half(combined.z) * 0.5h);
+                
                 sample = applyColorPostProcessing(sample, uniforms.colorScheme);
+                
+                float depthShift = nebula.depth;
+                sample.x += half(depthShift * 0.1f);
+                sample.z -= half(depthShift * 0.05f);
+                
                 accum += float3(sample) * alpha * trans;
 
                 trans *= (1.0f - alpha);
