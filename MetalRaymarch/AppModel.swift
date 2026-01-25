@@ -162,7 +162,7 @@ class AppModel {
 }
 
 // Fractal type enum matching ShaderTypes.h
-enum FractalType: Int32 {
+enum FractalType: Int32, Codable {
     case mandelbox = 0
     case triforce = 1
     case negativeMandelbox = 2  // Scale = -1.5 Mandelbox (organic, dense)
@@ -177,7 +177,7 @@ enum FractalType: Int32 {
 }
 
 // Color scheme enum with built-in presets matching ShaderTypes.h
-enum ColorScheme: Int32, CaseIterable {
+enum ColorScheme: Int32, CaseIterable, Codable {
     case classic = 0        // Original Mandelbox colors (red/gray/gold)
     case ocean = 1          // Deep blues and teals
     case fire = 2           // Warm oranges and reds

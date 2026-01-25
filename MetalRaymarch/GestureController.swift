@@ -8,7 +8,8 @@
 //  - TWO-HAND PINCH: Pinch with both hands simultaneously
 //    * Index fingers = minDistance (pull apart = increase)
 //    * Middle fingers = foldingLimit
-//    * Ring fingers = fractalScale
+//    * Ring fingers = sphereRadius
+//    * Pinky fingers = fractalScale
 //  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
 //    * Right hand index = translate position
 //  - LEFT HAND FIST: Start/stop parameter recording
@@ -250,6 +251,7 @@ final class GestureController {
     private var indexGestureState = TwoHandGestureState()    // minDistance
     private var middleGestureState = TwoHandGestureState()   // foldingLimit
     private var ringGestureState = TwoHandGestureState()     // sphereRadius
+    private var pinkyGestureState = TwoHandGestureState()    // fractalScale
     
     // Single-hand drag state
     private var rightIndexDragActive: Bool = false
@@ -296,6 +298,7 @@ final class GestureController {
         indexGestureState = TwoHandGestureState()
         middleGestureState = TwoHandGestureState()
         ringGestureState = TwoHandGestureState()
+        pinkyGestureState = TwoHandGestureState()
         rightIndexDragActive = false
         leftFistActive = false
         menuToggleActive = false
@@ -562,6 +565,17 @@ final class GestureController {
             settings.targetSphereRadius = newValue
         }
         if ringGestureState.isActive { activeDigit = 3 }
+
+        // PINKY FINGER: fractalScale
+        processTwoHandGesture(
+            digit: 4,
+            state: &pinkyGestureState,
+            currentTarget: settings.fractalScale,
+            range: ranges.fractalScale
+        ) { newValue in
+            settings.fractalScale = newValue
+        }
+        if pinkyGestureState.isActive { activeDigit = 4 }
         
         // Update active gesture for HUD
         settings.activeGestureIndex = activeDigit
@@ -591,8 +605,8 @@ final class GestureController {
         let rightPinch = rightHand.pinchStrength(digit: digit)
         
         // Use lower thresholds for ring finger (harder to pinch)
-        let activateThresh = (digit == 3) ? ringPinchActivateThreshold : pinchActivateThreshold
-        let releaseThresh = (digit == 3) ? ringPinchReleaseThreshold : pinchReleaseThreshold
+        let activateThresh = (digit == 3 || digit == 4) ? ringPinchActivateThreshold : pinchActivateThreshold
+        let releaseThresh = (digit == 3 || digit == 4) ? ringPinchReleaseThreshold : pinchReleaseThreshold
         
         // Measure hand separation (only meaningful if both tracked)
         let leftPos = leftHand.pinchPosition(digit: digit)
@@ -629,8 +643,8 @@ final class GestureController {
             state.startParameterValue = currentTarget  // Capture current target when gesture starts
             
             #if DEBUG
-            let paramNames = ["", "minDistance", "foldingLimit", "fractalScale"]
-            let paramName = paramNames[min(digit, 3)]
+            let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"]
+            let paramName = paramNames[min(digit, 4)]
             let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
             print("🤲 Two-hand \(paramName) gesture STARTED (\(mode))")
             #endif
@@ -684,7 +698,7 @@ final class GestureController {
         if !bothActive && state.isActive {
             state.isActive = false
             #if DEBUG
-            let paramName = ["", "minDistance", "foldingLimit", "fractalScale"][min(digit, 3)]
+            let paramName = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"][min(digit, 4)]
             let reason: String
             if !leftHand.isTracked || !rightHand.isTracked {
                 reason = "hand tracking lost"

@@ -24,6 +24,13 @@ struct FractalPreset: Codable, Identifiable {
     var colorIterations: Float
     var position: SIMD3<Float>
     var scale: Float
+
+    // Scene-style settings
+    var fractalType: FractalType
+    var colorScheme: ColorScheme
+    var colorSchemeSaturation: Float
+    var colorSchemeContrast: Float
+    var colorSchemeGamma: Float
     
     // Mandelbox parameters
     var minDistance: Float
@@ -42,6 +49,7 @@ struct FractalPreset: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, glowIntensity, colorIterations, position, scale
+        case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case minDistance, fractalScale, foldingLimit, sphereRadius
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius
     }
@@ -61,6 +69,12 @@ struct FractalPreset: Codable, Identifiable {
         self.colorIterations = 8.0
         self.position = .zero
         self.scale = 1.0
+
+        self.fractalType = .mandelbox
+        self.colorScheme = .classic
+        self.colorSchemeSaturation = 2.0
+        self.colorSchemeContrast = 1.05
+        self.colorSchemeGamma = 0.5
         
         self.minDistance = 0.8
         self.fractalScale = 2.8
@@ -82,6 +96,11 @@ struct FractalPreset: Codable, Identifiable {
         colorIterations = try container.decode(Float.self, forKey: .colorIterations)
         position = try container.decode(SIMD3<Float>.self, forKey: .position)
         scale = try container.decode(Float.self, forKey: .scale)
+        fractalType = try container.decodeIfPresent(FractalType.self, forKey: .fractalType) ?? .mandelbox
+        colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
+        colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 2.0
+        colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.05
+        colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.5
         minDistance = try container.decode(Float.self, forKey: .minDistance)
         fractalScale = try container.decode(Float.self, forKey: .fractalScale)
         foldingLimit = try container.decode(Float.self, forKey: .foldingLimit)
@@ -106,6 +125,11 @@ struct FractalPreset: Codable, Identifiable {
         try container.encode(colorIterations, forKey: .colorIterations)
         try container.encode(position, forKey: .position)
         try container.encode(scale, forKey: .scale)
+        try container.encode(fractalType, forKey: .fractalType)
+        try container.encode(colorScheme, forKey: .colorScheme)
+        try container.encode(colorSchemeSaturation, forKey: .colorSchemeSaturation)
+        try container.encode(colorSchemeContrast, forKey: .colorSchemeContrast)
+        try container.encode(colorSchemeGamma, forKey: .colorSchemeGamma)
         try container.encode(minDistance, forKey: .minDistance)
         try container.encode(fractalScale, forKey: .fractalScale)
         try container.encode(foldingLimit, forKey: .foldingLimit)
@@ -127,6 +151,12 @@ struct FractalPreset: Codable, Identifiable {
         preset.colorIterations = settings.colorIterations
         preset.position = settings.position
         preset.scale = settings.scale
+
+        preset.fractalType = settings.fractalType
+        preset.colorScheme = settings.colorScheme
+        preset.colorSchemeSaturation = settings.colorSchemeSaturation
+        preset.colorSchemeContrast = settings.colorSchemeContrast
+        preset.colorSchemeGamma = settings.colorSchemeGamma
         
         preset.minDistance = settings.minDistance
         preset.fractalScale = settings.fractalScale
@@ -151,6 +181,12 @@ struct FractalPreset: Codable, Identifiable {
         settings.colorIterations = colorIterations
         settings.position = position
         settings.scale = scale
+
+        settings.fractalType = fractalType
+        settings.transitionToColorScheme(colorScheme)
+        settings.colorSchemeSaturation = colorSchemeSaturation
+        settings.colorSchemeContrast = colorSchemeContrast
+        settings.colorSchemeGamma = colorSchemeGamma
         
         settings.minDistance = minDistance
         settings.fractalScale = fractalScale
@@ -494,6 +530,11 @@ class PresetManager {
             newPreset.tileSize = importedPreset.tileSize
             newPreset.safetyBubbleEnabled = importedPreset.safetyBubbleEnabled
             newPreset.safetyBubbleRadius = importedPreset.safetyBubbleRadius
+            newPreset.fractalType = importedPreset.fractalType
+            newPreset.colorScheme = importedPreset.colorScheme
+            newPreset.colorSchemeSaturation = importedPreset.colorSchemeSaturation
+            newPreset.colorSchemeContrast = importedPreset.colorSchemeContrast
+            newPreset.colorSchemeGamma = importedPreset.colorSchemeGamma
             newPreset.rating = importedPreset.rating
             
             presets.insert(newPreset, at: 0)
@@ -511,27 +552,56 @@ class PresetManager {
 extension PresetManager {
     /// Add some built-in presets for users to start with
     func addBuiltInPresetsIfNeeded() {
-        guard presets.isEmpty else { return }
+        func ensurePreset(named name: String, build: () -> FractalPreset) {
+            guard !presets.contains(where: { $0.name == name }) else { return }
+            presets.append(build())
+        }
         
         // Classic Mandelbox
-        var classic = FractalPreset(name: "Classic Mandelbox")
-        classic.fractalScale = 2.8
-        classic.fractalIterations = 6
-        classic.foldingLimit = 1.0
-        classic.sphereRadius = 0.5
-        classic.colorMix = 0.5
-        classic.glowIntensity = 0.2
-        presets.append(classic)
+        ensurePreset(named: "Classic Mandelbox") {
+            var classic = FractalPreset(name: "Classic Mandelbox")
+            classic.fractalScale = 2.8
+            classic.fractalIterations = 6
+            classic.foldingLimit = 1.0
+            classic.sphereRadius = 0.5
+            classic.colorMix = 0.5
+            classic.glowIntensity = 0.2
+            return classic
+        }
         
         // Deep Dive
-        var deepDive = FractalPreset(name: "Deep Dive")
-        deepDive.fractalScale = 2.2
-        deepDive.fractalIterations = 10
-        deepDive.foldingLimit = 1.5
-        deepDive.sphereRadius = 0.3
-        deepDive.colorMix = 0.7
-        deepDive.glowIntensity = 0.4
-        presets.append(deepDive)
+        ensurePreset(named: "Deep Dive") {
+            var deepDive = FractalPreset(name: "Deep Dive")
+            deepDive.fractalScale = 2.2
+            deepDive.fractalIterations = 10
+            deepDive.foldingLimit = 1.5
+            deepDive.sphereRadius = 0.3
+            deepDive.colorMix = 0.7
+            deepDive.glowIntensity = 0.4
+            return deepDive
+        }
+
+        // Nebulabrot Drift (color-driven scene inspired by Nebulabrot aesthetics)
+        ensurePreset(named: "Nebulabrot Drift") {
+            var nebulabrot = FractalPreset(name: "Nebulabrot Drift")
+            nebulabrot.fractalType = .mandelbox
+            nebulabrot.colorScheme = .nebula
+            nebulabrot.colorSchemeSaturation = 2.4
+            nebulabrot.colorSchemeContrast = 1.1
+            nebulabrot.colorSchemeGamma = 0.55
+            nebulabrot.fractalIterations = 12
+            nebulabrot.maxRaySteps = 100
+            nebulabrot.fractalScale = 2.6
+            nebulabrot.foldingLimit = 1.2
+            nebulabrot.sphereRadius = 0.45
+            nebulabrot.minDistance = 0.6
+            nebulabrot.colorIterations = 10
+            nebulabrot.colorMix = 0.65
+            nebulabrot.glowIntensity = 0.35
+            nebulabrot.scale = 1.1
+            nebulabrot.position = SIMD3<Float>(0.0, 0.1, -1.6)
+            return nebulabrot
+        }
         
         savePresets()
     }
