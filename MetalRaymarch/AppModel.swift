@@ -449,7 +449,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalScale: Float = 2.8
     private var _fractalIterations: Int = 9         // Mid quality default
     private var _maxRaySteps: Int = 64              // Mid quality default
-    private var _foveationIntensity: Float = 1.0    // Gentle shader-side foveation (rate maps handle gaze tracking)
     private var _colorMix: Float = 0.5
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
@@ -475,13 +474,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
     
-    // Symmetry-based movement controls
-    private var _symmetryMovementEnabled: Bool = false  // Auto-move along fractal symmetry axes
-    private var _symmetryMovementSpeed: Float = 0.3     // World units per second
-    private var _symmetryUpdateInterval: Float = 0.5    // Seconds between direction recalculations
-    private var _symmetryBlendDuration: Float = 0.5     // Seconds to blend to new direction
-    private var _symmetryPreferredAxis: Int = -1        // -1=auto, 0=primary, 1=secondary, 2=tertiary
-    
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
     private var _colorScheme: ColorScheme = .classic     // Current color scheme
@@ -503,6 +495,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _pulseAmount: Float = 0.0                   // Pulse intensity (0 = off, 0.15 = subtle)
     private var _glowIntensity: Float = 0.0                 // Ray-step glow (0 = off, 0.3 = moderate)
     private var _bloomStrength: Float = 0.0                 // Bloom effect (0 = off, 0.2 = subtle)
+    
+    // === KUWAHARA FILTER (Painterly Effect) ===
+    private var _kuwaharaEnabled: Bool = false              // Enable anisotropic Kuwahara filter
+    private var _kuwaharaRadius: Float = 4.0                // Filter radius (2-8, higher = more painterly)
+    private var _kuwaharaSharpness: Float = 8.0             // Edge sharpness (1-16, higher = sharper edges)
     
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
@@ -549,11 +546,6 @@ final class RenderSettings: @unchecked Sendable {
     var maxRaySteps: Int {
         get { withLock { _maxRaySteps } }
         set { withLock { _maxRaySteps = newValue } }
-    }
-    
-    var foveationIntensity: Float {
-        get { withLock { _foveationIntensity } }
-        set { withLock { _foveationIntensity = newValue } }
     }
     
     var colorMix: Float {
@@ -685,39 +677,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
     }
     
-    // === SYMMETRY MOVEMENT SETTINGS ===
-    // Auto-move the camera/position along fractal symmetry axes for hypnotic exploration
-    
-    /// Enable/disable automatic symmetry-based movement
-    var symmetryMovementEnabled: Bool {
-        get { withLock { _symmetryMovementEnabled } }
-        set { withLock { _symmetryMovementEnabled = newValue } }
-    }
-    
-    /// Speed of symmetry movement in world units per second (0.05 - 1.0)
-    var symmetryMovementSpeed: Float {
-        get { withLock { _symmetryMovementSpeed } }
-        set { withLock { _symmetryMovementSpeed = max(0.05, min(1.0, newValue)) } }
-    }
-    
-    /// How often to recalculate symmetry axes in seconds (0.2 - 2.0)
-    var symmetryUpdateInterval: Float {
-        get { withLock { _symmetryUpdateInterval } }
-        set { withLock { _symmetryUpdateInterval = max(0.2, min(2.0, newValue)) } }
-    }
-    
-    /// Time to blend between direction changes in seconds (0.1 - 1.0)
-    var symmetryBlendDuration: Float {
-        get { withLock { _symmetryBlendDuration } }
-        set { withLock { _symmetryBlendDuration = max(0.1, min(1.0, newValue)) } }
-    }
-    
-    /// Preferred axis for movement: -1=auto (random when symmetric), 0=primary, 1=secondary, 2=tertiary
-    var symmetryPreferredAxis: Int {
-        get { withLock { _symmetryPreferredAxis } }
-        set { withLock { _symmetryPreferredAxis = max(-1, min(2, newValue)) } }
-    }
-    
     // === COLOR SCHEME SETTINGS ===
     // Controls the color palette and transitions for fractal coloring
     
@@ -809,6 +768,24 @@ final class RenderSettings: @unchecked Sendable {
     var bloomStrength: Float {
         get { withLock { _bloomStrength } }
         set { withLock { _bloomStrength = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Enable anisotropic Kuwahara filter for painterly effect
+    var kuwaharaEnabled: Bool {
+        get { withLock { _kuwaharaEnabled } }
+        set { withLock { _kuwaharaEnabled = newValue } }
+    }
+    
+    /// Kuwahara filter radius (2-8, higher = more painterly)
+    var kuwaharaRadius: Float {
+        get { withLock { _kuwaharaRadius } }
+        set { withLock { _kuwaharaRadius = max(2.0, min(8.0, newValue)) } }
+    }
+    
+    /// Kuwahara edge sharpness (1-16, higher = sharper edges)
+    var kuwaharaSharpness: Float {
+        get { withLock { _kuwaharaSharpness } }
+        set { withLock { _kuwaharaSharpness = max(1.0, min(16.0, newValue)) } }
     }
     
     /// Update color scheme transitions and animation time. Call once per frame.

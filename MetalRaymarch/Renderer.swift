@@ -20,6 +20,14 @@ let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 // This prevents the 45fps vsync lock while minimizing latency.
 let maxBuffersInFlight = 2
 
+// Kuwahara filter parameters - must match shader definition
+struct KuwaharaParams {
+    var radius: Float       // Filter kernel radius (2-8)
+    var sharpness: Float    // Edge sharpness factor (1-16)
+    var resolution: SIMD2<Float>  // Texture resolution
+    var eyeIndex: UInt32    // For stereo array textures
+}
+
 // Function constant indices - must match the indices in Shaders.metal
 // These allow compile-time shader specialization for better performance
 enum FunctionConstantIndex: Int {
@@ -121,6 +129,11 @@ actor Renderer {
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
     
+    // Kuwahara filter pipeline (painterly post-processing)
+    var kuwaharaPipeline: MTLComputePipelineState?
+    var kuwaharaSimplePipeline: MTLComputePipelineState?
+    var kuwaharaIntermediateTexture: MTLTexture?  // For in-place filtering
+    
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
@@ -168,13 +181,7 @@ actor Renderer {
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
     
-    // === SYMMETRY MOVEMENT STATE ===
-    // CPU-side state for symmetry-based auto-navigation
-    private var symmetryCurrentDirection: SIMD3<Float> = SIMD3<Float>(0, 0, 1)
-    private var symmetryTargetDirection: SIMD3<Float> = SIMD3<Float>(0, 0, 1)
-    private var symmetryBlendProgress: Float = 1.0
-    private var symmetryTimeSinceUpdate: Float = 0.0
-    private var symmetryStrength: Float = 0.5
+
 
     var mesh: MTKMesh
 
@@ -332,6 +339,16 @@ actor Renderer {
             let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
+            
+            // === KUWAHARA FILTER PIPELINES ===
+            if let kuwaharaKernel = library.makeFunction(name: "anisotropicKuwaharaFilter") {
+                kuwaharaPipeline = try device.makeComputePipelineState(function: kuwaharaKernel)
+                print("✓ Anisotropic Kuwahara filter pipeline ready")
+            }
+            if let kuwaharaSimpleKernel = library.makeFunction(name: "kuwaharaFilterSimple") {
+                kuwaharaSimplePipeline = try device.makeComputePipelineState(function: kuwaharaSimpleKernel)
+                print("✓ Simple Kuwahara filter pipeline ready")
+            }
             
             print("✓ Tile-based compute pipeline ready (adaptive 8x8)")
         } catch {
@@ -829,197 +846,6 @@ actor Renderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to:UniformsArray.self, capacity:1)
     }
     
-    // === SYMMETRY MOVEMENT - CPU-SIDE IMPLEMENTATION ===
-    // Replicates the shader logic for symmetry axis detection and movement
-    // This runs on CPU to update the position target before rendering
-    
-    /// Mandelbox symmetry axes (box fold planes + diagonals)
-    private static let mandelboxAxes: [SIMD3<Float>] = [
-        SIMD3<Float>(1, 0, 0),    // X axis
-        SIMD3<Float>(0, 1, 0),    // Y axis
-        SIMD3<Float>(0, 0, 1),    // Z axis
-        normalize(SIMD3<Float>(1, 1, 0)),  // XY diagonal
-        normalize(SIMD3<Float>(1, 0, 1)),  // XZ diagonal
-        normalize(SIMD3<Float>(0, 1, 1))   // YZ diagonal
-    ]
-    
-    /// Triforce/IFS symmetry axes (fold plane normals)
-    private static let triforceAxes: [SIMD3<Float>] = [
-        normalize(SIMD3<Float>(1, 1, 0)),  // x+y=0 plane normal
-        normalize(SIMD3<Float>(1, 0, 1)),  // x+z=0 plane normal
-        normalize(SIMD3<Float>(0, 1, 1)),  // y+z=0 plane normal
-        normalize(SIMD3<Float>(1, 1, 1))   // Diagonal
-    ]
-    
-    /// Compute symmetry axes at current position (CPU-side version)
-    /// Returns (primaryAxis, secondaryAxis, tertiaryAxis, symmetryStrength)
-    private func computeSymmetryAxes(
-        position: SIMD3<Float>,
-        fractalType: FractalType,
-        foldingLimit: Float,
-        minRadius2: Float,
-        fractalScale: Float,
-        iterations: Int
-    ) -> (primary: SIMD3<Float>, secondary: SIMD3<Float>, tertiary: SIMD3<Float>, strength: Float) {
-        
-        if fractalType == .triforce {
-            // Triforce: track which fold planes are crossed
-            var z = position
-            var foldCounts: SIMD3<Int32> = .zero
-            let scale: Float = 2.0
-            let offset = SIMD3<Float>(1, 1, 1)
-            
-            for _ in 0..<min(iterations, 8) {
-                if z.x + z.y < 0 { foldCounts.x += 1; let tmp = z.x; z.x = -z.y; z.y = -tmp }
-                if z.x + z.z < 0 { foldCounts.y += 1; let tmp = z.x; z.x = -z.z; z.z = -tmp }
-                if z.y + z.z < 0 { foldCounts.z += 1; let tmp = z.y; z.y = -z.z; z.z = -tmp }
-                z = z * scale - offset * (scale - 1.0)
-            }
-            
-            // Least-active fold = most aligned with that symmetry plane
-            let minIdx = foldCounts.x <= foldCounts.y && foldCounts.x <= foldCounts.z ? 0 :
-                         foldCounts.y <= foldCounts.z ? 1 : 2
-            
-            let totalFolds = Float(foldCounts.x + foldCounts.y + foldCounts.z)
-            let avgFold = totalFolds / 3.0
-            let variance = abs(Float(foldCounts.x) - avgFold) + abs(Float(foldCounts.y) - avgFold) + abs(Float(foldCounts.z) - avgFold)
-            let strength = max(0, 1.0 - variance / (totalFolds + 1.0))
-            
-            return (Self.triforceAxes[minIdx],
-                    Self.triforceAxes[(minIdx + 1) % 3],
-                    Self.triforceAxes[3],
-                    strength)
-        } else {
-            // Mandelbox: track which axes hit box fold boundary
-            var p = SIMD4<Float>(position.x, position.y, position.z, 1.0)
-            let p0 = p
-            var foldCounts: SIMD3<Int32> = .zero
-            var foldDirSum = SIMD3<Float>.zero
-            
-            let invMinRadius2 = 1.0 / minRadius2
-            let scaleValue: Float = fractalType == .negativeMandelbox ? -1.5 : fractalScale
-            let scale = SIMD4<Float>(repeating: scaleValue / minRadius2)
-            
-            for i in 0..<min(iterations, 8) {
-                let weight = 1.0 / Float(i + 1)
-                let preFold = SIMD3<Float>(p.x, p.y, p.z)
-                
-                // Box fold
-                let clamped = simd_clamp(SIMD3<Float>(p.x, p.y, p.z), -SIMD3<Float>(repeating: foldingLimit), SIMD3<Float>(repeating: foldingLimit))
-                let delta = abs(preFold) - SIMD3<Float>(repeating: foldingLimit)
-                
-                if delta.x > 0 { foldCounts.x += 1; foldDirSum.x += (preFold.x > 0 ? 1 : -1) * weight }
-                if delta.y > 0 { foldCounts.y += 1; foldDirSum.y += (preFold.y > 0 ? 1 : -1) * weight }
-                if delta.z > 0 { foldCounts.z += 1; foldDirSum.z += (preFold.z > 0 ? 1 : -1) * weight }
-                
-                p.x = clamped.x * 2.0 - p.x
-                p.y = clamped.y * 2.0 - p.y
-                p.z = clamped.z * 2.0 - p.z
-                
-                // Sphere fold
-                let r2 = p.x*p.x + p.y*p.y + p.z*p.z
-                let t = simd_clamp(1.0 / max(r2, minRadius2), 1.0, invMinRadius2)
-                p *= t
-                p = p * scale + p0
-            }
-            
-            // Primary axis from fold direction accumulation
-            let foldLen = length(foldDirSum)
-            let primary = foldLen > 0.001 ? foldDirSum / foldLen : -normalize(position + SIMD3<Float>(0.001, 0.001, 0.001))
-            
-            // Find dominant fold axis
-            let maxFoldAxis = foldCounts.x >= foldCounts.y && foldCounts.x >= foldCounts.z ? 0 :
-                              foldCounts.y >= foldCounts.z ? 1 : 2
-            
-            // Secondary perpendicular to primary
-            let up = abs(simd_dot(primary, Self.mandelboxAxes[maxFoldAxis])) < 0.9 ? Self.mandelboxAxes[maxFoldAxis] : SIMD3<Float>(0, 1, 0)
-            let secondary = normalize(simd_cross(primary, up))
-            let tertiary = normalize(simd_cross(primary, secondary))
-            
-            // Symmetry strength from fold balance
-            let totalFolds = Float(foldCounts.x + foldCounts.y + foldCounts.z)
-            let maxFolds = Float(max(max(foldCounts.x, foldCounts.y), foldCounts.z))
-            let strength = totalFolds > 0 ? 1.0 - maxFolds / totalFolds : 0.5
-            
-            return (primary, secondary, tertiary, strength)
-        }
-    }
-    
-    /// Update symmetry-based movement
-    private func updateSymmetryMovement(settings: RenderSettings, deltaTime: Float) {
-        symmetryTimeSinceUpdate += deltaTime
-        
-        // Check if we need to recalculate symmetry direction
-        let needsUpdate = symmetryTimeSinceUpdate >= settings.symmetryUpdateInterval ||
-                          (symmetryBlendProgress >= 1.0 && symmetryStrength < 0.3)
-        
-        if needsUpdate {
-            symmetryTimeSinceUpdate = 0.0
-            
-            // Compute symmetry at current position
-            let currentPos = settings.position
-            let minRadius2 = settings.sphereRadius * settings.sphereRadius
-            
-            let (primary, secondary, tertiary, strength) = computeSymmetryAxes(
-                position: currentPos,
-                fractalType: settings.fractalType,
-                foldingLimit: settings.foldingLimit,
-                minRadius2: minRadius2,
-                fractalScale: settings.fractalScale,
-                iterations: settings.fractalIterations
-            )
-            
-            symmetryStrength = strength
-            
-            // Choose target direction based on preference
-            switch settings.symmetryPreferredAxis {
-            case 0: symmetryTargetDirection = primary
-            case 1: symmetryTargetDirection = secondary
-            case 2: symmetryTargetDirection = tertiary
-            default:
-                // Auto-select with randomness when symmetric
-                let rand = Float.random(in: 0...1)
-                let primaryWeight = (1.0 - symmetryStrength) * 0.5 + 0.5  // 0.5-1.0 range
-                if rand < primaryWeight {
-                    symmetryTargetDirection = primary
-                } else if rand < primaryWeight + (1.0 - primaryWeight) * 0.5 {
-                    symmetryTargetDirection = secondary
-                } else {
-                    symmetryTargetDirection = tertiary
-                }
-            }
-            
-            // Reset blend
-            symmetryBlendProgress = 0.0
-        }
-        
-        // Blend toward target direction
-        if symmetryBlendProgress < 1.0 {
-            let blendSpeed = deltaTime / max(settings.symmetryBlendDuration, 0.01)
-            symmetryBlendProgress = min(symmetryBlendProgress + blendSpeed, 1.0)
-            
-            // Smoothstep easing
-            let t = symmetryBlendProgress * symmetryBlendProgress * (3.0 - 2.0 * symmetryBlendProgress)
-            
-            // Slerp approximation
-            let dot = simd_dot(symmetryCurrentDirection, symmetryTargetDirection)
-            if dot > 0.9999 {
-                symmetryCurrentDirection = symmetryTargetDirection
-            } else if dot < -0.9999 {
-                // Opposite - blend through perpendicular
-                let perp = normalize(simd_cross(symmetryCurrentDirection, SIMD3<Float>(0, 1, 0)))
-                symmetryCurrentDirection = normalize(simd_mix(symmetryCurrentDirection, perp, SIMD3<Float>(repeating: t)))
-            } else {
-                symmetryCurrentDirection = normalize(simd_mix(symmetryCurrentDirection, symmetryTargetDirection, SIMD3<Float>(repeating: t)))
-            }
-        }
-        
-        // Apply movement
-        let movement = symmetryCurrentDirection * settings.symmetryMovementSpeed * deltaTime
-        let newPos = settings.targetPosition + movement
-        settings.targetPosition = newPos
-    }
-    
     /// Update hand tracking data and process gesture controls
     private func updateHandTracking(atTime time: TimeInterval) {
         guard let ht = handTracking else { return }
@@ -1056,12 +882,6 @@ actor Renderer {
         /// Update any game state before rendering
 
         let settings = appModel.renderSettings
-        
-        // === SYMMETRY MOVEMENT UPDATE ===
-        // Auto-navigate along fractal symmetry axes when enabled
-        if settings.symmetryMovementEnabled {
-            updateSymmetryMovement(settings: settings, deltaTime: cachedDeltaTime)
-        }
         
         // === INTERPOLATE GESTURE-CONTROLLED VALUES ===
         // This is the SINGLE source of truth for smoothing gesture parameters.
@@ -1141,11 +961,9 @@ actor Renderer {
                             inverseViewMatrix: inverseView,
                             time: Float(appModel.clock.time),
                             minDistance: settings.minDistance,
-                            foveaCenter: SIMD2<Float>(0.5, 0.5),
                             fractalScale: settings.fractalScale,
                             fractalIterations: Int32(settings.fractalIterations),
                             maxRaySteps: Int32(settings.maxRaySteps),
-                            foveationIntensity: settings.foveationIntensity,
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
                             foldingLimit: settings.foldingLimit,
@@ -1250,11 +1068,8 @@ actor Renderer {
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = settings.tileSize
-    #if canImport(MetalFX)
-        let wantsMetalFX = settings.resolutionScale < 0.999
-    #else
+        // MetalFX spatial upscaling disabled - causes frame drops without quality benefit
         let wantsMetalFX = false
-    #endif
         let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil && !wantsMetalFX
         
         if useAdaptiveCompute {
@@ -1265,6 +1080,11 @@ actor Renderer {
             )
             
             if computeRendered {
+                // Apply Kuwahara post-processing if enabled
+                if settings.kuwaharaEnabled {
+                    applyKuwaharaFilter(commandBuffer: commandBuffer, drawable: drawable, settings: settings)
+                }
+                
                 drawable.encodePresent(commandBuffer: commandBuffer)
                 commandBuffer.commit()
                 frame.endSubmission()
@@ -1382,6 +1202,12 @@ actor Renderer {
         renderEncoder.popDebugGroup()
 
         renderEncoder.endEncoding()
+        
+        // === KUWAHARA POST-PROCESSING ===
+        if settings.kuwaharaEnabled {
+            applyKuwaharaFilter(commandBuffer: commandBuffer, drawable: drawable, settings: settings)
+        }
+        
     #if canImport(MetalFX)
         if let context = metalFXContext {
             try? context.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: nil)
@@ -1837,6 +1663,144 @@ actor Renderer {
         }
         
         blitEncoder.endEncoding()
+    }
+    
+    // MARK: - Kuwahara Filter
+    
+    /// Creates or resizes the intermediate texture for Kuwahara filtering
+    private func ensureKuwaharaIntermediateTexture(matching texture: MTLTexture, viewCount: Int) -> MTLTexture? {
+        // Check if existing texture matches
+        if let existing = kuwaharaIntermediateTexture,
+           existing.width == texture.width,
+           existing.height == texture.height,
+           existing.arrayLength == viewCount {
+            return existing
+        }
+        
+        // Create new texture with read/write access
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2DArray
+        descriptor.pixelFormat = texture.pixelFormat
+        descriptor.width = texture.width
+        descriptor.height = texture.height
+        descriptor.arrayLength = viewCount
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderWrite, .shaderRead]
+        
+        guard let newTexture = device.makeTexture(descriptor: descriptor) else {
+            print("⚠️ Failed to create Kuwahara intermediate texture")
+            return nil
+        }
+        newTexture.label = "Kuwahara Intermediate"
+        
+        kuwaharaIntermediateTexture = newTexture
+        print("📐 Created Kuwahara intermediate texture: \(texture.width)×\(texture.height) × \(viewCount) layers")
+        return newTexture
+    }
+    
+    /// Applies anisotropic Kuwahara filter as a post-processing effect
+    private func applyKuwaharaFilter(
+        commandBuffer: MTLCommandBuffer,
+        drawable: LayerRenderer.Drawable,
+        settings: RenderSettings
+    ) {
+        // Use simple pipeline for lower radii (faster), anisotropic for higher (better quality)
+        let pipeline = settings.kuwaharaRadius > 4.0 ? kuwaharaPipeline : kuwaharaSimplePipeline
+        guard let pipeline = pipeline else { return }
+        
+        let colorTexture = drawable.colorTextures[0]
+        let viewCount = drawable.views.count
+        
+        // Ensure we have an intermediate texture for ping-pong filtering
+        guard let intermediateTexture = ensureKuwaharaIntermediateTexture(matching: colorTexture, viewCount: viewCount) else {
+            return
+        }
+        
+        // Process each eye
+        for eyeIndex in 0..<viewCount {
+            // Step 1: Copy drawable to intermediate (since drawable may not have shaderRead)
+            guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { continue }
+            blitEncoder.label = "Copy to Kuwahara Input \(eyeIndex)"
+            
+            let sourceTexture: MTLTexture
+            let sourceSlice: Int
+            if drawable.colorTextures.count > eyeIndex {
+                sourceTexture = drawable.colorTextures[eyeIndex]
+                sourceSlice = 0
+            } else {
+                sourceTexture = colorTexture
+                sourceSlice = eyeIndex
+            }
+            
+            blitEncoder.copy(
+                from: sourceTexture,
+                sourceSlice: sourceSlice,
+                sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: sourceTexture.width, height: sourceTexture.height, depth: 1),
+                to: intermediateTexture,
+                destinationSlice: eyeIndex,
+                destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+            )
+            blitEncoder.endEncoding()
+            
+            // Step 2: Apply Kuwahara filter (intermediate -> compute output)
+            guard let computeOutputTexture = ensureComputeOutputTexture(for: drawable) else { continue }
+            guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            computeEncoder.label = "Kuwahara Filter \(eyeIndex)"
+            
+            // Create params for this eye
+            var params = KuwaharaParams(
+                radius: settings.kuwaharaRadius,
+                sharpness: settings.kuwaharaSharpness,
+                resolution: SIMD2<Float>(Float(colorTexture.width), Float(colorTexture.height)),
+                eyeIndex: UInt32(eyeIndex)
+            )
+            
+            computeEncoder.setComputePipelineState(pipeline)
+            computeEncoder.setTexture(intermediateTexture, index: 0)      // Input
+            computeEncoder.setTexture(computeOutputTexture, index: 1)     // Output
+            // Use setBytes to avoid race condition - each encoder gets its own copy
+            computeEncoder.setBytes(&params, length: MemoryLayout<KuwaharaParams>.size, index: 0)
+            
+            // Dispatch threads
+            let threadgroupSize = MTLSize(width: 16, height: 16, depth: 1)
+            let threadgroups = MTLSize(
+                width: (colorTexture.width + threadgroupSize.width - 1) / threadgroupSize.width,
+                height: (colorTexture.height + threadgroupSize.height - 1) / threadgroupSize.height,
+                depth: 1
+            )
+            computeEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadgroupSize)
+            computeEncoder.endEncoding()
+            
+            // Step 3: Copy result back to drawable
+            guard let blitBack = commandBuffer.makeBlitCommandEncoder() else { continue }
+            blitBack.label = "Copy Kuwahara Output \(eyeIndex)"
+            
+            let destTexture: MTLTexture
+            let destSlice: Int
+            if drawable.colorTextures.count > eyeIndex {
+                destTexture = drawable.colorTextures[eyeIndex]
+                destSlice = 0
+            } else {
+                destTexture = colorTexture
+                destSlice = eyeIndex
+            }
+            
+            blitBack.copy(
+                from: computeOutputTexture,
+                sourceSlice: eyeIndex,
+                sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: computeOutputTexture.width, height: computeOutputTexture.height, depth: 1),
+                to: destTexture,
+                destinationSlice: destSlice,
+                destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+            )
+            blitBack.endEncoding()
+        }
     }
     
     /// Renders using the adaptive 8x8 compute pipeline instead of fragment shaders

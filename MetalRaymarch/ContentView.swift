@@ -137,16 +137,15 @@ struct ContentView: View {
                 
                 // Render scale control lives in Safety & Render Options.
 
-                // Tile-based rendering mode (2x2 quad sharing shadows)
+                // Tile-based rendering mode
                 HStack {
-                    Text("Tile Mode:")
+                    Text("Render")
                     Picker("", selection: Binding(
                         get: { appModel.renderSettings.tileSize },
                         set: { appModel.renderSettings.tileSize = $0 }
                     )) {
-                        Text("Off").tag(0)
-                        Text("2×2").tag(2)
-                        Text("8×8 Adaptive").tag(8)
+                        Text("Per-Pixel").tag(0)
+                        Text("Adaptive").tag(8)
                     }
                     .pickerStyle(.segmented)
                 }
@@ -166,8 +165,14 @@ struct ContentView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         Divider()
-                        Text("Animation speed (caution: motion sickness!)")
-
+                        
+                        // Time/animation speed
+                        HStack {
+                            Text("Time Speed")
+                            Spacer()
+                            Text("\(speed, specifier: "%.1f")×")
+                                .foregroundStyle(.secondary)
+                        }
                         Slider(value: $speed, in: 0...2, onEditingChanged: { editing in
                             if !editing {
                                 appModel.clock.speed = Double(speed)
@@ -396,6 +401,30 @@ struct ContentView: View {
                                     get: { appModel.renderSettings.bloomStrength },
                                     set: { appModel.renderSettings.bloomStrength = $0 }
                                 ), in: 0...1)
+                                
+                                Divider()
+                                
+                                // === KUWAHARA FILTER (Painterly Effect) ===
+                                Text("Painterly Effect").font(.headline)
+                                
+                                Toggle("Kuwahara Filter", isOn: Binding(
+                                    get: { appModel.renderSettings.kuwaharaEnabled },
+                                    set: { appModel.renderSettings.kuwaharaEnabled = $0 }
+                                ))
+                                
+                                if appModel.renderSettings.kuwaharaEnabled {
+                                    Text("Filter Radius: \(appModel.renderSettings.kuwaharaRadius, specifier: "%.1f")")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.kuwaharaRadius },
+                                        set: { appModel.renderSettings.kuwaharaRadius = $0 }
+                                    ), in: 2...8)
+                                    
+                                    Text("Edge Sharpness: \(appModel.renderSettings.kuwaharaSharpness, specifier: "%.1f")")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.kuwaharaSharpness },
+                                        set: { appModel.renderSettings.kuwaharaSharpness = $0 }
+                                    ), in: 1...16)
+                                }
 
                                 Divider()
                                 
@@ -476,28 +505,20 @@ struct ContentView: View {
                             .padding(.leading, 10)
                         }
 
-                        // Foveation, Safety & Debug Group
-                        DisclosureGroup("Safety & Render Options") {
+                        // Safety & Options Group
+                        DisclosureGroup("Safety & Options") {
                             VStack(spacing: 8) {
                                 Toggle("Show HUD", isOn: Binding(get: { appModel.renderSettings.showHUD }, set: { appModel.renderSettings.showHUD = $0 }))
 
                                 Toggle("Safety Bubble", isOn: Binding(get: { appModel.renderSettings.safetyBubbleEnabled }, set: { appModel.renderSettings.safetyBubbleEnabled = $0 }))
 
-                                Text("Safety Bubble Radius: \(appModel.renderSettings.safetyBubbleRadius, specifier: "%.2f")m")
-                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleRadius }, set: { appModel.renderSettings.safetyBubbleRadius = $0 }), in: 0.05...2.5)
+                                if appModel.renderSettings.safetyBubbleEnabled {
+                                    Text("Radius: \(appModel.renderSettings.safetyBubbleRadius, specifier: "%.2f")m")
+                                    Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleRadius }, set: { appModel.renderSettings.safetyBubbleRadius = $0 }), in: 0.5...2.5)
 
-                                Text("Shape: \(appModel.renderSettings.safetyBubbleShape < 0.33 ? "Sphere" : (appModel.renderSettings.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
-                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleShape }, set: { appModel.renderSettings.safetyBubbleShape = $0 }), in: 0...1)
-
-                                Text("Foveation Intensity")
-                                Slider(value: Binding(get: { appModel.renderSettings.foveationIntensity }, set: { appModel.renderSettings.foveationIntensity = $0 }), in: 0...2.0)
-
-                                Text("Render Scale (MetalFX): \(appModel.renderSettings.resolutionScale, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.resolutionScale },
-                                    set: { appModel.renderSettings.resolutionScale = $0 }
-                                ), in: 0.5...1.0)
-                                .help("Lower values render at reduced resolution and upscale with MetalFX")
+                                    Text("Shape: \(appModel.renderSettings.safetyBubbleShape < 0.33 ? "Sphere" : (appModel.renderSettings.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
+                                    Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleShape }, set: { appModel.renderSettings.safetyBubbleShape = $0 }), in: 0...1)
+                                }
                                 
                                 Divider()
                                 
@@ -506,49 +527,6 @@ struct ContentView: View {
                                     set: { appModel.renderSettings.useRelativeGestures = $0 }
                                 ))
                                 .help("Relative: fine-tune from current value. Absolute: hand distance maps directly to range.")
-                            }
-                            .padding(.leading, 10)
-                        }
-                        
-                        // Symmetry Movement (auto-pilot along fractal symmetry)
-                        DisclosureGroup("Symmetry Movement") {
-                            VStack(spacing: 8) {
-                                Toggle("Enable Symmetry Travel", isOn: Binding(
-                                    get: { appModel.renderSettings.symmetryMovementEnabled },
-                                    set: { appModel.renderSettings.symmetryMovementEnabled = $0 }
-                                ))
-                                .help("Auto-navigate along fractal symmetry axes for hypnotic exploration")
-                                
-                                if appModel.renderSettings.symmetryMovementEnabled {
-                                    Text("Speed: \(appModel.renderSettings.symmetryMovementSpeed, specifier: "%.2f")")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.symmetryMovementSpeed },
-                                        set: { appModel.renderSettings.symmetryMovementSpeed = $0 }
-                                    ), in: 0.05...1.0)
-                                    
-                                    Text("Direction Change Interval: \(appModel.renderSettings.symmetryUpdateInterval, specifier: "%.1f")s")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.symmetryUpdateInterval },
-                                        set: { appModel.renderSettings.symmetryUpdateInterval = $0 }
-                                    ), in: 0.2...2.0)
-                                    
-                                    Text("Blend Smoothness: \(appModel.renderSettings.symmetryBlendDuration, specifier: "%.1f")s")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.symmetryBlendDuration },
-                                        set: { appModel.renderSettings.symmetryBlendDuration = $0 }
-                                    ), in: 0.1...1.0)
-                                    
-                                    Picker("Axis Preference", selection: Binding(
-                                        get: { appModel.renderSettings.symmetryPreferredAxis },
-                                        set: { appModel.renderSettings.symmetryPreferredAxis = $0 }
-                                    )) {
-                                        Text("Auto").tag(-1)
-                                        Text("Primary").tag(0)
-                                        Text("Secondary").tag(1)
-                                        Text("Tertiary").tag(2)
-                                    }
-                                    .pickerStyle(.segmented)
-                                }
                             }
                             .padding(.leading, 10)
                         }
@@ -567,14 +545,13 @@ struct ContentView: View {
                         }
                         .padding(.top, 8)
 
-                        Text("FPS: \(appModel.fps, specifier: "%.1f")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text(cameraMode ? "Camera dolly: drag = Z, pinch = Z" : "Object move: drag = XY, pinch = Z")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
+                        HStack {
+                            Text("FPS: \(appModel.fps, specifier: "%.0f")")
+                            Spacer()
+                            Text(cameraMode ? "Dolly mode" : "Pan mode")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal)
                 }

@@ -898,234 +898,6 @@ half3 ColourNegativeMandelbox(float3 pos, float quality, float minRad2Val, float
 }
 
 // =============================================================================
-// SYMMETRY-BASED MOVEMENT - Find directions that bisect fractal symmetry
-// =============================================================================
-// These functions extract symmetry information from fractal iteration to guide
-// camera/object movement along aesthetically pleasing paths.
-
-// Symmetry information extracted from fractal evaluation
-struct SymmetryInfo {
-    float3 primaryAxis;     // Best movement direction (toward symmetry center)
-    float3 secondaryAxis;   // Perpendicular alternative direction
-    float3 tertiaryAxis;    // Third option (cross of primary/secondary)
-    float symmetryStrength; // 0-1: how symmetric the local region is (1 = very symmetric)
-    uint foldMask;          // Bitmask of which folds were active during iteration
-    int dominantFoldCount;  // Which fold fired most often
-};
-
-// Triforce/IFS explicit symmetry axes (fold plane normals)
-constant float3 TRIFORCE_SYMMETRY_AXES[4] = {
-    float3(0.7071067811865476, 0.7071067811865476, 0.0),   // x+y=0 plane normal (normalized)
-    float3(0.7071067811865476, 0.0, 0.7071067811865476),   // x+z=0 plane normal
-    float3(0.0, 0.7071067811865476, 0.7071067811865476),   // y+z=0 plane normal
-    float3(0.5773502691896258, 0.5773502691896258, 0.5773502691896258)  // Diagonal (1,1,1) normalized
-};
-
-// Mandelbox symmetry axes (box fold planes + sphere)
-constant float3 MANDELBOX_SYMMETRY_AXES[6] = {
-    float3(1.0, 0.0, 0.0),   // X axis (box fold)
-    float3(0.0, 1.0, 0.0),   // Y axis (box fold)
-    float3(0.0, 0.0, 1.0),   // Z axis (box fold)
-    float3(0.7071067811865476, 0.7071067811865476, 0.0),   // XY diagonal
-    float3(0.7071067811865476, 0.0, 0.7071067811865476),   // XZ diagonal
-    float3(0.0, 0.7071067811865476, 0.7071067811865476)    // YZ diagonal
-};
-
-// Extract symmetry axes from Mandelbox fold operations
-// Cost: ~same as one Map() call, can piggyback on existing evaluation
-FORCE_INLINE SymmetryInfo GetSymmetryAxesMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations) 
-{
-    SymmetryInfo info;
-    float4 p = float4(pos, 1.0);
-    float4 p0 = p;
-    
-    // Track fold activations per axis
-    uint foldMask = 0;
-    int3 foldCounts = int3(0);  // Count folds per axis (x, y, z)
-    float3 foldDirectionSum = float3(0.0);  // Weighted direction accumulator
-    int sphereFoldCount = 0;
-    
-    float invMinRadius2 = 1.0f / params.minRadius2;
-    int loopCount = min(iterations, 8);  // Limit for symmetry detection
-    
-    for (int i = 0; i < loopCount; i++) {
-        // Box fold - track which axes hit the fold boundary
-        float3 preFold = p.xyz;
-        float3 clamped = clamp(p.xyz, -foldingLimit, foldingLimit);
-        
-        // Detect which axes were clamped (folded)
-        float3 delta = abs(preFold) - foldingLimit;
-        float weight = 1.0 / float(i + 1);  // Earlier folds weighted more
-        
-        if (delta.x > 0.0) { 
-            foldMask |= (1u << 0); 
-            foldCounts.x++; 
-            foldDirectionSum.x += sign(preFold.x) * weight;
-        }
-        if (delta.y > 0.0) { 
-            foldMask |= (1u << 1); 
-            foldCounts.y++; 
-            foldDirectionSum.y += sign(preFold.y) * weight;
-        }
-        if (delta.z > 0.0) { 
-            foldMask |= (1u << 2); 
-            foldCounts.z++; 
-            foldDirectionSum.z += sign(preFold.z) * weight;
-        }
-        
-        p.xyz = clamped * 2.0 - p.xyz;
-        
-        // Sphere fold - track if inner sphere was hit
-        float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
-        if (r2 < params.minRadius2) {
-            foldMask |= (1u << 3);
-            sphereFoldCount++;
-        }
-        
-        p *= t;
-        p = fma(p, params.scale, p0);
-    }
-    
-    // Primary axis: direction toward symmetry center based on fold accumulation
-    float foldLen = length(foldDirectionSum);
-    if (foldLen > 0.001) {
-        info.primaryAxis = foldDirectionSum / foldLen;
-    } else {
-        // No dominant fold direction - use position-based fallback
-        info.primaryAxis = -normalize(pos + float3(0.001));
-    }
-    
-    // Find which fold fired most - that's the dominant symmetry plane
-    info.dominantFoldCount = 0;
-    int maxCount = foldCounts.x;
-    if (foldCounts.y > maxCount) { maxCount = foldCounts.y; info.dominantFoldCount = 1; }
-    if (foldCounts.z > maxCount) { maxCount = foldCounts.z; info.dominantFoldCount = 2; }
-    
-    // Secondary axis: perpendicular to primary, favoring the least-active fold axis
-    float3 leastActive = MANDELBOX_SYMMETRY_AXES[info.dominantFoldCount];
-    float3 up = (abs(dot(info.primaryAxis, leastActive)) < 0.9) ? leastActive : float3(0, 1, 0);
-    info.secondaryAxis = normalize(cross(info.primaryAxis, up));
-    
-    // Tertiary: orthogonal to both
-    info.tertiaryAxis = normalize(cross(info.primaryAxis, info.secondaryAxis));
-    
-    // Symmetry strength: balanced folds = high symmetry
-    // If all axes fold equally, we're at a highly symmetric point
-    float totalFolds = float(foldCounts.x + foldCounts.y + foldCounts.z + sphereFoldCount);
-    float maxFolds = float(max(max(foldCounts.x, foldCounts.y), foldCounts.z));
-    info.symmetryStrength = (totalFolds > 0.0) ? (1.0 - maxFolds / totalFolds) : 0.5;
-    info.foldMask = foldMask;
-    
-    return info;
-}
-
-// Extract symmetry for Triforce/Kaleidoscopic IFS - uses explicit fold planes
-FORCE_INLINE SymmetryInfo GetSymmetryAxesTriforce(float3 pos, float scale, int iterations)
-{
-    SymmetryInfo info;
-    float3 z = pos;
-    
-    // Track which fold planes were crossed
-    uint foldMask = 0;
-    int3 foldCounts = int3(0);  // Counts for each of 3 fold planes
-    float3 Offset = float3(1.0, 1.0, 1.0);
-    
-    int loopCount = min(iterations, 8);
-    
-    for (int n = 0; n < loopCount; n++) {
-        // Track each fold
-        if (z.x + z.y < 0.0) { foldMask |= (1u << 0); foldCounts.x++; z.xy = -z.yx; }
-        if (z.x + z.z < 0.0) { foldMask |= (1u << 1); foldCounts.y++; z.xz = -z.zx; }
-        if (z.y + z.z < 0.0) { foldMask |= (1u << 2); foldCounts.z++; z.yz = -z.zy; }
-        
-        z = z * scale - Offset * (scale - 1.0);
-    }
-    
-    // Determine which symmetry sector we're in and pick appropriate axis
-    // The fold with the LEAST activations indicates we're aligned with that symmetry plane
-    info.dominantFoldCount = 0;
-    int minCount = foldCounts.x;
-    if (foldCounts.y < minCount) { minCount = foldCounts.y; info.dominantFoldCount = 1; }
-    if (foldCounts.z < minCount) { minCount = foldCounts.z; info.dominantFoldCount = 2; }
-    
-    // Primary axis: the symmetry plane we're most aligned with
-    info.primaryAxis = TRIFORCE_SYMMETRY_AXES[info.dominantFoldCount];
-    
-    // Secondary: next least-active fold plane
-    int secondIdx = (info.dominantFoldCount + 1) % 3;
-    info.secondaryAxis = TRIFORCE_SYMMETRY_AXES[secondIdx];
-    
-    // Tertiary: the diagonal direction (always valid for tetrahedron)
-    info.tertiaryAxis = TRIFORCE_SYMMETRY_AXES[3];
-    
-    // Symmetry strength based on balance of folds
-    float totalFolds = float(foldCounts.x + foldCounts.y + foldCounts.z);
-    float variance = abs(float(foldCounts.x) - totalFolds/3.0) + 
-                     abs(float(foldCounts.y) - totalFolds/3.0) +
-                     abs(float(foldCounts.z) - totalFolds/3.0);
-    info.symmetryStrength = saturate(1.0 - variance / (totalFolds + 1.0));
-    info.foldMask = foldMask;
-    
-    return info;
-}
-
-// Unified symmetry detection - dispatches based on fractal type
-// fractalType: 0 = Mandelbox, 1 = Triforce, 2 = Negative Mandelbox
-FORCE_INLINE SymmetryInfo GetSymmetryAxes(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType)
-{
-    if (fractalType == 1) {
-        return GetSymmetryAxesTriforce(pos, 2.0, iterations);
-    } else {
-        // Mandelbox and Negative Mandelbox use same fold structure
-        return GetSymmetryAxesMandelbox(pos, params, foldingLimit, iterations);
-    }
-}
-
-// Choose a movement direction with optional randomness for equivalent paths
-// Returns a direction that follows fractal symmetry
-// randomSeed: use time or frame number for temporal variation
-FORCE_INLINE float3 ChooseSymmetryDirection(SymmetryInfo info, float randomSeed, float biasTowardPrimary)
-{
-    // Hash for pseudo-random choice
-    float h = fract(sin(randomSeed * 12.9898) * 43758.5453);
-    
-    // When symmetry is strong, multiple directions are equally valid - use randomness
-    // When symmetry is weak, prefer the primary (most distinct) axis
-    float primaryWeight = mix(0.33, 0.8, 1.0 - info.symmetryStrength);
-    primaryWeight = mix(primaryWeight, 1.0, biasTowardPrimary);
-    
-    if (h < primaryWeight) {
-        return info.primaryAxis;
-    } else if (h < primaryWeight + (1.0 - primaryWeight) * 0.5) {
-        return info.secondaryAxis;
-    } else {
-        return info.tertiaryAxis;
-    }
-}
-
-// Smooth direction interpolation for animation
-// Blends from current direction toward a new symmetry-aligned direction
-FORCE_INLINE float3 BlendTowardSymmetry(float3 currentDir, float3 targetSymmetryDir, float blendFactor)
-{
-    // Spherical interpolation for smooth direction changes
-    float d = dot(currentDir, targetSymmetryDir);
-    
-    // Handle near-parallel and anti-parallel cases
-    if (d > 0.9999) return targetSymmetryDir;
-    if (d < -0.9999) {
-        // Opposite directions - blend through perpendicular
-        float3 perp = normalize(cross(currentDir, float3(0, 1, 0)));
-        if (length(perp) < 0.001) perp = normalize(cross(currentDir, float3(1, 0, 0)));
-        return normalize(mix(currentDir, perp, blendFactor));
-    }
-    
-    // Slerp approximation (cheaper than true slerp)
-    float3 blended = normalize(mix(currentDir, targetSymmetryDir, blendFactor));
-    return blended;
-}
-
-// =============================================================================
 // UNIFIED MAP FUNCTION - Dispatches to correct fractal based on type
 // =============================================================================
 
@@ -2683,6 +2455,245 @@ struct DepthOutput {
     float depth [[depth(any)]];
 };
 
+// =============================================================================
+// ANISOTROPIC KUWAHARA FILTER (Painterly Post-Processing)
+// =============================================================================
+// Implements a generalized Kuwahara filter that produces painterly brush-stroke effects.
+// The filter divides the neighborhood into overlapping sectors and selects the one
+// with minimum variance, creating oil-painting-like smoothing while preserving edges.
+// Based on Papari et al. "Artistic Edge and Corner Enhancing Smoothing" (2007)
+// and Kyprianidis et al. "Image and Video Abstraction by Anisotropic Kuwahara Filtering" (2009)
+
+// Kuwahara parameters passed from CPU
+struct KuwaharaParams {
+    float radius;       // Filter kernel radius (2-8)
+    float sharpness;    // Edge sharpness factor (1-16)
+    float2 resolution;  // Texture resolution
+    uint eyeIndex;      // For stereo array textures
+};
+
+// Compute structure tensor for local orientation
+// Returns eigenvector of dominant direction
+FORCE_INLINE float2 computeStructureTensor(texture2d_array<half, access::read> tex, 
+                                            int2 coord, uint slice) {
+    // Sobel gradients
+    half gxr = 0, gyr = 0, gxg = 0, gyg = 0, gxb = 0, gyb = 0;
+    
+    UNROLL_FULL
+    for (int dy = -1; dy <= 1; dy++) {
+        UNROLL_FULL
+        for (int dx = -1; dx <= 1; dx++) {
+            int2 samplePos = coord + int2(dx, dy);
+            half3 c = tex.read(uint2(samplePos), slice).rgb;
+            
+            // Sobel weights
+            float sx = (dx == 0) ? 0.0f : ((dx < 0) ? -1.0f : 1.0f) * ((dy == 0) ? 2.0f : 1.0f);
+            float sy = (dy == 0) ? 0.0f : ((dy < 0) ? -1.0f : 1.0f) * ((dx == 0) ? 2.0f : 1.0f);
+            
+            gxr += c.r * half(sx); gyr += c.r * half(sy);
+            gxg += c.g * half(sx); gyg += c.g * half(sy);
+            gxb += c.b * half(sx); gyb += c.b * half(sy);
+        }
+    }
+    
+    // Structure tensor components (sum over RGB channels)
+    float Jxx = float(gxr*gxr + gxg*gxg + gxb*gxb);
+    float Jxy = float(gxr*gyr + gxg*gyg + gxb*gyb);
+    float Jyy = float(gyr*gyr + gyg*gyg + gyb*gyb);
+    
+    // Compute dominant eigenvector (perpendicular to gradient = edge direction)
+    // Using analytical eigenvector formula for 2x2 symmetric matrix
+    float trace = Jxx + Jyy;
+    float det = Jxx * Jyy - Jxy * Jxy;
+    float disc = sqrt(max(trace * trace * 0.25f - det, 0.0f));
+    float lambda1 = trace * 0.5f + disc;  // Larger eigenvalue
+    
+    // Eigenvector for larger eigenvalue gives gradient direction
+    // We want perpendicular (edge/flow direction)
+    float2 gradDir;
+    if (abs(Jxy) > 0.0001f) {
+        gradDir = normalize(float2(lambda1 - Jyy, Jxy));
+    } else {
+        gradDir = (Jxx > Jyy) ? float2(1, 0) : float2(0, 1);
+    }
+    
+    // Perpendicular = flow direction along edges
+    return float2(-gradDir.y, gradDir.x);
+}
+
+// Generalized Kuwahara filter with N sectors
+// Uses 8 overlapping pie-slice sectors for smoother results
+kernel void anisotropicKuwaharaFilter(
+    texture2d_array<half, access::read> inputTexture [[texture(0)]],
+    texture2d_array<half, access::write> outputTexture [[texture(1)]],
+    constant KuwaharaParams& params [[buffer(0)]],
+    uint3 gid [[thread_position_in_grid]])
+{
+    uint2 texSize = uint2(inputTexture.get_width(), inputTexture.get_height());
+    if (gid.x >= texSize.x || gid.y >= texSize.y) return;
+    
+    int2 coord = int2(gid.xy);
+    uint slice = params.eyeIndex;
+    int radius = int(params.radius);
+    
+    // Get local flow direction from structure tensor
+    float2 flowDir = computeStructureTensor(inputTexture, coord, slice);
+    float2 perpDir = float2(-flowDir.y, flowDir.x);
+    
+    // Build rotation matrix to align sectors with local structure
+    float2x2 rotMat = float2x2(flowDir, perpDir);
+    
+    // 8 overlapping sectors (45 degrees each, with overlap)
+    const int NUM_SECTORS = 8;
+    const float SECTOR_ANGLE = M_PI_F / 4.0f;  // 45 degrees
+    
+    half3 sectorSum[NUM_SECTORS];
+    half3 sectorSqSum[NUM_SECTORS];
+    float sectorCount[NUM_SECTORS];
+    
+    // Initialize accumulators
+    UNROLL_FULL
+    for (int s = 0; s < NUM_SECTORS; s++) {
+        sectorSum[s] = half3(0);
+        sectorSqSum[s] = half3(0);
+        sectorCount[s] = 0;
+    }
+    
+    // Sample neighborhood
+    for (int dy = -radius; dy <= radius; dy++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            float2 offset = float2(dx, dy);
+            float dist = length(offset);
+            if (dist > float(radius) + 0.5f) continue;  // Circular kernel
+            
+            // Rotate offset to local frame
+            float2 localOffset = rotMat * offset;
+            
+            // Determine which sector(s) this sample belongs to
+            float angle = atan2(localOffset.y, localOffset.x);  // -PI to PI
+            if (angle < 0) angle += 2.0f * M_PI_F;  // 0 to 2PI
+            
+            // Gaussian weight based on distance
+            float sigma = float(radius) * 0.5f;
+            float weight = exp(-dist * dist / (2.0f * sigma * sigma));
+            
+            // Sample pixel
+            int2 samplePos = coord + int2(dx, dy);
+            samplePos = clamp(samplePos, int2(0), int2(texSize) - 1);
+            half3 color = inputTexture.read(uint2(samplePos), slice).rgb;
+            
+            // Add to overlapping sectors based on angle
+            // Each sector has a smooth falloff at edges for seamless blending
+            UNROLL_FULL
+            for (int s = 0; s < NUM_SECTORS; s++) {
+                float sectorCenter = float(s) * SECTOR_ANGLE;
+                float angleDiff = abs(angle - sectorCenter);
+                if (angleDiff > M_PI_F) angleDiff = 2.0f * M_PI_F - angleDiff;
+                
+                // Smooth falloff within sector (cosine weighting)
+                float sectorWidth = SECTOR_ANGLE * 1.2f;  // Slight overlap
+                if (angleDiff < sectorWidth) {
+                    float sectorWeight = weight * cos(angleDiff / sectorWidth * M_PI_F * 0.5f);
+                    sectorSum[s] += color * half(sectorWeight);
+                    sectorSqSum[s] += color * color * half(sectorWeight);
+                    sectorCount[s] += sectorWeight;
+                }
+            }
+        }
+    }
+    
+    // Find sector with minimum variance (standard Kuwahara selection)
+    half3 bestColor = inputTexture.read(uint2(coord), slice).rgb;
+    float minVariance = 1e10f;
+    float totalWeight = 0.0f;
+    half3 weightedColor = half3(0);
+    
+    UNROLL_FULL
+    for (int s = 0; s < NUM_SECTORS; s++) {
+        if (sectorCount[s] > 1.0f) {
+            half3 mean = sectorSum[s] / half(sectorCount[s]);
+            half3 sqMean = sectorSqSum[s] / half(sectorCount[s]);
+            half3 variance = max(sqMean - mean * mean, half3(0));
+            float totalVar = float(variance.r + variance.g + variance.b);
+            
+            // Weight inversely by variance (sharpness controls falloff)
+            float w = exp(-totalVar * params.sharpness);
+            weightedColor += mean * half(w);
+            totalWeight += w;
+            
+            if (totalVar < minVariance) {
+                minVariance = totalVar;
+                bestColor = mean;
+            }
+        }
+    }
+    
+    // Blend between hard selection and soft weighting based on sharpness
+    half3 softResult = (totalWeight > 0.0f) ? weightedColor / half(totalWeight) : bestColor;
+    float blendFactor = saturate(params.sharpness / 8.0f);  // Higher sharpness = more hard selection
+    half3 result = mix(softResult, bestColor, half(blendFactor));
+    
+    outputTexture.write(half4(result, 1.0h), gid.xy, slice);
+}
+
+// Simplified Kuwahara for lower quality / faster execution
+// Uses 4 quadrants instead of 8 sectors (classic Kuwahara)
+kernel void kuwaharaFilterSimple(
+    texture2d_array<half, access::read> inputTexture [[texture(0)]],
+    texture2d_array<half, access::write> outputTexture [[texture(1)]],
+    constant KuwaharaParams& params [[buffer(0)]],
+    uint3 gid [[thread_position_in_grid]])
+{
+    uint2 texSize = uint2(inputTexture.get_width(), inputTexture.get_height());
+    if (gid.x >= texSize.x || gid.y >= texSize.y) return;
+    
+    int2 coord = int2(gid.xy);
+    uint slice = params.eyeIndex;
+    int radius = int(params.radius);
+    
+    // 4 quadrants: top-left, top-right, bottom-left, bottom-right
+    half3 quadSum[4] = {half3(0), half3(0), half3(0), half3(0)};
+    half3 quadSqSum[4] = {half3(0), half3(0), half3(0), half3(0)};
+    int quadCount[4] = {0, 0, 0, 0};
+    
+    for (int dy = -radius; dy <= radius; dy++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            int2 samplePos = clamp(coord + int2(dx, dy), int2(0), int2(texSize) - 1);
+            half3 color = inputTexture.read(uint2(samplePos), slice).rgb;
+            
+            // Determine quadrant (with overlap at center)
+            int qx = (dx <= 0) ? 0 : 1;
+            int qy = (dy <= 0) ? 0 : 1;
+            int q = qy * 2 + qx;
+            
+            quadSum[q] += color;
+            quadSqSum[q] += color * color;
+            quadCount[q]++;
+        }
+    }
+    
+    // Find quadrant with minimum variance
+    half3 bestColor = inputTexture.read(uint2(coord), slice).rgb;
+    float minVariance = 1e10f;
+    
+    UNROLL_FULL
+    for (int q = 0; q < 4; q++) {
+        if (quadCount[q] > 0) {
+            half3 mean = quadSum[q] / half(quadCount[q]);
+            half3 sqMean = quadSqSum[q] / half(quadCount[q]);
+            half3 variance = max(sqMean - mean * mean, half3(0));
+            float totalVar = float(variance.r + variance.g + variance.b);
+            
+            if (totalVar < minVariance) {
+                minVariance = totalVar;
+                bestColor = mean;
+            }
+        }
+    }
+    
+    outputTexture.write(half4(bestColor, 1.0h), gid.xy, slice);
+}
+
 // Stereo depth upscale fragment shader
 // Use BILINEAR filtering for depth to reduce shimmer during ASW reprojection.
 // While nearest preserves exact depth discontinuities, bilinear provides
@@ -2708,200 +2719,3 @@ fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]]
     return out;
 }
 
-// =============================================================================
-// SYMMETRY MOVEMENT COMPUTE KERNEL
-// =============================================================================
-// Updates movement state based on fractal symmetry at current position.
-// Run once per frame (single thread) - extremely lightweight.
-// Output can drive camera animation on the CPU side.
-
-// GPU-side symmetry movement state (matches SymmetryMovementState in ShaderTypes.h)
-struct SymmetryMovementStateGPU {
-    float3 currentDirection;
-    float3 targetDirection;
-    float3 primaryAxis;
-    float3 secondaryAxis;
-    float3 tertiaryAxis;
-    float blendProgress;
-    float blendDuration;
-    float timeSinceLastUpdate;
-    float updateInterval;
-    float symmetryStrength;
-    uint foldMask;
-    float movementSpeed;
-    int preferredAxisIndex;
-};
-
-// Uniforms for symmetry update kernel
-struct SymmetryUpdateUniforms {
-    float3 currentPosition;     // Current camera/object position
-    float deltaTime;            // Frame time in seconds
-    float minDistance;          // Fractal minDistance param
-    float fractalScale;         // Fractal scale param
-    float foldingLimit;         // Box fold limit
-    float sphereRadius;         // Sphere fold radius
-    int fractalIterations;      // Iteration count
-    int fractalType;            // 0=Mandelbox, 1=Triforce, 2=Negative
-    float randomSeed;           // For direction choice (e.g., time)
-};
-
-// Single-thread compute kernel to update symmetry movement state
-// Dispatch with [1,1,1] - runs once per frame
-kernel void updateSymmetryMovement(
-    device SymmetryMovementStateGPU* state [[buffer(0)]],
-    constant SymmetryUpdateUniforms& uniforms [[buffer(1)]],
-    uint tid [[thread_position_in_grid]])
-{
-    if (tid != 0) return;  // Single thread only
-    
-    SymmetryMovementStateGPU s = *state;
-    
-    // Update timing
-    s.timeSinceLastUpdate += uniforms.deltaTime;
-    
-    // Check if we need to recalculate symmetry
-    bool needsUpdate = (s.timeSinceLastUpdate >= s.updateInterval);
-    
-    // Also update if we're done blending and symmetry is weak (might have moved to new region)
-    if (s.blendProgress >= 1.0 && s.symmetryStrength < 0.3) {
-        needsUpdate = true;
-    }
-    
-    if (needsUpdate) {
-        s.timeSinceLastUpdate = 0.0;
-        
-        // Build fractal params for symmetry evaluation
-        FractalParams params = makeFractalParams(
-            uniforms.minDistance,
-            uniforms.fractalScale,
-            uniforms.sphereRadius,
-            uniforms.fractalIterations,
-            float3(0.0),  // No bubble center needed for symmetry
-            0.0,          // No bubble radius
-            0,            // Bubble disabled
-            0.0           // Bubble shape (not used)
-        );
-        
-        // Get symmetry information at current position
-        SymmetryInfo symInfo = GetSymmetryAxes(
-            uniforms.currentPosition,
-            params,
-            uniforms.foldingLimit,
-            uniforms.fractalIterations,
-            uniforms.fractalType
-        );
-        
-        // Store axes for external use
-        s.primaryAxis = symInfo.primaryAxis;
-        s.secondaryAxis = symInfo.secondaryAxis;
-        s.tertiaryAxis = symInfo.tertiaryAxis;
-        s.symmetryStrength = symInfo.symmetryStrength;
-        s.foldMask = symInfo.foldMask;
-        
-        // Choose new target direction
-        if (s.preferredAxisIndex >= 0 && s.preferredAxisIndex <= 2) {
-            // User-specified preference
-            if (s.preferredAxisIndex == 0) s.targetDirection = symInfo.primaryAxis;
-            else if (s.preferredAxisIndex == 1) s.targetDirection = symInfo.secondaryAxis;
-            else s.targetDirection = symInfo.tertiaryAxis;
-        } else {
-            // Auto-select with randomness for equally valid paths
-            s.targetDirection = ChooseSymmetryDirection(symInfo, uniforms.randomSeed, 0.5);
-        }
-        
-        // Reset blend progress
-        s.blendProgress = 0.0;
-        
-        // Adjust update interval based on symmetry strength
-        // High symmetry = slower updates (stable region)
-        // Low symmetry = faster updates (transitional region)
-        s.updateInterval = mix(0.3, 1.0, s.symmetryStrength);
-    }
-    
-    // Blend current direction toward target
-    if (s.blendProgress < 1.0) {
-        float blendSpeed = uniforms.deltaTime / max(s.blendDuration, 0.01);
-        s.blendProgress = min(s.blendProgress + blendSpeed, 1.0);
-        
-        // Smooth easing
-        float t = s.blendProgress;
-        t = t * t * (3.0 - 2.0 * t);  // Smoothstep
-        
-        s.currentDirection = BlendTowardSymmetry(s.currentDirection, s.targetDirection, t);
-    }
-    
-    // Write back
-    *state = s;
-}
-
-// Alternative: Per-pixel symmetry visualization for debugging
-// Shows symmetry axes as colored overlay
-fragment half4 debugSymmetryVisualization(
-    ColorInOut in [[stage_in]],
-    constant UniformsArray& uniformsArray [[buffer(BufferIndexUniforms)]],
-    ushort ampId [[amplification_id]])
-{
-    Uniforms uniforms = uniformsArray.uniforms[ampId];
-    
-    // Ray setup (same as main fragment shader)
-    float4x4 invModelView = uniforms.inverseModelViewMatrix;
-    float4x4 invProj = uniforms.inverseProjectionMatrix;
-    
-    float2 ndc = in.texCoord * 2.0 - 1.0;
-    float4 clipNear = float4(ndc, -1.0, 1.0);
-    float4 clipFar = float4(ndc, 1.0, 1.0);
-    float4 viewNear = invProj * clipNear;
-    float4 viewFar = invProj * clipFar;
-    viewNear /= viewNear.w;
-    viewFar /= viewFar.w;
-    
-    float3 rO = (invModelView * viewNear).xyz;
-    float3 rD = normalize((invModelView * viewFar).xyz - rO);
-    
-    // Build params
-    FractalParams params = makeFractalParams(
-        uniforms.minDistance,
-        uniforms.fractalScale,
-        uniforms.sphereRadius,
-        uniforms.fractalIterations,
-        float3(0.0), 0.0, 0, 0.0
-    );
-    
-    // Quick raymarch to find surface
-    float t = 0.05;
-    for (int i = 0; i < 32; i++) {
-        float3 p = rO + rD * t;
-        float d = MapUnified(p, params, uniforms.foldingLimit, uniforms.fractalIterations, uniforms.fractalType);
-        if (d < 0.01) break;
-        if (t > 10.0) break;
-        t += d;
-    }
-    
-    if (t > 10.0) {
-        return half4(0.0h, 0.0h, 0.05h, 1.0h);  // Background
-    }
-    
-    float3 hitPos = rO + rD * t;
-    
-    // Get symmetry at hit point
-    SymmetryInfo sym = GetSymmetryAxes(
-        hitPos, params, uniforms.foldingLimit, 
-        uniforms.fractalIterations, uniforms.fractalType
-    );
-    
-    // Visualize: color based on dominant axis alignment
-    half3 col;
-    col.r = half(abs(dot(sym.primaryAxis, float3(1,0,0))));
-    col.g = half(abs(dot(sym.primaryAxis, float3(0,1,0))));
-    col.b = half(abs(dot(sym.primaryAxis, float3(0,0,1))));
-    
-    // Brightness based on symmetry strength
-    col *= half(0.5 + 0.5 * sym.symmetryStrength);
-    
-    // Add fold mask visualization as subtle pattern
-    if ((sym.foldMask & 1u) != 0u) col.r += 0.1h;
-    if ((sym.foldMask & 2u) != 0u) col.g += 0.1h;
-    if ((sym.foldMask & 4u) != 0u) col.b += 0.1h;
-    
-    return half4(col, 1.0h);
-}

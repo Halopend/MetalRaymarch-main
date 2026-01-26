@@ -118,46 +118,6 @@ typedef struct
     int _padding;                     // Alignment padding
 } ColorSchemeParams;
 
-// Symmetry-based movement state for fractal navigation
-// Used to animate along paths that follow fractal symmetry planes
-typedef struct
-{
-    vector_float3 currentDirection;    // Current movement direction (normalized)
-    vector_float3 targetDirection;     // Target symmetry-aligned direction
-    vector_float3 primaryAxis;         // Primary symmetry axis at current position
-    vector_float3 secondaryAxis;       // Secondary symmetry axis
-    vector_float3 tertiaryAxis;        // Tertiary symmetry axis
-    float blendProgress;               // 0-1: progress blending to target direction
-    float blendDuration;               // Seconds to complete direction change
-    float timeSinceLastUpdate;         // Time since symmetry was recalculated
-    float updateInterval;              // Seconds between symmetry recalculations
-    float symmetryStrength;            // 0-1: how symmetric current region is
-    uint32_t foldMask;                 // Bitmask of active folds (for debugging/viz)
-    float movementSpeed;               // World units per second
-    int preferredAxisIndex;            // 0=primary, 1=secondary, 2=tertiary, -1=auto
-} SymmetryMovementState;
-
-// Default initialization for SymmetryMovementState
-#ifndef __METAL_VERSION__
-static inline SymmetryMovementState SymmetryMovementStateDefault(void) {
-    SymmetryMovementState state;
-    state.currentDirection = (vector_float3){0.0f, 0.0f, 1.0f};
-    state.targetDirection = (vector_float3){0.0f, 0.0f, 1.0f};
-    state.primaryAxis = (vector_float3){1.0f, 0.0f, 0.0f};
-    state.secondaryAxis = (vector_float3){0.0f, 1.0f, 0.0f};
-    state.tertiaryAxis = (vector_float3){0.0f, 0.0f, 1.0f};
-    state.blendProgress = 1.0f;
-    state.blendDuration = 0.5f;
-    state.timeSinceLastUpdate = 0.0f;
-    state.updateInterval = 0.5f;
-    state.symmetryStrength = 0.5f;
-    state.foldMask = 0;
-    state.movementSpeed = 0.3f;
-    state.preferredAxisIndex = -1;  // Auto-select
-    return state;
-}
-#endif
-
 typedef struct
 {
     matrix_float4x4 projectionMatrix;
@@ -168,11 +128,9 @@ typedef struct
     matrix_float4x4 inverseViewMatrix;    // For world-space ray origin
     float time;
     float minDistance;
-    vector_float2 foveaCenter;
     float fractalScale;
     int fractalIterations;
     int maxRaySteps;
-    float foveationIntensity;
     float colorMix;
     float glowIntensity;
     float foldingLimit;      // Box folding limit (default 1.0)
