@@ -1733,6 +1733,161 @@ FORCE_INLINE float computeLightingIntensity(float gTime, int lightingMode, float
     }
 }
 
+// =============================================================================
+// EMISSIVE GLOW CALCULATION
+// Computes self-illumination based on position, fold state, or patterns
+// Patterns:
+//   0 = Folds: Glow based on how many times the point was folded
+//   1 = Depth: Glow based on iteration depth reached
+//   2 = Position: Glow based on position-derived patterns (veins/ridges)
+//   3 = Pulse: Animated pulse waves emanating from origin
+//   4 = Edges: Glow at sharp edges/corners of the fractal
+// =============================================================================
+
+// Track fold information during SDF evaluation for emissive calculation
+struct FoldInfo {
+    int boxFolds;      // Number of box folds applied
+    int sphereFolds;   // Number of sphere folds applied (inner/outer)
+    float minRadius;   // Minimum radius reached during iteration
+    float orbitTrap;   // Distance to nearest orbit trap point
+};
+
+// Evaluate SDF with fold tracking for emissive calculation
+FORCE_INLINE float MapWithFoldInfo(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType, thread FoldInfo& foldInfo)
+{
+    foldInfo.boxFolds = 0;
+    foldInfo.sphereFolds = 0;
+    foldInfo.minRadius = 1e10;
+    foldInfo.orbitTrap = 1e10;
+    
+    float3 z = pos;
+    float dr = 1.0;
+    float scale = params.scale.x;  // Extract scalar from float4
+    float minRad2 = params.minRadius2;
+    float fixedRad2 = 1.0;  // Standard Mandelbox fixed radius squared
+    
+    for (int i = 0; i < iterations; i++) {
+        // Box fold - track each fold
+        float3 zOld = z;
+        z = clamp(z, -foldingLimit, foldingLimit) * 2.0 - z;
+        if (any(z != zOld)) foldInfo.boxFolds++;
+        
+        // Sphere fold
+        float r2 = dot(z, z);
+        foldInfo.minRadius = min(foldInfo.minRadius, sqrt(r2));
+        
+        // Orbit trap - distance to nearest axis
+        float trap = min(min(abs(z.x), abs(z.y)), abs(z.z));
+        foldInfo.orbitTrap = min(foldInfo.orbitTrap, trap);
+        
+        if (r2 < minRad2) {
+            float temp = fixedRad2 / minRad2;
+            z *= temp;
+            dr *= temp;
+            foldInfo.sphereFolds++;
+        } else if (r2 < fixedRad2) {
+            float temp = fixedRad2 / r2;
+            z *= temp;
+            dr *= temp;
+            foldInfo.sphereFolds++;
+        }
+        
+        z = scale * z + pos;
+        dr = dr * abs(scale) + 1.0;
+    }
+    
+    return length(z) / abs(dr) - 0.001;
+}
+
+// Compute emissive glow contribution
+// Returns RGB emissive color to add to final shading
+FORCE_INLINE half3 computeEmissive(
+    float3 pos,
+    float3 normal,
+    float distance,
+    float gTime,
+    int pattern,
+    float intensity,
+    float threshold,
+    float3 emissiveColor,
+    float speed,
+    FractalParams params,
+    float foldingLimit,
+    int iterations,
+    int fractalType
+) {
+    if (intensity <= 0.0) return half3(0.0h);
+    
+    float emission = 0.0;
+    
+    if (pattern == 0) {
+        // FOLDS: Glow based on fold count
+        FoldInfo info;
+        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
+        
+        // More folds = more glow (normalized to typical range)
+        float foldRatio = float(info.boxFolds + info.sphereFolds) / float(iterations * 2);
+        emission = smoothstep(threshold, 1.0, foldRatio);
+    }
+    else if (pattern == 1) {
+        // DEPTH: Glow based on iteration depth (deep = glowy)
+        FoldInfo info;
+        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
+        
+        // Small min radius = deep in the fractal
+        float depthFactor = 1.0 - saturate(info.minRadius / (foldingLimit * 2.0));
+        emission = smoothstep(threshold, 1.0, depthFactor);
+    }
+    else if (pattern == 2) {
+        // POSITION: Sine-based veins/ridges pattern
+        float3 freq = float3(5.0, 7.0, 6.0);
+        float veins = sin(pos.x * freq.x) * sin(pos.y * freq.y) * sin(pos.z * freq.z);
+        veins = veins * 0.5 + 0.5;  // Normalize to 0-1
+        
+        // Add orbit trap influence
+        FoldInfo info;
+        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 6), fractalType, info);
+        float trap = 1.0 - saturate(info.orbitTrap * 2.0);
+        
+        emission = smoothstep(threshold, 1.0, veins * 0.5 + trap * 0.5);
+    }
+    else if (pattern == 3) {
+        // PULSE: Animated waves from origin
+        float dist = length(pos);
+        float wave = sin(dist * 3.0 - gTime * speed * 5.0);
+        wave = wave * 0.5 + 0.5;
+        
+        // Secondary ripple
+        float ripple = sin(dist * 8.0 - gTime * speed * 3.0) * 0.5 + 0.5;
+        
+        emission = smoothstep(threshold, 1.0, wave * 0.7 + ripple * 0.3);
+    }
+    else if (pattern == 4) {
+        // EDGES: Glow at sharp edges using normal variance
+        // Approximate curvature by checking normal stability
+        float e = distance * 0.01;
+        float3 n1 = normal;
+        
+        // Sample nearby normals (cheap approximation)
+        float3 tangent = normalize(cross(normal, float3(0, 1, 0) + float3(0.001)));
+        float3 bitangent = cross(normal, tangent);
+        
+        // High curvature = edge
+        float curvature = 1.0 - abs(dot(n1, normalize(n1 + tangent * 0.1)));
+        curvature += 1.0 - abs(dot(n1, normalize(n1 + bitangent * 0.1)));
+        
+        // Add fold-based edge detection
+        FoldInfo info;
+        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 6), fractalType, info);
+        float foldEdge = float(info.boxFolds) / float(iterations);
+        
+        emission = smoothstep(threshold, 1.0, curvature * 0.5 + foldEdge * 0.5);
+    }
+    
+    // Apply intensity and color
+    return half3(emissiveColor) * half(emission * intensity);
+}
+
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
 // Three-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
 // Dramatically reduces total Map() evaluations while maintaining quality
@@ -2089,6 +2244,26 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 col += half3(specSpot) * shaSpot * bri;
                 col += half3(specSun) * shaSun * briSun;
             }
+            
+            // Emissive glow (self-illumination based on patterns)
+            if (uniforms.emissiveEnabled != 0) {
+                half3 emissive = computeEmissive(
+                    p,
+                    nor,
+                    ret.x,
+                    gTime,
+                    uniforms.emissivePattern,
+                    uniforms.emissiveIntensity,
+                    uniforms.emissiveThreshold,
+                    uniforms.emissiveColor,
+                    uniforms.emissiveSpeed,
+                    fractalParams,
+                    uniforms.foldingLimit,
+                    lodIterations,
+                    fractalType
+                );
+                col += emissive;
+            }
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
             if (fractalType == 1) {
@@ -2334,6 +2509,26 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
+        
+        // Emissive glow (self-illumination based on patterns)
+        if (uniforms.emissiveEnabled != 0) {
+            half3 emissive = computeEmissive(
+                p,
+                nor,
+                adjustedDist,
+                gTime,
+                uniforms.emissivePattern,
+                uniforms.emissiveIntensity,
+                uniforms.emissiveThreshold,
+                uniforms.emissiveColor,
+                uniforms.emissiveSpeed,
+                fractalParams,
+                uniforms.foldingLimit,
+                lodIterations,
+                fractalType
+            );
+            col += emissive;
+        }
 
         // Compute clip-space depth and write it out for async timewarp
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);

@@ -166,6 +166,11 @@ actor Renderer {
     private var hasLoggedMetalFXFallback = false
 #endif
 
+    // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
+    // Adjusts LayerRenderer.renderQuality based on FPS performance
+    private var dynamicRenderQualityManager: Any?  // Type-erased for @available
+    private var hasLoggedDynamicQualityStatus = false
+
     // Device pose smoothing removed — use raw device anchor from drawable for async timewarp
     
 
@@ -361,6 +366,32 @@ actor Renderer {
         arSession = ARKitSession()
         // Setup screenshot capture pipeline
         setupScreenshotCapture()
+        
+        // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
+        // Initialize dynamic quality manager if available on this OS version
+        setupDynamicRenderQuality()
+    }
+    
+    /// Setup dynamic render quality management (visionOS 26+)
+    private func setupDynamicRenderQuality() {
+        if #available(visionOS 26.0, *) {
+            let settings = appModel.renderSettings
+            let manager = DynamicRenderQualityManager(defaultQuality: settings.dynamicRenderQualityTarget)
+            manager.minQuality = settings.dynamicRenderQualityMin
+            manager.maxQuality = settings.dynamicRenderQualityMax
+            manager.isEnabled = settings.dynamicRenderQualityEnabled
+            manager.debugLogging = false  // Enable for debugging
+            dynamicRenderQualityManager = manager
+            
+            if layerRenderer.configuration.isFoveationEnabled {
+                print("✓ Dynamic render quality manager initialized (visionOS 26+)")
+                print("  Target: \(settings.dynamicRenderQualityTarget), Range: \(settings.dynamicRenderQualityMin)-\(settings.dynamicRenderQualityMax)")
+            } else {
+                print("ℹ️ Dynamic render quality: Foveation not enabled (quality adjustment disabled)")
+            }
+        } else {
+            print("ℹ️ Dynamic render quality: Requires visionOS 26+")
+        }
     }
     
     /// Setup screenshot capture resources
@@ -877,6 +908,44 @@ actor Renderer {
             }
         }
     }
+    
+    /// Update dynamic render quality based on FPS performance (visionOS 26+)
+    /// This implements Apple's WWDC25 Session 294 dynamic render quality API.
+    private func updateDynamicRenderQuality(fps: Double, deltaTime: TimeInterval) {
+        if #available(visionOS 26.0, *) {
+            guard let manager = dynamicRenderQualityManager as? DynamicRenderQualityManager else { return }
+            
+            let settings = appModel.renderSettings
+            
+            // Sync manager settings with RenderSettings (in case user changed them)
+            manager.isEnabled = settings.dynamicRenderQualityEnabled
+            manager.minQuality = settings.dynamicRenderQualityMin
+            manager.maxQuality = settings.dynamicRenderQualityMax
+            
+            // Update the manager with current FPS
+            manager.update(fps: fps, deltaTime: deltaTime, layerRenderer: layerRenderer)
+            
+            // Sync current quality back to settings for UI display
+            settings.currentRenderQuality = manager.currentQuality
+            
+            // Log status once
+            if !hasLoggedDynamicQualityStatus && manager.isEnabled {
+                hasLoggedDynamicQualityStatus = true
+                if layerRenderer.configuration.isFoveationEnabled {
+                    print("✓ Dynamic render quality active: adjusting based on FPS")
+                }
+            }
+            
+            // Optionally hint scene complexity when fractal parameters change significantly
+            // This helps the manager anticipate quality needs
+            let complexity = DynamicRenderQualityManager.estimateFractalComplexity(
+                iterations: settings.fractalIterations,
+                raySteps: settings.maxRaySteps,
+                tileSize: settings.tileSize
+            )
+            manager.hintSceneComplexity(complexity, layerRenderer: layerRenderer)
+        }
+    }
 
     private func updateGameState(drawable: LayerRenderer.Drawable) {
         /// Update any game state before rendering
@@ -979,6 +1048,12 @@ actor Renderer {
                             fractalType: settings.fractalType.rawValue,
                             lightingMode: settings.lightingMode.rawValue,
                             audioLevel: settings.audioLevel,
+                            emissiveEnabled: settings.emissiveEnabled ? 1 : 0,
+                            emissivePattern: Int32(settings.emissivePattern),
+                            emissiveIntensity: settings.emissiveIntensity,
+                            emissiveThreshold: settings.emissiveThreshold,
+                            emissiveColor: settings.emissiveColor,
+                            emissiveSpeed: settings.emissiveSpeed,
                             colorScheme: colorSchemeParams)
         }
 
@@ -1010,7 +1085,17 @@ actor Renderer {
             fatalError("Failed to create command buffer")
         }
 
-        guard let drawable = frame.queryDrawable() else { return }
+        // Query drawable using the appropriate API for the OS version
+        // visionOS 26+ uses queryDrawables() which supports renderQuality and fovea
+        let drawable: LayerRenderer.Drawable
+        if #available(visionOS 26.0, *) {
+            let drawables = frame.queryDrawables()
+            guard let firstDrawable = drawables.first else { return }
+            drawable = firstDrawable
+        } else {
+            guard let legacyDrawable = frame.queryDrawable() else { return }
+            drawable = legacyDrawable
+        }
 
         // Wait for a buffer to become available. With maxBuffersInFlight=2,
         // this allows CPU/GPU pipelining while preventing frame accumulation.
@@ -1050,6 +1135,10 @@ actor Renderer {
                     appModel.fps = updatedFPS
                 }
             }
+            
+            // === DYNAMIC RENDER QUALITY UPDATE ===
+            // Adjust LayerRenderer.renderQuality based on FPS performance
+            updateDynamicRenderQuality(fps: updatedFPS, deltaTime: deltaTime)
         }
         lastPresentationTime = presentationTime
 
@@ -1559,6 +1648,12 @@ actor Renderer {
             fractalType: settings.fractalType.rawValue,
             lightingMode: settings.lightingMode.rawValue,
             audioLevel: settings.audioLevel,
+            emissiveEnabled: settings.emissiveEnabled ? 1 : 0,
+            emissivePattern: Int32(settings.emissivePattern),
+            emissiveIntensity: settings.emissiveIntensity,
+            emissiveThreshold: settings.emissiveThreshold,
+            emissiveColor: settings.emissiveColor,
+            emissiveSpeed: settings.emissiveSpeed,
             colorScheme: colorSchemeParams
         )
         

@@ -20,6 +20,17 @@ struct ContentView: View {
     private var parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
         appModel.gestureController?.getParameterRanges() ?? (0.1...5.0, 0.1...13.0, 0.1...2.0)
     }
+    
+    /// Color for quality indicator based on current quality level
+    private func qualityColor(_ quality: Float) -> Color {
+        if quality >= 0.8 {
+            return .green
+        } else if quality >= 0.6 {
+            return .yellow
+        } else {
+            return .orange
+        }
+    }
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -136,19 +147,6 @@ struct ContentView: View {
                 .padding(.bottom, 8)
                 
                 // Render scale control lives in Safety & Render Options.
-
-                // Tile-based rendering mode
-                HStack {
-                    Text("Render")
-                    Picker("", selection: Binding(
-                        get: { appModel.renderSettings.tileSize },
-                        set: { appModel.renderSettings.tileSize = $0 }
-                    )) {
-                        Text("Per-Pixel").tag(0)
-                        Text("Adaptive").tag(8)
-                    }
-                    .pickerStyle(.segmented)
-                }
 
             }
             .padding(.bottom, 16)
@@ -425,6 +423,80 @@ struct ContentView: View {
                                         set: { appModel.renderSettings.kuwaharaSharpness = $0 }
                                     ), in: 1...16)
                                 }
+                                
+                                Divider()
+                                
+                                // === EMISSIVE GLOW ===
+                                Text("Emissive Glow").font(.headline)
+                                
+                                Toggle("Enable Emissive", isOn: Binding(
+                                    get: { appModel.renderSettings.emissiveEnabled },
+                                    set: { appModel.renderSettings.emissiveEnabled = $0 }
+                                ))
+                                
+                                if appModel.renderSettings.emissiveEnabled {
+                                    // Pattern picker
+                                    HStack {
+                                        Text("Pattern")
+                                        Spacer()
+                                        Picker("Pattern", selection: Binding(
+                                            get: { appModel.renderSettings.emissivePattern },
+                                            set: { appModel.renderSettings.emissivePattern = $0 }
+                                        )) {
+                                            Text("Folds").tag(0)
+                                            Text("Depth").tag(1)
+                                            Text("Veins").tag(2)
+                                            Text("Pulse").tag(3)
+                                            Text("Edges").tag(4)
+                                        }
+                                        .pickerStyle(.segmented)
+                                        .frame(maxWidth: 220)
+                                    }
+                                    
+                                    Text("Intensity: \(appModel.renderSettings.emissiveIntensity, specifier: "%.2f")")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.emissiveIntensity },
+                                        set: { appModel.renderSettings.emissiveIntensity = $0 }
+                                    ), in: 0...2)
+                                    
+                                    Text("Threshold: \(appModel.renderSettings.emissiveThreshold, specifier: "%.2f")")
+                                    Slider(value: Binding(
+                                        get: { appModel.renderSettings.emissiveThreshold },
+                                        set: { appModel.renderSettings.emissiveThreshold = $0 }
+                                    ), in: 0...1)
+                                    
+                                    if appModel.renderSettings.emissivePattern == 3 {
+                                        Text("Pulse Speed: \(appModel.renderSettings.emissiveSpeed, specifier: "%.1f")")
+                                        Slider(value: Binding(
+                                            get: { appModel.renderSettings.emissiveSpeed },
+                                            set: { appModel.renderSettings.emissiveSpeed = $0 }
+                                        ), in: 0.1...5)
+                                    }
+                                    
+                                    // Color picker (RGB sliders for simplicity)
+                                    Text("Emissive Color")
+                                    HStack {
+                                        Text("R")
+                                        Slider(value: Binding(
+                                            get: { appModel.renderSettings.emissiveColor.x },
+                                            set: { appModel.renderSettings.emissiveColor.x = $0 }
+                                        ), in: 0...1)
+                                    }
+                                    HStack {
+                                        Text("G")
+                                        Slider(value: Binding(
+                                            get: { appModel.renderSettings.emissiveColor.y },
+                                            set: { appModel.renderSettings.emissiveColor.y = $0 }
+                                        ), in: 0...1)
+                                    }
+                                    HStack {
+                                        Text("B")
+                                        Slider(value: Binding(
+                                            get: { appModel.renderSettings.emissiveColor.z },
+                                            set: { appModel.renderSettings.emissiveColor.z = $0 }
+                                        ), in: 0...1)
+                                    }
+                                }
 
                                 Divider()
                                 
@@ -510,15 +582,11 @@ struct ContentView: View {
                             VStack(spacing: 8) {
                                 Toggle("Show HUD", isOn: Binding(get: { appModel.renderSettings.showHUD }, set: { appModel.renderSettings.showHUD = $0 }))
 
-                                Toggle("Safety Bubble", isOn: Binding(get: { appModel.renderSettings.safetyBubbleEnabled }, set: { appModel.renderSettings.safetyBubbleEnabled = $0 }))
+                                Text("Safety Bubble Radius: \(appModel.renderSettings.safetyBubbleRadius, specifier: "%.2f")m")
+                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleRadius }, set: { appModel.renderSettings.safetyBubbleRadius = $0 }), in: 0.5...2.5)
 
-                                if appModel.renderSettings.safetyBubbleEnabled {
-                                    Text("Radius: \(appModel.renderSettings.safetyBubbleRadius, specifier: "%.2f")m")
-                                    Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleRadius }, set: { appModel.renderSettings.safetyBubbleRadius = $0 }), in: 0.5...2.5)
-
-                                    Text("Shape: \(appModel.renderSettings.safetyBubbleShape < 0.33 ? "Sphere" : (appModel.renderSettings.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
-                                    Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleShape }, set: { appModel.renderSettings.safetyBubbleShape = $0 }), in: 0...1)
-                                }
+                                Text("Bubble Shape: \(appModel.renderSettings.safetyBubbleShape < 0.33 ? "Sphere" : (appModel.renderSettings.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
+                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleShape }, set: { appModel.renderSettings.safetyBubbleShape = $0 }), in: 0...1)
                                 
                                 Divider()
                                 
@@ -527,6 +595,67 @@ struct ContentView: View {
                                     set: { appModel.renderSettings.useRelativeGestures = $0 }
                                 ))
                                 .help("Relative: fine-tune from current value. Absolute: hand distance maps directly to range.")
+                                
+                                Divider()
+                                
+                                // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
+                                // Automatically adjusts render quality based on FPS performance
+                                Toggle("Dynamic Render Quality", isOn: Binding(
+                                    get: { appModel.renderSettings.dynamicRenderQualityEnabled },
+                                    set: { appModel.renderSettings.dynamicRenderQualityEnabled = $0 }
+                                ))
+                                .help("Automatically adjust render quality to maintain frame rate")
+                                
+                                if appModel.renderSettings.dynamicRenderQualityEnabled {
+                                    // Current quality indicator
+                                    HStack {
+                                        Text("Current Quality:")
+                                            .font(.caption)
+                                        Spacer()
+                                        Text("\(Int(appModel.renderSettings.currentRenderQuality * 100))%")
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(qualityColor(appModel.renderSettings.currentRenderQuality))
+                                        
+                                        // Quality bar indicator
+                                        GeometryReader { geo in
+                                            ZStack(alignment: .leading) {
+                                                RoundedRectangle(cornerRadius: 2)
+                                                    .fill(Color.gray.opacity(0.3))
+                                                RoundedRectangle(cornerRadius: 2)
+                                                    .fill(qualityColor(appModel.renderSettings.currentRenderQuality))
+                                                    .frame(width: geo.size.width * CGFloat(appModel.renderSettings.currentRenderQuality))
+                                            }
+                                        }
+                                        .frame(width: 60, height: 8)
+                                    }
+                                    
+                                    // Min/Max quality range
+                                    VStack(spacing: 4) {
+                                        HStack {
+                                            Text("Min Quality:")
+                                                .font(.caption)
+                                            Slider(value: Binding(
+                                                get: { appModel.renderSettings.dynamicRenderQualityMin },
+                                                set: { appModel.renderSettings.dynamicRenderQualityMin = $0 }
+                                            ), in: 0.4...0.8)
+                                            Text("\(Int(appModel.renderSettings.dynamicRenderQualityMin * 100))%")
+                                                .font(.caption.monospacedDigit())
+                                                .frame(width: 40, alignment: .trailing)
+                                        }
+                                        
+                                        HStack {
+                                            Text("Max Quality:")
+                                                .font(.caption)
+                                            Slider(value: Binding(
+                                                get: { appModel.renderSettings.dynamicRenderQualityMax },
+                                                set: { appModel.renderSettings.dynamicRenderQualityMax = $0 }
+                                            ), in: 0.8...1.0)
+                                            Text("\(Int(appModel.renderSettings.dynamicRenderQualityMax * 100))%")
+                                                .font(.caption.monospacedDigit())
+                                                .frame(width: 40, alignment: .trailing)
+                                        }
+                                    }
+                                }
                             }
                             .padding(.leading, 10)
                         }

@@ -146,6 +146,13 @@ typedef struct
     int fractalType;         // 0=Mandelbox, 1=Triforce, 2=Negative Mandelbox, 3=Orbit Density
     int lightingMode;        // 0=static, 1=animated, 2=audio-reactive
     float audioLevel;        // Audio level for reactive lighting (0-1)
+    // Emissive glow parameters
+    int emissiveEnabled;     // Enable emissive glow regions (0/1)
+    int emissivePattern;     // Pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
+    float emissiveIntensity; // Glow brightness (0-2)
+    float emissiveThreshold; // Threshold for triggering glow (0-1)
+    vector_float3 emissiveColor;  // Emissive color tint
+    float emissiveSpeed;     // Animation speed for pulse mode
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } Uniforms;
 
@@ -181,6 +188,13 @@ typedef struct
     int fractalType;             // 0=Mandelbox, 1=Triforce, 2=Negative Mandelbox, 3=Orbit Density
     int lightingMode;            // 0=static, 1=animated, 2=audio-reactive
     float audioLevel;            // Audio level for reactive lighting (0-1)
+    // Emissive glow parameters
+    int emissiveEnabled;         // Enable emissive glow regions (0/1)
+    int emissivePattern;         // Pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
+    float emissiveIntensity;     // Glow brightness (0-2)
+    float emissiveThreshold;     // Threshold for triggering glow (0-1)
+    vector_float3 emissiveColor; // Emissive color tint
+    float emissiveSpeed;         // Animation speed for pulse mode
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 

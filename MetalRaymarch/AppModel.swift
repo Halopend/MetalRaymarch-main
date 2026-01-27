@@ -496,10 +496,26 @@ final class RenderSettings: @unchecked Sendable {
     private var _glowIntensity: Float = 0.0                 // Ray-step glow (0 = off, 0.3 = moderate)
     private var _bloomStrength: Float = 0.0                 // Bloom effect (0 = off, 0.2 = subtle)
     
+    // === EMISSIVE GLOW (Self-illuminating regions) ===
+    private var _emissiveEnabled: Bool = false              // Enable emissive glow regions
+    private var _emissivePattern: Int = 0                   // 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
+    private var _emissiveIntensity: Float = 1.0             // Glow brightness (0-2)
+    private var _emissiveThreshold: Float = 0.5             // Threshold for triggering glow (0-1)
+    private var _emissiveColor: SIMD3<Float> = SIMD3<Float>(0.3, 0.6, 1.0)  // Blue-white default
+    private var _emissiveSpeed: Float = 1.0                 // Animation speed for pulse mode
+    
     // === KUWAHARA FILTER (Painterly Effect) ===
     private var _kuwaharaEnabled: Bool = false              // Enable anisotropic Kuwahara filter
     private var _kuwaharaRadius: Float = 4.0                // Filter radius (2-8, higher = more painterly)
     private var _kuwaharaSharpness: Float = 8.0             // Edge sharpness (1-16, higher = sharper edges)
+    
+    // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
+    // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
+    private var _dynamicRenderQualityEnabled: Bool = true   // Enable dynamic quality adjustment
+    private var _dynamicRenderQualityTarget: Float = 0.7    // Target quality when stable (0.5-1.0)
+    private var _dynamicRenderQualityMin: Float = 0.5       // Minimum quality floor (0.4-0.8)
+    private var _dynamicRenderQualityMax: Float = 1.0       // Maximum quality ceiling (0.8-1.0)
+    private var _currentRenderQuality: Float = 0.7          // Current quality level (read-only from manager)
     
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
@@ -788,6 +804,76 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _kuwaharaSharpness = max(1.0, min(16.0, newValue)) } }
     }
     
+    // === EMISSIVE GLOW ===
+    
+    /// Enable emissive glow regions
+    var emissiveEnabled: Bool {
+        get { withLock { _emissiveEnabled } }
+        set { withLock { _emissiveEnabled = newValue } }
+    }
+    
+    /// Emissive pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
+    var emissivePattern: Int {
+        get { withLock { _emissivePattern } }
+        set { withLock { _emissivePattern = max(0, min(4, newValue)) } }
+    }
+    
+    /// Emissive glow intensity (0-2)
+    var emissiveIntensity: Float {
+        get { withLock { _emissiveIntensity } }
+        set { withLock { _emissiveIntensity = max(0.0, min(2.0, newValue)) } }
+    }
+    
+    /// Threshold for triggering emissive glow (0-1)
+    var emissiveThreshold: Float {
+        get { withLock { _emissiveThreshold } }
+        set { withLock { _emissiveThreshold = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Emissive color tint
+    var emissiveColor: SIMD3<Float> {
+        get { withLock { _emissiveColor } }
+        set { withLock { _emissiveColor = newValue } }
+    }
+    
+    /// Emissive animation speed (for pulse mode)
+    var emissiveSpeed: Float {
+        get { withLock { _emissiveSpeed } }
+        set { withLock { _emissiveSpeed = max(0.1, min(5.0, newValue)) } }
+    }
+    
+    // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
+    
+    /// Enable dynamic render quality adjustment based on FPS
+    var dynamicRenderQualityEnabled: Bool {
+        get { withLock { _dynamicRenderQualityEnabled } }
+        set { withLock { _dynamicRenderQualityEnabled = newValue } }
+    }
+    
+    /// Target render quality when stable (0.5-1.0)
+    var dynamicRenderQualityTarget: Float {
+        get { withLock { _dynamicRenderQualityTarget } }
+        set { withLock { _dynamicRenderQualityTarget = max(0.5, min(1.0, newValue)) } }
+    }
+    
+    /// Minimum render quality floor (0.4-0.8)
+    var dynamicRenderQualityMin: Float {
+        get { withLock { _dynamicRenderQualityMin } }
+        set { withLock { _dynamicRenderQualityMin = max(0.4, min(0.8, newValue)) } }
+    }
+    
+    /// Maximum render quality ceiling (0.8-1.0)
+    var dynamicRenderQualityMax: Float {
+        get { withLock { _dynamicRenderQualityMax } }
+        set { withLock { _dynamicRenderQualityMax = max(0.8, min(1.0, newValue)) } }
+    }
+    
+    /// Current render quality level (read-only, updated by DynamicRenderQualityManager)
+    var currentRenderQuality: Float {
+        get { withLock { _currentRenderQuality } }
+        set { withLock { _currentRenderQuality = newValue } }
+    }
+
     /// Update color scheme transitions and animation time. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
         withLock {
