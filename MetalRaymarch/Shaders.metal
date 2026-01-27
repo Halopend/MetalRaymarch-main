@@ -1852,15 +1852,26 @@ FORCE_INLINE half3 computeEmissive(
         emission = smoothstep(threshold, 1.0, veins * 0.5 + trap * 0.5);
     }
     else if (pattern == 3) {
-        // PULSE: Animated waves from origin
-        float dist = length(pos);
-        float wave = sin(dist * 3.0 - gTime * speed * 5.0);
-        wave = wave * 0.5 + 0.5;
+        // PULSE: Fold-aware animated glow (symmetric structures light together)
+        // Use fold info to create "cells" that pulse together
+        FoldInfo info;
+        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
         
-        // Secondary ripple
-        float ripple = sin(dist * 8.0 - gTime * speed * 3.0) * 0.5 + 0.5;
+        // Cell ID based on fold count + orbit trap (groups symmetric parts)
+        float cellId = float(info.boxFolds * 3 + info.sphereFolds * 7) + floor(info.orbitTrap * 4.0);
         
-        emission = smoothstep(threshold, 1.0, wave * 0.7 + ripple * 0.3);
+        // Animated pulse per cell
+        float phase = cellId * 0.7;  // Different phase per cell type
+        float pulse = sin(gTime * speed * 3.0 + phase);
+        pulse = pulse * 0.5 + 0.5;  // Normalize to 0-1
+        
+        // Add depth-based brightness (deeper = brighter glow)
+        float depthBoost = 1.0 - saturate(info.minRadius / (foldingLimit * 1.5));
+        
+        // Threshold controls which cells glow (lower = more cells)
+        float cellMask = step(threshold, fract(cellId * 0.1234));
+        
+        emission = pulse * depthBoost * cellMask;
     }
     else if (pattern == 4) {
         // EDGES: Glow at sharp edges using normal variance

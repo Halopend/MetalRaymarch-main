@@ -29,6 +29,7 @@ final class UISettingsCache {
     var colorSchemeAutoInterval: Float = 30.0
     var colorSchemeTransitionDuration: Float = 2.0
     var colorSchemeSaturation: Float = 2.0
+    var colorSchemeContrast: Float = 1.05
     var colorSchemeGamma: Float = 0.5
     
     // Animation
@@ -107,6 +108,7 @@ final class UISettingsCache {
         colorSchemeAutoInterval = settings.colorSchemeAutoInterval
         colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
         colorSchemeSaturation = settings.colorSchemeSaturation
+        colorSchemeContrast = settings.colorSchemeContrast
         colorSchemeGamma = settings.colorSchemeGamma
         
         hueCycleSpeed = settings.hueCycleSpeed
@@ -498,6 +500,44 @@ struct ContentView: View {
                                 
                                 Divider()
                                 
+                                // Contrast control
+                                Text("Contrast: \(cache.colorSchemeContrast, specifier: "%.2f")")
+                                Slider(value: $cache.colorSchemeContrast, in: 0.8...1.2, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) }
+                                })
+                                
+                                Divider()
+                                
+                                // === DYNAMIC LIGHTING / ANIMATION ===
+                                Text("Lighting Animation").font(.headline)
+                                
+                                Text("Hue Cycle Speed: \(cache.hueCycleSpeed, specifier: "%.3f")")
+                                Slider(value: $cache.hueCycleSpeed, in: 0...0.5, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.hueCycleSpeed, value: cache.hueCycleSpeed) }
+                                })
+                                
+                                Text("Pulse Speed: \(cache.pulseSpeed, specifier: "%.2f")")
+                                Slider(value: $cache.pulseSpeed, in: 0...2, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.pulseSpeed, value: cache.pulseSpeed) }
+                                })
+                                
+                                Text("Pulse Amount: \(cache.pulseAmount, specifier: "%.2f")")
+                                Slider(value: $cache.pulseAmount, in: 0...1, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.pulseAmount, value: cache.pulseAmount) }
+                                })
+                                
+                                Text("Glow Intensity: \(cache.glowIntensity, specifier: "%.2f")")
+                                Slider(value: $cache.glowIntensity, in: 0...1, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.glowIntensity, value: cache.glowIntensity) }
+                                })
+                                
+                                Text("Bloom Strength: \(cache.bloomStrength, specifier: "%.2f")")
+                                Slider(value: $cache.bloomStrength, in: 0...1, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.bloomStrength, value: cache.bloomStrength) }
+                                })
+                                
+                                Divider()
+                                
                                 // === KUWAHARA (Painterly Effect) ===
                                 Text("Painterly Effect").font(.headline)
                                 
@@ -562,6 +602,21 @@ struct ContentView: View {
                                             if !editing { cache.push(\.emissiveSpeed, value: cache.emissiveSpeed) }
                                         })
                                     }
+                                    
+                                    // Color wheel picker
+                                    EmissiveColorPicker(color: Binding(
+                                        get: { 
+                                            Color(red: Double(cache.emissiveColor.x), 
+                                                  green: Double(cache.emissiveColor.y), 
+                                                  blue: Double(cache.emissiveColor.z))
+                                        },
+                                        set: { newColor in
+                                            if let components = newColor.cgColor?.components, components.count >= 3 {
+                                                cache.emissiveColor = SIMD3<Float>(Float(components[0]), Float(components[1]), Float(components[2]))
+                                                cache.push(\.emissiveColor, value: cache.emissiveColor)
+                                            }
+                                        }
+                                    ))
                                 }
                                 
                                 Divider()
@@ -872,6 +927,73 @@ struct SharePlayControlsView: View {
         case .collaborative:
             return "Everyone can control. Last change wins."
         }
+    }
+}
+
+// MARK: - Emissive Color Picker
+// Compact color wheel for selecting emissive glow color
+struct EmissiveColorPicker: View {
+    @Binding var color: Color
+    
+    // Preset emissive colors
+    private let presets: [(name: String, color: Color)] = [
+        ("Cyan", Color(red: 0.3, green: 0.8, blue: 1.0)),
+        ("Pink", Color(red: 1.0, green: 0.3, blue: 0.6)),
+        ("Green", Color(red: 0.3, green: 1.0, blue: 0.4)),
+        ("Gold", Color(red: 1.0, green: 0.8, blue: 0.2)),
+        ("Purple", Color(red: 0.7, green: 0.3, blue: 1.0)),
+        ("White", Color(red: 1.0, green: 1.0, blue: 1.0)),
+    ]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Emissive Color")
+                .font(.subheadline)
+            
+            // Quick preset buttons
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: 6) {
+                ForEach(presets, id: \.name) { preset in
+                    Button {
+                        color = preset.color
+                    } label: {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(preset.color)
+                            .frame(height: 32)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSelected(preset.color) ? Color.white : Color.clear, lineWidth: 2)
+                            )
+                            .overlay(
+                                Text(preset.name)
+                                    .font(.caption2)
+                                    .foregroundColor(.white)
+                                    .shadow(radius: 2)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            
+            // Full color picker for custom colors
+            ColorPicker("Custom", selection: $color, supportsOpacity: false)
+                .labelsHidden()
+        }
+    }
+    
+    private func isSelected(_ presetColor: Color) -> Bool {
+        // Compare colors approximately
+        guard let c1 = color.cgColor?.components,
+              let c2 = presetColor.cgColor?.components,
+              c1.count >= 3, c2.count >= 3 else { return false }
+        
+        let tolerance: CGFloat = 0.05
+        return abs(c1[0] - c2[0]) < tolerance &&
+               abs(c1[1] - c2[1]) < tolerance &&
+               abs(c1[2] - c2[2]) < tolerance
     }
 }
 
