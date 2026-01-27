@@ -8,13 +8,166 @@
 import SwiftUI
 import RealityKit
 
+// MARK: - Cached UI Settings
+// Local state that syncs with RenderSettings periodically to avoid lock contention
+@Observable
+final class UISettingsCache {
+    // Fractal parameters
+    var fractalType: FractalType = .mandelbox
+    var fractalScale: Float = 2.0
+    var targetMinDistance: Float = 0.8
+    var targetFoldingLimit: Float = 1.0
+    var targetSphereRadius: Float = 0.5
+    var fractalIterations: Int = 9
+    var maxRaySteps: Int = 64
+    
+    // Color & effects
+    var colorScheme: ColorScheme = .classic
+    var colorMix: Float = 0.5
+    var colorIterations: Float = 8.0
+    var colorSchemeAutoTransition: Bool = false
+    var colorSchemeAutoInterval: Float = 30.0
+    var colorSchemeTransitionDuration: Float = 2.0
+    var colorSchemeSaturation: Float = 2.0
+    var colorSchemeGamma: Float = 0.5
+    
+    // Animation
+    var hueCycleSpeed: Float = 0.0
+    var pulseSpeed: Float = 0.0
+    var pulseAmount: Float = 0.0
+    var glowIntensity: Float = 0.0
+    var bloomStrength: Float = 0.0
+    
+    // Kuwahara
+    var kuwaharaEnabled: Bool = false
+    var kuwaharaRadius: Float = 4.0
+    var kuwaharaSharpness: Float = 8.0
+    
+    // Emissive
+    var emissiveEnabled: Bool = false
+    var emissivePattern: Int = 0
+    var emissiveIntensity: Float = 1.0
+    var emissiveThreshold: Float = 0.5
+    var emissiveColor: SIMD3<Float> = SIMD3<Float>(0.3, 0.6, 1.0)
+    var emissiveSpeed: Float = 1.0
+    
+    // Lighting - simplified
+    var lightingMode: LightingMode = .animated
+    
+    // Safety & display
+    var showHUD: Bool = true
+    var safetyBubbleRadius: Float = 1.8
+    var safetyBubbleShape: Float = 0.0
+    var useRelativeGestures: Bool = false
+    
+    // Dynamic quality
+    var dynamicRenderQualityEnabled: Bool = true
+    var dynamicRenderQualityMin: Float = 0.5
+    var dynamicRenderQualityMax: Float = 1.0
+    var currentRenderQuality: Float = 0.7
+    
+    private var syncTimer: Timer?
+    private weak var settings: RenderSettings?
+    
+    func startSync(with settings: RenderSettings) {
+        self.settings = settings
+        loadFromSettings()
+        
+        // Sync quality indicator at 4Hz (doesn't need to be faster)
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            self?.syncQualityOnly()
+        }
+    }
+    
+    func stopSync() {
+        syncTimer?.invalidate()
+        syncTimer = nil
+    }
+    
+    private func syncQualityOnly() {
+        guard let settings else { return }
+        currentRenderQuality = settings.currentRenderQuality
+    }
+    
+    func loadFromSettings() {
+        guard let settings else { return }
+        
+        fractalType = settings.fractalType
+        fractalScale = settings.fractalScale
+        targetMinDistance = settings.targetMinDistance
+        targetFoldingLimit = settings.targetFoldingLimit
+        targetSphereRadius = settings.targetSphereRadius
+        fractalIterations = settings.fractalIterations
+        maxRaySteps = settings.maxRaySteps
+        
+        colorScheme = settings.colorScheme
+        colorMix = settings.colorMix
+        colorIterations = settings.colorIterations
+        colorSchemeAutoTransition = settings.colorSchemeAutoTransition
+        colorSchemeAutoInterval = settings.colorSchemeAutoInterval
+        colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
+        colorSchemeSaturation = settings.colorSchemeSaturation
+        colorSchemeGamma = settings.colorSchemeGamma
+        
+        hueCycleSpeed = settings.hueCycleSpeed
+        pulseSpeed = settings.pulseSpeed
+        pulseAmount = settings.pulseAmount
+        glowIntensity = settings.glowIntensity
+        bloomStrength = settings.bloomStrength
+        
+        kuwaharaEnabled = settings.kuwaharaEnabled
+        kuwaharaRadius = settings.kuwaharaRadius
+        kuwaharaSharpness = settings.kuwaharaSharpness
+        
+        emissiveEnabled = settings.emissiveEnabled
+        emissivePattern = settings.emissivePattern
+        emissiveIntensity = settings.emissiveIntensity
+        emissiveThreshold = settings.emissiveThreshold
+        emissiveColor = settings.emissiveColor
+        emissiveSpeed = settings.emissiveSpeed
+        
+        lightingMode = settings.lightingMode
+        
+        showHUD = settings.showHUD
+        safetyBubbleRadius = settings.safetyBubbleRadius
+        safetyBubbleShape = settings.safetyBubbleShape
+        useRelativeGestures = settings.useRelativeGestures
+        
+        dynamicRenderQualityEnabled = settings.dynamicRenderQualityEnabled
+        dynamicRenderQualityMin = settings.dynamicRenderQualityMin
+        dynamicRenderQualityMax = settings.dynamicRenderQualityMax
+        currentRenderQuality = settings.currentRenderQuality
+    }
+    
+    // Push a single value to settings (called on slider release or toggle change)
+    func push<T>(_ keyPath: WritableKeyPath<RenderSettings, T>, value: T) {
+        settings?[keyPath: keyPath] = value
+    }
+    
+    @MainActor
+    func pushFractalType(_ type: FractalType, gestureController: GestureController?) {
+        let oldType = settings?.fractalType
+        settings?.fractalType = type
+        if oldType != type {
+            gestureController?.applyFractalDefaults()
+            // Reload to get new defaults
+            loadFromSettings()
+        }
+    }
+    
+    func pushColorScheme(_ scheme: ColorScheme) {
+        settings?.transitionToColorScheme(scheme)
+        colorScheme = scheme
+    }
+}
+
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
     
     @State private var speed: Float = 0
     @State private var initialPosition: SIMD3<Float> = .zero
-    @State private var initialScale: Float = 1.0
     @State private var cameraMode: Bool = false
+    @State private var cache = UISettingsCache()
     
     /// Get parameter ranges for current fractal type
     private var parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
@@ -111,6 +264,13 @@ struct ContentView: View {
                 Color.clear.glassBackgroundEffect()
             }
         }
+        .onAppear {
+            cache.startSync(with: appModel.renderSettings)
+            speed = Float(appModel.clock.speed)
+        }
+        .onDisappear {
+            cache.stopSync()
+        }
     }
     
     // MARK: - Menu Content
@@ -160,8 +320,8 @@ struct ContentView: View {
             }
             
             if appModel.immersiveSpaceState == .open {
-                ScrollView {
-                    VStack(spacing: 12) {
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(spacing: 12) {
                         Divider()
                         
                         // Time/animation speed
@@ -177,31 +337,24 @@ struct ContentView: View {
                             }
                         })
 
-                        // Fractal type picker
+                        // Fractal type picker - use cache
                         Group {
                             Text("Fractal Type")
                                 .font(.headline)
                             
-                            Picker("Fractal", selection: Binding(
-                                get: { appModel.renderSettings.fractalType },
-                                set: { newType in
-                                    let oldType = appModel.renderSettings.fractalType
-                                    appModel.renderSettings.fractalType = newType
-                                    // Apply default parameters when switching fractal types
-                                    if oldType != newType {
-                                        appModel.gestureController?.applyFractalDefaults()
-                                    }
-                                }
-                            )) {
+                            Picker("Fractal", selection: $cache.fractalType) {
                                 Text("Mandelbox").tag(FractalType.mandelbox)
                                 Text("Triforce").tag(FractalType.triforce)
                                 Text("Neg. Mandelbox").tag(FractalType.negativeMandelbox)
                                 Text("Orbit Density").tag(FractalType.orbitDensity)
                             }
                             .pickerStyle(.segmented)
+                            .onChange(of: cache.fractalType) { _, newValue in
+                                cache.pushFractalType(newValue, gestureController: appModel.gestureController)
+                            }
                         }
 
-                        // Quality preset picker
+                        // Quality preset picker - use cache
                         Group {
                             Text("Quality Preset")
                                 .font(.headline)
@@ -209,13 +362,15 @@ struct ContentView: View {
                             Picker("Quality", selection: Binding(
                                 get: {
                                     QualityPreset.detect(
-                                        fractalIterations: appModel.renderSettings.fractalIterations,
-                                        raySteps: appModel.renderSettings.maxRaySteps
+                                        fractalIterations: cache.fractalIterations,
+                                        raySteps: cache.maxRaySteps
                                     ) ?? .iter9
                                 },
                                 set: { preset in
-                                    appModel.renderSettings.fractalIterations = preset.fractalIterations
-                                    appModel.renderSettings.maxRaySteps = preset.raySteps
+                                    cache.fractalIterations = preset.fractalIterations
+                                    cache.maxRaySteps = preset.raySteps
+                                    cache.push(\.fractalIterations, value: preset.fractalIterations)
+                                    cache.push(\.maxRaySteps, value: preset.raySteps)
                                 }
                             )) {
                                 ForEach(QualityPreset.allCases, id: \.self) { preset in
@@ -226,50 +381,54 @@ struct ContentView: View {
                             
                             // Show current values
                             HStack {
-                                Text("FI: \(appModel.renderSettings.fractalIterations)")
+                                Text("FI: \(cache.fractalIterations)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Text("RI: \(appModel.renderSettings.maxRaySteps)")
+                                Text("RI: \(cache.maxRaySteps)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
 
-                        // Primary Parameter: Fractal Scale
-                        Text("Fractal Scale")
-                        Slider(value: Binding(get: { appModel.renderSettings.fractalScale }, set: { appModel.renderSettings.fractalScale = $0 }), in: 1.0...5.0)
+                        // Primary Parameter: Fractal Scale - push on editing end
+                        Text("Fractal Scale (\(String(format: "%.2f", cache.fractalScale)))")
+                        Slider(value: $cache.fractalScale, in: 1.0...5.0, onEditingChanged: { editing in
+                            if !editing { cache.push(\.fractalScale, value: cache.fractalScale) }
+                        })
 
-                        // Shape Parameters Group - ranges adjust per fractal type
+                        // Shape Parameters Group - use cache with push on editing end
                         DisclosureGroup("Shape Parameters") {
                             VStack(spacing: 8) {
-                                Text("Min Distance (\(String(format: "%.2f", appModel.renderSettings.targetMinDistance)))")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.targetMinDistance },
-                                    set: { appModel.renderSettings.targetMinDistance = $0 }
-                                ), in: parameterRanges.minDistance)
+                                Text("Min Distance (\(String(format: "%.2f", cache.targetMinDistance)))")
+                                Slider(value: $cache.targetMinDistance, in: parameterRanges.minDistance, onEditingChanged: { editing in
+                                    if !editing {
+                                        cache.push(\.targetMinDistance, value: cache.targetMinDistance)
+                                    }
+                                })
 
-                                Text("Box Folding Limit (\(String(format: "%.2f", appModel.renderSettings.targetFoldingLimit)))")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.targetFoldingLimit },
-                                    set: { appModel.renderSettings.targetFoldingLimit = $0 }
-                                ), in: parameterRanges.foldingLimit)
+                                Text("Box Folding Limit (\(String(format: "%.2f", cache.targetFoldingLimit)))")
+                                Slider(value: $cache.targetFoldingLimit, in: parameterRanges.foldingLimit, onEditingChanged: { editing in
+                                    if !editing {
+                                        cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit)
+                                    }
+                                })
 
-                                Text("Sphere Radius (\(String(format: "%.2f", appModel.renderSettings.targetSphereRadius)))")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.targetSphereRadius },
-                                    set: { appModel.renderSettings.targetSphereRadius = $0 }
-                                ), in: parameterRanges.sphereRadius)
+                                Text("Sphere Radius (\(String(format: "%.2f", cache.targetSphereRadius)))")
+                                Slider(value: $cache.targetSphereRadius, in: parameterRanges.sphereRadius, onEditingChanged: { editing in
+                                    if !editing {
+                                        cache.push(\.targetSphereRadius, value: cache.targetSphereRadius)
+                                    }
+                                })
                             }
                             .padding(.leading, 10)
                         }
 
-                        // Color & Glow Group
-                        DisclosureGroup("Color & Glow") {
+                        // Color & Effects Group - simplified
+                        DisclosureGroup("Color & Effects") {
                             VStack(spacing: 8) {
                                 // Color scheme picker
-                                Text("Color Scheme")
-                                    .font(.headline)
+                                Text("Color Scheme").font(.headline)
                                 
                                 // Standard schemes
                                 Text("Standard").font(.subheadline).foregroundColor(.secondary)
@@ -281,7 +440,7 @@ struct ContentView: View {
                                 ], spacing: 8) {
                                     ForEach(ColorScheme.allCases.filter { !$0.isNeonMode }, id: \.rawValue) { scheme in
                                         Button {
-                                            appModel.renderSettings.transitionToColorScheme(scheme)
+                                            cache.pushColorScheme(scheme)
                                         } label: {
                                             VStack(spacing: 4) {
                                                 Image(systemName: scheme.icon)
@@ -293,11 +452,11 @@ struct ContentView: View {
                                             .padding(.vertical, 8)
                                         }
                                         .buttonStyle(.bordered)
-                                        .tint(appModel.renderSettings.colorScheme == scheme ? .blue : .secondary)
+                                        .tint(cache.colorScheme == scheme ? .blue : .secondary)
                                     }
                                 }
                                 
-                                // Neon schemes with special styling
+                                // Neon schemes
                                 Text("Neon").font(.subheadline).foregroundColor(.pink)
                                 LazyVGrid(columns: [
                                     GridItem(.flexible()),
@@ -306,7 +465,7 @@ struct ContentView: View {
                                 ], spacing: 8) {
                                     ForEach(ColorScheme.allCases.filter { $0.isNeonMode }, id: \.rawValue) { scheme in
                                         Button {
-                                            appModel.renderSettings.transitionToColorScheme(scheme)
+                                            cache.pushColorScheme(scheme)
                                         } label: {
                                             VStack(spacing: 4) {
                                                 Image(systemName: scheme.icon)
@@ -318,110 +477,45 @@ struct ContentView: View {
                                             .padding(.vertical, 8)
                                         }
                                         .buttonStyle(.bordered)
-                                        .tint(appModel.renderSettings.colorScheme == scheme ? .pink : .purple)
+                                        .tint(cache.colorScheme == scheme ? .pink : .purple)
                                     }
                                 }
                                 
                                 Divider()
                                 
-                                // Auto-transition controls
-                                Toggle("Auto-Cycle Schemes", isOn: Binding(
-                                    get: { appModel.renderSettings.colorSchemeAutoTransition },
-                                    set: { appModel.renderSettings.colorSchemeAutoTransition = $0 }
-                                ))
+                                // Auto-transition toggle
+                                Toggle("Auto-Cycle Schemes", isOn: $cache.colorSchemeAutoTransition)
+                                    .onChange(of: cache.colorSchemeAutoTransition) { _, newValue in
+                                        cache.push(\.colorSchemeAutoTransition, value: newValue)
+                                    }
                                 
-                                if appModel.renderSettings.colorSchemeAutoTransition {
-                                    Text("Cycle Interval: \(appModel.renderSettings.colorSchemeAutoInterval, specifier: "%.0f")s")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.colorSchemeAutoInterval },
-                                        set: { appModel.renderSettings.colorSchemeAutoInterval = $0 }
-                                    ), in: 5...120)
+                                if cache.colorSchemeAutoTransition {
+                                    Text("Cycle Interval: \(cache.colorSchemeAutoInterval, specifier: "%.0f")s")
+                                    Slider(value: $cache.colorSchemeAutoInterval, in: 5...120, onEditingChanged: { editing in
+                                        if !editing { cache.push(\.colorSchemeAutoInterval, value: cache.colorSchemeAutoInterval) }
+                                    })
                                 }
                                 
-                                Text("Transition Duration: \(appModel.renderSettings.colorSchemeTransitionDuration, specifier: "%.1f")s")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.colorSchemeTransitionDuration },
-                                    set: { appModel.renderSettings.colorSchemeTransitionDuration = $0 }
-                                ), in: 0.5...10)
-                                
                                 Divider()
                                 
-                                // Post-processing overrides
-                                Text("Saturation: \(appModel.renderSettings.colorSchemeSaturation, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.colorSchemeSaturation },
-                                    set: { appModel.renderSettings.colorSchemeSaturation = $0 }
-                                ), in: 0...3)
-                                
-                                Text("Contrast: \(appModel.renderSettings.colorSchemeContrast, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.colorSchemeContrast },
-                                    set: { appModel.renderSettings.colorSchemeContrast = $0 }
-                                ), in: 0.8...1.2)
-                                
-                                Text("Gamma: \(appModel.renderSettings.colorSchemeGamma, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.colorSchemeGamma },
-                                    set: { appModel.renderSettings.colorSchemeGamma = $0 }
-                                ), in: 0.2...1)
-                                
-                                Divider()
-                                
-                                // === COLOR ANIMATION CONTROLS ===
-                                Text("Color Animation").font(.headline)
-                                
-                                Text("Hue Cycle Speed: \(appModel.renderSettings.hueCycleSpeed, specifier: "%.3f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.hueCycleSpeed },
-                                    set: { appModel.renderSettings.hueCycleSpeed = $0 }
-                                ), in: 0...0.5)
-                                
-                                Text("Pulse Speed: \(appModel.renderSettings.pulseSpeed, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.pulseSpeed },
-                                    set: { appModel.renderSettings.pulseSpeed = $0 }
-                                ), in: 0...2)
-                                
-                                Text("Pulse Amount: \(appModel.renderSettings.pulseAmount, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.pulseAmount },
-                                    set: { appModel.renderSettings.pulseAmount = $0 }
-                                ), in: 0...1)
-                                
-                                Text("Glow Intensity: \(appModel.renderSettings.glowIntensity, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.glowIntensity },
-                                    set: { appModel.renderSettings.glowIntensity = $0 }
-                                ), in: 0...1)
-                                
-                                Text("Bloom Strength: \(appModel.renderSettings.bloomStrength, specifier: "%.2f")")
-                                Slider(value: Binding(
-                                    get: { appModel.renderSettings.bloomStrength },
-                                    set: { appModel.renderSettings.bloomStrength = $0 }
-                                ), in: 0...1)
-                                
-                                Divider()
-                                
-                                // === KUWAHARA FILTER (Painterly Effect) ===
+                                // === KUWAHARA (Painterly Effect) ===
                                 Text("Painterly Effect").font(.headline)
                                 
-                                Toggle("Kuwahara Filter", isOn: Binding(
-                                    get: { appModel.renderSettings.kuwaharaEnabled },
-                                    set: { appModel.renderSettings.kuwaharaEnabled = $0 }
-                                ))
+                                Toggle("Kuwahara Filter", isOn: $cache.kuwaharaEnabled)
+                                    .onChange(of: cache.kuwaharaEnabled) { _, newValue in
+                                        cache.push(\.kuwaharaEnabled, value: newValue)
+                                    }
                                 
-                                if appModel.renderSettings.kuwaharaEnabled {
-                                    Text("Filter Radius: \(appModel.renderSettings.kuwaharaRadius, specifier: "%.1f")")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.kuwaharaRadius },
-                                        set: { appModel.renderSettings.kuwaharaRadius = $0 }
-                                    ), in: 2...8)
+                                if cache.kuwaharaEnabled {
+                                    Text("Filter Radius: \(cache.kuwaharaRadius, specifier: "%.1f")")
+                                    Slider(value: $cache.kuwaharaRadius, in: 2...8, onEditingChanged: { editing in
+                                        if !editing { cache.push(\.kuwaharaRadius, value: cache.kuwaharaRadius) }
+                                    })
                                     
-                                    Text("Edge Sharpness: \(appModel.renderSettings.kuwaharaSharpness, specifier: "%.1f")")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.kuwaharaSharpness },
-                                        set: { appModel.renderSettings.kuwaharaSharpness = $0 }
-                                    ), in: 1...16)
+                                    Text("Edge Sharpness: \(cache.kuwaharaSharpness, specifier: "%.1f")")
+                                    Slider(value: $cache.kuwaharaSharpness, in: 1...16, onEditingChanged: { editing in
+                                        if !editing { cache.push(\.kuwaharaSharpness, value: cache.kuwaharaSharpness) }
+                                    })
                                 }
                                 
                                 Divider()
@@ -429,20 +523,16 @@ struct ContentView: View {
                                 // === EMISSIVE GLOW ===
                                 Text("Emissive Glow").font(.headline)
                                 
-                                Toggle("Enable Emissive", isOn: Binding(
-                                    get: { appModel.renderSettings.emissiveEnabled },
-                                    set: { appModel.renderSettings.emissiveEnabled = $0 }
-                                ))
+                                Toggle("Enable Emissive", isOn: $cache.emissiveEnabled)
+                                    .onChange(of: cache.emissiveEnabled) { _, newValue in
+                                        cache.push(\.emissiveEnabled, value: newValue)
+                                    }
                                 
-                                if appModel.renderSettings.emissiveEnabled {
-                                    // Pattern picker
+                                if cache.emissiveEnabled {
                                     HStack {
                                         Text("Pattern")
                                         Spacer()
-                                        Picker("Pattern", selection: Binding(
-                                            get: { appModel.renderSettings.emissivePattern },
-                                            set: { appModel.renderSettings.emissivePattern = $0 }
-                                        )) {
+                                        Picker("Pattern", selection: $cache.emissivePattern) {
                                             Text("Folds").tag(0)
                                             Text("Depth").tag(1)
                                             Text("Veins").tag(2)
@@ -451,76 +541,51 @@ struct ContentView: View {
                                         }
                                         .pickerStyle(.segmented)
                                         .frame(maxWidth: 220)
+                                        .onChange(of: cache.emissivePattern) { _, newValue in
+                                            cache.push(\.emissivePattern, value: newValue)
+                                        }
                                     }
                                     
-                                    Text("Intensity: \(appModel.renderSettings.emissiveIntensity, specifier: "%.2f")")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.emissiveIntensity },
-                                        set: { appModel.renderSettings.emissiveIntensity = $0 }
-                                    ), in: 0...2)
+                                    Text("Intensity: \(cache.emissiveIntensity, specifier: "%.2f")")
+                                    Slider(value: $cache.emissiveIntensity, in: 0...2, onEditingChanged: { editing in
+                                        if !editing { cache.push(\.emissiveIntensity, value: cache.emissiveIntensity) }
+                                    })
                                     
-                                    Text("Threshold: \(appModel.renderSettings.emissiveThreshold, specifier: "%.2f")")
-                                    Slider(value: Binding(
-                                        get: { appModel.renderSettings.emissiveThreshold },
-                                        set: { appModel.renderSettings.emissiveThreshold = $0 }
-                                    ), in: 0...1)
+                                    Text("Threshold: \(cache.emissiveThreshold, specifier: "%.2f")")
+                                    Slider(value: $cache.emissiveThreshold, in: 0...1, onEditingChanged: { editing in
+                                        if !editing { cache.push(\.emissiveThreshold, value: cache.emissiveThreshold) }
+                                    })
                                     
-                                    if appModel.renderSettings.emissivePattern == 3 {
-                                        Text("Pulse Speed: \(appModel.renderSettings.emissiveSpeed, specifier: "%.1f")")
-                                        Slider(value: Binding(
-                                            get: { appModel.renderSettings.emissiveSpeed },
-                                            set: { appModel.renderSettings.emissiveSpeed = $0 }
-                                        ), in: 0.1...5)
-                                    }
-                                    
-                                    // Color picker (RGB sliders for simplicity)
-                                    Text("Emissive Color")
-                                    HStack {
-                                        Text("R")
-                                        Slider(value: Binding(
-                                            get: { appModel.renderSettings.emissiveColor.x },
-                                            set: { appModel.renderSettings.emissiveColor.x = $0 }
-                                        ), in: 0...1)
-                                    }
-                                    HStack {
-                                        Text("G")
-                                        Slider(value: Binding(
-                                            get: { appModel.renderSettings.emissiveColor.y },
-                                            set: { appModel.renderSettings.emissiveColor.y = $0 }
-                                        ), in: 0...1)
-                                    }
-                                    HStack {
-                                        Text("B")
-                                        Slider(value: Binding(
-                                            get: { appModel.renderSettings.emissiveColor.z },
-                                            set: { appModel.renderSettings.emissiveColor.z = $0 }
-                                        ), in: 0...1)
+                                    if cache.emissivePattern == 3 {
+                                        Text("Pulse Speed: \(cache.emissiveSpeed, specifier: "%.1f")")
+                                        Slider(value: $cache.emissiveSpeed, in: 0.1...5, onEditingChanged: { editing in
+                                            if !editing { cache.push(\.emissiveSpeed, value: cache.emissiveSpeed) }
+                                        })
                                     }
                                 }
-
+                                
                                 Divider()
                                 
-                                // Lighting Mode Picker (Static / Animated / Audio Reactive)
+                                // === LIGHTING MODE - Simplified ===
                                 HStack {
                                     Text("Lighting")
                                     Spacer()
-                                    Picker("Lighting", selection: Binding(
-                                        get: { appModel.renderSettings.lightingMode },
-                                        set: { appModel.renderSettings.lightingMode = $0 }
-                                    )) {
+                                    Picker("Lighting", selection: $cache.lightingMode) {
                                         ForEach(LightingMode.allCases, id: \.rawValue) { mode in
                                             Text(mode.displayName).tag(mode)
                                         }
                                     }
                                     .pickerStyle(.segmented)
                                     .frame(maxWidth: 200)
+                                    .onChange(of: cache.lightingMode) { _, newValue in
+                                        cache.push(\.lightingMode, value: newValue)
+                                    }
                                 }
                                 
-                                // Audio level slider (only visible in Audio Reactive mode)
-                                if appModel.renderSettings.lightingMode == .audioReactive {
+                                // Audio controls only in audio reactive mode
+                                if cache.lightingMode == .audioReactive {
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack {
-                                            // Audio capture toggle
                                             Button {
                                                 if appModel.audioAnalyzer.isCapturing {
                                                     appModel.audioAnalyzer.stopCapture()
@@ -538,7 +603,6 @@ struct ContentView: View {
                                             
                                             Spacer()
                                             
-                                            // Audio level indicator
                                             if appModel.audioAnalyzer.isCapturing {
                                                 HStack(spacing: 2) {
                                                     ForEach(0..<10, id: \.self) { i in
@@ -555,24 +619,19 @@ struct ContentView: View {
                                                 .font(.caption)
                                                 .foregroundStyle(.red)
                                         }
-                                        
-                                        if !appModel.audioAnalyzer.isCapturing {
-                                            Text("Manual Level: \(appModel.renderSettings.audioLevel, specifier: "%.2f")")
-                                            Slider(value: Binding(
-                                                get: { appModel.renderSettings.audioLevel },
-                                                set: { appModel.renderSettings.audioLevel = $0 }
-                                            ), in: 0...1)
-                                            .tint(.purple)
-                                        }
                                     }
                                     .padding(.vertical, 4)
                                 }
 
                                 Text("Color Mix")
-                                Slider(value: Binding(get: { appModel.renderSettings.colorMix }, set: { appModel.renderSettings.colorMix = $0 }), in: 0...1.0)
+                                Slider(value: $cache.colorMix, in: 0...1.0, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.colorMix, value: cache.colorMix) }
+                                })
 
-                                Text("Color Iterations: \(appModel.renderSettings.colorIterations, specifier: "%.0f")")
-                                Slider(value: Binding(get: { appModel.renderSettings.colorIterations }, set: { appModel.renderSettings.colorIterations = $0 }), in: 4...16, step: 1)
+                                Text("Color Iterations: \(cache.colorIterations, specifier: "%.0f")")
+                                Slider(value: $cache.colorIterations, in: 4...16, step: 1, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.colorIterations, value: cache.colorIterations) }
+                                })
                             }
                             .padding(.leading, 10)
                         }
@@ -580,50 +639,55 @@ struct ContentView: View {
                         // Safety & Options Group
                         DisclosureGroup("Safety & Options") {
                             VStack(spacing: 8) {
-                                Toggle("Show HUD", isOn: Binding(get: { appModel.renderSettings.showHUD }, set: { appModel.renderSettings.showHUD = $0 }))
+                                Toggle("Show HUD", isOn: $cache.showHUD)
+                                    .onChange(of: cache.showHUD) { _, newValue in
+                                        cache.push(\.showHUD, value: newValue)
+                                    }
 
-                                Text("Safety Bubble Radius: \(appModel.renderSettings.safetyBubbleRadius, specifier: "%.2f")m")
-                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleRadius }, set: { appModel.renderSettings.safetyBubbleRadius = $0 }), in: 0.5...2.5)
+                                Text("Safety Bubble Radius: \(cache.safetyBubbleRadius, specifier: "%.2f")m")
+                                Slider(value: $cache.safetyBubbleRadius, in: 0.5...2.5, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) }
+                                })
 
-                                Text("Bubble Shape: \(appModel.renderSettings.safetyBubbleShape < 0.33 ? "Sphere" : (appModel.renderSettings.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
-                                Slider(value: Binding(get: { appModel.renderSettings.safetyBubbleShape }, set: { appModel.renderSettings.safetyBubbleShape = $0 }), in: 0...1)
+                                Text("Bubble Shape: \(cache.safetyBubbleShape < 0.33 ? "Sphere" : (cache.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
+                                Slider(value: $cache.safetyBubbleShape, in: 0...1, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
+                                })
                                 
                                 Divider()
                                 
-                                Toggle("Relative Gestures", isOn: Binding(
-                                    get: { appModel.renderSettings.useRelativeGestures },
-                                    set: { appModel.renderSettings.useRelativeGestures = $0 }
-                                ))
-                                .help("Relative: fine-tune from current value. Absolute: hand distance maps directly to range.")
+                                Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
+                                    .onChange(of: cache.useRelativeGestures) { _, newValue in
+                                        cache.push(\.useRelativeGestures, value: newValue)
+                                    }
+                                    .help("Relative: fine-tune from current value. Absolute: hand distance maps directly to range.")
                                 
                                 Divider()
                                 
-                                // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-                                // Automatically adjusts render quality based on FPS performance
-                                Toggle("Dynamic Render Quality", isOn: Binding(
-                                    get: { appModel.renderSettings.dynamicRenderQualityEnabled },
-                                    set: { appModel.renderSettings.dynamicRenderQualityEnabled = $0 }
-                                ))
-                                .help("Automatically adjust render quality to maintain frame rate")
+                                // === DYNAMIC RENDER QUALITY ===
+                                Toggle("Dynamic Render Quality", isOn: $cache.dynamicRenderQualityEnabled)
+                                    .onChange(of: cache.dynamicRenderQualityEnabled) { _, newValue in
+                                        cache.push(\.dynamicRenderQualityEnabled, value: newValue)
+                                    }
+                                    .help("Automatically adjust render quality to maintain frame rate")
                                 
-                                if appModel.renderSettings.dynamicRenderQualityEnabled {
-                                    // Current quality indicator
+                                if cache.dynamicRenderQualityEnabled {
+                                    // Current quality indicator (reads from cache, synced at 4Hz)
                                     HStack {
                                         Text("Current Quality:")
                                             .font(.caption)
                                         Spacer()
-                                        Text("\(Int(appModel.renderSettings.currentRenderQuality * 100))%")
+                                        Text("\(Int(cache.currentRenderQuality * 100))%")
                                             .font(.caption.monospacedDigit())
-                                            .foregroundStyle(qualityColor(appModel.renderSettings.currentRenderQuality))
+                                            .foregroundStyle(qualityColor(cache.currentRenderQuality))
                                         
-                                        // Quality bar indicator
                                         GeometryReader { geo in
                                             ZStack(alignment: .leading) {
                                                 RoundedRectangle(cornerRadius: 2)
                                                     .fill(Color.gray.opacity(0.3))
                                                 RoundedRectangle(cornerRadius: 2)
-                                                    .fill(qualityColor(appModel.renderSettings.currentRenderQuality))
-                                                    .frame(width: geo.size.width * CGFloat(appModel.renderSettings.currentRenderQuality))
+                                                    .fill(qualityColor(cache.currentRenderQuality))
+                                                    .frame(width: geo.size.width * CGFloat(cache.currentRenderQuality))
                                             }
                                         }
                                         .frame(width: 60, height: 8)
@@ -634,11 +698,10 @@ struct ContentView: View {
                                         HStack {
                                             Text("Min Quality:")
                                                 .font(.caption)
-                                            Slider(value: Binding(
-                                                get: { appModel.renderSettings.dynamicRenderQualityMin },
-                                                set: { appModel.renderSettings.dynamicRenderQualityMin = $0 }
-                                            ), in: 0.4...0.8)
-                                            Text("\(Int(appModel.renderSettings.dynamicRenderQualityMin * 100))%")
+                                            Slider(value: $cache.dynamicRenderQualityMin, in: 0.4...0.8, onEditingChanged: { editing in
+                                                if !editing { cache.push(\.dynamicRenderQualityMin, value: cache.dynamicRenderQualityMin) }
+                                            })
+                                            Text("\(Int(cache.dynamicRenderQualityMin * 100))%")
                                                 .font(.caption.monospacedDigit())
                                                 .frame(width: 40, alignment: .trailing)
                                         }
@@ -646,11 +709,10 @@ struct ContentView: View {
                                         HStack {
                                             Text("Max Quality:")
                                                 .font(.caption)
-                                            Slider(value: Binding(
-                                                get: { appModel.renderSettings.dynamicRenderQualityMax },
-                                                set: { appModel.renderSettings.dynamicRenderQualityMax = $0 }
-                                            ), in: 0.8...1.0)
-                                            Text("\(Int(appModel.renderSettings.dynamicRenderQualityMax * 100))%")
+                                            Slider(value: $cache.dynamicRenderQualityMax, in: 0.8...1.0, onEditingChanged: { editing in
+                                                if !editing { cache.push(\.dynamicRenderQualityMax, value: cache.dynamicRenderQualityMax) }
+                                            })
+                                            Text("\(Int(cache.dynamicRenderQualityMax * 100))%")
                                                 .font(.caption.monospacedDigit())
                                                 .frame(width: 40, alignment: .trailing)
                                         }
