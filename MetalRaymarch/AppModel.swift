@@ -375,17 +375,27 @@ enum ColorScheme: Int32, CaseIterable, Codable {
     }
     
     // Neon mode parameters (only used when isNeonMode is true)
+    // hueFreq: color variation speed (low=smooth gradients, high=more color zones)
+    // hueOffset: shifts which palette color appears at center
+    // bandFreq: radial glow rings (0=none, higher=more rings)
+    // stripeFreq: (unused in new impl)
+    // stripeStrength: (unused in new impl)
+    // glowSharpness: how quickly glow falls off (higher=sharper edges)
+    // satPower: saturation boost (lower=more saturated)
     var neonParams: (hueFreq: Float, hueOffset: Float, bandFreq: Float, stripeFreq: Float, 
                      stripeStrength: Float, glowSharpness: Float, satPower: Float) {
         switch self {
         case .neonCyber:
-            return (3.0, 0.83, 10.0, 8.0, 0.5, 3.5, 0.35)  // Pink-cyan hue range
+            // Hot pink/cyan - smooth gradient, subtle rings, sharp glow
+            return (1.5, 0.0, 3.0, 0.0, 0.0, 4.0, 0.2)
         case .neonSunset:
-            return (2.5, 0.05, 6.0, 5.0, 0.4, 3.0, 0.4)    // Orange-violet range
+            // Orange/magenta/violet - medium gradient, no rings, softer glow
+            return (2.0, 0.33, 0.0, 0.0, 0.0, 2.5, 0.25)
         case .neonMatrix:
-            return (1.0, 0.33, 12.0, 10.0, 0.6, 4.0, 0.3)  // Tight green hue, strong bands
+            // Pure green tones - tight color (low freq), strong rings, very sharp
+            return (0.5, 0.0, 6.0, 0.0, 0.0, 5.0, 0.15)
         default:
-            return (3.0, 0.0, 8.0, 6.0, 0.4, 3.0, 0.4)     // Default values
+            return (1.5, 0.0, 2.0, 0.0, 0.0, 3.0, 0.3)
         }
     }
     

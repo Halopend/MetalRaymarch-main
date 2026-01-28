@@ -458,44 +458,56 @@ FORCE_INLINE half3 hsv2rgb(half h, half s, half v)
     return v * mix(half3(1.0h), rgb, s);
 }
 
-// Neon orbit trap coloring - creates vibrant, glowing neon bands
-// Based on: trapMin (min distance to trap), trapIter (normalized iteration), trapAngle (angle-based)
+// Neon orbit trap coloring - uses scheme palette colors for distinct looks
+// trapMin: distance to orbit trap (0 = close, 1 = far)
+// trapIter: normalized iteration depth
+// trapAngle: angle-based variation
 FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAngle, ColorSchemeParams scheme)
 {
     half d = saturate(trapMin);
     half it = saturate(trapIter);
-    half ang = fract(trapAngle);
     
-    // Hue: base from angle (creates swirling color bands)
-    half h = fract(ang * half(scheme.hueFrequency) + half(scheme.hueOffset));
-    // Modulate with distance for color shifts away from trap
-    h += 0.25h * pow(1.0h - d, 0.7h);
-    h = fract(h);
+    // Get scheme palette colors - these define the neon look
+    half3 col1 = half3(scheme.color1);  // Primary neon color
+    half3 col2 = half3(scheme.color2);  // Secondary neon color  
+    half3 col3 = half3(scheme.color3);  // Tertiary neon color
     
-    // Saturation: flatten toward 1.0 with power curve (neon wants near-max)
-    half s = pow(1.0h - d, half(scheme.saturationPower));
+    // Brightness: sharp glow falloff from trap surface
+    half glow = pow(1.0h - d, half(scheme.glowSharpness));
     
-    // Value: sharp bright cores with stripe modulation
-    half vCore = pow(1.0h - d, half(scheme.glowSharpness));
+    // Color mixing based on iteration depth (creates radial color zones)
+    // Low hueFrequency = smooth gradients, high = more color variation
+    half colorPhase = it * half(scheme.hueFrequency) * 0.5h;
+    colorPhase = fract(colorPhase + half(scheme.hueOffset));
     
-    // Add iteration-based stripes for extra visual interest
-    half vStripe = 0.5h + 0.5h * cos(6.28318h * it * half(scheme.stripeFrequency));
-    half v = saturate(mix(vCore, 1.0h, half(scheme.stripeStrength) * vStripe));
+    // Blend between the 3 palette colors based on depth
+    half3 baseColor;
+    if (colorPhase < 0.33h) {
+        baseColor = mix(col1, col2, colorPhase * 3.0h);
+    } else if (colorPhase < 0.66h) {
+        baseColor = mix(col2, col3, (colorPhase - 0.33h) * 3.0h);
+    } else {
+        baseColor = mix(col3, col1, (colorPhase - 0.66h) * 3.0h);
+    }
     
-    // Distance banding for glowing "rings"
-    half band = fract(d * half(scheme.bandFrequency));
-    v *= 0.7h + 0.3h * (1.0h - band * band);  // Soft glow at band edges
+    // Optional soft banding (controlled by bandFrequency, 0 = no bands)
+    half bandEffect = 1.0h;
+    if (scheme.bandFrequency > 0.1h) {
+        half band = sin(d * half(scheme.bandFrequency) * 3.14159h);
+        bandEffect = 0.8h + 0.2h * band * band;
+    }
     
-    // Convert HSV to RGB
-    half3 rgb = hsv2rgb(h, s, v);
+    // Saturation boost for neon effect
+    half sat = pow(0.9h, half(scheme.saturationPower));
     
-    // Tint toward scheme colors for palette coherence
-    half3 col1 = half3(scheme.color1);
-    half3 col2 = half3(scheme.color2);
-    half3 tint = mix(col1, col2, h);
-    rgb = mix(rgb, rgb * tint * 2.0h, 0.3h);
+    // Final color: base palette color * glow * banding
+    half3 rgb = baseColor * glow * bandEffect;
     
-    return rgb;
+    // Boost saturation by pushing away from gray
+    half luma = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+    rgb = mix(half3(luma), rgb, 1.0h + sat);
+    
+    return saturate(rgb);
 }
 
 // =============================================================================
