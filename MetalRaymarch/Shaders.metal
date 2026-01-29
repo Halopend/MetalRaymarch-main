@@ -1383,7 +1383,132 @@ FORCE_INLINE half3 ColourFromCache(OrbitCache cache, float3 pos, ColorSchemePara
 }
 
 // =============================================================================
-// END ORBIT CACHE SYSTEM
+// SIMD/QUAD OPTIMIZATIONS
+// =============================================================================
+// In a 2x2 quad, threads can share work via quad_broadcast/quad_shuffle
+// Thread indices in a quad: 0=TL, 1=TR, 2=BL, 3=BR
+//
+// Key insight: Normal computation needs 4 samples (center + 3 offsets)
+// With SIMD, each thread computes ONE sample and shares with others
+// Result: 1 Map call per thread instead of 4 = 75% reduction!
+
+// SIMD-parallel normal: Each quad thread computes one axis offset
+// Thread 0: center, Thread 1: +X, Thread 2: +Y, Thread 3: +Z
+FORCE_INLINE float3 GetNormalSIMD(
+    float3 pos,
+    float distance,
+    OrbitCache cache,
+    FractalParams params,
+    float foldingLimit,
+    int iterations,
+    int fractalType,
+    uint quadLaneId  // 0-3 within the quad
+) {
+    // Reduced iterations for normal (gradient direction converges fast)
+    int normalIters = max((iterations * 2) / 5, 3);
+    float e = max(distance * 0.0005f, 0.0001f);
+    
+    // Each thread computes one sample:
+    // Lane 0: center (d0), Lane 1: +X (dx), Lane 2: +Y (dy), Lane 3: +Z (dz)
+    float3 samplePos = pos;
+    if (quadLaneId == 1) samplePos.x += e;
+    else if (quadLaneId == 2) samplePos.y += e;
+    else if (quadLaneId == 3) samplePos.z += e;
+    
+    // Each thread computes its assigned sample
+    float mySample;
+    if (quadLaneId == 0 && cache.valid) {
+        // Thread 0 can use cached center value
+        mySample = cache.distance;
+    } else {
+        OrbitCache dummy;
+        mySample = MapWithOrbitCache(samplePos, params, foldingLimit, normalIters, dummy);
+    }
+    
+    // Broadcast all 4 values to all threads via SIMD shuffle
+    float d0 = quad_broadcast(mySample, 0);  // center from lane 0
+    float dx = quad_broadcast(mySample, 1);  // +X from lane 1
+    float dy = quad_broadcast(mySample, 2);  // +Y from lane 2  
+    float dz = quad_broadcast(mySample, 3);  // +Z from lane 3
+    
+    // All threads now have the full gradient
+    float3 gradient = float3(dx - d0, dy - d0, dz - d0);
+    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+}
+
+// SIMD-assisted raymarching: Share distance hints between neighbors
+// When one thread finds a hit, nearby threads can use that as a distance hint
+FORCE_INLINE float2 SceneWithSIMDHints(
+    float3 rO,
+    float3 rD,
+    float2 fragCoord,
+    float startT,
+    int maxSteps,
+    float glowIntensity,
+    float foldingLimit,
+    FractalParams params,
+    int iterations,
+    float time,
+    int fractalType,
+    uint quadLaneId,
+    thread OrbitCache& outCache
+) {
+    // Use temporally stable blue noise dithering
+    float dither = blueNoise(fragCoord, time) * 0.015;
+    float t = 0.05 + dither;
+    float glow = 0.0;
+    
+    const int loopCount = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxSteps;
+    
+    OrbitCache lastCache = makeEmptyOrbitCache();
+    
+    // Main raymarch loop
+    NO_UNROLL
+    for (int j = 0; j < loopCount; j++) {
+        float3 p = fma(rD, float3(t), rO);
+        
+        float h;
+        if (fractalType == 0) {
+            h = MapWithOrbitCache(p, params, foldingLimit, iterations, lastCache);
+        } else {
+            h = MapUnified(p, params, foldingLimit, iterations, fractalType);
+        }
+        
+        // Glow accumulation (same as Scene())
+        glow = fma(saturate(0.04 - h), glowIntensity, glow);
+        
+        // Hit test (same threshold formula as Scene())
+        float threshold = fma(t, 0.0008, 0.0005);
+        if (UNLIKELY(h < threshold)) {
+            outCache = lastCache;
+            return float2(t, saturate(glow * 0.25));
+        }
+        
+        // Standard sphere tracing step
+        t += h;
+        
+        // === SIMD HINT: Check if ANY quad thread hit ===
+        // If a neighbor hit, we're likely very close too - slow down
+        // quad_any returns true if any thread in the quad has true
+        bool neighborClose = quad_any(h < threshold * 4.0);
+        if (neighborClose && h < threshold * 8.0) {
+            // Step back a bit and use smaller steps
+            t -= h * 0.5;
+        }
+        
+        // Early termination
+        if (UNLIKELY(t > kMaxRayDistance)) {
+            outCache = makeEmptyOrbitCache();
+            return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+        }
+    }
+    
+    outCache = lastCache;
+    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+}
+
+// =============================================================================
+// END SIMD OPTIMIZATIONS
 // =============================================================================
 
 // Fast normal using forward differences (3 Map calls instead of 4 with central diff)
@@ -2730,15 +2855,14 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         return output;
     }
     
-    // === OPTIMIZED RAYMARCH WITH ORBIT CACHING (Mandelbox) ===
-    // Use cache-enabled Scene for Mandelbox to reduce Map() calls
+    // === SIMD-OPTIMIZED RAYMARCH WITH ORBIT CACHING (Mandelbox) ===
+    // Uses SIMD hints for cooperative raymarching + orbit caching
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
     
     if (fractalType == 0) {
-        SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
-        ret = sceneResult.distGlow;
-        hitCache = sceneResult.cache;
+        // Use SIMD-assisted raymarching with neighbor distance hints
+        ret = SceneWithSIMDHints(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, quadLaneId, hitCache);
     } else {
         ret = Scene(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     }
@@ -2752,10 +2876,13 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     {
         float3 p = marchOrigin + adjustedDist * marchDir;
         
-        // Per-pixel normal - use cached version for Mandelbox
+        // === SIMD-PARALLEL NORMALS ===
+        // Each quad thread computes ONE offset sample, then share via quad_broadcast
+        // Result: 1 Map call per thread instead of 4 = 75% fewer Map calls for normals!
         float3 nor;
         if (fractalType == 0 && hitCache.valid) {
-            nor = GetNormalFromCache(p, adjustedDist, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
+            // Use full SIMD normal for Mandelbox - 1 Map call per thread
+            nor = GetNormalSIMD(p, adjustedDist, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, quadLaneId);
         } else {
             nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         }
