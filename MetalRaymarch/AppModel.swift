@@ -1036,8 +1036,8 @@ final class RenderSettings: @unchecked Sendable {
     /// Maximum speed the parameter can travel (units per second). Prevents jarring fast motion.
     private let maxSpeed: Float = 8.0
     
-    /// Maximum speed for position (meters per second)
-    private let maxPositionSpeed: Float = 3.0
+    /// Maximum speed for position (meters per second) - higher to allow responsive flicking
+    private let maxPositionSpeed: Float = 12.0
     
     /// Critically-damped smooth damp function (like Unity's SmoothDamp)
     /// Smoothly moves a value toward a target with velocity tracking and limits

@@ -734,13 +734,40 @@ final class GestureController {
             }
 
             let rawDelta = currentPos - previousPos
-            // Clamp delta to avoid spikes on sporadic joints
-            let maxStep: Float = 0.05 // 5 cm per frame cap
             let deltaLength = simd_length(rawDelta)
-            let delta = (deltaLength > maxStep && deltaLength > 0) ? rawDelta * (maxStep / deltaLength) : rawDelta
+            
+            // Non-linear velocity response for flicking:
+            // - Slow movements (< threshold): linear with base multiplier
+            // - Fast movements: exponential boost for responsive flicking
+            let slowThreshold: Float = 0.002  // 2mm/frame threshold
+            let maxStep: Float = 0.30         // 30cm per frame cap
+            let baseMultiplier: Float = 2.0   // Even slow movements get 2x boost
+            
+            var scaledDelta: SIMD3<Float>
+            if deltaLength > 0 {
+                let direction = rawDelta / deltaLength
+                var scaledLength: Float
+                
+                if deltaLength <= slowThreshold {
+                    // Slow movement: boosted linear response
+                    scaledLength = deltaLength * baseMultiplier
+                } else {
+                    // Fast movement: apply acceleration curve
+                    let excess = deltaLength - slowThreshold
+                    let boost: Float = 8.0   // Higher amplification
+                    let power: Float = 1.1   // Gentler curve so it kicks in sooner
+                    scaledLength = (slowThreshold * baseMultiplier) + pow(excess, power) * boost
+                }
+                
+                // Cap at maximum
+                scaledLength = min(scaledLength, maxStep)
+                scaledDelta = direction * scaledLength
+            } else {
+                scaledDelta = .zero
+            }
 
             // Apply translation (world space) to target
-            accumulatedPosition = accumulatedPosition + delta * translateSensitivity
+            accumulatedPosition = accumulatedPosition + scaledDelta * translateSensitivity
             settings.targetPosition = accumulatedPosition
             rightIndexPrevPos = currentPos
             rightIndexPrevPalm = currentPos

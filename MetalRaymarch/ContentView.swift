@@ -294,6 +294,19 @@ struct ContentView: View {
                         }
                     }
                     
+                    // Reset button
+                    Button {
+                        // Reset position to origin
+                        appModel.renderSettings.targetPosition = .zero
+                        appModel.renderSettings.position = .zero
+                        // Apply default fractal parameters
+                        appModel.gestureController?.applyFractalDefaults()
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Reset position to origin and parameters to defaults")
+                    
                     Spacer()
                     
                     // Menu visibility hint
