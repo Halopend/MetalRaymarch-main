@@ -474,7 +474,9 @@ final class RenderSettings: @unchecked Sendable {
     // HUD display
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    private var _useRelativeGestures: Bool = false   // Use relative gestures (delta-based) instead of absolute mapping
+    private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
+    private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
+    private var _gestureSensitivity: Float = 5.0     // Gesture sensitivity (1=10x slower, 10=normal speed)
 
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
@@ -511,11 +513,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _emissiveColor: SIMD3<Float> = SIMD3<Float>(0.3, 0.6, 1.0)  // Blue-white default
     private var _emissiveSpeed: Float = 1.0                 // Animation speed for pulse mode
     
-    // === KUWAHARA FILTER (Painterly Effect) ===
-    private var _kuwaharaEnabled: Bool = false              // Enable anisotropic Kuwahara filter
-    private var _kuwaharaRadius: Float = 4.0                // Filter radius (2-8, higher = more painterly)
-    private var _kuwaharaSharpness: Float = 8.0             // Edge sharpness (1-16, higher = sharper edges)
-    
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
     private var _dynamicRenderQualityEnabled: Bool = true   // Enable dynamic quality adjustment
@@ -531,6 +528,13 @@ final class RenderSettings: @unchecked Sendable {
     private var _targetFoldingLimit: Float = 1.0
     private var _targetSphereRadius: Float = 0.5
     private var _targetPosition: SIMD3<Float> = .zero
+    
+    // === VELOCITY STATE FOR SMOOTH DAMP ===
+    // Track velocities for critically-damped spring interpolation
+    private var _velocityMinDistance: Float = 0.0
+    private var _velocityFoldingLimit: Float = 0.0
+    private var _velocitySphereRadius: Float = 0.0
+    private var _velocityPosition: SIMD3<Float> = .zero
     
     // === REFINING PARAMETERS (Polychronakis 2024 / Keinert 2014) ===
     // These control the sphere tracing optimization thresholds
@@ -681,6 +685,18 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _useRelativeGestures = newValue } }
     }
 
+    /// Allow extended parameter ranges for gestures (wider min/max values)
+    var extendedGestureRange: Bool {
+        get { withLock { _extendedGestureRange } }
+        set { withLock { _extendedGestureRange = newValue } }
+    }
+
+    /// Gesture sensitivity (1-10, where 1 = 10x slower, 10 = normal speed)
+    var gestureSensitivity: Float {
+        get { withLock { _gestureSensitivity } }
+        set { withLock { _gestureSensitivity = max(1.0, min(10.0, newValue)) } }
+    }
+
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry
     var safetyBubbleEnabled: Bool {
         get { withLock { _safetyBubbleEnabled } }
@@ -791,24 +807,6 @@ final class RenderSettings: @unchecked Sendable {
     var bloomStrength: Float {
         get { withLock { _bloomStrength } }
         set { withLock { _bloomStrength = max(0.0, min(1.0, newValue)) } }
-    }
-    
-    /// Enable anisotropic Kuwahara filter for painterly effect
-    var kuwaharaEnabled: Bool {
-        get { withLock { _kuwaharaEnabled } }
-        set { withLock { _kuwaharaEnabled = newValue } }
-    }
-    
-    /// Kuwahara filter radius (2-8, higher = more painterly)
-    var kuwaharaRadius: Float {
-        get { withLock { _kuwaharaRadius } }
-        set { withLock { _kuwaharaRadius = max(2.0, min(8.0, newValue)) } }
-    }
-    
-    /// Kuwahara edge sharpness (1-16, higher = sharper edges)
-    var kuwaharaSharpness: Float {
-        get { withLock { _kuwaharaSharpness } }
-        set { withLock { _kuwaharaSharpness = max(1.0, min(16.0, newValue)) } }
     }
     
     // === EMISSIVE GLOW ===
@@ -1029,46 +1027,137 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _targetPosition = newValue } }
     }
     
-    /// Interpolation speed for gesture-controlled parameters (higher = faster convergence)
-    /// 18.0 = ~63% convergence in 55ms, very responsive while still smooth
-    private let gestureInterpolationSpeed: Float = 18.0
+    // === SMOOTH DAMP PARAMETERS ===
+    // Critically-damped spring with velocity/acceleration limits for buttery smooth motion
+    
+    /// Smooth time - how long (in seconds) to reach the target. Higher = smoother but more latency.
+    private let smoothTime: Float = 0.35
+    
+    /// Maximum speed the parameter can travel (units per second). Prevents jarring fast motion.
+    private let maxSpeed: Float = 8.0
+    
+    /// Maximum speed for position (meters per second)
+    private let maxPositionSpeed: Float = 3.0
+    
+    /// Critically-damped smooth damp function (like Unity's SmoothDamp)
+    /// Smoothly moves a value toward a target with velocity tracking and limits
+    private func smoothDamp(
+        current: Float,
+        target: Float,
+        velocity: inout Float,
+        smoothTime: Float,
+        maxSpeed: Float,
+        deltaTime: Float
+    ) -> Float {
+        // Based on Game Programming Gems 4, Chapter 1.10
+        let omega = 2.0 / smoothTime
+        let x = omega * deltaTime
+        let exp_factor = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x)
+        
+        var change = current - target
+        let originalTo = target
+        
+        // Clamp maximum speed
+        let maxChange = maxSpeed * smoothTime
+        change = max(-maxChange, min(maxChange, change))
+        let clampedTarget = current - change
+        
+        let temp = (velocity + omega * change) * deltaTime
+        velocity = (velocity - omega * temp) * exp_factor
+        var output = clampedTarget + (change + temp) * exp_factor
+        
+        // Prevent overshooting
+        if (originalTo - current > 0.0) == (output > originalTo) {
+            output = originalTo
+            velocity = (output - originalTo) / deltaTime
+        }
+        
+        return output
+    }
     
     /// Called by Renderer every frame to smoothly interpolate current values toward targets.
-    /// This is the ONLY place smoothing happens for gesture parameters - single source of truth.
-    /// Uses frame-rate independent exponential decay for consistent feel at any FPS.
+    /// Uses critically-damped spring physics for smooth acceleration/deceleration.
     /// - Parameter deltaTime: Time since last frame in seconds
     func interpolateToTargets(deltaTime: Float) {
         withLock {
             // Guard against bad deltaTime values that could cause instability
             let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
             
-            // Exponential decay: factor = 1 - e^(-speed * dt)
-            // At speed=18, dt=1/90: factor ≈ 0.18 (smooth 90fps)
-            // At speed=18, dt=1/45: factor ≈ 0.33 (catches up on slow frames)
-            let factor = 1.0 - exp(-gestureInterpolationSpeed * clampedDT)
-            
             // Check for NaN/Inf in targets before interpolating
             if _targetMinDistance.isNaN || _targetMinDistance.isInfinite {
                 print("⚠️ ANOMALY: targetMinDistance is \(_targetMinDistance), resetting to 0.8")
                 _targetMinDistance = 0.8
+                _velocityMinDistance = 0.0
             }
             if _targetFoldingLimit.isNaN || _targetFoldingLimit.isInfinite {
                 print("⚠️ ANOMALY: targetFoldingLimit is \(_targetFoldingLimit), resetting to 1.0")
                 _targetFoldingLimit = 1.0
+                _velocityFoldingLimit = 0.0
             }
             if _targetSphereRadius.isNaN || _targetSphereRadius.isInfinite {
                 print("⚠️ ANOMALY: targetSphereRadius is \(_targetSphereRadius), resetting to 0.5")
                 _targetSphereRadius = 0.5
+                _velocitySphereRadius = 0.0
             }
             if _targetPosition.x.isNaN || _targetPosition.y.isNaN || _targetPosition.z.isNaN {
                 print("⚠️ ANOMALY: targetPosition contains NaN, resetting to zero")
                 _targetPosition = .zero
+                _velocityPosition = .zero
             }
             
-            _minDistance += (_targetMinDistance - _minDistance) * factor
-            _foldingLimit += (_targetFoldingLimit - _foldingLimit) * factor
-            _sphereRadius += (_targetSphereRadius - _sphereRadius) * factor
-            _position += (_targetPosition - _position) * factor
+            // Apply smooth damp to each parameter
+            _minDistance = smoothDamp(
+                current: _minDistance,
+                target: _targetMinDistance,
+                velocity: &_velocityMinDistance,
+                smoothTime: smoothTime,
+                maxSpeed: maxSpeed,
+                deltaTime: clampedDT
+            )
+            
+            _foldingLimit = smoothDamp(
+                current: _foldingLimit,
+                target: _targetFoldingLimit,
+                velocity: &_velocityFoldingLimit,
+                smoothTime: smoothTime,
+                maxSpeed: maxSpeed,
+                deltaTime: clampedDT
+            )
+            
+            _sphereRadius = smoothDamp(
+                current: _sphereRadius,
+                target: _targetSphereRadius,
+                velocity: &_velocitySphereRadius,
+                smoothTime: smoothTime,
+                maxSpeed: maxSpeed,
+                deltaTime: clampedDT
+            )
+            
+            // Smooth damp position (each component separately)
+            _position.x = smoothDamp(
+                current: _position.x,
+                target: _targetPosition.x,
+                velocity: &_velocityPosition.x,
+                smoothTime: smoothTime,
+                maxSpeed: maxPositionSpeed,
+                deltaTime: clampedDT
+            )
+            _position.y = smoothDamp(
+                current: _position.y,
+                target: _targetPosition.y,
+                velocity: &_velocityPosition.y,
+                smoothTime: smoothTime,
+                maxSpeed: maxPositionSpeed,
+                deltaTime: clampedDT
+            )
+            _position.z = smoothDamp(
+                current: _position.z,
+                target: _targetPosition.z,
+                velocity: &_velocityPosition.z,
+                smoothTime: smoothTime,
+                maxSpeed: maxPositionSpeed,
+                deltaTime: clampedDT
+            )
             
             // Clamp current values to sane ranges as a safety net
             _minDistance = max(0.1, min(10.0, _minDistance))
@@ -1091,6 +1180,11 @@ final class RenderSettings: @unchecked Sendable {
             _foldingLimit = _targetFoldingLimit
             _sphereRadius = _targetSphereRadius
             _position = _targetPosition
+            // Reset velocities when snapping
+            _velocityMinDistance = 0.0
+            _velocityFoldingLimit = 0.0
+            _velocitySphereRadius = 0.0
+            _velocityPosition = .zero
         }
     }
     

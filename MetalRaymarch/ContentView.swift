@@ -39,11 +39,6 @@ final class UISettingsCache {
     var glowIntensity: Float = 0.0
     var bloomStrength: Float = 0.0
     
-    // Kuwahara
-    var kuwaharaEnabled: Bool = false
-    var kuwaharaRadius: Float = 4.0
-    var kuwaharaSharpness: Float = 8.0
-    
     // Emissive
     var emissiveEnabled: Bool = false
     var emissivePattern: Int = 0
@@ -59,7 +54,9 @@ final class UISettingsCache {
     var showHUD: Bool = true
     var safetyBubbleRadius: Float = 1.8
     var safetyBubbleShape: Float = 0.0
-    var useRelativeGestures: Bool = false
+    var useRelativeGestures: Bool = true
+    var extendedGestureRange: Bool = true
+    var gestureSensitivity: Float = 5.0
     
     // Dynamic quality
     var dynamicRenderQualityEnabled: Bool = true
@@ -117,10 +114,6 @@ final class UISettingsCache {
         glowIntensity = settings.glowIntensity
         bloomStrength = settings.bloomStrength
         
-        kuwaharaEnabled = settings.kuwaharaEnabled
-        kuwaharaRadius = settings.kuwaharaRadius
-        kuwaharaSharpness = settings.kuwaharaSharpness
-        
         emissiveEnabled = settings.emissiveEnabled
         emissivePattern = settings.emissivePattern
         emissiveIntensity = settings.emissiveIntensity
@@ -134,6 +127,8 @@ final class UISettingsCache {
         safetyBubbleRadius = settings.safetyBubbleRadius
         safetyBubbleShape = settings.safetyBubbleShape
         useRelativeGestures = settings.useRelativeGestures
+        extendedGestureRange = settings.extendedGestureRange
+        gestureSensitivity = settings.gestureSensitivity
         
         dynamicRenderQualityEnabled = settings.dynamicRenderQualityEnabled
         dynamicRenderQualityMin = settings.dynamicRenderQualityMin
@@ -535,28 +530,6 @@ struct ContentView: View {
                                 
                                 Divider()
                                 
-                                // === KUWAHARA (Painterly Effect) ===
-                                Text("Painterly Effect").font(.headline)
-                                
-                                Toggle("Kuwahara Filter", isOn: $cache.kuwaharaEnabled)
-                                    .onChange(of: cache.kuwaharaEnabled) { _, newValue in
-                                        cache.push(\.kuwaharaEnabled, value: newValue)
-                                    }
-                                
-                                if cache.kuwaharaEnabled {
-                                    Text("Filter Radius: \(cache.kuwaharaRadius, specifier: "%.1f")")
-                                    Slider(value: $cache.kuwaharaRadius, in: 2...8, onEditingChanged: { editing in
-                                        if !editing { cache.push(\.kuwaharaRadius, value: cache.kuwaharaRadius) }
-                                    })
-                                    
-                                    Text("Edge Sharpness: \(cache.kuwaharaSharpness, specifier: "%.1f")")
-                                    Slider(value: $cache.kuwaharaSharpness, in: 1...16, onEditingChanged: { editing in
-                                        if !editing { cache.push(\.kuwaharaSharpness, value: cache.kuwaharaSharpness) }
-                                    })
-                                }
-                                
-                                Divider()
-                                
                                 // === EMISSIVE GLOW ===
                                 Text("Emissive Glow").font(.headline)
                                 
@@ -713,6 +686,18 @@ struct ContentView: View {
                                         cache.push(\.useRelativeGestures, value: newValue)
                                     }
                                     .help("Relative: fine-tune from current value. Absolute: hand distance maps directly to range.")
+                                
+                                Toggle("Extended Range", isOn: $cache.extendedGestureRange)
+                                    .onChange(of: cache.extendedGestureRange) { _, newValue in
+                                        cache.push(\.extendedGestureRange, value: newValue)
+                                    }
+                                    .help("Allow wider parameter ranges for gesture controls.")
+                                
+                                Text("Gesture Sensitivity: \(Int(cache.gestureSensitivity))")
+                                Slider(value: $cache.gestureSensitivity, in: 1...10, step: 1, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) }
+                                })
+                                .help("1 = 10x slower, 10 = normal speed")
                                 
                                 Divider()
                                 

@@ -186,7 +186,11 @@ final class GestureController {
             return Self.mandelboxRanges
         }
         
-        // Only Mandelbox is supported
+        // Use extended ranges if enabled
+        if settings.extendedGestureRange {
+            return Self.mandelboxExtendedRanges
+        }
+        
         return Self.mandelboxRanges
     }
     
@@ -198,6 +202,20 @@ final class GestureController {
         foldingLimit: 0.5...13.0,         // Box fold boundary - wide range
         sphereRadius: 0.1...2.0,          // Sphere inversion radius
         fractalScale: 1.5...4.0,          // Typical positive scale range
+        defaultMinDistance: 0.8,
+        defaultFoldingLimit: 1.0,
+        defaultSphereRadius: 0.5,
+        defaultFractalScale: 2.8
+    )
+    
+    // EXTENDED MANDELBOX RANGES
+    // - Much wider ranges for extreme exploration
+    // - Allows reaching more unusual/exotic parameter combinations
+    private static let mandelboxExtendedRanges = FractalParamRanges(
+        minDistance: 0.1...10.0,          // Extended: much wider minRadius² range
+        foldingLimit: 0.1...20.0,         // Extended: allows very tight and very loose folds
+        sphereRadius: 0.01...5.0,         // Extended: from tiny to large sphere inversions
+        fractalScale: 0.5...6.0,          // Extended: includes sub-1 scales for different effects
         defaultMinDistance: 0.8,
         defaultFoldingLimit: 1.0,
         defaultSphereRadius: 0.5,
@@ -616,9 +634,11 @@ final class GestureController {
             
             if settings.useRelativeGestures {
                 // RELATIVE: Change based on delta from start distance
+                // Sensitivity: 1 = 10x slower (0.1x), 10 = normal (1.0x)
+                let sensitivityMultiplier = settings.gestureSensitivity / 10.0
                 let rangeSpan = range.upperBound - range.lowerBound
                 let distSpan = maxHandDistance - minHandDistance
-                let sensitivity = rangeSpan / distSpan
+                let sensitivity = (rangeSpan / distSpan) * sensitivityMultiplier
                 
                 let delta = currentDistance - state.startDistance
                 newValue = state.startParameterValue + (delta * sensitivity)
