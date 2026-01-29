@@ -1123,10 +1123,12 @@ actor Renderer {
         let deltaTime = max(1.0 / 240.0, rawDelta)  // Allow slow frames to surface instead of capping at 30 FPS
         cachedDeltaTime = Float(deltaTime)  // Cache for use in updateGameState and other methods
 
-        // FPS tracking using clamped interval (stable with triple buffering)
+        // FPS tracking using frame-rate independent exponential decay (Freya Holmér technique)
+        // factor = 1 - e^(-speed * dt), speed=10 gives ~63% convergence in 100ms
         if deltaTime > 0 {
             let instantFPS = 1.0 / deltaTime
-            let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * 0.1
+            let fpsSmoothFactor = 1.0 - exp(-10.0 * deltaTime)  // speed=10 for responsive but smooth FPS display
+            let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * fpsSmoothFactor
             smoothedFPS = updatedFPS
             
             // Throttle UI updates to 4Hz (every 0.25s) to prevent SwiftUI layout thrashing

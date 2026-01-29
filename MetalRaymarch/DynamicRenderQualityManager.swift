@@ -53,8 +53,9 @@ final class DynamicRenderQualityManager {
     /// Rate of quality increase per second when above threshold
     var increaseRate: Float = 0.08
     
-    /// Smoothing factor for FPS averaging (higher = more responsive, noisier)
-    var fpsSmoothingFactor: Double = 0.15
+    /// Smoothing speed for FPS averaging (Freya Holmér exponential decay)
+    /// Higher = more responsive, lower = smoother. 10.0 gives ~63% convergence in 100ms
+    var fpsSmoothingSpeed: Double = 10.0
     
     /// Minimum time between quality updates (prevents oscillation)
     var updateCooldown: TimeInterval = 0.1
@@ -104,8 +105,10 @@ final class DynamicRenderQualityManager {
         
         frameCount += 1
         
-        // Smooth the FPS to avoid reacting to individual frame spikes
-        smoothedFPS = smoothedFPS + (fps - smoothedFPS) * fpsSmoothingFactor
+        // Smooth the FPS using frame-rate independent exponential decay (Freya Holmér technique)
+        // factor = 1 - e^(-speed * dt), gives consistent smoothing regardless of frame rate
+        let fpsSmoothFactor = 1.0 - exp(-fpsSmoothingSpeed * deltaTime)
+        smoothedFPS = smoothedFPS + (fps - smoothedFPS) * fpsSmoothFactor
         
         // Apply cooldown to prevent rapid oscillation
         let currentTime = CACurrentMediaTime()

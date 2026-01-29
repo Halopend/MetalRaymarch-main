@@ -40,10 +40,15 @@ class AudioAnalyzer {
     private var audioEngine: AVAudioEngine?
     private var inputNode: AVAudioInputNode?
     
-    // Smoothing parameters
-    private let attackSpeed: Float = 0.3     // How fast level rises
-    private let decaySpeed: Float = 0.1      // How fast level falls
-    private let peakDecaySpeed: Float = 0.02 // How fast peak falls
+    // Frame-rate independent smoothing speeds (Freya Holmér exponential decay)
+    // Higher values = faster response. speed=20 gives ~63% convergence in 50ms
+    private let attackSpeed: Float = 30.0     // How fast level rises (responsive)
+    private let decaySpeed: Float = 8.0       // How fast level falls (slower decay)
+    private let peakDecaySpeed: Float = 1.5   // How fast peak falls (very slow)
+    private let bandSmoothSpeed: Float = 15.0 // Bass/treble smoothing speed
+    
+    // Timestamp for frame-rate independent smoothing
+    private var lastUpdateTime: CFTimeInterval = 0
     
     // MARK: - Initialization
     
@@ -176,23 +181,37 @@ class AudioAnalyzer {
     }
     
     private func updateLevels(overall: Float, bass: Float, treble: Float) {
+        // Calculate deltaTime for frame-rate independent smoothing
+        let currentTime = CACurrentMediaTime()
+        let deltaTime = lastUpdateTime > 0 ? Float(currentTime - lastUpdateTime) : Float(1.0 / 60.0)
+        lastUpdateTime = currentTime
+        
+        // Clamp deltaTime to reasonable range (handles first call and long pauses)
+        let clampedDT = max(0.001, min(0.1, deltaTime))
+        
+        // Frame-rate independent exponential decay (Freya Holmér technique)
+        // factor = 1 - e^(-speed * dt)
+        
         // Smooth the overall level (fast attack, slow decay)
         if overall > level {
-            level = level + (overall - level) * attackSpeed
+            let attackFactor = 1.0 - exp(-attackSpeed * clampedDT)
+            level = level + (overall - level) * attackFactor
         } else {
-            level = level + (overall - level) * decaySpeed
+            let decayFactor = 1.0 - exp(-decaySpeed * clampedDT)
+            level = level + (overall - level) * decayFactor
         }
         
-        // Update peak with slow decay
+        // Update peak with slow decay (linear decay rate per second)
         if level > peakLevel {
             peakLevel = level
         } else {
-            peakLevel = max(0, peakLevel - peakDecaySpeed)
+            peakLevel = max(0, peakLevel - peakDecaySpeed * clampedDT)
         }
         
-        // Smooth bass and treble
-        bassLevel = bassLevel + (bass - bassLevel) * 0.2
-        trebleLevel = trebleLevel + (treble - trebleLevel) * 0.2
+        // Smooth bass and treble with frame-rate independent decay
+        let bandFactor = 1.0 - exp(-bandSmoothSpeed * clampedDT)
+        bassLevel = bassLevel + (bass - bassLevel) * bandFactor
+        trebleLevel = trebleLevel + (treble - trebleLevel) * bandFactor
     }
 }
 
