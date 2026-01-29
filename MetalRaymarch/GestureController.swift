@@ -186,16 +186,8 @@ final class GestureController {
             return Self.mandelboxRanges
         }
         
-        switch settings.fractalType {
-        case .mandelbox:
-            return Self.mandelboxRanges
-        case .triforce:
-            return Self.triforceRanges
-        case .negativeMandelbox:
-            return Self.negativeMandelboxRanges
-        case .orbitDensity:
-            return Self.mandelboxRanges
-        }
+        // Only Mandelbox is supported
+        return Self.mandelboxRanges
     }
     
     // STANDARD MANDELBOX (positive scale ~2-3)
@@ -210,36 +202,6 @@ final class GestureController {
         defaultFoldingLimit: 1.0,
         defaultSphereRadius: 0.5,
         defaultFractalScale: 2.8
-    )
-    
-    // NEGATIVE MANDELBOX (scale = -1.5)
-    // - Tighter ranges because -1.5 scale is very sensitive
-    // - Small changes create big visual differences
-    // - Reference: https://sites.google.com/site/mandelbox/negative-1-5-mandelbox
-    // - Standard params: s=-1.5, r=0.5 (minRad²=0.25), f=1.0
-    private static let negativeMandelboxRanges = FractalParamRanges(
-        minDistance: 0.1...1.0,           // minRadius² - tighter range (0.25 typical)
-        foldingLimit: 0.5...2.0,          // Box fold - tighter (1.0 typical)
-        sphereRadius: 0.3...1.0,          // Sphere radius (0.5 typical)
-        fractalScale: 1.5...4.0,          // Scale (not directly used, -1.5 is fixed)
-        defaultMinDistance: 0.25,         // r² where r=0.5
-        defaultFoldingLimit: 1.0,
-        defaultSphereRadius: 0.5,
-        defaultFractalScale: 2.8          // UI only - actual scale is -1.5
-    )
-    
-    // TRIFORCE / KALEIDOSCOPIC IFS
-    // - Scale drives complexity, offset controls position in IFS space
-    // - foldingLimit affects tetrahedron fold intensity
-    private static let triforceRanges = FractalParamRanges(
-        minDistance: 0.5...3.0,           // Not used much in IFS
-        foldingLimit: 0.5...5.0,          // Fold intensity
-        sphereRadius: 0.1...2.0,          // Not used much in IFS
-        fractalScale: 1.5...4.0,          // IFS scale factor
-        defaultMinDistance: 1.0,
-        defaultFoldingLimit: 1.0,
-        defaultSphereRadius: 0.5,
-        defaultFractalScale: 2.0
     )
     
     // Single-hand drag sensitivity

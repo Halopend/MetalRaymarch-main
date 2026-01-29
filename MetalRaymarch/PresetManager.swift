@@ -603,10 +603,10 @@ extension PresetManager {
             return nebulabrot
         }
 
-        // Orbit Density (3D Buddhabrot-style)
+        // Orbit Density (originally 3D Buddhabrot-style, now Mandelbox)
         ensurePreset(named: "Orbit Density") {
             var orbit = FractalPreset(name: "Orbit Density")
-            orbit.fractalType = .orbitDensity
+            orbit.fractalType = .mandelbox
             orbit.colorScheme = .nebula
             orbit.colorSchemeSaturation = 2.2
             orbit.colorSchemeContrast = 1.1
@@ -628,7 +628,7 @@ extension PresetManager {
         // Taurus66 Rotbox (approx) - tuned from Mandelbulber settings
         ensurePreset(named: "Taurus66 Rotbox") {
             var rotbox = FractalPreset(name: "Taurus66 Rotbox")
-            rotbox.fractalType = .negativeMandelbox
+            rotbox.fractalType = .mandelbox
             rotbox.colorScheme = .fire
             rotbox.colorSchemeSaturation = 2.0
             rotbox.colorSchemeContrast = 1.15
@@ -648,10 +648,9 @@ extension PresetManager {
         }
 
         // Yip Yip Martians - fuzzy, playful chaos inspired by Sesame Street's aliens
-        // Now enhanced with Nebulabrot multi-channel rendering & 3D orbit traps!
         ensurePreset(named: "Yip Yip Martians") {
             var yipyip = FractalPreset(name: "Yip Yip Martians")
-            yipyip.fractalType = .orbitDensity  // Nebulabrot-style ethereal volume
+            yipyip.fractalType = .mandelbox  // Originally Nebulabrot-style, now Mandelbox
             yipyip.colorScheme = .neonSunset    // Orange/magenta/violet - playful retro
             yipyip.colorSchemeSaturation = 2.6  // Vibrant retro 70s/80s colors
             yipyip.colorSchemeContrast = 0.95   // Soft, fuzzy contrast like their fur
@@ -670,10 +669,10 @@ extension PresetManager {
             return yipyip
         }
 
-        // Deep Nebula - showcase the multi-channel Nebulabrot technique
+        // Deep Nebula - originally multi-channel Nebulabrot, now Mandelbox
         ensurePreset(named: "Deep Nebula") {
             var nebula = FractalPreset(name: "Deep Nebula")
-            nebula.fractalType = .orbitDensity
+            nebula.fractalType = .mandelbox
             nebula.colorScheme = .nebula        // Astronomical false-color
             nebula.colorSchemeSaturation = 2.3
             nebula.colorSchemeContrast = 1.05

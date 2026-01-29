@@ -52,9 +52,6 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
 typedef NS_ENUM(EnumBackingType, FractalType)
 {
     FractalTypeMandelbox         = 0,
-    FractalTypeTriforce          = 1,
-    FractalTypeNegativeMandelbox = 2,  // Scale = -1.5 Mandelbox (organic, dense)
-    FractalTypeOrbitDensity       = 3,  // 3D orbit-density variant (Buddhabrot-style)
 };
 
 // Color scheme selection (built-in presets)
@@ -143,7 +140,7 @@ typedef struct
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
-    int fractalType;         // 0=Mandelbox, 1=Triforce, 2=Negative Mandelbox, 3=Orbit Density
+    int fractalType;         // 0=Mandelbox (only supported type)
     int lightingMode;        // 0=static, 1=animated, 2=audio-reactive
     float audioLevel;        // Audio level for reactive lighting (0-1)
     // Emissive glow parameters
@@ -185,7 +182,7 @@ typedef struct
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
-    int fractalType;             // 0=Mandelbox, 1=Triforce, 2=Negative Mandelbox, 3=Orbit Density
+    int fractalType;             // 0=Mandelbox (only supported type)
     int lightingMode;            // 0=static, 1=animated, 2=audio-reactive
     float audioLevel;            // Audio level for reactive lighting (0-1)
     // Emissive glow parameters

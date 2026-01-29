@@ -346,108 +346,6 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
 }
 
 // =============================================================================
-// TRIFORCE IFS FRACTAL - Based on Knighty's work (Fractal Forums)
-// Reference: http://blog.hvidtfeldts.net/index.php/2011/08/distance-estimated-3d-fractals-iii-folding-space/
-//
-// This implements a proper IFS (Iterated Function System) fractal using:
-// 1. Plane folds (reflections) for symmetry
-// 2. Scaling about a point
-// 3. Proper DE tracking via the running derivative
-//
-// The "Triforce" branch is a kaleidoscopic IFS with dense recursive detail and
-// sphere-packing aesthetics.
-// =============================================================================
-
-// Triforce/IFS parameters - optimized for register usage
-struct TriforceParams {
-    float scale;           // Scaling factor (typically 2.0-3.0)
-    float3 offset;         // Scaling center offset
-    float3 bubbleCenter;
-    float bubbleRadius;
-    int bubbleEnabled;
-    float bubbleShape;     // 0 = sphere, 1 = cube, intermediate = morph
-};
-
-// Create Triforce parameters
-FORCE_INLINE TriforceParams makeTriforceParams(float scale, float3 offset,
-                                                float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape) {
-    TriforceParams params;
-    params.scale = scale;
-    params.offset = offset;
-    params.bubbleCenter = bubbleCenter;
-    params.bubbleRadius = bubbleRadius;
-    params.bubbleEnabled = bubbleEnabled;
-    params.bubbleShape = bubbleShape;
-    return params;
-}
-
-// Sierpinski tetrahedron / Kaleidoscopic IFS distance function
-// This is a well-understood fractal with proper DE convergence
-// Based on Syntopia/Fragmentarium implementation
-FORCE_INLINE float MapTriforce(float3 pos, TriforceParams params, int iterations, float foldingLimit) 
-{
-    float3 z = pos;
-    float dr = 1.0;  // Running derivative for proper DE
-    
-    // Scale and offset from params
-    float Scale = params.scale;
-    float3 Offset = params.offset;
-    
-    // Use function constant for iteration count when available
-    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? 
-        min(FC_FRACTAL_ITERATIONS, 15) : min(iterations, 15);
-    
-    // Main IFS iteration loop
-    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
-        UNROLL_FULL
-        for (int n = 0; n < loopCount; n++) {
-            // Fold 1: Reflect across plane x+y=0
-            // if(z.x+z.y<0) z.xy = -z.yx;
-            // Branchless version:
-            z.xy -= 2.0 * min(0.0, z.x + z.y) * float2(0.5, 0.5);
-            z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
-            
-            // Fold 2: Reflect across plane x+z=0  
-            z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
-            
-            // Fold 3: Reflect across plane y+z=0
-            z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
-            
-            // Scale and translate
-            z = z * Scale - Offset * (Scale - 1.0);
-            
-            // Track derivative for proper DE
-            dr = dr * abs(Scale) + 1.0;
-        }
-    } else {
-        UNROLL_8
-        for (int n = 0; n < loopCount; n++) {
-            // Same operations with unroll hint
-            z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
-            z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
-            z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
-            
-            z = z * Scale - Offset * (Scale - 1.0);
-            dr = dr * abs(Scale) + 1.0;
-        }
-    }
-    
-    // Distance estimate - the key formula from the papers
-    // DE = distance_to_point / accumulated_derivative
-    float d = (length(z) - 2.0) / dr;
-    
-    // Safety bubble
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? 
-        FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
-    
-    return d;
-}
-
-// =============================================================================
 // COLOR SCHEME FUNCTIONS (must be before color functions that use them)
 // =============================================================================
 
@@ -511,596 +409,14 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
 }
 
 // =============================================================================
-
-// Triforce/IFS color function with color scheme support and neon mode
-half3 ColourTriforceWithScheme(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale, ColorSchemeParams scheme) 
-{
-    float3 z = pos;
-    float3 Offset = float3(1.0, 1.0, 1.0);
-    float Scale = scale;
-    
-    // Orbit trap variables
-    float minDist = 1e10;
-    float3 trapPos = z;
-    int trapIter = 0;
-    
-    int steps = max(int(float(colorIters) * quality), 2);
-    steps = min(steps, 10);
-    
-    for (int n = 0; n < steps; n++) {
-        // Tetrahedron folds
-        z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
-        z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
-        z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
-        
-        // Scale and translate
-        z = z * Scale - Offset * (Scale - 1.0);
-        
-        // Track orbit trap with iteration
-        float d = dot(z, z);
-        if (d < minDist) {
-            minDist = d;
-            trapPos = z;
-            trapIter = n;
-        }
-    }
-    
-    // Check if neon mode is active
-    if (scheme.neonIntensity > 0.01f) {
-        half trapMin = half(saturate(sqrt(minDist) * 0.3));
-        half trapIterNorm = half(float(trapIter) / float(steps));
-        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f);
-        
-        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
-        
-        if (scheme.neonIntensity < 0.99f) {
-            half trapNorm = half(saturate(sqrt(minDist) * 0.5));
-            half posNorm = half(saturate(length(trapPos) * 0.2));
-            half3 col1 = half3(scheme.color1);
-            half3 col2 = half3(scheme.color2);
-            half3 col3 = half3(scheme.color3);
-            half3 standardColor = mix(mix(col1, col2, trapNorm), col3, posNorm);
-            return mix(standardColor, neonColor, half(scheme.neonIntensity));
-        }
-        return neonColor;
-    }
-    
-    // Generate colors from orbit trap (standard mode)
-    half trapNorm = half(saturate(sqrt(minDist) * 0.5));
-    half posNorm = half(saturate(length(trapPos) * 0.2));
-    
-    // Use color scheme
-    half3 col1 = half3(scheme.color1);
-    half3 col2 = half3(scheme.color2);
-    half3 col3 = half3(scheme.color3);
-    
-    half3 finalColor = mix(mix(col1, col2, trapNorm), col3, posNorm);
-    
-    // Alternative palette using scheme factors
-    half3 altFactors = half3(scheme.altMixFactors);
-    half3 altColor = half3(posNorm * altFactors.x, trapNorm * altFactors.y, altFactors.z + 0.5h * posNorm);
-    
-    return mix(finalColor, altColor, half(colorMix));
-}
-
-// Original Triforce/IFS color function - orbit trap coloring
-half3 ColourTriforce(float3 pos, float quality, float colorMix, float foldingLimit, int colorIters, float scale) 
-{
-    float3 z = pos;
-    float3 Offset = float3(1.0, 1.0, 1.0);
-    float Scale = scale;
-    
-    // Orbit trap variables
-    float minDist = 1e10;
-    float3 trapPos = z;
-    
-    int steps = max(int(float(colorIters) * quality), 2);
-    steps = min(steps, 10);
-    
-    for (int n = 0; n < steps; n++) {
-        // Tetrahedron folds
-        z.xy = (z.x + z.y < 0.0) ? -z.yx : z.xy;
-        z.xz = (z.x + z.z < 0.0) ? -z.zx : z.xz;
-        z.yz = (z.y + z.z < 0.0) ? -z.zy : z.yz;
-        
-        // Scale and translate
-        z = z * Scale - Offset * (Scale - 1.0);
-        
-        // Track orbit trap
-        float d = dot(z, z);
-        if (d < minDist) {
-            minDist = d;
-            trapPos = z;
-        }
-    }
-    
-    // Generate colors from orbit trap
-    half trapNorm = half(saturate(sqrt(minDist) * 0.5));
-    half posNorm = half(saturate(length(trapPos) * 0.2));
-    
-    // Color palette - ethereal blue/purple 
-    half3 col1 = half3(0.1h, 0.3h, 0.8h);   // Deep blue
-    half3 col2 = half3(0.6h, 0.2h, 0.7h);   // Purple
-    half3 col3 = half3(0.9h, 0.6h, 0.3h);   // Gold
-    
-    half3 finalColor = mix(mix(col1, col2, trapNorm), col3, posNorm);
-    
-    // Alternative palette
-    half3 altColor = half3(posNorm * 0.8h, trapNorm, 0.4h + 0.5h * posNorm);
-    
-    return mix(finalColor, altColor, half(colorMix));
-}
-
-// Simplified Triforce color overload with default parameters
-inline half3 ColourTriforce(float3 pos, float distance, float gTime, float quality) {
-    // Default parameters that produce good results
-    return ColourTriforce(pos, quality, 0.5, 1.0, 8, 1.5);
-}
-
-// Animated Triforce zoom/rotation to keep motion feeling infinite without camera teleporting
-struct TriforceMotion {
-    float3 origin;
-    float3 direction;
-    int iterations;
-    int maxSteps;
-};
-
-FORCE_INLINE TriforceMotion applyTriforceMotion(float3 origin, float3 direction, int baseIterations, int baseMaxSteps, float time) {
-    // Slow oscillating zoom; exp2 keeps multiplicative layering stable
-    float zoomPhase = time * 0.12f;
-    float zoom = exp2(sin(zoomPhase) * 0.85f);  // ~0.55x to ~1.9x
-
-    // Gentle spin to avoid repetitive tiling
-    float spin = time * 0.05f;
-    float s = sin(spin);
-    float c = cos(spin);
-
-    float3 rotatedOrigin = float3(origin.x * c - origin.z * s, origin.y, origin.x * s + origin.z * c);
-    float3 rotatedDir = float3(direction.x * c - direction.z * s, direction.y, direction.x * s + direction.z * c);
-
-    // Apply zoom uniformly to origin; keep direction normalized after rotation
-    rotatedOrigin *= zoom;
-    rotatedDir = normalize(rotatedDir);
-
-    // Boost iterations/steps when zooming in to maintain detail, but clamp for perf
-    float lodBoost = clamp(log2(zoom), -2.0f, 3.0f);
-    int iterations = clamp(baseIterations + int(round(lodBoost * 2.5f)), 3, 20);
-    int maxSteps = clamp(int(round(float(baseMaxSteps) * (1.0f + lodBoost * 0.5f))), 8, 512);
-
-    TriforceMotion motion;
-    motion.origin = rotatedOrigin;
-    motion.direction = rotatedDir;
-    motion.iterations = iterations;
-    motion.maxSteps = maxSteps;
-    return motion;
-}
-
-// =============================================================================
-// NEGATIVE -1.5 MANDELBOX - Organic, dense variant with rough textures
-// Reference: https://sites.google.com/site/mandelbox/negative-1-5-mandelbox
-//
-// Using a negative scale (-1.5) creates an inverted folding behavior that:
-// - Prevents floating boxes on corners
-// - Creates denser, more connected structures  
-// - Produces organic, rough-looking surfaces (like rocks, coral, trees)
-// - Mimics Kleinian, Koch snowflake, and Cantor dust fractals
+// UNIFIED MAP FUNCTION
 // =============================================================================
 
-// Negative -1.5 Mandelbox distance estimator
-// Uses the SAME algorithm as standard Mandelbox but with scale fixed at -1.5
-// This ensures visual consistency with the reference images
-FORCE_INLINE float MapNegativeMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations) 
-{
-    // Override scale to -1.5 for negative mandelbox
-    // The scale needs to be divided by minDistanceVal (same as standard Mandelbox)
-    // This controls the overall structure/density
-    const float negScale = -1.5;
-    
-    // Recompute scale params for -1.5 (same formula as makeFractalParams)
-    // Uses minDistanceVal from params (not minRadius2 which is sphereRadius²)
-    float invMinRad = 1.0f / params.minDistanceVal;
-    float4 scale = float4(negScale * invMinRad);
-    scale.w = abs(scale.w);
-    float absScalem1 = abs(negScale - 1.0);  // = 2.5
-    float absScalePow = pow(abs(negScale), float(1 - iterations));  // 1.5^(1-iters)
-    
-    // Sphere fold uses params.minRadius2 (= sphereRadius²)
-    float minRad2 = params.minRadius2;
-    
-    float4 p = float4(pos, 1.0);
-    float4 p0 = p;
-    
-    // Pre-compute reciprocal for sphere fold (division is expensive)
-    float invMinRadius2 = 1.0f / minRad2;
-
-    // Use function constant for iteration count when available
-    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-
-    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
-        UNROLL_FULL
-        for (int i = 0; i < loopCount; i++)
-        {
-            // Box fold: clamp and reflect (same as standard Mandelbox)
-            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-            
-            // Branchless sphere fold using clamp (same as standard Mandelbox)
-            float r2 = dot(p.xyz, p.xyz);
-            float t = clamp(1.0f / max(r2, minRad2), 1.0f, invMinRadius2);
-            p *= t;
-            
-            // Scale and translate with negative scale
-            p = fma(p, scale, p0);
-        }
-    } else {
-        UNROLL_8
-        for (int i = 0; i < loopCount; i++)
-        {
-            // Box fold
-            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-            
-            // Sphere fold
-            float r2 = dot(p.xyz, p.xyz);
-            float t = clamp(1.0f / max(r2, minRad2), 1.0f, invMinRadius2);
-            p *= t;
-            
-            // Scale and translate with negative scale
-            p = fma(p, scale, p0);
-        }
-    }
-    
-    // Distance estimate - SAME formula as standard Mandelbox
-    float d = (length(p.xyz) - absScalem1) / p.w - absScalePow;
-    
-    // Safety bubble
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? 
-        FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
-    
-    return d;
-}
-
-// Negative Mandelbox coloring with color scheme support
-// Enhanced with more vibrant colors and better depth variation
-half3 ColourNegativeMandelboxWithScheme(float3 pos, float quality, float minRad2Val, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme) 
-{
-    // Use -1.5 scale for negative mandelbox
-    const float negScale = -1.5;
-    float4 scale = float4(negScale) / minRad2Val;
-    scale.w = abs(scale.w);
-    float minRadius2 = sphereRadius * sphereRadius;
-    float invMinRadius2 = 1.0 / minRadius2;
-
-    float3 p = pos;
-    float3 p0 = p;
-    float trap = 1.0;
-    float minTrap = 1.0;
-    int trapIter = 0;
-    float3 trapPos = p;  // Track position at minimum trap
-    
-    int steps = max(int(float(colorIters) * quality), 2);
-    steps = min(steps, 12);
-    
-    for (int i = 0; i < steps; i++)
-    {
-        // Box fold
-        p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
-        
-        // Sphere fold
-        float r2 = dot(p, p);
-        p *= clamp(1.0 / max(r2, minRadius2), 1.0, invMinRadius2);
-        
-        // Scale with -1.5
-        p = p * scale.xyz + p0;
-        
-        // Track orbit trap with iteration and position
-        if (r2 < minTrap) {
-            minTrap = r2;
-            trapIter = i;
-            trapPos = p;
-        }
-        trap = min(trap, r2);
-    }
-    
-    // Check if neon mode is active
-    if (scheme.neonIntensity > 0.01f) {
-        // Compute neon orbit trap metrics with extra depth variation for negative mandelbox
-        half trapMin = half(sqrt(trap));
-        half trapIterNorm = half(float(trapIter) / float(steps));
-        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f);
-        
-        // Add depth influence for negative mandelbox's organic structures
-        half depthVal = half(saturate(length(p - p0) * 0.08));
-        trapMin = mix(trapMin, depthVal, 0.3h);
-        
-        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
-        
-        if (scheme.neonIntensity < 0.99f) {
-            // Blend with standard coloring
-            half2 c = saturate(half2(0.3333h * log(half(dot(p, p))) - 1.0h, sqrt(half(trap))));
-            half3 col1 = half3(scheme.color1);
-            half3 col2 = half3(scheme.color2);
-            half3 col3 = half3(scheme.color3);
-            half3 standardColor = mix(mix(col1, col2, c.y), col3, c.x);
-            return mix(standardColor, neonColor, half(scheme.neonIntensity));
-        }
-        return neonColor;
-    }
-    
-    // Standard enhanced color mapping with more channels
-    half logVal = 0.3333h * log(half(dot(p, p))) - 1.0h;
-    half trapVal = sqrt(half(trap));
-    half posVal = half(length(trapPos) * 0.15);  // Position-based variation
-    half depthVal = half(saturate(length(p - p0) * 0.1));  // How far orbit traveled
-    
-    half2 c = saturate(half2(logVal, trapVal));
-    
-    // Use color scheme but add extra variation for negative mandelbox
-    half3 col1 = half3(scheme.color1);
-    half3 col2 = half3(scheme.color2);
-    half3 col3 = half3(scheme.color3);
-    
-    // Mix in depth-based color shift for more visual interest
-    half3 depthTint = half3(0.1h, 0.2h, 0.3h) * depthVal;
-    col1 += depthTint;
-    col2 += depthTint * 0.5h;
-    
-    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
-    
-    // Enhanced alternative with position influence
-    half3 altFactors = half3(scheme.altMixFactors);
-    half3 altColor = half3(
-        c.x * altFactors.x + posVal * 0.2h,
-        c.y * altFactors.y + depthVal * 0.3h,
-        altFactors.z + 0.3h * c.y + posVal * 0.15h
-    );
-    
-    // More aggressive mixing for negative mandelbox
-    return mix(finalColor, altColor, 0.45h);
-}
-
-// Original negative mandelbox coloring for backward compatibility
-half3 ColourNegativeMandelbox(float3 pos, float quality, float minRad2Val, float foldingLimit, float sphereRadius, int colorIters) 
-{
-    // Use -1.5 scale for negative mandelbox
-    const float negScale = -1.5;
-    float4 scale = float4(negScale) / minRad2Val;
-    scale.w = abs(scale.w);
-    float minRadius2 = sphereRadius * sphereRadius;
-    float invMinRadius2 = 1.0 / minRadius2;
-
-    float3 p = pos;
-    float3 p0 = p;
-    float trap = 1.0;
-    
-    int steps = max(int(float(colorIters) * quality), 2);
-    steps = min(steps, 12);
-    
-    for (int i = 0; i < steps; i++)
-    {
-        // Box fold (same as standard)
-        p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
-        
-        // Sphere fold (branchless, same as standard)
-        float r2 = dot(p, p);
-        p *= clamp(1.0 / max(r2, minRadius2), 1.0, invMinRadius2);
-        
-        // Scale with -1.5
-        p = p * scale.xyz + p0;
-        trap = min(trap, r2);
-    }
-    
-    // Use same color mapping as standard Mandelbox
-    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
-    
-    // Organic color palette for negative mandelbox - earthy, mossy tones
-    // These colors complement the rough, organic textures of negative scale
-    half3 col1 = half3(0.2h, 0.35h, 0.15h);   // Moss green
-    half3 col2 = half3(0.5h, 0.35h, 0.2h);    // Rust/bark brown
-    half3 col3 = half3(0.4h, 0.38h, 0.35h);   // Stone gray
-    
-    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
-    
-    // Alternative palette with more variation
-    half3 altColor = half3(c.y * 0.4h, c.x * 0.5h + 0.1h, 0.3h + 0.2h * c.y);
-    
-    return mix(finalColor, altColor, 0.4h);
-}
-
-// =============================================================================
-// UNIFIED MAP FUNCTION - Dispatches to correct fractal based on type
-// =============================================================================
-
-// Unified distance function that selects fractal type at runtime
-// fractalType: 0 = Mandelbox, 1 = Triforce/Kaleidoscopic IFS, 2 = Negative -1.5 Mandelbox, 3 = Orbit Density
+// Unified distance function - Mandelbox only (simplified after removing other fractal types)
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
 {
-    if (fractalType == 2) {
-        // Negative -1.5 Mandelbox - organic, dense variant
-        // Uses the same algorithm as standard Mandelbox but with scale fixed at -1.5
-        return MapNegativeMandelbox(pos, params, foldingLimit, iterations);
-    } else if (fractalType == 1) {
-        // Kaleidoscopic IFS fractal ("Triforce" in UI)
-        // Uses tetrahedron symmetry folds + scaling
-        // Scale: 2.0 is classic Sierpinski, higher values create more detail
-        // Offset: (1,1,1) is standard tetrahedron vertex
-        TriforceParams aParams = makeTriforceParams(
-            2.0,                        // Scale factor (2.0 = classic Sierpinski)
-            float3(1.0, 1.0, 1.0),      // Offset (tetrahedron vertex)
-            params.bubbleCenter,
-            params.bubbleRadius,
-            params.bubbleEnabled,
-            params.bubbleShape
-        );
-        return MapTriforce(pos, aParams, iterations, foldingLimit);
-    } else {
-        // Mandelbox (default)
-        return Map(pos, params, foldingLimit, iterations);
-    }
-}
-
-// =============================================================================
-// ORBIT DENSITY (BUDDHABROT-STYLE) - 3D VARIANT
-// Computes a density value at a point based on escaping orbit behavior.
-// Not a true SDF; intended for volumetric accumulation.
-// =============================================================================
-
-FORCE_INLINE float OrbitDensityMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations, thread float &trap)
-{
-    float4 p = float4(pos, 1.0);
-    float4 p0 = p;
-    float invMinRadius2 = 1.0f / params.minRadius2;
-
-    float density = 0.0f;
-    float escaped = 0.0f;
-    trap = 1e9;
-
-    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-
-    UNROLL_8
-    for (int i = 0; i < loopCount; i++)
-    {
-        // Box fold
-        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-
-        // Sphere fold
-        float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
-        p *= t;
-
-        // Scale and translate
-        p = fma(p, params.scale, p0);
-
-        float r2b = dot(p.xyz, p.xyz);
-        trap = min(trap, r2b);
-        float r = sqrt(r2b);
-
-        // Density contribution decays with radius
-        density += exp(-r * 0.6f);
-
-        // Escape check
-        if (r2b > 64.0f) {
-            escaped = 1.0f;
-            break;
-        }
-    }
-
-    if (escaped < 0.5f) return 0.0f;
-    return density / float(loopCount);
-}
-
-// =============================================================================
-// NEBULABROT 3D - Multi-channel orbit density with 3D orbit traps
-// Inspired by Melinda Green's Nebulabrot technique and iq's 3D orbit traps.
-// Uses different iteration counts for RGB channels (like Hubble false-color)
-// plus geometric orbit traps (sphere, cylinder, plane) for structure.
-// =============================================================================
-
-struct NebulaResult {
-    float3 density;     // RGB channel densities (different iteration depths)
-    float3 traps;       // Orbit trap distances (sphere, cylinder, plane)
-    float escape;       // Did the orbit escape?
-    float depth;        // How deep into the fractal (iteration count at escape)
-};
-
-FORCE_INLINE NebulaResult NebulabrotMandelbox(float3 pos, FractalParams params, float foldingLimit, int baseIterations)
-{
-    NebulaResult result;
-    result.density = float3(0.0);
-    result.traps = float3(1e9);
-    result.escape = 0.0;
-    result.depth = 0.0;
-
-    float4 p = float4(pos, 1.0);
-    float4 p0 = p;
-    float invMinRadius2 = 1.0f / params.minRadius2;
-
-    // Multi-channel iteration thresholds (Nebulabrot technique)
-    // Blue = short orbits (fast escape), Green = medium, Red = long (deep escape)
-    int blueMax = max(baseIterations / 3, 2);       // Short orbits ~33%
-    int greenMax = max(baseIterations * 2 / 3, 4);  // Medium orbits ~66%
-    int redMax = baseIterations;                     // Full iterations
-
-    // Orbit trap geometry parameters
-    float3 sphereCenter = float3(0.0, 0.0, 0.0);    // Sphere trap at origin
-    float3 cylAxis = normalize(float3(0.0, 1.0, 0.0)); // Cylinder along Y
-    float3 planeNormal = normalize(float3(1.0, 0.0, 1.0)); // Diagonal plane
-
-    float densityB = 0.0, densityG = 0.0, densityR = 0.0;
-    float sphereTrap = 1e9, cylTrap = 1e9, planeTrap = 1e9;
-    int escapeIter = redMax;
-
-    NO_UNROLL
-    for (int i = 0; i < redMax; i++)
-    {
-        // Box fold
-        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-
-        // Sphere fold
-        float r2 = dot(p.xyz, p.xyz);
-        float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
-        p *= t;
-
-        // Scale and translate
-        p = fma(p, params.scale, p0);
-
-        float r2b = dot(p.xyz, p.xyz);
-        float r = sqrt(r2b);
-
-        // === 3D ORBIT TRAPS (iq technique) ===
-        // Track minimum distance from orbit to geometric shapes
-
-        // Sphere trap: distance to center point
-        float dSphere = length(p.xyz - sphereCenter);
-        sphereTrap = min(sphereTrap, dSphere);
-
-        // Cylinder trap: distance to axis line
-        float3 toPoint = p.xyz;
-        float alongAxis = dot(toPoint, cylAxis);
-        float3 nearestOnAxis = alongAxis * cylAxis;
-        float dCyl = length(toPoint - nearestOnAxis);
-        cylTrap = min(cylTrap, dCyl);
-
-        // Plane trap: distance to plane
-        float dPlane = abs(dot(p.xyz, planeNormal));
-        planeTrap = min(planeTrap, dPlane);
-
-        // === DENSITY ACCUMULATION ===
-        // Exponential decay contribution at each orbit point
-        float contrib = exp(-r * 0.5);
-
-        // Accumulate by channel based on iteration depth
-        if (i < blueMax)  densityB += contrib * 1.5;  // Blue channel emphasis
-        if (i < greenMax) densityG += contrib * 1.2;  // Green channel
-        densityR += contrib;                           // Red always accumulates
-
-        // Escape check
-        if (r2b > 64.0f) {
-            result.escape = 1.0f;
-            escapeIter = i + 1;
-            break;
-        }
-    }
-
-    // Only count escaping orbits (true Buddhabrot)
-    if (result.escape < 0.5f) {
-        result.density = float3(0.0);
-        result.traps = float3(1e9);
-        return result;
-    }
-
-    // Normalize densities by their respective iteration counts
-    result.density.x = densityR / float(redMax);     // Red = deep structure
-    result.density.y = densityG / float(greenMax);   // Green = medium
-    result.density.z = densityB / float(blueMax);    // Blue = surface glow
-
-    // Normalize trap distances
-    result.traps = float3(sphereTrap, cylTrap, planeTrap);
-    result.depth = float(escapeIter) / float(redMax);
-
-    return result;
+    // fractalType parameter kept for API compatibility but ignored - always Mandelbox
+    return Map(pos, params, foldingLimit, iterations);
 }
 
 // =============================================================================
@@ -1467,12 +783,8 @@ FORCE_INLINE float2 SceneWithSIMDHints(
     for (int j = 0; j < loopCount; j++) {
         float3 p = fma(rD, float3(t), rO);
         
-        float h;
-        if (fractalType == 0) {
-            h = MapWithOrbitCache(p, params, foldingLimit, iterations, lastCache);
-        } else {
-            h = MapUnified(p, params, foldingLimit, iterations, fractalType);
-        }
+        // Use caching version for Mandelbox
+        float h = MapWithOrbitCache(p, params, foldingLimit, iterations, lastCache);
         
         // Glow accumulation (same as Scene())
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
@@ -1719,18 +1031,11 @@ struct SceneResult {
 };
 
 // Optimized raymarch that caches orbit state on hit
-// For Mandelbox (fractalType == 0) only - other types fall back to standard behavior
+// For Mandelbox - caches orbit state for normal/color reuse
 FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
-    
-    // For non-Mandelbox types, fall back to standard Scene
-    // (Cache system is currently Mandelbox-specific due to orbit trap format)
-    if (fractalType != 0) {
-        result.distGlow = Scene(rO, rD, fragCoord, quality, maxStepsParam, glowIntensity, foldingLimit, params, iterations, time, fractalType);
-        return result;
-    }
     
     float dither = blueNoise(fragCoord, time) * 0.015;
     float t = 0.05 + dither;
@@ -2313,14 +1618,6 @@ kernel void adaptiveHierarchical8x8(
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
 
-    if (fractalType == 1) {
-        TriforceMotion motion = applyTriforceMotion(marchOrigin, marchDir, lodIterations, maxSteps, uniforms.time);
-        marchOrigin = motion.origin;
-        marchDir = motion.direction;
-        lodIterations = motion.iterations;
-        maxSteps = motion.maxSteps;
-    }
-
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
@@ -2364,14 +1661,9 @@ kernel void adaptiveHierarchical8x8(
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        // Choose coloring based on fractal type (using color scheme)
-        // Use cached color for Mandelbox to skip iteration entirely
-        if (fractalType == 0 && hitCache.valid) {
+        // Use cached color for Mandelbox (skips iteration entirely)
+        if (hitCache.valid) {
             col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
-        } else if (fractalType == 1) {
-            col = ColourTriforceWithScheme(p, 1.0, uniforms.colorMix, uniforms.foldingLimit, int(uniforms.colorIterations), uniforms.fractalScale, uniforms.colorScheme);
-        } else if (fractalType == 2) {
-            col = ColourNegativeMandelboxWithScheme(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme);
         } else {
             col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
                         uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme);
@@ -2435,126 +1727,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
 
-    if (fractalType == 1) {
-        TriforceMotion motion = applyTriforceMotion(marchOrigin, marchDir, lodIterations, maxSteps, time);
-        marchOrigin = motion.origin;
-        marchDir = motion.direction;
-        lodIterations = motion.iterations;
-        maxSteps = motion.maxSteps;
-    }
-
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
-    // Orbit-density volume rendering (Nebulabrot-style 3D)
-    // Enhanced with multi-channel iteration counts and 3D orbit traps
-    if (fractalType == 3) {
-        const int orbitSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxSteps;
-        int orbitIters = max(lodIterations, 6);  // Minimum 6 for meaningful RGB channels
-
-        float t = 0.0f;
-        float maxT = 8.0f;
-        float stepSize = 0.035f;  // Slightly finer for more detail
-
-        float trans = 1.0f;
-        float3 accum = float3(0.0);
-        float firstHitT = -1.0f;
-
-        float densityScale = 1.5f + uniforms.glowIntensity * 5.0f;
-        float trapInfluence = uniforms.colorMix;  // Use colorMix to blend trap coloring
-
-        for (int i = 0; i < orbitSteps; i++)
-        {
-            float3 p = marchOrigin + t * marchDir;
-            
-            // Use enhanced Nebulabrot with multi-channel densities and orbit traps
-            NebulaResult nebula = NebulabrotMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters);
-
-            if (nebula.escape > 0.5f) {
-                // Compute RGB from multi-channel densities (Nebulabrot false-color)
-                float3 nebulaRGB = nebula.density;
-                
-                // Incorporate orbit traps for structural detail
-                // Sphere trap adds central glow, cylinder trap adds streaks, plane trap adds layers
-                float sphereFactor = exp(-nebula.traps.x * 0.8f);
-                float cylFactor = exp(-nebula.traps.y * 0.6f);
-                float planeFactor = exp(-nebula.traps.z * 0.4f);
-                
-                // Mix trap colors with nebula density
-                float3 trapColor = float3(
-                    sphereFactor * 0.4f + cylFactor * 0.3f,   // Red: sphere + cylinder
-                    cylFactor * 0.5f + planeFactor * 0.2f,    // Green: cylinder + plane
-                    planeFactor * 0.6f + sphereFactor * 0.2f  // Blue: plane + sphere
-                );
-                
-                // Blend nebula density with orbit trap colors
-                float3 combined = mix(nebulaRGB, nebulaRGB + trapColor * 0.5f, trapInfluence);
-                
-                float totalDensity = (combined.x + combined.y + combined.z) / 3.0f;
-                float alpha = saturate(totalDensity * densityScale);
-                
-                if (alpha > 0.01f && firstHitT < 0.0f) {
-                    firstHitT = t;
-                }
-
-                // Apply color scheme to the nebula RGB
-                // Map combined density to color scheme parameters
-                half2 c = half2(half(saturate(combined.x)), half(saturate(combined.y * 0.8f + combined.z * 0.2f)));
-                half3 sample = applyColorScheme(c, uniforms.colorMix, uniforms.colorScheme);
-                
-                // Tint with nebula RGB for that false-color astronomical look
-                sample *= half3(0.5h + half(combined.x) * 0.5h, 
-                               0.5h + half(combined.y) * 0.5h, 
-                               0.5h + half(combined.z) * 0.5h);
-                
-                sample = applyColorPostProcessing(sample, uniforms.colorScheme);
-                
-                // Depth-based color shift (deeper = redder, like Hubble images)
-                float depthShift = nebula.depth;
-                sample.x += half(depthShift * 0.1f);
-                sample.z -= half(depthShift * 0.05f);
-                
-                accum += float3(sample) * alpha * trans;
-
-                trans *= (1.0f - alpha);
-                if (trans < 0.02f) break;
-            }
-
-            t += stepSize;
-            if (t > maxT) break;
-        }
-
-        half3 col = half3(saturate(accum));
-        half glow = half(saturate(1.0f - trans));
-
-        if (firstHitT > 0.0f) {
-            float3 p = marchOrigin + firstHitT * marchDir;
-            float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-            output.depth = encodeDepthFromClip(clipPos);
-        } else {
-            output.depth = 1e-7;
-        }
-
-        if (quality > kMinQualityForPostFX) {
-            col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glow);
-        } else {
-            col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
-        }
-
-        const bool showHUD = is_function_constant_defined(FC_SHOW_HUD) ? FC_SHOW_HUD : (uniforms.showHUD != 0);
-        if (showHUD) {
-            col = renderHUD(col, float2(in.texCoord), uniforms.activeGesture,
-                            uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius);
-        }
-
-        output.color = float4(float3(col), 1.0);
-        return output;
-    }
-
     // ==========================================================================
-    // OPTIMIZED RAYMARCH WITH ORBIT CACHING (Mandelbox only)
+    // OPTIMIZED RAYMARCH WITH ORBIT CACHING (Mandelbox)
     // ==========================================================================
-    // For Mandelbox (fractalType == 0), use the cached system to reduce Map() calls:
+    // Use the cached system to reduce Map() calls:
     // - Normal computation: ~60% fewer inner loops (uses reduced iterations + cached center)
     // - Color computation: 0 iterations (uses cached orbit trap directly)
     // - Overall: ~50% reduction in total iteration work per pixel
@@ -2563,15 +1742,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
     
-    if (fractalType == 0) {
-        // Use cache-enabled raymarch for Mandelbox
-        SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
-        ret = sceneResult.distGlow;
-        hitCache = sceneResult.cache;
-    } else {
-        // Standard raymarch for other fractal types
-        ret = Scene(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
-    }
+    // Use cache-enabled raymarch
+    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    ret = sceneResult.distGlow;
+    hitCache = sceneResult.cache;
 
     if (ret.x < kRayMissThreshold)
     {
@@ -2630,14 +1804,9 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
-            // Choose coloring based on fractal type (using color scheme)
-            // For Mandelbox with valid cache, use ColourFromCache to skip iteration entirely
-            if (fractalType == 0 && hitCache.valid) {
+            // Use cached color to skip iteration when available
+            if (hitCache.valid) {
                 col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
-            } else if (fractalType == 1) {
-                col = ColourTriforceWithScheme(p, quality, uniforms.colorMix, uniforms.foldingLimit, max(int(uniforms.colorIterations * quality), 2), uniforms.fractalScale, uniforms.colorScheme);
-            } else if (fractalType == 2) {
-                col = ColourNegativeMandelboxWithScheme(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme);
             } else {
                 col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme);
             }
@@ -2672,13 +1841,9 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             }
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
-            // Use cached color for Mandelbox when available (even in low quality mode)
-            if (fractalType == 0 && hitCache.valid) {
+            // Use cached color when available (even in low quality mode)
+            if (hitCache.valid) {
                 col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix) * diffuse;
-            } else if (fractalType == 1) {
-                col = ColourTriforceWithScheme(p, quality, uniforms.colorMix, uniforms.foldingLimit, 2, uniforms.fractalScale, uniforms.colorScheme) * diffuse;
-            } else if (fractalType == 2) {
-                col = ColourNegativeMandelboxWithScheme(p, quality, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, 2, uniforms.colorScheme) * diffuse;
             } else {
                 col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2, uniforms.colorScheme) * diffuse;
             }
@@ -2760,101 +1925,10 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
 
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
-    if (fractalType == 1) {
-        TriforceMotion motion = applyTriforceMotion(marchOrigin, marchDir, lodIterations, maxSteps, time);
-        marchOrigin = motion.origin;
-        marchDir = motion.direction;
-        lodIterations = motion.iterations;
-        maxSteps = motion.maxSteps;
-    }
 
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
-    // Orbit-density volume rendering (Nebulabrot-style 3D)
-    // Enhanced with multi-channel iteration counts and 3D orbit traps
-    if (fractalType == 3) {
-        const int orbitSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxSteps;
-        int orbitIters = max(lodIterations, 6);
-
-        float t = 0.0f;
-        float maxT = 8.0f;
-        float stepSize = 0.035f;
-
-        float trans = 1.0f;
-        float3 accum = float3(0.0);
-        float firstHitT = -1.0f;
-
-        float densityScale = 1.5f + uniforms.glowIntensity * 5.0f;
-        float trapInfluence = uniforms.colorMix;
-
-        for (int i = 0; i < orbitSteps; i++)
-        {
-            float3 p = marchOrigin + t * marchDir;
-            
-            NebulaResult nebula = NebulabrotMandelbox(p, fractalParams, uniforms.foldingLimit, orbitIters);
-
-            if (nebula.escape > 0.5f) {
-                float3 nebulaRGB = nebula.density;
-                
-                float sphereFactor = exp(-nebula.traps.x * 0.8f);
-                float cylFactor = exp(-nebula.traps.y * 0.6f);
-                float planeFactor = exp(-nebula.traps.z * 0.4f);
-                
-                float3 trapColor = float3(
-                    sphereFactor * 0.4f + cylFactor * 0.3f,
-                    cylFactor * 0.5f + planeFactor * 0.2f,
-                    planeFactor * 0.6f + sphereFactor * 0.2f
-                );
-                
-                float3 combined = mix(nebulaRGB, nebulaRGB + trapColor * 0.5f, trapInfluence);
-                
-                float totalDensity = (combined.x + combined.y + combined.z) / 3.0f;
-                float alpha = saturate(totalDensity * densityScale);
-                
-                if (alpha > 0.01f && firstHitT < 0.0f) {
-                    firstHitT = t;
-                }
-
-                half2 c = half2(half(saturate(combined.x)), half(saturate(combined.y * 0.8f + combined.z * 0.2f)));
-                half3 sample = applyColorScheme(c, uniforms.colorMix, uniforms.colorScheme);
-                
-                sample *= half3(0.5h + half(combined.x) * 0.5h, 
-                               0.5h + half(combined.y) * 0.5h, 
-                               0.5h + half(combined.z) * 0.5h);
-                
-                sample = applyColorPostProcessing(sample, uniforms.colorScheme);
-                
-                float depthShift = nebula.depth;
-                sample.x += half(depthShift * 0.1f);
-                sample.z -= half(depthShift * 0.05f);
-                
-                accum += float3(sample) * alpha * trans;
-
-                trans *= (1.0f - alpha);
-                if (trans < 0.02f) break;
-            }
-
-            t += stepSize;
-            if (t > maxT) break;
-        }
-
-        half3 col = half3(saturate(accum));
-        half glowH = half(saturate(1.0f - trans));
-
-        if (firstHitT > 0.0f) {
-            float3 p = marchOrigin + firstHitT * marchDir;
-            float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-            output.depth = encodeDepthFromClip(clipPos);
-        } else {
-            output.depth = 1e-7;
-        }
-
-        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glowH);
-        output.color = float4(float3(col), 1.0);
-        return output;
-    }
-    
     // === SIMD-OPTIMIZED RAYMARCH WITH ORBIT CACHING (Mandelbox) ===
     // Uses SIMD hints for cooperative raymarching + orbit caching
     float2 ret;
@@ -2921,12 +1995,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         // Choose coloring based on fractal type (using color scheme)
         // Use cached color for Mandelbox to skip iteration entirely
-        if (fractalType == 0 && hitCache.valid) {
+        if (hitCache.valid) {
             col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
-        } else if (fractalType == 1) {
-            col = ColourTriforceWithScheme(p, 1.0, uniforms.colorMix, uniforms.foldingLimit, max(int(uniforms.colorIterations), 2), uniforms.fractalScale, uniforms.colorScheme);
-        } else if (fractalType == 2) {
-            col = ColourNegativeMandelboxWithScheme(p, 1.0, uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme);
         } else {
             col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme);
         }

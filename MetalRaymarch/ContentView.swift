@@ -346,9 +346,6 @@ struct ContentView: View {
                             
                             Picker("Fractal", selection: $cache.fractalType) {
                                 Text("Mandelbox").tag(FractalType.mandelbox)
-                                Text("Triforce").tag(FractalType.triforce)
-                                Text("Neg. Mandelbox").tag(FractalType.negativeMandelbox)
-                                Text("Orbit Density").tag(FractalType.orbitDensity)
                             }
                             .pickerStyle(.segmented)
                             .onChange(of: cache.fractalType) { _, newValue in
