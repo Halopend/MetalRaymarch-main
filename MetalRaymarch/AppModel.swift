@@ -12,16 +12,18 @@ import os  // For os_unfair_lock - fastest available lock primitive
 /// Quality preset that bundles fractal iterations and ray steps
 enum QualityPreset: String, CaseIterable {
     case iter6 = "6"
+    case iter7 = "7"
+    case iter8 = "8"
     case iter9 = "9"
-    case iter10 = "10"
     case iter12 = "12"
     case iter16 = "16"
     
     var fractalIterations: Int {
         switch self {
         case .iter6: return 6
+        case .iter7: return 7
+        case .iter8: return 8
         case .iter9: return 9
-        case .iter10: return 10
         case .iter12: return 12
         case .iter16: return 16
         }
@@ -30,8 +32,9 @@ enum QualityPreset: String, CaseIterable {
     var raySteps: Int {
         switch self {
         case .iter6: return 32
+        case .iter7: return 48
+        case .iter8: return 56
         case .iter9: return 64
-        case .iter10: return 80
         case .iter12: return 100
         case .iter16: return 128
         }

@@ -769,8 +769,9 @@ actor Renderer {
             let qualityMode: Int32
             switch preset {
             case .iter6: qualityMode = 2
+            case .iter7: qualityMode = 2
+            case .iter8: qualityMode = 1
             case .iter9: qualityMode = 1
-            case .iter10: qualityMode = 1
             case .iter12: qualityMode = 0
             case .iter16: qualityMode = 0
             }
