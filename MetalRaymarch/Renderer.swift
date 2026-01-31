@@ -157,6 +157,10 @@ actor Renderer {
     // Adjusts LayerRenderer.renderQuality based on FPS performance
     private var dynamicRenderQualityManager: Any?  // Type-erased for @available
     private var hasLoggedDynamicQualityStatus = false
+    
+    // === RESIDENCY SET (visionOS 2.0+) ===
+    // Pre-validates GPU resource residency to reduce per-frame validation overhead
+    private var residencySet: MTLResidencySet?
 
     // Device pose smoothing removed — use raw device anchor from drawable for async timewarp
     
@@ -347,6 +351,61 @@ actor Renderer {
         // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
         // Initialize dynamic quality manager if available on this OS version
         setupDynamicRenderQuality()
+        
+        // === RESIDENCY SET ===
+        // Pre-validate resource residency for reduced per-frame overhead
+        setupResidencySet()
+    }
+    
+    /// Setup residency set for GPU resource pre-validation
+    private func setupResidencySet() {
+        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
+            let descriptor = MTLResidencySetDescriptor()
+            descriptor.label = "FractalResidencySet"
+            // Initial capacity - will grow as needed
+            descriptor.initialCapacity = 8
+            
+            do {
+                residencySet = try device.makeResidencySet(descriptor: descriptor)
+                
+                // Add persistent resources
+                residencySet?.addAllocation(dynamicUniformBuffer)
+                residencySet?.addAllocation(cubeMap)
+                
+                if let tileBuffer = tileUniformBuffer {
+                    residencySet?.addAllocation(tileBuffer)
+                }
+                
+                // Commit the set (validates all resources)
+                try residencySet?.commit()
+                
+                // Request initial residency
+                residencySet?.requestResidency()
+                
+                print("✓ Residency set created with \(residencySet?.allocatedSize ?? 0) bytes")
+            } catch {
+                print("⚠️ Failed to create residency set: \(error)")
+                residencySet = nil
+            }
+        }
+    }
+    
+    /// Update residency set when compute output texture changes
+    private func updateResidencySetForComputeTexture(_ texture: MTLTexture) {
+        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
+            guard let set = residencySet else { return }
+            
+            // Add the new texture allocation
+            set.addAllocation(texture)
+            
+            // Re-commit and request residency
+            do {
+                try set.commit()
+                set.requestResidency()
+            } catch {
+                print("⚠️ Failed to update residency set: \(error)")
+            }
+        }
     }
     
     /// Setup dynamic render quality management (visionOS 26+)
@@ -1075,6 +1134,13 @@ actor Renderer {
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             fatalError("Failed to create command buffer")
         }
+        
+        // Use residency set to ensure all resources stay GPU-resident during this frame
+        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
+            if let set = residencySet {
+                commandBuffer.useResidencySet(set)
+            }
+        }
 
         // Query drawable using the appropriate API for the OS version
         // visionOS 26+ uses queryDrawables() which supports renderQuality and fovea
@@ -1700,6 +1766,10 @@ actor Renderer {
         
         computeOutputTexture = texture
         computeOutputSize = SIMD2(width, height)
+        
+        // Add to residency set for GPU memory pre-validation
+        updateResidencySetForComputeTexture(texture)
+        
         print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers")
         return texture
     }
