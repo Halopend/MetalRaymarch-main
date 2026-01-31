@@ -38,6 +38,7 @@ final class UISettingsCache {
     var pulseAmount: Float = 0.0
     var glowIntensity: Float = 0.0
     var bloomStrength: Float = 0.0
+    var fogIntensity: Float = 0.5
     
     // Emissive
     var emissiveEnabled: Bool = false
@@ -114,6 +115,7 @@ final class UISettingsCache {
         pulseAmount = settings.pulseAmount
         glowIntensity = settings.glowIntensity
         bloomStrength = settings.bloomStrength
+        fogIntensity = settings.fogIntensity
         
         emissiveEnabled = settings.emissiveEnabled
         emissivePattern = settings.emissivePattern
@@ -254,10 +256,10 @@ struct ContentView: View {
         )
         // Hide content when menu window is "closed" - window stays but becomes invisible
         // This preserves window position while avoiding the white bar
-        .opacity(appModel.isMenuWindowVisible ? 1 : 0)
+        .opacity(appModel.isMenuWindowVisible ? 0.7 : 0)
         .allowsHitTesting(appModel.isMenuWindowVisible)
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
-        .opacity(appModel.isMenuWindowVisible ? 1 : 0)  // Also hide the glass background
+        .opacity(appModel.isMenuWindowVisible ? 0.7 : 0)  // Also hide the glass background
         .onAppear {
             cache.startSync(with: appModel.renderSettings)
             speed = Float(appModel.clock.speed)
@@ -515,6 +517,11 @@ struct ContentView: View {
                                 Text("Bloom Strength: \(cache.bloomStrength, specifier: "%.2f")")
                                 Slider(value: $cache.bloomStrength, in: 0...1, onEditingChanged: { editing in
                                     if !editing { cache.push(\.bloomStrength, value: cache.bloomStrength) }
+                                })
+                                
+                                Text("Fog Intensity: \(cache.fogIntensity, specifier: "%.2f")")
+                                Slider(value: $cache.fogIntensity, in: 0...1, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.fogIntensity, value: cache.fogIntensity) }
                                 })
                                 
                                 Divider()

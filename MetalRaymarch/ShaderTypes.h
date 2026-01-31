@@ -150,6 +150,7 @@ typedef struct
     float emissiveThreshold; // Threshold for triggering glow (0-1)
     vector_float3 emissiveColor;  // Emissive color tint
     float emissiveSpeed;     // Animation speed for pulse mode
+    float fogIntensity;      // Fog strength (0 = no fog, 1 = full fog)
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } Uniforms;
 
@@ -192,6 +193,7 @@ typedef struct
     float emissiveThreshold;     // Threshold for triggering glow (0-1)
     vector_float3 emissiveColor; // Emissive color tint
     float emissiveSpeed;         // Animation speed for pulse mode
+    float fogIntensity;          // Fog strength (0 = no fog, 1 = full fog)
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 

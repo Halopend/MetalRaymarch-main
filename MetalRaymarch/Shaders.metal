@@ -1440,7 +1440,8 @@ kernel void adaptiveHierarchical8x8(
     }
     
     // Fog (applied regardless of hit, same as fragment shader)
-    half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
+    // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
+    half fogFactor = half(saturate(exp(-adjustedDist * uniforms.fogIntensity * 2.0 + 1.5)));
     col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
     
     // Add glow
@@ -1620,7 +1621,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         output.depth = 1e-7;
     }
 
-    half fogFactor = half(saturate(exp(-ret.x + 1.5)));
+    // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
+    half fogFactor = half(saturate(exp(-ret.x * uniforms.fogIntensity * 2.0 + 1.5)));
     col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
 
     half glow = half(ret.y);
@@ -1791,7 +1793,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         output.depth = 1e-7;
     }
     
-    half fogFactor = half(saturate(exp(-adjustedDist + 1.5)));
+    // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
+    half fogFactor = half(saturate(exp(-adjustedDist * uniforms.fogIntensity * 2.0 + 1.5)));
     col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
     
     half glowH = half(glow);

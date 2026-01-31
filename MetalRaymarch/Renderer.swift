@@ -1104,7 +1104,8 @@ actor Renderer {
                             emissiveThreshold: settings.emissiveThreshold,
                             emissiveColor: settings.emissiveColor,
                             emissiveSpeed: settings.emissiveSpeed,
-                            colorScheme: colorSchemeParams)
+                            colorScheme: colorSchemeParams,
+                            fogIntensity: settings.fogIntensity)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -1703,7 +1704,8 @@ actor Renderer {
             emissiveThreshold: settings.emissiveThreshold,
             emissiveColor: settings.emissiveColor,
             emissiveSpeed: settings.emissiveSpeed,
-            colorScheme: colorSchemeParams
+            colorScheme: colorSchemeParams,
+            fogIntensity: settings.fogIntensity
         )
         
         // Copy uniforms to buffer

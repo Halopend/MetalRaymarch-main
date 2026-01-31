@@ -513,6 +513,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _pulseAmount: Float = 0.0                   // Pulse intensity (0 = off, 0.15 = subtle)
     private var _glowIntensity: Float = 0.0                 // Ray-step glow (0 = off, 0.3 = moderate)
     private var _bloomStrength: Float = 0.0                 // Bloom effect (0 = off, 0.2 = subtle)
+    private var _fogIntensity: Float = 0.5                  // Fog strength (0 = no fog, 1 = full fog)
     
     // === EMISSIVE GLOW (Self-illuminating regions) ===
     private var _emissiveEnabled: Bool = false              // Enable emissive glow regions
@@ -840,6 +841,12 @@ final class RenderSettings: @unchecked Sendable {
     var bloomStrength: Float {
         get { withLock { _bloomStrength } }
         set { withLock { _bloomStrength = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Fog intensity (0-1): 0 = no fog, 1 = heavy fog
+    var fogIntensity: Float {
+        get { withLock { _fogIntensity } }
+        set { withLock { _fogIntensity = max(0.0, min(1.0, newValue)) } }
     }
     
     // === EMISSIVE GLOW ===
