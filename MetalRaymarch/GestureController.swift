@@ -518,6 +518,8 @@ final class GestureController {
             range: ranges.minDistance
         ) { newValue in
             settings.targetMinDistance = newValue
+            // Track hand gesture usage for analytics
+            Task { @MainActor in UsageAnalytics.shared.trackHandGestureUsed() }
         }
         if indexGestureState.isActive { activeDigit = 1 }
         

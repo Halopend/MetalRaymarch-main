@@ -155,7 +155,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MetalMandelboxDemo;
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio-reactive lighting responds to music and sounds around you to create dynamic visual effects.";
-				INFOPLIST_KEY_NSWorldSensingUsageDescription = "";
+				INFOPLIST_KEY_NSWorldSensingUsageDescription = "World sensing helps position the fractal environment in your physical space.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -190,7 +190,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MetalMandelboxDemo;
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio-reactive lighting responds to music and sounds around you to create dynamic visual effects.";
-				INFOPLIST_KEY_NSWorldSensingUsageDescription = "";
+				INFOPLIST_KEY_NSWorldSensingUsageDescription = "World sensing helps position the fractal environment in your physical space.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

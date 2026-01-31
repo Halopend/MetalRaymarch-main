@@ -99,6 +99,8 @@ struct MetalProjectTestApp: App {
                     appModel.isAppActive = false
                     // Save current state when going to background
                     appModel.saveLastState()
+                    // Upload analytics before going to background
+                    await UsageAnalytics.shared.endSession()
                 }
             }
         }

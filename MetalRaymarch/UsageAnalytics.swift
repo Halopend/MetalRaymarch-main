@@ -1,0 +1,487 @@
+//
+//  UsageAnalytics.swift
+//  MetalRaymarch
+//
+//  Created on January 31, 2026.
+//  Automatic anonymous usage analytics for TestFlight beta.
+//  Uses CloudKit public database - no server required.
+//
+//  SETUP INSTRUCTIONS:
+//  1. In Xcode: Target → Signing & Capabilities → + Capability → iCloud
+//  2. Check "CloudKit" in the iCloud section
+//  3. The container ID will auto-create as "iCloud.{your.bundle.id}"
+//  4. In CloudKit Console (https://icloud.developer.apple.com):
+//     - Select your container
+//     - Go to Schema → Record Types → Create New Type
+//     - Name: "UsageSnapshot"
+//     - Add fields (all optional):
+//       * timestamp (Date/Time)
+//       * sessionDuration (Double)
+//       * qualityDistribution (String)
+//       * colorSchemeDistribution (String)
+//       * avgFractalScale (Double)
+//       * avgFoldingLimit (Double)
+//       * avgSphereRadius (Double)
+//       * avgMinDistance (Double)
+//       * avgColorMix (Double)
+//       * avgGlowIntensity (Double)
+//       * avgSafetyBubbleRadius (Double)
+//       * usedAudioReactive (Int64)
+//       * usedHandGestures (Int64)
+//       * usedRecording (Int64)
+//       * usedSharePlay (Int64)
+//       * presetsLoaded (Int64)
+//       * presetsSaved (Int64)
+//       * favoritePresets (List of Strings)
+//       * avgFPS (Double)
+//       * dynamicQualityEnabled (Int64)
+//       * avgRenderQuality (Double)
+//       * deviceModel (String)
+//       * osVersion (String)
+//       * appVersion (String)
+//     - Deploy to Production environment before TestFlight
+//
+//  VIEW DATA:
+//  - CloudKit Console → Data → Public Database → UsageSnapshot
+//  - Export to CSV/JSON for analysis
+//
+
+import Foundation
+import CloudKit
+import UIKit
+
+/// Anonymous usage statistics collected during a session
+struct UsageSnapshot: Codable {
+    let timestamp: Date
+    let sessionDuration: TimeInterval
+    
+    // Quality settings distribution (percentage of time at each level)
+    var qualityDistribution: [String: Float]  // e.g., ["iter6": 0.2, "iter9": 0.8]
+    
+    // Color scheme usage (percentage of time)
+    var colorSchemeDistribution: [String: Float]
+    
+    // Parameter averages (weighted by time spent)
+    var avgFractalScale: Float
+    var avgFoldingLimit: Float
+    var avgSphereRadius: Float
+    var avgMinDistance: Float
+    var avgColorMix: Float
+    var avgGlowIntensity: Float
+    var avgSafetyBubbleRadius: Float
+    
+    // Feature usage flags
+    var usedAudioReactive: Bool
+    var usedHandGestures: Bool
+    var usedRecording: Bool
+    var usedSharePlay: Bool
+    
+    // Preset interactions
+    var presetsLoaded: Int
+    var presetsSaved: Int
+    var favoritePresetNames: [String]  // Top 3 most loaded
+    
+    // Performance context
+    var avgFPS: Float
+    var dynamicQualityEnabled: Bool
+    var avgRenderQuality: Float
+    
+    // Device info (anonymous)
+    var deviceModel: String  // e.g., "RealityDevice14,1"
+    var osVersion: String
+    var appVersion: String
+}
+
+/// Tracks usage patterns and uploads anonymously to CloudKit
+@MainActor
+class UsageAnalytics: ObservableObject {
+    static let shared = UsageAnalytics()
+    
+    // CloudKit container - uses your app's default container
+    private let container = CKContainer.default()
+    private var database: CKDatabase { container.publicCloudDatabase }
+    
+    // Local tracking state
+    private var sessionStartTime: Date = Date()
+    private var lastSampleTime: Date = Date()
+    private var totalSessionTime: TimeInterval = 0
+    
+    // Weighted accumulators (value * time)
+    private var qualityTimeAccum: [String: TimeInterval] = [:]
+    private var colorSchemeTimeAccum: [String: TimeInterval] = [:]
+    private var fractalScaleAccum: Float = 0
+    private var foldingLimitAccum: Float = 0
+    private var sphereRadiusAccum: Float = 0
+    private var minDistanceAccum: Float = 0
+    private var colorMixAccum: Float = 0
+    private var glowIntensityAccum: Float = 0
+    private var safetyBubbleRadiusAccum: Float = 0
+    private var fpsAccum: Float = 0
+    private var renderQualityAccum: Float = 0
+    private var sampleCount: Int = 0
+    
+    // Feature flags
+    private var usedAudioReactive = false
+    private var usedHandGestures = false
+    private var usedRecording = false
+    private var usedSharePlay = false
+    
+    // Preset tracking
+    private var presetsLoaded = 0
+    private var presetsSaved = 0
+    private var presetLoadCounts: [String: Int] = [:]
+    
+    // Upload interval (upload every 5 minutes of active use)
+    private let uploadInterval: TimeInterval = 300
+    private var lastUploadTime: Date = Date()
+    
+    // Persistence key
+    private let pendingUploadsKey = "PendingUsageSnapshots"
+    
+    @Published var analyticsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(analyticsEnabled, forKey: "AnalyticsEnabled")
+        }
+    }
+    
+    private init() {
+        // Default to enabled for TestFlight, user can opt out
+        self.analyticsEnabled = UserDefaults.standard.object(forKey: "AnalyticsEnabled") as? Bool ?? true
+        
+        // Try to upload any pending snapshots from previous sessions
+        Task {
+            await uploadPendingSnapshots()
+        }
+    }
+    
+    // MARK: - Sampling (call from render loop ~1Hz)
+    
+    /// Sample current settings. Call approximately once per second from render loop.
+    func sample(settings: RenderSettings, fps: Double, currentQuality: String) {
+        guard analyticsEnabled else { return }
+        
+        let now = Date()
+        let deltaTime = now.timeIntervalSince(lastSampleTime)
+        lastSampleTime = now
+        
+        // Clamp delta to avoid huge jumps if app was backgrounded
+        let dt = min(deltaTime, 2.0)
+        totalSessionTime += dt
+        
+        // Accumulate quality time
+        qualityTimeAccum[currentQuality, default: 0] += dt
+        
+        // Accumulate color scheme time
+        let schemeName = settings.colorScheme.displayName
+        colorSchemeTimeAccum[schemeName, default: 0] += dt
+        
+        // Accumulate parameter values (for averaging)
+        let dtf = Float(dt)
+        fractalScaleAccum += settings.fractalScale * dtf
+        foldingLimitAccum += settings.foldingLimit * dtf
+        sphereRadiusAccum += settings.sphereRadius * dtf
+        minDistanceAccum += settings.minDistance * dtf
+        colorMixAccum += settings.colorMix * dtf
+        glowIntensityAccum += settings.glowIntensity * dtf
+        safetyBubbleRadiusAccum += settings.safetyBubbleRadius * dtf
+        fpsAccum += Float(fps) * dtf
+        renderQualityAccum += settings.currentRenderQuality * dtf
+        sampleCount += 1
+        
+        // Track feature usage
+        if settings.lightingMode == .audioReactive {
+            usedAudioReactive = true
+        }
+        
+        // Check if we should upload
+        if now.timeIntervalSince(lastUploadTime) >= uploadInterval {
+            Task {
+                await uploadSnapshot()
+            }
+            lastUploadTime = now
+        }
+    }
+    
+    /// Mark that hand gestures were used
+    func trackHandGestureUsed() {
+        usedHandGestures = true
+    }
+    
+    /// Mark that recording was used
+    func trackRecordingUsed() {
+        usedRecording = true
+    }
+    
+    /// Mark that SharePlay was used
+    func trackSharePlayUsed() {
+        usedSharePlay = true
+    }
+    
+    /// Track preset load
+    func trackPresetLoaded(name: String) {
+        presetsLoaded += 1
+        presetLoadCounts[name, default: 0] += 1
+    }
+    
+    /// Track preset save
+    func trackPresetSaved() {
+        presetsSaved += 1
+    }
+    
+    // MARK: - Snapshot Creation
+    
+    private func createSnapshot(settings: RenderSettings) -> UsageSnapshot {
+        let duration = totalSessionTime
+        let durationF = Float(max(duration, 1.0))
+        
+        // Convert time accumulators to percentages
+        var qualityDist: [String: Float] = [:]
+        for (key, time) in qualityTimeAccum {
+            qualityDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        var schemeDist: [String: Float] = [:]
+        for (key, time) in colorSchemeTimeAccum {
+            schemeDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        // Top 3 presets
+        let topPresets = presetLoadCounts.sorted { $0.value > $1.value }
+            .prefix(3)
+            .map { $0.key }
+        
+        // Device info
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let deviceModel = withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(cString: $0)
+            }
+        }
+        
+        return UsageSnapshot(
+            timestamp: Date(),
+            sessionDuration: duration,
+            qualityDistribution: qualityDist,
+            colorSchemeDistribution: schemeDist,
+            avgFractalScale: fractalScaleAccum / durationF,
+            avgFoldingLimit: foldingLimitAccum / durationF,
+            avgSphereRadius: sphereRadiusAccum / durationF,
+            avgMinDistance: minDistanceAccum / durationF,
+            avgColorMix: colorMixAccum / durationF,
+            avgGlowIntensity: glowIntensityAccum / durationF,
+            avgSafetyBubbleRadius: safetyBubbleRadiusAccum / durationF,
+            usedAudioReactive: usedAudioReactive,
+            usedHandGestures: usedHandGestures,
+            usedRecording: usedRecording,
+            usedSharePlay: usedSharePlay,
+            presetsLoaded: presetsLoaded,
+            presetsSaved: presetsSaved,
+            favoritePresetNames: Array(topPresets),
+            avgFPS: fpsAccum / durationF,
+            dynamicQualityEnabled: settings.dynamicRenderQualityEnabled,
+            avgRenderQuality: renderQualityAccum / durationF,
+            deviceModel: deviceModel,
+            osVersion: UIDevice.current.systemVersion,
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        )
+    }
+    
+    // MARK: - CloudKit Upload
+    
+    /// Upload current snapshot to CloudKit
+    func uploadSnapshot() async {
+        guard analyticsEnabled else { return }
+        guard totalSessionTime > 10 else { return }  // Don't upload very short sessions
+        
+        // Get current settings from app model (need to pass in or use shared reference)
+        // For now, create a minimal snapshot
+        let snapshot = createMinimalSnapshot()
+        
+        await uploadToCloudKit(snapshot)
+    }
+    
+    /// Create snapshot with current accumulated data
+    private func createMinimalSnapshot() -> UsageSnapshot {
+        let duration = totalSessionTime
+        let durationF = Float(max(duration, 1.0))
+        
+        var qualityDist: [String: Float] = [:]
+        for (key, time) in qualityTimeAccum {
+            qualityDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        var schemeDist: [String: Float] = [:]
+        for (key, time) in colorSchemeTimeAccum {
+            schemeDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        let topPresets = presetLoadCounts.sorted { $0.value > $1.value }
+            .prefix(3)
+            .map { $0.key }
+        
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let deviceModel = withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(cString: $0)
+            }
+        }
+        
+        return UsageSnapshot(
+            timestamp: Date(),
+            sessionDuration: duration,
+            qualityDistribution: qualityDist,
+            colorSchemeDistribution: schemeDist,
+            avgFractalScale: fractalScaleAccum / durationF,
+            avgFoldingLimit: foldingLimitAccum / durationF,
+            avgSphereRadius: sphereRadiusAccum / durationF,
+            avgMinDistance: minDistanceAccum / durationF,
+            avgColorMix: colorMixAccum / durationF,
+            avgGlowIntensity: glowIntensityAccum / durationF,
+            avgSafetyBubbleRadius: safetyBubbleRadiusAccum / durationF,
+            usedAudioReactive: usedAudioReactive,
+            usedHandGestures: usedHandGestures,
+            usedRecording: usedRecording,
+            usedSharePlay: usedSharePlay,
+            presetsLoaded: presetsLoaded,
+            presetsSaved: presetsSaved,
+            favoritePresetNames: Array(topPresets),
+            avgFPS: fpsAccum / durationF,
+            dynamicQualityEnabled: true,
+            avgRenderQuality: renderQualityAccum / durationF,
+            deviceModel: deviceModel,
+            osVersion: UIDevice.current.systemVersion,
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        )
+    }
+    
+    private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
+        let record = CKRecord(recordType: "UsageSnapshot")
+        
+        // Session info
+        record["timestamp"] = snapshot.timestamp as NSDate
+        record["sessionDuration"] = snapshot.sessionDuration as NSNumber
+        
+        // Encode distributions as JSON strings (CloudKit doesn't support nested dicts)
+        if let qualityData = try? JSONEncoder().encode(snapshot.qualityDistribution),
+           let qualityString = String(data: qualityData, encoding: .utf8) {
+            record["qualityDistribution"] = qualityString
+        }
+        
+        if let schemeData = try? JSONEncoder().encode(snapshot.colorSchemeDistribution),
+           let schemeString = String(data: schemeData, encoding: .utf8) {
+            record["colorSchemeDistribution"] = schemeString
+        }
+        
+        // Parameter averages
+        record["avgFractalScale"] = snapshot.avgFractalScale as NSNumber
+        record["avgFoldingLimit"] = snapshot.avgFoldingLimit as NSNumber
+        record["avgSphereRadius"] = snapshot.avgSphereRadius as NSNumber
+        record["avgMinDistance"] = snapshot.avgMinDistance as NSNumber
+        record["avgColorMix"] = snapshot.avgColorMix as NSNumber
+        record["avgGlowIntensity"] = snapshot.avgGlowIntensity as NSNumber
+        record["avgSafetyBubbleRadius"] = snapshot.avgSafetyBubbleRadius as NSNumber
+        
+        // Feature flags
+        record["usedAudioReactive"] = snapshot.usedAudioReactive ? 1 : 0
+        record["usedHandGestures"] = snapshot.usedHandGestures ? 1 : 0
+        record["usedRecording"] = snapshot.usedRecording ? 1 : 0
+        record["usedSharePlay"] = snapshot.usedSharePlay ? 1 : 0
+        
+        // Presets
+        record["presetsLoaded"] = snapshot.presetsLoaded as NSNumber
+        record["presetsSaved"] = snapshot.presetsSaved as NSNumber
+        record["favoritePresets"] = snapshot.favoritePresetNames
+        
+        // Performance
+        record["avgFPS"] = snapshot.avgFPS as NSNumber
+        record["dynamicQualityEnabled"] = snapshot.dynamicQualityEnabled ? 1 : 0
+        record["avgRenderQuality"] = snapshot.avgRenderQuality as NSNumber
+        
+        // Device (anonymous)
+        record["deviceModel"] = snapshot.deviceModel
+        record["osVersion"] = snapshot.osVersion
+        record["appVersion"] = snapshot.appVersion
+        
+        do {
+            let _ = try await database.save(record)
+            print("📊 Analytics uploaded successfully")
+        } catch {
+            print("📊 Analytics upload failed: \(error.localizedDescription)")
+            // Save for retry later
+            savePendingSnapshot(snapshot)
+        }
+    }
+    
+    // MARK: - Offline Persistence
+    
+    private func savePendingSnapshot(_ snapshot: UsageSnapshot) {
+        var pending = loadPendingSnapshots()
+        pending.append(snapshot)
+        
+        // Keep only last 10 pending
+        if pending.count > 10 {
+            pending = Array(pending.suffix(10))
+        }
+        
+        if let data = try? JSONEncoder().encode(pending) {
+            UserDefaults.standard.set(data, forKey: pendingUploadsKey)
+        }
+    }
+    
+    private func loadPendingSnapshots() -> [UsageSnapshot] {
+        guard let data = UserDefaults.standard.data(forKey: pendingUploadsKey),
+              let snapshots = try? JSONDecoder().decode([UsageSnapshot].self, from: data) else {
+            return []
+        }
+        return snapshots
+    }
+    
+    private func uploadPendingSnapshots() async {
+        let pending = loadPendingSnapshots()
+        guard !pending.isEmpty else { return }
+        
+        // Clear pending - uploadToCloudKit will re-save failures
+        UserDefaults.standard.removeObject(forKey: pendingUploadsKey)
+        
+        for snapshot in pending {
+            await uploadToCloudKit(snapshot)
+        }
+    }
+    
+    // MARK: - Session Lifecycle
+    
+    /// Call when app goes to background or terminates
+    func endSession() async {
+        guard analyticsEnabled else { return }
+        await uploadSnapshot()
+    }
+    
+    /// Reset accumulators for new session
+    func startNewSession() {
+        sessionStartTime = Date()
+        lastSampleTime = Date()
+        totalSessionTime = 0
+        qualityTimeAccum = [:]
+        colorSchemeTimeAccum = [:]
+        fractalScaleAccum = 0
+        foldingLimitAccum = 0
+        sphereRadiusAccum = 0
+        minDistanceAccum = 0
+        colorMixAccum = 0
+        glowIntensityAccum = 0
+        safetyBubbleRadiusAccum = 0
+        fpsAccum = 0
+        renderQualityAccum = 0
+        sampleCount = 0
+        usedAudioReactive = false
+        usedHandGestures = false
+        usedRecording = false
+        usedSharePlay = false
+        presetsLoaded = 0
+        presetsSaved = 0
+        presetLoadCounts = [:]
+        lastUploadTime = Date()
+    }
+}

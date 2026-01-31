@@ -814,6 +814,17 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.top, 8)
+                        
+                        // Analytics (TestFlight)
+                        Divider()
+                        HStack {
+                            Toggle("Share Usage Analytics", isOn: Binding(
+                                get: { UsageAnalytics.shared.analyticsEnabled },
+                                set: { UsageAnalytics.shared.analyticsEnabled = $0 }
+                            ))
+                            .font(.caption)
+                        }
+                        .help("Help improve the app by sharing anonymous usage statistics")
                     }
                     .padding(.horizontal)
                 }

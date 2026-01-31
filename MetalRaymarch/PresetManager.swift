@@ -411,6 +411,9 @@ class PresetManager {
         presets.insert(preset, at: 0) // Add to beginning (newest first)
         savePresets()
         
+        // Track for analytics
+        UsageAnalytics.shared.trackPresetSaved()
+        
         // Log all parameters for recovery purposes
         print("""
         📸 PRESET SAVED: "\(name)"
@@ -501,6 +504,8 @@ class PresetManager {
     /// Load a preset's settings
     func loadPreset(_ preset: FractalPreset, into settings: RenderSettings, includePerformance: Bool = false) {
         preset.apply(to: settings, includePerformance: includePerformance)
+        // Track for analytics
+        UsageAnalytics.shared.trackPresetLoaded(name: preset.name)
     }
     
     /// Export a preset to a file URL

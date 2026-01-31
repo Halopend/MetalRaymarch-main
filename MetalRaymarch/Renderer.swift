@@ -347,16 +347,21 @@ actor Renderer {
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
-        // Setup screenshot capture pipeline
-        setupScreenshotCapture()
         
-        // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-        // Initialize dynamic quality manager if available on this OS version
-        setupDynamicRenderQuality()
-        
-        // === RESIDENCY SET ===
-        // Pre-validate resource residency for reduced per-frame overhead
-        setupResidencySet()
+        // Defer actor-isolated setup to after init completes
+        // These methods access actor-isolated properties and must run on this actor
+        Task {
+            // Setup screenshot capture pipeline
+            await self.setupScreenshotCapture()
+            
+            // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
+            // Initialize dynamic quality manager if available on this OS version
+            await self.setupDynamicRenderQuality()
+            
+            // === RESIDENCY SET ===
+            // Pre-validate resource residency for reduced per-frame overhead
+            await self.setupResidencySet()
+        }
     }
     
     /// Setup residency set for GPU resource pre-validation
@@ -1184,6 +1189,7 @@ actor Renderer {
 
         // FPS tracking using frame-rate independent exponential decay (Freya Holmér technique)
         // factor = 1 - e^(-speed * dt), speed=10 gives ~63% convergence in 100ms
+        let settings = appModel.renderSettings  // Capture settings early for use in Task closure
         if deltaTime > 0 {
             let instantFPS = 1.0 / deltaTime
             let fpsSmoothFactor = 1.0 - exp(-10.0 * deltaTime)  // speed=10 for responsive but smooth FPS display
@@ -1195,6 +1201,16 @@ actor Renderer {
                 lastFPSUpdateTime = time
                 Task { @MainActor in
                     appModel.fps = updatedFPS
+                    // Sample analytics ~4Hz (matches FPS update rate)
+                    let qualityPreset = QualityPreset.detect(
+                        fractalIterations: settings.fractalIterations,
+                        raySteps: settings.maxRaySteps
+                    )?.rawValue ?? "custom"
+                    UsageAnalytics.shared.sample(
+                        settings: settings,
+                        fps: updatedFPS,
+                        currentQuality: qualityPreset
+                    )
                 }
             }
             
@@ -1214,8 +1230,6 @@ actor Renderer {
         self.updateHandTracking(atTime: time)
 
         self.updateGameState(drawable: drawable)
-
-        let settings = appModel.renderSettings
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = settings.tileSize
@@ -1359,6 +1373,7 @@ actor Renderer {
         let cpuEncodeMs = (CACurrentMediaTime() - cpuEncodeStart) * 1000.0
         let frameTimeSeconds = Double(cachedDeltaTime)
         let logTime = time
+        let capturedMetalFXInputSize = metalFXInputSize  // Capture for concurrent closure
         commandBuffer.addCompletedHandler { [weak self] cb in
             let gpuMs: Double?
             if cb.gpuEndTime > cb.gpuStartTime {
@@ -1376,7 +1391,7 @@ actor Renderer {
                     settings: settings,
                     wantsMetalFX: wantsMetalFX,
                     useAdaptiveCompute: useAdaptiveCompute,
-                    metalFXInputSize: metalFXInputSize,
+                    metalFXInputSize: capturedMetalFXInputSize,
                     viewCount: drawable.views.count
                 )
             }
