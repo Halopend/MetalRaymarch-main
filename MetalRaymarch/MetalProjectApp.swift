@@ -94,9 +94,11 @@ struct MetalProjectTestApp: App {
                     appModel.isAppActive = true
                     appModel.ensureWindowContentVisible()
                 }
-            } else {
+            } else if newPhase == .background || newPhase == .inactive {
                 Task { @MainActor in
                     appModel.isAppActive = false
+                    // Save current state when going to background
+                    appModel.saveLastState()
                 }
             }
         }

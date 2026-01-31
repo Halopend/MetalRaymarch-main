@@ -718,4 +718,54 @@ extension PresetManager {
         
         savePresets()
     }
+    
+    // MARK: - Last State Auto-Save/Restore
+    
+    /// URL for the last state file
+    private var lastStateFileURL: URL {
+        presetsDirectory.appendingPathComponent("lastState.json")
+    }
+    
+    /// Save current settings as "last state" for restore on next launch
+    func saveLastState(from settings: RenderSettings) {
+        let preset = FractalPreset.fromSettings(settings, name: "__lastState__")
+        
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(preset)
+            try data.write(to: lastStateFileURL)
+            print("💾 Last state saved")
+        } catch {
+            print("Failed to save last state: \(error)")
+        }
+    }
+    
+    /// Restore last state to settings if available
+    /// Returns true if state was restored, false if no saved state exists
+    @discardableResult
+    func restoreLastState(to settings: RenderSettings) -> Bool {
+        guard FileManager.default.fileExists(atPath: lastStateFileURL.path) else {
+            print("ℹ️ No last state found - using defaults")
+            return false
+        }
+        
+        do {
+            let data = try Data(contentsOf: lastStateFileURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let preset = try decoder.decode(FractalPreset.self, from: data)
+            preset.apply(to: settings)
+            print("✅ Last state restored")
+            return true
+        } catch {
+            print("Failed to restore last state: \(error)")
+            return false
+        }
+    }
+    
+    /// Check if a last state exists
+    var hasLastState: Bool {
+        FileManager.default.fileExists(atPath: lastStateFileURL.path)
+    }
 }

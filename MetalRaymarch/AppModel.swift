@@ -125,8 +125,16 @@ class AppModel {
         // Add built-in presets if this is first launch
         presetManager.addBuiltInPresetsIfNeeded()
         
+        // Restore last state if available
+        presetManager.restoreLastState(to: renderSettings)
+        
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
+    }
+    
+    /// Save current state for restore on next launch
+    func saveLastState() {
+        presetManager.saveLastState(from: renderSettings)
     }
     
     /// Toggle recording state
