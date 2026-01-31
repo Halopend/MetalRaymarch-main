@@ -49,6 +49,23 @@ struct FractalPreset: Codable, Identifiable {
     // Safety bubble
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
+    
+    // === LIGHTING & EFFECTS (new in v1.1) ===
+    // These capture the full visual look of a preset
+    var fogIntensity: Float?
+    var lightingMode: LightingMode?
+    var hueCycleSpeed: Float?
+    var pulseSpeed: Float?
+    var pulseAmount: Float?
+    var bloomStrength: Float?
+    
+    // === EMISSIVE SETTINGS (new in v1.1) ===
+    var emissiveEnabled: Bool?
+    var emissivePattern: Int?
+    var emissiveIntensity: Float?
+    var emissiveThreshold: Float?
+    var emissiveColor: SIMD3<Float>?
+    var emissiveSpeed: Float?
 
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
@@ -57,6 +74,9 @@ struct FractalPreset: Codable, Identifiable {
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius
+        // v1.1 lighting & effects
+        case fogIntensity, lightingMode, hueCycleSpeed, pulseSpeed, pulseAmount, bloomStrength
+        case emissiveEnabled, emissivePattern, emissiveIntensity, emissiveThreshold, emissiveColor, emissiveSpeed
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -122,6 +142,22 @@ struct FractalPreset: Codable, Identifiable {
         tileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
+        
+        // v1.1 lighting & effects
+        fogIntensity = try container.decodeIfPresent(Float.self, forKey: .fogIntensity)
+        lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
+        hueCycleSpeed = try container.decodeIfPresent(Float.self, forKey: .hueCycleSpeed)
+        pulseSpeed = try container.decodeIfPresent(Float.self, forKey: .pulseSpeed)
+        pulseAmount = try container.decodeIfPresent(Float.self, forKey: .pulseAmount)
+        bloomStrength = try container.decodeIfPresent(Float.self, forKey: .bloomStrength)
+        
+        // v1.1 emissive settings
+        emissiveEnabled = try container.decodeIfPresent(Bool.self, forKey: .emissiveEnabled)
+        emissivePattern = try container.decodeIfPresent(Int.self, forKey: .emissivePattern)
+        emissiveIntensity = try container.decodeIfPresent(Float.self, forKey: .emissiveIntensity)
+        emissiveThreshold = try container.decodeIfPresent(Float.self, forKey: .emissiveThreshold)
+        emissiveColor = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .emissiveColor)
+        emissiveSpeed = try container.decodeIfPresent(Float.self, forKey: .emissiveSpeed)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -155,6 +191,22 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(tileSize, forKey: .tileSize)
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
+        
+        // v1.1 lighting & effects
+        try container.encodeIfPresent(fogIntensity, forKey: .fogIntensity)
+        try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
+        try container.encodeIfPresent(hueCycleSpeed, forKey: .hueCycleSpeed)
+        try container.encodeIfPresent(pulseSpeed, forKey: .pulseSpeed)
+        try container.encodeIfPresent(pulseAmount, forKey: .pulseAmount)
+        try container.encodeIfPresent(bloomStrength, forKey: .bloomStrength)
+        
+        // v1.1 emissive settings
+        try container.encodeIfPresent(emissiveEnabled, forKey: .emissiveEnabled)
+        try container.encodeIfPresent(emissivePattern, forKey: .emissivePattern)
+        try container.encodeIfPresent(emissiveIntensity, forKey: .emissiveIntensity)
+        try container.encodeIfPresent(emissiveThreshold, forKey: .emissiveThreshold)
+        try container.encodeIfPresent(emissiveColor, forKey: .emissiveColor)
+        try container.encodeIfPresent(emissiveSpeed, forKey: .emissiveSpeed)
     }
     
     /// Create a preset from current render settings
@@ -189,6 +241,22 @@ struct FractalPreset: Codable, Identifiable {
         
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
+        
+        // v1.1 lighting & effects
+        preset.fogIntensity = settings.fogIntensity
+        preset.lightingMode = settings.lightingMode
+        preset.hueCycleSpeed = settings.hueCycleSpeed
+        preset.pulseSpeed = settings.pulseSpeed
+        preset.pulseAmount = settings.pulseAmount
+        preset.bloomStrength = settings.bloomStrength
+        
+        // v1.1 emissive settings
+        preset.emissiveEnabled = settings.emissiveEnabled
+        preset.emissivePattern = settings.emissivePattern
+        preset.emissiveIntensity = settings.emissiveIntensity
+        preset.emissiveThreshold = settings.emissiveThreshold
+        preset.emissiveColor = settings.emissiveColor
+        preset.emissiveSpeed = settings.emissiveSpeed
         
         return preset
     }
@@ -241,6 +309,46 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let safetyBubbleRadius = safetyBubbleRadius {
             settings.safetyBubbleRadius = safetyBubbleRadius
+        }
+        
+        // v1.1 lighting & effects
+        if let fogIntensity = fogIntensity {
+            settings.fogIntensity = fogIntensity
+        }
+        if let lightingMode = lightingMode {
+            settings.lightingMode = lightingMode
+        }
+        if let hueCycleSpeed = hueCycleSpeed {
+            settings.hueCycleSpeed = hueCycleSpeed
+        }
+        if let pulseSpeed = pulseSpeed {
+            settings.pulseSpeed = pulseSpeed
+        }
+        if let pulseAmount = pulseAmount {
+            settings.pulseAmount = pulseAmount
+        }
+        if let bloomStrength = bloomStrength {
+            settings.bloomStrength = bloomStrength
+        }
+        
+        // v1.1 emissive settings
+        if let emissiveEnabled = emissiveEnabled {
+            settings.emissiveEnabled = emissiveEnabled
+        }
+        if let emissivePattern = emissivePattern {
+            settings.emissivePattern = emissivePattern
+        }
+        if let emissiveIntensity = emissiveIntensity {
+            settings.emissiveIntensity = emissiveIntensity
+        }
+        if let emissiveThreshold = emissiveThreshold {
+            settings.emissiveThreshold = emissiveThreshold
+        }
+        if let emissiveColor = emissiveColor {
+            settings.emissiveColor = emissiveColor
+        }
+        if let emissiveSpeed = emissiveSpeed {
+            settings.emissiveSpeed = emissiveSpeed
         }
         
         // Log preset load for debugging
@@ -411,8 +519,8 @@ class PresetManager {
         presets.insert(preset, at: 0) // Add to beginning (newest first)
         savePresets()
         
-        // Track for analytics
-        UsageAnalytics.shared.trackPresetSaved()
+        // Track for analytics with full preset data
+        UsageAnalytics.shared.trackPresetSaved(preset: preset)
         
         // Log all parameters for recovery purposes
         print("""
@@ -468,6 +576,16 @@ class PresetManager {
         preset.position = settings.position
         preset.scale = settings.scale
         
+        preset.fractalType = settings.fractalType
+        preset.colorScheme = settings.colorScheme
+        preset.colorSchemeSaturation = settings.colorSchemeSaturation
+        preset.colorSchemeContrast = settings.colorSchemeContrast
+        preset.colorSchemeGamma = settings.colorSchemeGamma
+        preset.colorSchemeVibrance = settings.colorSchemeVibrance
+        preset.colorSchemeCurve = settings.colorSchemeCurve
+        preset.colorSchemeShadows = settings.colorSchemeShadows
+        preset.colorSchemeHighlights = settings.colorSchemeHighlights
+        
         preset.minDistance = settings.minDistance
         preset.fractalScale = settings.fractalScale
         preset.foldingLimit = settings.foldingLimit
@@ -478,6 +596,22 @@ class PresetManager {
         
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
+        
+        // v1.1 lighting & effects
+        preset.fogIntensity = settings.fogIntensity
+        preset.lightingMode = settings.lightingMode
+        preset.hueCycleSpeed = settings.hueCycleSpeed
+        preset.pulseSpeed = settings.pulseSpeed
+        preset.pulseAmount = settings.pulseAmount
+        preset.bloomStrength = settings.bloomStrength
+        
+        // v1.1 emissive settings
+        preset.emissiveEnabled = settings.emissiveEnabled
+        preset.emissivePattern = settings.emissivePattern
+        preset.emissiveIntensity = settings.emissiveIntensity
+        preset.emissiveThreshold = settings.emissiveThreshold
+        preset.emissiveColor = settings.emissiveColor
+        preset.emissiveSpeed = settings.emissiveSpeed
         
         return preset
     }
@@ -565,7 +699,27 @@ class PresetManager {
             newPreset.colorSchemeSaturation = importedPreset.colorSchemeSaturation
             newPreset.colorSchemeContrast = importedPreset.colorSchemeContrast
             newPreset.colorSchemeGamma = importedPreset.colorSchemeGamma
+            newPreset.colorSchemeVibrance = importedPreset.colorSchemeVibrance
+            newPreset.colorSchemeCurve = importedPreset.colorSchemeCurve
+            newPreset.colorSchemeShadows = importedPreset.colorSchemeShadows
+            newPreset.colorSchemeHighlights = importedPreset.colorSchemeHighlights
             newPreset.rating = importedPreset.rating
+            
+            // v1.1 lighting & effects
+            newPreset.fogIntensity = importedPreset.fogIntensity
+            newPreset.lightingMode = importedPreset.lightingMode
+            newPreset.hueCycleSpeed = importedPreset.hueCycleSpeed
+            newPreset.pulseSpeed = importedPreset.pulseSpeed
+            newPreset.pulseAmount = importedPreset.pulseAmount
+            newPreset.bloomStrength = importedPreset.bloomStrength
+            
+            // v1.1 emissive settings
+            newPreset.emissiveEnabled = importedPreset.emissiveEnabled
+            newPreset.emissivePattern = importedPreset.emissivePattern
+            newPreset.emissiveIntensity = importedPreset.emissiveIntensity
+            newPreset.emissiveThreshold = importedPreset.emissiveThreshold
+            newPreset.emissiveColor = importedPreset.emissiveColor
+            newPreset.emissiveSpeed = importedPreset.emissiveSpeed
             
             presets.insert(newPreset, at: 0)
             savePresets()
@@ -580,6 +734,86 @@ class PresetManager {
 
 // MARK: - Default Presets
 extension PresetManager {
+    /// The default preset loaded when there is no saved state
+    static func metallicPinkPreset() -> FractalPreset {
+        var preset = FractalPreset(name: "Metallic Pink")
+        preset.fractalType = .mandelbox
+        preset.colorScheme = .neonSunset
+        preset.colorSchemeSaturation = 2.0
+        preset.colorSchemeContrast = 1.0658348
+        preset.colorSchemeGamma = 0.5
+        preset.colorSchemeVibrance = 1.0
+        preset.colorSchemeCurve = -0.2481237
+        preset.colorSchemeShadows = -0.023361081
+        preset.colorSchemeHighlights = 0.7755921
+        preset.fractalIterations = 7
+        preset.maxRaySteps = 48
+        preset.fractalScale = 3.8917305
+        preset.foldingLimit = 0.98709714
+        preset.sphereRadius = 0.05
+        preset.minDistance = 1.3423144
+        preset.colorIterations = 16
+        preset.colorMix = 0.45099074
+        preset.glowIntensity = 0.18124515
+        preset.scale = 1.0
+        preset.position = SIMD3<Float>(0.09840668, 1.4379398, -3.6177335)
+        preset.safetyBubbleEnabled = true
+        preset.safetyBubbleRadius = 1.8
+        preset.fogIntensity = 0.14822857
+        preset.lightingMode = .staticLight
+        preset.hueCycleSpeed = 0.0
+        preset.pulseSpeed = 0.46227682
+        preset.pulseAmount = 0.1637325
+        preset.bloomStrength = 0.7048401
+        preset.emissiveEnabled = true
+        preset.emissivePattern = 1
+        preset.emissiveIntensity = 0.04231105
+        preset.emissiveThreshold = 0.70703346
+        preset.emissiveColor = SIMD3<Float>(0.99658203, 0.11701965, 1.0)
+        preset.emissiveSpeed = 2.7824872
+        return preset
+    }
+    
+    /// The default preset loaded when there is no saved state
+    static func brightPreset() -> FractalPreset {
+        var preset = FractalPreset(name: "Bright Preset")
+        preset.fractalType = .mandelbox
+        preset.colorScheme = .classic
+        preset.colorSchemeSaturation = 2.0
+        preset.colorSchemeContrast = 1.0576694
+        preset.colorSchemeGamma = 0.5
+        preset.colorSchemeVibrance = 1.0
+        preset.colorSchemeCurve = -1.0
+        preset.colorSchemeShadows = -0.0066674873
+        preset.colorSchemeHighlights = 0.28305644
+        preset.fractalIterations = 7
+        preset.maxRaySteps = 48
+        preset.fractalScale = 2.8
+        preset.foldingLimit = 1.1646773
+        preset.sphereRadius = 0.05
+        preset.minDistance = 0.8117829
+        preset.colorIterations = 15
+        preset.colorMix = 0.61749166
+        preset.glowIntensity = 0.0
+        preset.scale = 1.0
+        preset.position = SIMD3<Float>(0.10157842, 1.3497616, -3.3686383)
+        preset.safetyBubbleEnabled = true
+        preset.safetyBubbleRadius = 1.8
+        preset.fogIntensity = 0.14822857
+        preset.lightingMode = .staticLight
+        preset.hueCycleSpeed = 0.059446618
+        preset.pulseSpeed = 0.46227682
+        preset.pulseAmount = 0.1637325
+        preset.bloomStrength = 0.7048401
+        preset.emissiveEnabled = true
+        preset.emissivePattern = 0
+        preset.emissiveIntensity = 0.04231105
+        preset.emissiveThreshold = 0.70703346
+        preset.emissiveColor = SIMD3<Float>(0.99658203, 0.11701965, 1.0)
+        preset.emissiveSpeed = 2.7824872
+        return preset
+    }
+    
     /// Add some built-in presets for users to start with
     func addBuiltInPresetsIfNeeded() {
         func ensurePreset(named name: String, build: () -> FractalPreset) {
@@ -587,52 +821,16 @@ extension PresetManager {
             presets.append(build())
         }
         
-        // Classic Mandelbox
-        ensurePreset(named: "Classic Mandelbox") {
-            var classic = FractalPreset(name: "Classic Mandelbox")
-            classic.fractalScale = 2.8
-            classic.fractalIterations = 6
-            classic.foldingLimit = 1.0
-            classic.sphereRadius = 0.5
-            classic.colorMix = 0.5
-            classic.glowIntensity = 0.2
-            return classic
+        // Metallic Pink - the default launch preset
+        ensurePreset(named: "Metallic Pink") {
+            return PresetManager.metallicPinkPreset()
         }
         
-        // Deep Dive
-        ensurePreset(named: "Deep Dive") {
-            var deepDive = FractalPreset(name: "Deep Dive")
-            deepDive.fractalScale = 2.2
-            deepDive.fractalIterations = 10
-            deepDive.foldingLimit = 1.5
-            deepDive.sphereRadius = 0.3
-            deepDive.colorMix = 0.7
-            deepDive.glowIntensity = 0.4
-            return deepDive
+        // Bright Preset - the default launch preset
+        ensurePreset(named: "Bright Preset") {
+            return PresetManager.brightPreset()
         }
-
-        // Nebulabrot Drift (color-driven scene inspired by Nebulabrot aesthetics)
-        ensurePreset(named: "Nebulabrot Drift") {
-            var nebulabrot = FractalPreset(name: "Nebulabrot Drift")
-            nebulabrot.fractalType = .mandelbox
-            nebulabrot.colorScheme = .nebula
-            nebulabrot.colorSchemeSaturation = 2.4
-            nebulabrot.colorSchemeContrast = 1.1
-            nebulabrot.colorSchemeGamma = 0.55
-            nebulabrot.fractalIterations = 12
-            nebulabrot.maxRaySteps = 100
-            nebulabrot.fractalScale = 2.6
-            nebulabrot.foldingLimit = 1.2
-            nebulabrot.sphereRadius = 0.45
-            nebulabrot.minDistance = 0.6
-            nebulabrot.colorIterations = 10
-            nebulabrot.colorMix = 0.65
-            nebulabrot.glowIntensity = 0.35
-            nebulabrot.scale = 1.1
-            nebulabrot.position = SIMD3<Float>(0.0, 0.1, -1.6)
-            return nebulabrot
-        }
-
+        
         // Orbit Density (originally 3D Buddhabrot-style, now Mandelbox)
         ensurePreset(named: "Orbit Density") {
             var orbit = FractalPreset(name: "Orbit Density")
@@ -653,72 +851,6 @@ extension PresetManager {
             orbit.scale = 1.0
             orbit.position = SIMD3<Float>(0.0, 0.0, -1.4)
             return orbit
-        }
-
-        // Taurus66 Rotbox (approx) - tuned from Mandelbulber settings
-        ensurePreset(named: "Taurus66 Rotbox") {
-            var rotbox = FractalPreset(name: "Taurus66 Rotbox")
-            rotbox.fractalType = .mandelbox
-            rotbox.colorScheme = .fire
-            rotbox.colorSchemeSaturation = 2.0
-            rotbox.colorSchemeContrast = 1.15
-            rotbox.colorSchemeGamma = 0.55
-            rotbox.fractalIterations = 12
-            rotbox.maxRaySteps = 128
-            rotbox.fractalScale = 2.8
-            rotbox.foldingLimit = 1.0
-            rotbox.sphereRadius = 0.5
-            rotbox.minDistance = 0.4
-            rotbox.colorIterations = 10
-            rotbox.colorMix = 0.6
-            rotbox.glowIntensity = 0.1
-            rotbox.scale = 1.0
-            rotbox.position = SIMD3<Float>(0.0, 0.0, -1.6)
-            return rotbox
-        }
-
-        // Yip Yip Martians - fuzzy, playful chaos inspired by Sesame Street's aliens
-        ensurePreset(named: "Yip Yip Martians") {
-            var yipyip = FractalPreset(name: "Yip Yip Martians")
-            yipyip.fractalType = .mandelbox  // Originally Nebulabrot-style, now Mandelbox
-            yipyip.colorScheme = .neonSunset    // Orange/magenta/violet - playful retro
-            yipyip.colorSchemeSaturation = 2.6  // Vibrant retro 70s/80s colors
-            yipyip.colorSchemeContrast = 0.95   // Soft, fuzzy contrast like their fur
-            yipyip.colorSchemeGamma = 0.5       // Balanced for multi-channel glow
-            yipyip.fractalIterations = 12       // More iterations for richer RGB channels
-            yipyip.maxRaySteps = 110            // More steps for detailed volume
-            yipyip.fractalScale = 2.4           // Wobbly, blobby alien scale
-            yipyip.foldingLimit = 1.25          // Extra folding = fuzzy texture
-            yipyip.sphereRadius = 0.65          // Rounder shapes like their heads
-            yipyip.minDistance = 0.85           // Space between blobs
-            yipyip.colorIterations = 8          // Color cycling rhythm
-            yipyip.colorMix = 0.55              // Orbit trap influence for structure
-            yipyip.glowIntensity = 0.45         // Ethereal glow - "uh huh uh huh"
-            yipyip.scale = 0.85
-            yipyip.position = SIMD3<Float>(0.0, 0.15, -1.25)
-            return yipyip
-        }
-
-        // Deep Nebula - originally multi-channel Nebulabrot, now Mandelbox
-        ensurePreset(named: "Deep Nebula") {
-            var nebula = FractalPreset(name: "Deep Nebula")
-            nebula.fractalType = .mandelbox
-            nebula.colorScheme = .nebula        // Astronomical false-color
-            nebula.colorSchemeSaturation = 2.3
-            nebula.colorSchemeContrast = 1.05
-            nebula.colorSchemeGamma = 0.55
-            nebula.fractalIterations = 16       // High iterations for rich RGB separation
-            nebula.maxRaySteps = 140            // Dense volume sampling
-            nebula.fractalScale = 2.3
-            nebula.foldingLimit = 1.15
-            nebula.sphereRadius = 0.55
-            nebula.minDistance = 0.75
-            nebula.colorIterations = 12
-            nebula.colorMix = 0.7               // Strong orbit trap influence
-            nebula.glowIntensity = 0.35
-            nebula.scale = 1.0
-            nebula.position = SIMD3<Float>(0.0, 0.0, -1.5)
-            return nebula
         }
         
         savePresets()
@@ -748,11 +880,14 @@ extension PresetManager {
     
     /// Restore last state to settings if available
     /// Returns true if state was restored, false if no saved state exists
+    /// When no saved state exists, loads the default "Metallic Pink" preset
     @discardableResult
     func restoreLastState(to settings: RenderSettings) -> Bool {
         guard FileManager.default.fileExists(atPath: lastStateFileURL.path) else {
-            print("ℹ️ No last state found - using defaults")
-            return false
+            print("ℹ️ No last state found - loading Bright Preset default")
+            let defaultPreset = PresetManager.brightPreset()
+            defaultPreset.apply(to: settings)
+            return true
         }
         
         do {

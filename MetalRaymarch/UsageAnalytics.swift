@@ -39,10 +39,29 @@
 //       * deviceModel (String)
 //       * osVersion (String)
 //       * appVersion (String)
+//
+//     - Create another Record Type: "PresetSnapshot"
+//     - Add fields:
+//       * timestamp (Date/Time)
+//       * presetName (String)
+//       * presetJSON (String) - full preset as JSON for easy parsing
+//       * deviceModel (String)
+//       * appVersion (String)
+//       --- Individual fields for easy CloudKit querying/filtering ---
+//       * colorScheme (String)
+//       * fractalScale (Double)
+//       * foldingLimit (Double)
+//       * sphereRadius (Double)
+//       * minDistance (Double)
+//       * fractalIterations (Int64)
+//       * glowIntensity (Double)
+//       * fogIntensity (Double)
+//       * colorSchemeVibrance (Double)
+//       * emissiveEnabled (Int64)
 //     - Deploy to Production environment before TestFlight
 //
 //  VIEW DATA:
-//  - CloudKit Console → Data → Public Database → UsageSnapshot
+//  - CloudKit Console → Data → Public Database → UsageSnapshot / PresetSnapshot
 //  - Export to CSV/JSON for analysis
 //
 
@@ -226,6 +245,93 @@ class UsageAnalytics: ObservableObject {
     /// Track preset save
     func trackPresetSaved() {
         presetsSaved += 1
+    }
+    
+    /// Track preset save with full preset data for analysis
+    /// This uploads the complete preset to CloudKit so you can see what users are creating
+    func trackPresetSaved(preset: FractalPreset) {
+        presetsSaved += 1
+        
+        guard analyticsEnabled else { return }
+        
+        Task {
+            await uploadPresetSnapshot(preset)
+        }
+    }
+    
+    // MARK: - Preset Snapshot Upload
+    
+    /// Upload a saved preset to CloudKit for analysis
+    private func uploadPresetSnapshot(_ preset: FractalPreset) async {
+        let record = CKRecord(recordType: "PresetSnapshot")
+        
+        // Metadata
+        record["timestamp"] = Date() as NSDate
+        record["presetName"] = preset.name
+        
+        // Encode full preset as JSON for complete data access
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = .prettyPrinted
+        if let jsonData = try? encoder.encode(preset),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            record["presetJSON"] = jsonString
+        }
+        
+        // Device info
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let deviceModel = withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(cString: $0)
+            }
+        }
+        record["deviceModel"] = deviceModel
+        record["appVersion"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        
+        // === Key fields for easy CloudKit querying/filtering ===
+        // These let you filter/sort in CloudKit Console without parsing JSON
+        
+        // Color & style
+        record["colorScheme"] = preset.colorScheme.displayName
+        record["colorSchemeVibrance"] = (preset.colorSchemeVibrance ?? 0.0) as NSNumber
+        record["colorSchemeSaturation"] = preset.colorSchemeSaturation as NSNumber
+        record["colorSchemeContrast"] = preset.colorSchemeContrast as NSNumber
+        
+        // Fractal geometry
+        record["fractalScale"] = preset.fractalScale as NSNumber
+        record["foldingLimit"] = preset.foldingLimit as NSNumber
+        record["sphereRadius"] = preset.sphereRadius as NSNumber
+        record["minDistance"] = preset.minDistance as NSNumber
+        record["fractalIterations"] = preset.fractalIterations as NSNumber
+        
+        // Effects
+        record["glowIntensity"] = preset.glowIntensity as NSNumber
+        record["fogIntensity"] = (preset.fogIntensity ?? 0.5) as NSNumber
+        record["bloomStrength"] = (preset.bloomStrength ?? 0.0) as NSNumber
+        
+        // Emissive
+        record["emissiveEnabled"] = (preset.emissiveEnabled ?? false) ? 1 : 0
+        record["emissivePattern"] = (preset.emissivePattern ?? 0) as NSNumber
+        record["emissiveIntensity"] = (preset.emissiveIntensity ?? 1.0) as NSNumber
+        
+        // Lighting
+        record["lightingMode"] = preset.lightingMode?.displayName ?? "Animated"
+        record["hueCycleSpeed"] = (preset.hueCycleSpeed ?? 0.0) as NSNumber
+        record["pulseSpeed"] = (preset.pulseSpeed ?? 0.0) as NSNumber
+        
+        // Position (useful to see if people explore far from origin)
+        record["positionX"] = preset.position.x as NSNumber
+        record["positionY"] = preset.position.y as NSNumber
+        record["positionZ"] = preset.position.z as NSNumber
+        
+        do {
+            let _ = try await database.save(record)
+            print("📊 Preset snapshot uploaded: \"\(preset.name)\"")
+        } catch {
+            print("📊 Preset snapshot upload failed: \(error.localizedDescription)")
+            // Could save for retry, but presets are less critical than session data
+        }
     }
     
     // MARK: - Snapshot Creation

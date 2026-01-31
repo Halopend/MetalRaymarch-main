@@ -1601,11 +1601,15 @@ actor Renderer {
         var inputWidth = max(1, Int(Float(outputWidth) * settings.resolutionScale))
         var inputHeight = max(1, Int(Float(outputHeight) * settings.resolutionScale))
 
+        // When using foveation with MetalFX, the input texture MUST be at least as large as
+        // the rate map's physical size, otherwise Metal validation fails with:
+        // "maximum physical rendering width must be <= minimum attachment width"
         if layerRenderer.configuration.isFoveationEnabled, let map = rasterizationRateMap {
             let physical = map.physicalSize(layer: 0)
             if physical.width > 0 && physical.height > 0 {
-                inputWidth = physical.width
-                inputHeight = physical.height
+                // Ensure input is at least the physical size required by the rate map
+                inputWidth = max(inputWidth, physical.width)
+                inputHeight = max(inputHeight, physical.height)
             }
         }
 

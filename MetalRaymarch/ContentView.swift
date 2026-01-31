@@ -22,7 +22,7 @@ final class UISettingsCache {
     var maxRaySteps: Int = 64
     
     // Color & effects
-    var colorScheme: ColorScheme = .classic
+    var colorScheme: ColorScheme = .nebula
     var colorMix: Float = 0.5
     var colorIterations: Float = 8.0
     var colorSchemeAutoTransition: Bool = false
@@ -31,7 +31,7 @@ final class UISettingsCache {
     var colorSchemeSaturation: Float = 2.0
     var colorSchemeContrast: Float = 1.05
     var colorSchemeGamma: Float = 0.5
-    var colorSchemeVibrance: Float = 0.0
+    var colorSchemeVibrance: Float = 1.0
     var colorSchemeCurve: Float = 0.0
     var colorSchemeShadows: Float = 0.0
     var colorSchemeHighlights: Float = 0.0
@@ -42,7 +42,7 @@ final class UISettingsCache {
     var pulseAmount: Float = 0.0
     var glowIntensity: Float = 0.0
     var bloomStrength: Float = 0.0
-    var fogIntensity: Float = 0.5
+    var fogIntensity: Float = 0.32
     
     // Emissive
     var emissiveEnabled: Bool = false
