@@ -61,6 +61,10 @@ struct MetalProjectTestApp: App {
                 .onAppear {
                     // Ensure window content is visible when app launches or window appears
                     appModel.ensureWindowContentVisible()
+                    // Set up the handler to open window via gesture
+                    appModel.openMenuWindowHandler = {
+                        openWindow(id: appModel.menuWindowID)
+                    }
                 }
         }
         .defaultSize(width: 600, height: 250)

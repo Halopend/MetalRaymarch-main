@@ -276,7 +276,7 @@ struct ContentView: View {
     private var menuContent: some View {
         VStack {
             VStack(spacing: 10) {
-                // Presets and Recordings buttons at the top
+                // Presets button at the top
                 HStack {
                     PresetButton(
                         presetManager: appModel.presetManager,
@@ -288,12 +288,6 @@ struct ContentView: View {
                             appModel.gestureController?.syncWithSettings()
                         }
                     )
-                    
-                    if let recorder = appModel.parameterRecorder {
-                        RecordingButton(recorder: recorder) { recording in
-                            recorder.startPlayback(recording)
-                        }
-                    }
                     
                     // Reset button
                     Button {

@@ -1606,7 +1606,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             if (hitCache.valid) {
                 col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix) * diffuse;
             } else {
-                col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, 2, uniforms.colorScheme) * diffuse;
+                col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme) * diffuse;
             }
         }
 
