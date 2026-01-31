@@ -804,7 +804,7 @@ final class RenderSettings: @unchecked Sendable {
     /// Contrast override
     var colorSchemeContrast: Float {
         get { withLock { _colorSchemeContrast } }
-        set { withLock { _colorSchemeContrast = max(0.5, min(2.0, newValue)) } }
+        set { withLock { _colorSchemeContrast = max(0.95, min(1.15, newValue)) } }
     }
     
     /// Gamma override

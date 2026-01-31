@@ -485,7 +485,7 @@ struct ContentView: View {
                                 
                                 // Contrast control
                                 Text("Contrast: \(cache.colorSchemeContrast, specifier: "%.2f")")
-                                Slider(value: $cache.colorSchemeContrast, in: 0.8...1.2, onEditingChanged: { editing in
+                                Slider(value: $cache.colorSchemeContrast, in: 0.95...1.15, onEditingChanged: { editing in
                                     if !editing { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) }
                                 })
                                 
