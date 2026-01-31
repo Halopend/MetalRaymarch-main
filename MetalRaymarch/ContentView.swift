@@ -207,8 +207,6 @@ struct ContentView: View {
              
                 // Menu content
                 menuContent
-                
-                Spacer()
             }
             .animation(.easeInOut(duration: 0.3), value: appModel.isMenuWindowVisible)
             .animation(.easeInOut(duration: 0.2), value: appModel.parameterRecorder?.isRecording)
@@ -304,10 +302,13 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    // Menu visibility hint
-                    Text("👆 Middle→Palm: Toggle")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    // FPS display
+                    if appModel.immersiveSpaceState == .open {
+                        Text("\(appModel.fps, specifier: "%.0f") FPS")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
                 }
                 .padding(.bottom, 8)
                 
@@ -318,29 +319,10 @@ struct ContentView: View {
 
             ToggleImmersiveSpaceButton()
             
-            // SharePlay Controls
-            if let shareSession = appModel.shareSession {
-                SharePlayControlsView(shareSession: shareSession, appModel: appModel)
-                    .padding(.vertical, 8)
-            }
-            
             if appModel.immersiveSpaceState == .open {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 12) {
                         Divider()
-                        
-                        // Time/animation speed
-                        HStack {
-                            Text("Time Speed")
-                            Spacer()
-                            Text("\(speed, specifier: "%.1f")×")
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(value: $speed, in: 0...2, onEditingChanged: { editing in
-                            if !editing {
-                                appModel.clock.speed = Double(speed)
-                            }
-                        })
 
                         // Fractal type picker - use cache
                         Group {
@@ -794,17 +776,10 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.top, 8)
-
-                        HStack {
-                            Text("FPS: \(appModel.fps, specifier: "%.0f")")
-                            Spacer()
-                            Text(cameraMode ? "Dolly mode" : "Pan mode")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal)
                 }
+                .frame(height: 550)  // Fixed height for immersive controls - ScrollView handles overflow
             }
         }
     }

@@ -142,15 +142,23 @@ class AppModel {
     /// Callback to open the menu window (set by App scene)
     var openMenuWindowHandler: (() -> Void)?
     
-    /// Toggle menu window - always opens/shows if closed
+    /// Toggle menu window visibility - hides content or reopens window
     func toggleMenuWindow() {
-        // Always ensure content is visible
-        withAnimation(.easeInOut(duration: 0.25)) {
-            isMenuWindowVisible = true
+        if isMenuWindowVisible {
+            // Hide the content (window stays but content hidden)
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isMenuWindowVisible = false
+            }
+            print("📋 Menu window hidden")
+        } else {
+            // Show content and ensure window is open
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isMenuWindowVisible = true
+            }
+            // Call the handler to open the window (handles native close)
+            openMenuWindowHandler?()
+            print("📋 Menu window opened/shown")
         }
-        // Call the handler to open the window (handles native close)
-        openMenuWindowHandler?()
-        print("📋 Menu window opened/shown")
     }
     
     /// Ensure window content is visible - call when exiting immersive mode or on app launch
