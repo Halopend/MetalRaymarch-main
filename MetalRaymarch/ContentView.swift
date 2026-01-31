@@ -95,8 +95,9 @@ final class UISettingsCache {
         targetMinDistance = settings.targetMinDistance
         targetFoldingLimit = settings.targetFoldingLimit
         targetSphereRadius = settings.targetSphereRadius
-        fractalIterations = settings.fractalIterations
-        maxRaySteps = settings.maxRaySteps
+        // Load BASE values for UI display (these are what user sets)
+        fractalIterations = settings.baseFractalIterations
+        maxRaySteps = settings.baseMaxRaySteps
         
         colorScheme = settings.colorScheme
         colorMix = settings.colorMix
@@ -376,8 +377,9 @@ struct ContentView: View {
                                 set: { preset in
                                     cache.fractalIterations = preset.fractalIterations
                                     cache.maxRaySteps = preset.raySteps
-                                    cache.push(\.fractalIterations, value: preset.fractalIterations)
-                                    cache.push(\.maxRaySteps, value: preset.raySteps)
+                                    // Push to BASE values so dynamic quality can scale from them
+                                    cache.push(\.baseFractalIterations, value: preset.fractalIterations)
+                                    cache.push(\.baseMaxRaySteps, value: preset.raySteps)
                                 }
                             )) {
                                 ForEach(QualityPreset.allCases, id: \.self) { preset in
@@ -741,6 +743,19 @@ struct ContentView: View {
                                             }
                                         }
                                         .frame(width: 60, height: 8)
+                                    }
+                                    
+                                    // Show effective parameters being used
+                                    HStack {
+                                        Text("Effective:")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        let effectiveIters = Int(Float(cache.fractalIterations) * (0.6 + 0.4 * cache.currentRenderQuality))
+                                        let effectiveSteps = Int(Float(cache.maxRaySteps) * (0.5 + 0.5 * cache.currentRenderQuality))
+                                        Text("FI: \(effectiveIters) RS: \(effectiveSteps)")
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
                                     }
                                     
                                     // Min/Max quality range

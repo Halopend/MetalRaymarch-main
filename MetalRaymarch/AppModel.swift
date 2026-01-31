@@ -456,6 +456,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalScale: Float = 2.8
     private var _fractalIterations: Int = 9         // Mid quality default
     private var _maxRaySteps: Int = 64              // Mid quality default
+    private var _baseFractalIterations: Int = 9     // User-set base (before dynamic quality adjustment)
+    private var _baseMaxRaySteps: Int = 64          // User-set base (before dynamic quality adjustment)
     private var _colorMix: Float = 0.5
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
@@ -565,14 +567,38 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _fractalScale = newValue } }
     }
     
+    /// Current effective fractal iterations (may be adjusted by dynamic quality)
     var fractalIterations: Int {
         get { withLock { _fractalIterations } }
         set { withLock { _fractalIterations = newValue } }
     }
     
+    /// Current effective ray steps (may be adjusted by dynamic quality)
     var maxRaySteps: Int {
         get { withLock { _maxRaySteps } }
         set { withLock { _maxRaySteps = newValue } }
+    }
+    
+    /// Base fractal iterations set by user (before dynamic quality adjustment)
+    var baseFractalIterations: Int {
+        get { withLock { _baseFractalIterations } }
+        set { 
+            withLock { 
+                _baseFractalIterations = newValue
+                _fractalIterations = newValue  // Also update current
+            } 
+        }
+    }
+    
+    /// Base ray steps set by user (before dynamic quality adjustment)
+    var baseMaxRaySteps: Int {
+        get { withLock { _baseMaxRaySteps } }
+        set { 
+            withLock { 
+                _baseMaxRaySteps = newValue
+                _maxRaySteps = newValue  // Also update current
+            } 
+        }
     }
     
     var colorMix: Float {

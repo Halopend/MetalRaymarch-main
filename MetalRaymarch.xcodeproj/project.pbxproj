@@ -150,15 +150,16 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = MetalRayMarchDemo;
+				INFOPLIST_KEY_CFBundleDisplayName = MetalMandelbox;
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio-reactive lighting responds to music and sounds around you to create dynamic visual effects.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.MetalRaymarch;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.MetalMadelbox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -181,15 +182,16 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = MetalRayMarchDemo;
+				INFOPLIST_KEY_CFBundleDisplayName = MetalMandelbox;
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio-reactive lighting responds to music and sounds around you to create dynamic visual effects.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.MetalRaymarch;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.MetalMadelbox;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "xros xrsimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;

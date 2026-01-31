@@ -98,10 +98,10 @@ final class DynamicRenderQualityManager {
     /// - Parameters:
     ///   - fps: Current frame rate (instantaneous or smoothed)
     ///   - deltaTime: Time since last frame in seconds
-    ///   - layerRenderer: The LayerRenderer to apply quality changes to
-    func update(fps: Double, deltaTime: TimeInterval, layerRenderer: LayerRenderer) {
+    ///   - layerRenderer: The LayerRenderer to apply quality changes to (optional, for resolution scaling)
+    ///   - applyResolutionScaling: Whether to apply LayerRenderer.renderQuality (requires foveation)
+    func update(fps: Double, deltaTime: TimeInterval, layerRenderer: LayerRenderer? = nil, applyResolutionScaling: Bool = true) {
         guard isEnabled else { return }
-        guard layerRenderer.configuration.isFoveationEnabled else { return }
         
         frameCount += 1
         
@@ -133,7 +133,11 @@ final class DynamicRenderQualityManager {
         
         // Only apply if quality changed meaningfully (avoid constant updates)
         if abs(currentQuality - previousQuality) > 0.01 {
-            applyQuality(to: layerRenderer)
+            // Apply resolution scaling if LayerRenderer is provided and foveation is enabled
+            if applyResolutionScaling, let layerRenderer = layerRenderer,
+               layerRenderer.configuration.isFoveationEnabled {
+                applyQuality(to: layerRenderer)
+            }
             
             if debugLogging {
                 print("[DynQuality] FPS: \(String(format: "%.1f", smoothedFPS)) → Quality: \(String(format: "%.2f", currentQuality))")
@@ -141,22 +145,42 @@ final class DynamicRenderQualityManager {
         }
     }
     
+    /// Get the effective iteration count based on current quality and base value.
+    /// Lower quality = fewer iterations for better performance.
+    func effectiveIterations(base: Int) -> Int {
+        // Scale iterations: at 1.0 quality use full, at minQuality use ~60%
+        let scale = 0.6 + 0.4 * currentQuality
+        return max(4, Int(Float(base) * scale))
+    }
+    
+    /// Get the effective ray steps based on current quality and base value.
+    /// Lower quality = fewer ray steps for better performance.
+    func effectiveRaySteps(base: Int) -> Int {
+        // Scale ray steps: at 1.0 quality use full, at minQuality use ~50%
+        let scale = 0.5 + 0.5 * currentQuality
+        return max(24, Int(Float(base) * scale))
+    }
+    
     /// Force a specific quality level (bypasses automatic adjustment temporarily)
     ///
     /// - Parameters:
     ///   - quality: Quality level (0.0 - 1.0)
-    ///   - layerRenderer: The LayerRenderer to apply quality changes to
-    func setQuality(_ quality: Float, layerRenderer: LayerRenderer) {
+    ///   - layerRenderer: Optional LayerRenderer to apply resolution quality changes to
+    func setQuality(_ quality: Float, layerRenderer: LayerRenderer? = nil) {
         currentQuality = max(minQuality, min(maxQuality, quality))
-        applyQuality(to: layerRenderer)
+        if let layerRenderer = layerRenderer, layerRenderer.configuration.isFoveationEnabled {
+            applyQuality(to: layerRenderer)
+        }
     }
     
     /// Reset to default quality
-    func reset(layerRenderer: LayerRenderer) {
+    func reset(layerRenderer: LayerRenderer? = nil) {
         currentQuality = defaultQuality
         smoothedFPS = targetFPS
         timeBelowThreshold = 0
-        applyQuality(to: layerRenderer)
+        if let layerRenderer = layerRenderer, layerRenderer.configuration.isFoveationEnabled {
+            applyQuality(to: layerRenderer)
+        }
     }
     
     /// Get statistics for debugging/UI
@@ -199,7 +223,7 @@ extension DynamicRenderQualityManager {
     }
     
     /// Apply a quality preset
-    func applyPreset(_ preset: QualityPreset, layerRenderer: LayerRenderer) {
+    func applyPreset(_ preset: QualityPreset, layerRenderer: LayerRenderer? = nil) {
         setQuality(preset.value, layerRenderer: layerRenderer)
     }
 }
@@ -214,8 +238,8 @@ extension DynamicRenderQualityManager {
     ///
     /// - Parameters:
     ///   - complexity: Estimated complexity (0.0 = simple, 1.0 = very complex)
-    ///   - layerRenderer: The LayerRenderer to apply quality changes to
-    func hintSceneComplexity(_ complexity: Float, layerRenderer: LayerRenderer) {
+    ///   - layerRenderer: Optional LayerRenderer to apply resolution quality changes to
+    func hintSceneComplexity(_ complexity: Float, layerRenderer: LayerRenderer? = nil) {
         // Map complexity to quality: higher complexity → lower quality target
         // But don't force the change, just adjust the targets
         let targetQuality = maxQuality - (maxQuality - minQuality) * complexity * 0.5
@@ -223,7 +247,9 @@ extension DynamicRenderQualityManager {
         // If current quality is significantly higher than appropriate, nudge down
         if currentQuality > targetQuality + 0.1 {
             currentQuality = currentQuality - 0.05
-            applyQuality(to: layerRenderer)
+            if let layerRenderer = layerRenderer, layerRenderer.configuration.isFoveationEnabled {
+                applyQuality(to: layerRenderer)
+            }
         }
     }
     
