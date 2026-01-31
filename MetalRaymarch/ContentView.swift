@@ -31,6 +31,10 @@ final class UISettingsCache {
     var colorSchemeSaturation: Float = 2.0
     var colorSchemeContrast: Float = 1.05
     var colorSchemeGamma: Float = 0.5
+    var colorSchemeVibrance: Float = 0.0
+    var colorSchemeCurve: Float = 0.0
+    var colorSchemeShadows: Float = 0.0
+    var colorSchemeHighlights: Float = 0.0
     
     // Animation
     var hueCycleSpeed: Float = 0.0
@@ -109,6 +113,10 @@ final class UISettingsCache {
         colorSchemeSaturation = settings.colorSchemeSaturation
         colorSchemeContrast = settings.colorSchemeContrast
         colorSchemeGamma = settings.colorSchemeGamma
+        colorSchemeVibrance = settings.colorSchemeVibrance
+        colorSchemeCurve = settings.colorSchemeCurve
+        colorSchemeShadows = settings.colorSchemeShadows
+        colorSchemeHighlights = settings.colorSchemeHighlights
         
         hueCycleSpeed = settings.hueCycleSpeed
         pulseSpeed = settings.pulseSpeed
@@ -487,6 +495,31 @@ struct ContentView: View {
                                 Text("Contrast: \(cache.colorSchemeContrast, specifier: "%.2f")")
                                 Slider(value: $cache.colorSchemeContrast, in: 0.95...1.15, onEditingChanged: { editing in
                                     if !editing { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) }
+                                })
+                                
+                                Divider()
+                                
+                                // Color Grading Group
+                                Text("Color Grading Curves").font(.subheadline).foregroundColor(.secondary)
+                                
+                                Text("Vibrance: \(cache.colorSchemeVibrance, specifier: "%.2f")")
+                                Slider(value: $cache.colorSchemeVibrance, in: 0...1.0, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) }
+                                })
+                                
+                                Text("Midtone Curve: \(cache.colorSchemeCurve, specifier: "%.2f")")
+                                Slider(value: $cache.colorSchemeCurve, in: -1.0...1.0, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) }
+                                })
+                                
+                                Text("Shadows: \(cache.colorSchemeShadows, specifier: "%.3f")")
+                                Slider(value: $cache.colorSchemeShadows, in: -0.05...0.05, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) }
+                                })
+                                
+                                Text("Highlights: \(cache.colorSchemeHighlights, specifier: "%.2f")")
+                                Slider(value: $cache.colorSchemeHighlights, in: -0.5...1.0, onEditingChanged: { editing in
+                                    if !editing { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) }
                                 })
                                 
                                 Divider()

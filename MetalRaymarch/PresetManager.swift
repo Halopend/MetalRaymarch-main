@@ -31,6 +31,10 @@ struct FractalPreset: Codable, Identifiable {
     var colorSchemeSaturation: Float
     var colorSchemeContrast: Float
     var colorSchemeGamma: Float
+    var colorSchemeVibrance: Float?
+    var colorSchemeCurve: Float?
+    var colorSchemeShadows: Float?
+    var colorSchemeHighlights: Float?
     
     // Mandelbox parameters
     var minDistance: Float
@@ -50,6 +54,7 @@ struct FractalPreset: Codable, Identifiable {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, glowIntensity, colorIterations, position, scale
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
+        case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius
     }
@@ -75,6 +80,10 @@ struct FractalPreset: Codable, Identifiable {
         self.colorSchemeSaturation = 2.0
         self.colorSchemeContrast = 1.05
         self.colorSchemeGamma = 0.5
+        self.colorSchemeVibrance = 0.0
+        self.colorSchemeCurve = 0.0
+        self.colorSchemeShadows = 0.0
+        self.colorSchemeHighlights = 0.0
         
         self.minDistance = 0.8
         self.fractalScale = 2.8
@@ -101,6 +110,10 @@ struct FractalPreset: Codable, Identifiable {
         colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 2.0
         colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.05
         colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.5
+        colorSchemeVibrance = try container.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance) ?? 0.0
+        colorSchemeCurve = try container.decodeIfPresent(Float.self, forKey: .colorSchemeCurve) ?? 0.0
+        colorSchemeShadows = try container.decodeIfPresent(Float.self, forKey: .colorSchemeShadows) ?? 0.0
+        colorSchemeHighlights = try container.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights) ?? 0.0
         minDistance = try container.decode(Float.self, forKey: .minDistance)
         fractalScale = try container.decode(Float.self, forKey: .fractalScale)
         foldingLimit = try container.decode(Float.self, forKey: .foldingLimit)
@@ -130,6 +143,10 @@ struct FractalPreset: Codable, Identifiable {
         try container.encode(colorSchemeSaturation, forKey: .colorSchemeSaturation)
         try container.encode(colorSchemeContrast, forKey: .colorSchemeContrast)
         try container.encode(colorSchemeGamma, forKey: .colorSchemeGamma)
+        try container.encodeIfPresent(colorSchemeVibrance, forKey: .colorSchemeVibrance)
+        try container.encodeIfPresent(colorSchemeCurve, forKey: .colorSchemeCurve)
+        try container.encodeIfPresent(colorSchemeShadows, forKey: .colorSchemeShadows)
+        try container.encodeIfPresent(colorSchemeHighlights, forKey: .colorSchemeHighlights)
         try container.encode(minDistance, forKey: .minDistance)
         try container.encode(fractalScale, forKey: .fractalScale)
         try container.encode(foldingLimit, forKey: .foldingLimit)
@@ -157,6 +174,10 @@ struct FractalPreset: Codable, Identifiable {
         preset.colorSchemeSaturation = settings.colorSchemeSaturation
         preset.colorSchemeContrast = settings.colorSchemeContrast
         preset.colorSchemeGamma = settings.colorSchemeGamma
+        preset.colorSchemeVibrance = settings.colorSchemeVibrance
+        preset.colorSchemeCurve = settings.colorSchemeCurve
+        preset.colorSchemeShadows = settings.colorSchemeShadows
+        preset.colorSchemeHighlights = settings.colorSchemeHighlights
         
         preset.minDistance = settings.minDistance
         preset.fractalScale = settings.fractalScale
@@ -187,6 +208,10 @@ struct FractalPreset: Codable, Identifiable {
         settings.colorSchemeSaturation = colorSchemeSaturation
         settings.colorSchemeContrast = colorSchemeContrast
         settings.colorSchemeGamma = colorSchemeGamma
+        settings.colorSchemeVibrance = colorSchemeVibrance ?? 0.0
+        settings.colorSchemeCurve = colorSchemeCurve ?? 0.0
+        settings.colorSchemeShadows = colorSchemeShadows ?? 0.0
+        settings.colorSchemeHighlights = colorSchemeHighlights ?? 0.0
         
         settings.minDistance = minDistance
         settings.fractalScale = fractalScale

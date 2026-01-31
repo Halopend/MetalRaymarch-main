@@ -89,6 +89,10 @@ typedef struct
     float contrast;                   // Contrast adjustment (default 1.05)
     float gamma;                      // Gamma correction (default 0.5)
     float brightness;                 // Brightness offset (default 0.0)
+    float vibrance;                   // Saturation that protects highlights
+    float colorCurve;                 // Midtone curve adjustment
+    float shadows;                    // Shadow adjustment
+    float highlights;                 // Highlight adjustment
     
     // Neon mode parameters (HSV-based orbit trap coloring)
     float neonIntensity;              // 0 = off, 1 = full neon mode

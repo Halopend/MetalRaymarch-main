@@ -29,6 +29,97 @@ struct ParameterFrame: Codable {
     let colorMix: Float
     let glowIntensity: Float
     let colorIterations: Float
+    
+    // Color grading (added for enhanced contrast/grading)
+    let colorSchemeVibrance: Float
+    let colorSchemeCurve: Float
+    let colorSchemeShadows: Float
+    let colorSchemeHighlights: Float
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp
+        case position
+        case scale
+        case minDistance
+        case fractalScale
+        case foldingLimit
+        case sphereRadius
+        case colorMix
+        case glowIntensity
+        case colorIterations
+        case colorSchemeVibrance
+        case colorSchemeCurve
+        case colorSchemeShadows
+        case colorSchemeHighlights
+    }
+
+    init(
+        timestamp: Float,
+        position: SIMD3<Float>,
+        scale: Float,
+        minDistance: Float,
+        fractalScale: Float,
+        foldingLimit: Float,
+        sphereRadius: Float,
+        colorMix: Float,
+        glowIntensity: Float,
+        colorIterations: Float,
+        colorSchemeVibrance: Float,
+        colorSchemeCurve: Float,
+        colorSchemeShadows: Float,
+        colorSchemeHighlights: Float
+    ) {
+        self.timestamp = timestamp
+        self.position = position
+        self.scale = scale
+        self.minDistance = minDistance
+        self.fractalScale = fractalScale
+        self.foldingLimit = foldingLimit
+        self.sphereRadius = sphereRadius
+        self.colorMix = colorMix
+        self.glowIntensity = glowIntensity
+        self.colorIterations = colorIterations
+        self.colorSchemeVibrance = colorSchemeVibrance
+        self.colorSchemeCurve = colorSchemeCurve
+        self.colorSchemeShadows = colorSchemeShadows
+        self.colorSchemeHighlights = colorSchemeHighlights
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try container.decode(Float.self, forKey: .timestamp)
+        position = try container.decode(SIMD3<Float>.self, forKey: .position)
+        scale = try container.decode(Float.self, forKey: .scale)
+        minDistance = try container.decode(Float.self, forKey: .minDistance)
+        fractalScale = try container.decode(Float.self, forKey: .fractalScale)
+        foldingLimit = try container.decode(Float.self, forKey: .foldingLimit)
+        sphereRadius = try container.decode(Float.self, forKey: .sphereRadius)
+        colorMix = try container.decode(Float.self, forKey: .colorMix)
+        glowIntensity = try container.decode(Float.self, forKey: .glowIntensity)
+        colorIterations = try container.decode(Float.self, forKey: .colorIterations)
+        colorSchemeVibrance = try container.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance) ?? 0.0
+        colorSchemeCurve = try container.decodeIfPresent(Float.self, forKey: .colorSchemeCurve) ?? 0.0
+        colorSchemeShadows = try container.decodeIfPresent(Float.self, forKey: .colorSchemeShadows) ?? 0.0
+        colorSchemeHighlights = try container.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights) ?? 0.0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(position, forKey: .position)
+        try container.encode(scale, forKey: .scale)
+        try container.encode(minDistance, forKey: .minDistance)
+        try container.encode(fractalScale, forKey: .fractalScale)
+        try container.encode(foldingLimit, forKey: .foldingLimit)
+        try container.encode(sphereRadius, forKey: .sphereRadius)
+        try container.encode(colorMix, forKey: .colorMix)
+        try container.encode(glowIntensity, forKey: .glowIntensity)
+        try container.encode(colorIterations, forKey: .colorIterations)
+        try container.encode(colorSchemeVibrance, forKey: .colorSchemeVibrance)
+        try container.encode(colorSchemeCurve, forKey: .colorSchemeCurve)
+        try container.encode(colorSchemeShadows, forKey: .colorSchemeShadows)
+        try container.encode(colorSchemeHighlights, forKey: .colorSchemeHighlights)
+    }
 }
 
 // MARK: - Recording Session
@@ -87,7 +178,11 @@ struct ParameterRecording: Codable, Identifiable {
             sphereRadius: simd_mix(lower.sphereRadius, upper.sphereRadius, t),
             colorMix: simd_mix(lower.colorMix, upper.colorMix, t),
             glowIntensity: simd_mix(lower.glowIntensity, upper.glowIntensity, t),
-            colorIterations: simd_mix(lower.colorIterations, upper.colorIterations, t)
+            colorIterations: simd_mix(lower.colorIterations, upper.colorIterations, t),
+            colorSchemeVibrance: simd_mix(lower.colorSchemeVibrance, upper.colorSchemeVibrance, t),
+            colorSchemeCurve: simd_mix(lower.colorSchemeCurve, upper.colorSchemeCurve, t),
+            colorSchemeShadows: simd_mix(lower.colorSchemeShadows, upper.colorSchemeShadows, t),
+            colorSchemeHighlights: simd_mix(lower.colorSchemeHighlights, upper.colorSchemeHighlights, t)
         )
     }
 }
@@ -204,9 +299,9 @@ class ParameterRecorder {
     
     /// Called every frame during recording to capture parameter state
     func update() {
-        guard state == .recording,
+          guard state == .recording,
               let startTime = recordingStartTime,
-              let settings = renderSettings else { return }
+              renderSettings != nil else { return }
         
         let currentTime = Float(Date().timeIntervalSince(startTime))
         
@@ -233,7 +328,11 @@ class ParameterRecorder {
             sphereRadius: settings.sphereRadius,
             colorMix: settings.colorMix,
             glowIntensity: settings.glowIntensity,
-            colorIterations: settings.colorIterations
+            colorIterations: settings.colorIterations,
+            colorSchemeVibrance: settings.colorSchemeVibrance,
+            colorSchemeCurve: settings.colorSchemeCurve,
+            colorSchemeShadows: settings.colorSchemeShadows,
+            colorSchemeHighlights: settings.colorSchemeHighlights
         )
         
         recordingFrames.append(frame)
@@ -305,6 +404,10 @@ class ParameterRecorder {
             settings.colorMix = frame.colorMix
             settings.glowIntensity = frame.glowIntensity
             settings.colorIterations = frame.colorIterations
+            settings.colorSchemeVibrance = frame.colorSchemeVibrance
+            settings.colorSchemeCurve = frame.colorSchemeCurve
+            settings.colorSchemeShadows = frame.colorSchemeShadows
+            settings.colorSchemeHighlights = frame.colorSchemeHighlights
         }
     }
     
@@ -456,21 +559,3 @@ struct RandomNameGenerator {
     }
 }
 
-// MARK: - SIMD3 Codable Extension
-
-extension SIMD3: Codable where Scalar: Codable {
-    public init(from decoder: Decoder) throws {
-        var container = try decoder.unkeyedContainer()
-        let x = try container.decode(Scalar.self)
-        let y = try container.decode(Scalar.self)
-        let z = try container.decode(Scalar.self)
-        self.init(x: x, y: y, z: z)
-    }
-    
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.unkeyedContainer()
-        try container.encode(x)
-        try container.encode(y)
-        try container.encode(z)
-    }
-}

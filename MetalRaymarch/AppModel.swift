@@ -66,7 +66,8 @@ class AppModel {
     var immersiveSpaceState = ImmersiveSpaceState.closed
 
     // App activity state (used to avoid submitting GPU work while backgrounded)
-    nonisolated(unsafe) var isAppActive: Bool = true
+    // @ObservationIgnored + nonisolated(unsafe) allows cross-thread access without @Observable macro interference
+    @ObservationIgnored nonisolated(unsafe) var isAppActive: Bool = true
 
     var fps: Double = 0
     
@@ -420,6 +421,10 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             contrast: pp.contrast,
             gamma: pp.gamma,
             brightness: 0.0,
+            vibrance: 1.0,
+            colorCurve: 1.0,
+            shadows: 1.0,
+            highlights: 1.0,
             neonIntensity: isNeonMode ? 1.0 : 0.0,
             hueFrequency: neon.hueFreq,
             hueOffset: neon.hueOffset,
@@ -504,6 +509,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeSaturation: Float = 2.0         // Color saturation override (boosted)
     private var _colorSchemeContrast: Float = 1.05          // Contrast override (default 1.05)
     private var _colorSchemeGamma: Float = 0.5              // Gamma override (default 0.5)
+    private var _colorSchemeVibrance: Float = 0.0           // Vibrance boost (0-1)
+    private var _colorSchemeCurve: Float = 0.0              // Midtone curve adjustment (-1 to 1)
+    private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.5 to 0.5)
+    private var _colorSchemeHighlights: Float = 0.0         // Highlight boost/reduction (-0.5 to 1.0)
     
     // === DYNAMIC COLOR ANIMATION ===
     // All animation effects default to OFF (0.0) so user must enable them
@@ -813,6 +822,30 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _colorSchemeGamma = max(0.2, min(1.0, newValue)) } }
     }
     
+    /// Vibrance boost (0-1)
+    var colorSchemeVibrance: Float {
+        get { withLock { _colorSchemeVibrance } }
+        set { withLock { _colorSchemeVibrance = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Midtone curve adjustment (-1 to 1)
+    var colorSchemeCurve: Float {
+        get { withLock { _colorSchemeCurve } }
+        set { withLock { _colorSchemeCurve = max(-1.0, min(1.0, newValue)) } }
+    }
+    
+    /// Shadow lift/crush (-0.05 to 0.05)
+    var colorSchemeShadows: Float {
+        get { withLock { _colorSchemeShadows } }
+        set { withLock { _colorSchemeShadows = max(-0.05, min(0.05, newValue)) } }
+    }
+    
+    /// Highlight boost/reduction (-0.5 to 1.0)
+    var colorSchemeHighlights: Float {
+        get { withLock { _colorSchemeHighlights } }
+        set { withLock { _colorSchemeHighlights = max(-0.5, min(1.0, newValue)) } }
+    }
+    
     /// Hue cycle speed (rotations per second, 0 = static)
     var hueCycleSpeed: Float {
         get { withLock { _hueCycleSpeed } }
@@ -995,6 +1028,10 @@ final class RenderSettings: @unchecked Sendable {
                 contrast: _colorSchemeContrast,
                 gamma: _colorSchemeGamma,
                 brightness: 0.0,
+                vibrance: _colorSchemeVibrance,
+                colorCurve: _colorSchemeCurve,
+                shadows: _colorSchemeShadows,
+                highlights: _colorSchemeHighlights,
                 neonIntensity: neonIntensity,
                 hueFrequency: hueFreq,
                 hueOffset: hueOffset,

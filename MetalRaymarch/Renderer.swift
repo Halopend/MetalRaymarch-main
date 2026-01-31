@@ -5,7 +5,7 @@
 //  Created by MU on 18/11/24.
 //
 
-import CompositorServices
+@preconcurrency import CompositorServices
 import Metal
 import MetalKit
 import simd
@@ -44,7 +44,8 @@ extension LayerRenderer.Clock.Instant.Duration {
 }
 
 /// Dedicated render thread using a persistent Thread object with high priority.\n/// This avoids thread hopping and preemption that causes micro-stutters with DispatchQueue.
-final class RendererTaskExecutor: TaskExecutor {
+final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
+    // pendingJobs is protected by lock - safe for Sendable
     private var pendingJobs: [UnownedJob] = []
     private let lock = NSLock()
     private let semaphore = DispatchSemaphore(value: 0)
@@ -377,7 +378,7 @@ actor Renderer {
                 }
                 
                 // Commit the set (validates all resources)
-                try residencySet?.commit()
+                residencySet?.commit()
                 
                 // Request initial residency
                 residencySet?.requestResidency()
@@ -399,12 +400,8 @@ actor Renderer {
             set.addAllocation(texture)
             
             // Re-commit and request residency
-            do {
-                try set.commit()
-                set.requestResidency()
-            } catch {
-                print("⚠️ Failed to update residency set: \(error)")
-            }
+            set.commit()
+            set.requestResidency()
         }
     }
     
@@ -1104,8 +1101,8 @@ actor Renderer {
                             emissiveThreshold: settings.emissiveThreshold,
                             emissiveColor: settings.emissiveColor,
                             emissiveSpeed: settings.emissiveSpeed,
-                            colorScheme: colorSchemeParams,
-                            fogIntensity: settings.fogIntensity)
+                            fogIntensity: settings.fogIntensity,
+                            colorScheme: colorSchemeParams)
         }
 
         self.uniforms[0].uniforms.0 = uniforms(forViewIndex: 0)
@@ -1704,8 +1701,8 @@ actor Renderer {
             emissiveThreshold: settings.emissiveThreshold,
             emissiveColor: settings.emissiveColor,
             emissiveSpeed: settings.emissiveSpeed,
-            colorScheme: colorSchemeParams,
-            fogIntensity: settings.fogIntensity
+            fogIntensity: settings.fogIntensity,
+            colorScheme: colorSchemeParams
         )
         
         // Copy uniforms to buffer

@@ -56,7 +56,7 @@ class FractalShareSession {
     private var groupSession: GroupSession<FractalShareActivity>?
     private var messenger: GroupSessionMessenger?
     private var subscriptions = Set<AnyCancellable>()
-    nonisolated(unsafe) private var tasks = Set<Task<Void, Never>>()
+    @ObservationIgnored private var tasks = Set<Task<Void, Never>>()
     
     private weak var renderSettings: RenderSettings?
     

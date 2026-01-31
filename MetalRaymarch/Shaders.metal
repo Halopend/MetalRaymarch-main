@@ -118,7 +118,6 @@ vertex ColorInOut screenshotVertexShader(Vertex in [[stage_in]],
 // Spatial Rendering optimizations for visionOS
 
 constant float3 sunDir = float3(0.3235, 0.0924, 0.2773); // normalized(0.35, 0.1, 0.3)
-constant float3 sunColour = float3(1.0, 0.95, 0.8);
 constant float kPowEpsilon = 1e-6f;
 constant half kPowEpsilonHalf = 1e-4h;
 
@@ -127,12 +126,8 @@ constant half kPowEpsilonHalf = 1e-4h;
 constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
 constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
 constant float kCoarseMaxDistance = 80.0f;      // Super-coarse max distance
-constant float kFogStartDistance = 1.5f;        // Fog exponential start
 
 // Shading constants
-constant half kGamma = 0.47h;                   // Output gamma correction
-constant half kSaturation = 1.5h;               // Color saturation multiplier
-constant half kContrast = 1.08h;                // Contrast adjustment
 constant float kSpecularPower = 10.0f;          // Specular highlight power
 constant float kSpecularIntensity = 2.0f;       // Specular intensity multiplier
 constant float kAttenPower = 1.5f;              // Light attenuation power
@@ -144,7 +139,6 @@ constant float kMinQualityForSpecular = 0.7f;   // Skip specular below this
 constant float kMinQualityForPostFX = 0.5f;     // Use simple gamma below this
 
 // === ADAPTIVE HIERARCHICAL CONSTANTS ===
-constant float BOUNDING_SPHERE_RADIUS = 3.5f;  // Skip rays outside this
 constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this distance
 constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
 constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
@@ -187,7 +181,6 @@ FORCE_INLINE float blueNoise(float2 uv, float time) {
     // Add small temporal variation to prevent static patterns
     return fract(fma(time, 0.1, noise));
 }
-constant float SCALE = 2.8;
 
 struct FractalParams {
     float4 scale;
@@ -394,18 +387,39 @@ FORCE_INLINE half3 applyColorScheme(half2 c, float colorMix, ColorSchemeParams s
 // Apply post-processing (saturation, contrast, gamma) from color scheme
 FORCE_INLINE half3 applyColorPostProcessing(half3 color, ColorSchemeParams scheme)
 {
-    // Saturation adjustment
+    // 1. Highlights adjustment (Exposure-like)
+    color *= half(1.0f + scheme.highlights);
+
+    // 2. Saturation adjustment with Vibrance boost
+    // Vibrance applies more saturation to less saturated parts of the image
     half luma = dot(color, half3(0.299h, 0.587h, 0.114h));
-    color = mix(half3(luma), color, half(scheme.saturation));
+    half maxVal = max(color.r, max(color.g, color.b));
+    half satBoost = half(scheme.saturation) + (1.0h - maxVal) * half(scheme.vibrance);
+    color = mix(half3(luma), color, max(0.0h, satBoost));
     
-    // Contrast adjustment (around 0.5 midpoint)
+    // 3. Contrast adjustment (around 0.5 midpoint)
     color = (color - 0.5h) * half(scheme.contrast) + 0.5h;
     
-    // Brightness
+    // 4. Shadows adjustment (Lift/Crush)
+    color = color + half(scheme.shadows) * (1.0h - color);
+
+    // 5. Brightness offset
     color += half(scheme.brightness);
     
-    // Gamma correction
+    // 6. Gamma correction (power curve)
     color = pow(max(color, half3(kPowEpsilonHalf)), half3(scheme.gamma));
+    
+    // 7. Midtone Curve (Soft Contrast/Sigmoid)
+    // colorCurve > 0 increases midtone contrast, < 0 flattens it
+    if (abs(scheme.colorCurve) > 0.001f) {
+        half curve = half(scheme.colorCurve);
+        // exponent < 1 means values are pushed away from mid (more contrast)
+        // exponent > 1 means values are pulled towards mid (less contrast)
+        half exponent = 1.0h / (1.0h + curve * 0.7h); 
+        half mid = 0.5h;
+        half3 delta = color - mid;
+        color = mid + sign(delta) * 0.5h * pow(abs(delta) * 2.0h, exponent);
+    }
     
     return saturate(color);
 }
@@ -922,7 +936,6 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
     if (rayGlow > 0.01h && scheme.glowIntensity > 0.001f) {
         half glowAmount = rayGlow * half(scheme.glowIntensity);
         // Additive glow based on the brightest channel
-        half maxC = max(max(rgb.r, rgb.g), rgb.b);
         half3 glowColor = rgb * (1.0h + glowAmount * 2.0h);
         rgb = mix(rgb, glowColor, glowAmount * 0.5h);
     }
@@ -935,6 +948,37 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
         half bloomAmount = max(0.0h, brightness - bloomThreshold) * half(scheme.bloomStrength);
         // Desaturate and brighten for bloom
         rgb += bloomAmount * half3(0.3h, 0.3h, 0.35h);
+    }
+    
+    // === COLOR GRADING: HIGHLIGHTS (Exposure-like) ===
+    // Apply before other grading - affects overall brightness
+    if (abs(scheme.highlights) > 0.001f) {
+        rgb *= half(1.0f + scheme.highlights);
+    }
+    
+    // === COLOR GRADING: VIBRANCE (Smart Saturation) ===
+    // Vibrance applies more saturation to less saturated colors
+    if (scheme.vibrance > 0.001f) {
+        half maxChannel = max(rgb.r, max(rgb.g, rgb.b));
+        half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance);
+        half luma2 = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+        rgb = mix(half3(luma2), rgb, 1.0h + vibranceBoost);
+    }
+    
+    // === COLOR GRADING: SHADOWS (Lift/Crush) ===
+    // Positive values lift shadows, negative values crush them
+    if (abs(scheme.shadows) > 0.001f) {
+        rgb = rgb + half(scheme.shadows) * (1.0h - rgb);
+    }
+    
+    // === COLOR GRADING: MIDTONE CURVE (S-Curve) ===
+    // colorCurve > 0 increases midtone contrast, < 0 flattens it
+    if (abs(scheme.colorCurve) > 0.001f) {
+        half curve = half(scheme.colorCurve);
+        half exponent = 1.0h / (1.0h + curve * 0.7h);
+        half mid = 0.5h;
+        half3 delta = rgb - mid;
+        rgb = mid + sign(delta) * 0.5h * powr(abs(delta) * 2.0h, half3(exponent));
     }
     
     // Simplified vignette
@@ -950,6 +994,9 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
         half3 flashColor = half3(1.0h, 0.4h, 0.1h);
         rgb = mix(rgb, flashColor, edgeGlow * 0.8h);
     }
+    
+    // Clamp before gamma to avoid NaN from negative values
+    rgb = saturate(rgb);
     
     // Gamma from scheme
     return powr(max(rgb, half3(kPowEpsilonHalf)), half3(scheme.gamma));
@@ -1301,7 +1348,6 @@ FORCE_INLINE half3 computeEmissive(
     else if (pattern == 4) {
         // EDGES: Glow at sharp edges using normal variance
         // Approximate curvature by checking normal stability
-        float e = distance * 0.01;
         float3 n1 = normal;
         
         // Sample nearby normals (cheap approximation)

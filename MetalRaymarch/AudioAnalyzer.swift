@@ -17,23 +17,23 @@ class AudioAnalyzer {
     // MARK: - Public Properties
     
     /// Current audio level (0-1), smoothed for visual appeal
-    /// nonisolated(unsafe) allows reading from render thread
-    nonisolated(unsafe) private(set) var level: Float = 0.0
+    /// @ObservationIgnored + nonisolated(unsafe) allows reading from render thread
+    @ObservationIgnored nonisolated(unsafe) private(set) var level: Float = 0.0
     
     /// Peak level with slow decay for "peak hold" effects
-    nonisolated(unsafe) private(set) var peakLevel: Float = 0.0
+    @ObservationIgnored nonisolated(unsafe) private(set) var peakLevel: Float = 0.0
     
     /// Bass level (low frequencies 20-250Hz) - good for deep pulses
-    nonisolated(unsafe) private(set) var bassLevel: Float = 0.0
+    @ObservationIgnored nonisolated(unsafe) private(set) var bassLevel: Float = 0.0
     
     /// Mid level (250Hz-2kHz) - vocals and instruments
-    nonisolated(unsafe) private(set) var midLevel: Float = 0.0
+    @ObservationIgnored nonisolated(unsafe) private(set) var midLevel: Float = 0.0
     
     /// Treble level (high frequencies 2k-20kHz) - good for sparkles
-    nonisolated(unsafe) private(set) var trebleLevel: Float = 0.0
+    @ObservationIgnored nonisolated(unsafe) private(set) var trebleLevel: Float = 0.0
     
     /// Whether audio capture is active
-    nonisolated(unsafe) private(set) var isCapturing: Bool = false
+    @ObservationIgnored nonisolated(unsafe) private(set) var isCapturing: Bool = false
     
     /// Error message if capture fails
     private(set) var errorMessage: String?
@@ -217,8 +217,12 @@ class AudioAnalyzer {
             
             // Calculate magnitudes for first half (positive frequencies)
             let halfSize = fftSize / 2
-            var splitComplex = DSPSplitComplex(realp: &realBuffer, imagp: &imagBuffer)
-            vDSP_zvabs(&splitComplex, vDSP_Stride(1), &magnitudeBuffer, vDSP_Stride(1), vDSP_Length(halfSize))
+            realBuffer.withUnsafeMutableBufferPointer { realPtr in
+                imagBuffer.withUnsafeMutableBufferPointer { imagPtr in
+                    var splitComplex = DSPSplitComplex(realp: realPtr.baseAddress!, imagp: imagPtr.baseAddress!)
+                    vDSP_zvabs(&splitComplex, vDSP_Stride(1), &magnitudeBuffer, vDSP_Stride(1), vDSP_Length(halfSize))
+                }
+            }
             
             // Normalize magnitudes
             var scale: Float = 2.0 / Float(fftSize)
