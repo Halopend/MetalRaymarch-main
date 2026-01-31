@@ -57,11 +57,8 @@ struct MetalProjectTestApp: App {
         Window(appModel.menuWindowID, id: appModel.menuWindowID) {
             ContentView()
                 .environment(appModel)
-                // Glass background is applied conditionally in ContentView based on visibility
                 .onAppear {
-                    // Ensure window content is visible when app launches or window appears
-                    appModel.ensureWindowContentVisible()
-                    // Set up the handler to open window via gesture
+                    // Set up handler for gesture-based window control
                     appModel.openMenuWindowHandler = {
                         openWindow(id: appModel.menuWindowID)
                     }

@@ -252,14 +252,12 @@ struct ContentView: View {
                     initialPosition = appModel.renderSettings.targetPosition
                 }
         )
-        // Hide content when menu window is "closed" (preserves window position/size)
+        // Hide content when menu window is "closed" - window stays but becomes invisible
+        // This preserves window position while avoiding the white bar
         .opacity(appModel.isMenuWindowVisible ? 1 : 0)
         .allowsHitTesting(appModel.isMenuWindowVisible)
-        .background {
-            if appModel.isMenuWindowVisible {
-                Color.clear.glassBackgroundEffect()
-            }
-        }
+        .glassBackgroundEffect(in: .rect(cornerRadius: 20))
+        .opacity(appModel.isMenuWindowVisible ? 1 : 0)  // Also hide the glass background
         .onAppear {
             cache.startSync(with: appModel.renderSettings)
             speed = Float(appModel.clock.speed)
