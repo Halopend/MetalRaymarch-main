@@ -698,61 +698,53 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     return kRayMissThreshold + 100.0;
 }
 
-// === FINE RAYMARCH FROM STARTING POINT ===
-// Refines from a known starting distance (from coarse pass or neighbor)
-// Uses FC_MAX_RAY_STEPS when available for compile-time optimization
-FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+// Cached raymarch refinement from a known starting distance
+// Combines refinement behavior with OrbitCache population on hit
+FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
 {
+    SceneResult result;
+    result.cache = makeEmptyOrbitCache();
+
+    if (UNLIKELY(startT > kRayMissThreshold)) {
+        result.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
+        return result;
+    }
+
     float dither = blueNoise(fragCoord, time) * 0.01;
-    
+
     // Back up further from the starting point to ensure we don't miss the surface
     float t = max(0.01, startT - 0.3) + dither;
-    
+
     float glow = 0.0;
-    // Use function constant when available for compile-time optimization
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
-    float endT = startT + 2.0;  // Pre-compute end threshold
-    
-    // Use partial unrolling when max steps is known at compile time
-    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
-        UNROLL_8
-        for(int j = 0; j < maxSteps; j++)
+    float endT = startT + 2.0;
+
+    NO_UNROLL
+    for(int j = 0; j < maxSteps; j++)
+    {
+        float threshold = fma(t, 0.0006, 0.0005);
+
+        float3 p = fma(rD, float3(t), rO);
+        float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
+
+        if(UNLIKELY(h < threshold))
         {
-            float threshold = fma(t, 0.0006, 0.0005);
-            float3 p = fma(rD, float3(t), rO);
-            float h = Map(p, params, foldingLimit, iterations);
-            
-            if(UNLIKELY(h < threshold)) {
-                return float2(t, saturate(glow * 0.25));
-            }
-            if (UNLIKELY(t > endT)) break;
-            
-            glow = fma(saturate(0.04 - h), glowIntensity, glow);
-            t += h;
+            OrbitCache hitCache;
+            MapWithOrbitCache(p, params, foldingLimit, iterations, hitCache);
+            result.cache = hitCache;
+            result.distGlow = float2(t, saturate(glow * 0.25));
+            return result;
         }
-    } else {
-        NO_UNROLL
-        for(int j = 0; j < maxSteps; j++)
-        {
-            float threshold = fma(t, 0.0006, 0.0005);
-            
-            float3 p = fma(rD, float3(t), rO);
-            float h = Map(p, params, foldingLimit, iterations);
-            
-            if(UNLIKELY(h < threshold))
-            {
-                return float2(t, saturate(glow * 0.25));
-            }
-            
-            if (UNLIKELY(t > endT)) break;
-            
-            glow = fma(saturate(0.04 - h), glowIntensity, glow);
-            t += h;
-        }
+
+        if (UNLIKELY(t > endT)) break;
+
+        glow = fma(saturate(0.04 - h), glowIntensity, glow);
+        t += h;
     }
-    
-    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+
+    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+    return result;
 }
 
 // Standard sphere tracing - reliable, no aggressive optimizations
@@ -1432,9 +1424,30 @@ kernel void adaptiveHierarchical8x8(
 
     float gTime = uniforms.time * 0.01 + 15.00;
     
-    // Use cached Scene for Mandelbox to avoid redundant iterations
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps, 
-                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
+    threadgroup float tileStartT;
+
+    if (localIndex == 0) {
+        if (fractalType == 0) {
+            int coarseIterations = max(lodIterations / 2, 2);
+            FractalParams coarseParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, coarseIterations,
+                                                           marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+            float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, coarseIterations);
+            tileStartT = coarseT < kRayMissThreshold ? coarseT : 0.05;
+        } else {
+            tileStartT = 0.05;
+        }
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    SceneResult sceneResult;
+    if (fractalType == 0) {
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, tileStartT, pixelCenter, 1.0, maxSteps,
+                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
+    } else {
+        sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
+                                     uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
+    }
     
     float adjustedDist = sceneResult.distGlow.x;
     float glow = sceneResult.distGlow.y;
@@ -1976,4 +1989,3 @@ fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]]
     out.depth = sourceTexture.sample(textureSampler, in.texCoord);
     return out;
 }
-
