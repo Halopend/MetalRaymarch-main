@@ -1049,6 +1049,86 @@ actor Renderer {
                 print("   ⚠️ Position is origin - world sensing may not be authorized!")
             }
         }
+        
+        // === PRECOMPUTE FRAME-UNIFORM VALUES ===
+        // These are computed once per frame on CPU, shared by all pixels
+        // Eliminates expensive per-pixel calculations like powr() and CameraPath()
+        
+        func computePrecomputedFractal(settings: RenderSettingsSnapshot) -> PrecomputedFractalParams {
+            let minRad2 = settings.minDistance
+            let fractalScale = settings.fractalScale
+            let sphereRadius = settings.sphereRadius
+            let iterations = settings.fractalIterations
+            
+            let invMinRad = 1.0 / minRad2
+            var scale = SIMD4<Float>(repeating: fractalScale * invMinRad)
+            scale.w = abs(scale.w)
+            
+            let absScalem1 = abs(fractalScale - 1.0)
+            // This is the expensive powr() call we're eliminating from the GPU
+            let absScalePow = pow(max(abs(fractalScale), 1e-6), Float(1 - iterations))
+            let sphereRadiusSq = sphereRadius * sphereRadius
+            let invSphereRadiusSq = 1.0 / sphereRadiusSq
+            
+            return PrecomputedFractalParams(
+                scale: scale,
+                absScalem1: absScalem1,
+                absScalePow: absScalePow,
+                invSphereRadiusSq: invSphereRadiusSq,
+                sphereRadiusSq: sphereRadiusSq
+            )
+        }
+        
+        func computePrecomputedLighting(time: Float, lightingMode: LightingMode, audioLevel: Float) -> PrecomputedLighting {
+            let gTime = time * 0.01 + 15.00
+            
+            let spotLightPosition: SIMD3<Float>
+            let lightIntensity: Float
+            
+            switch lightingMode {
+            case .staticLight:
+                spotLightPosition = SIMD3<Float>(2.0, 1.5, 2.0)
+                lightIntensity = 1.0
+            case .audioReactive:
+                let basePos = SIMD3<Float>(1.5, 1.0, 1.5)
+                let pulse = audioLevel * 2.0
+                let audioOffset = SIMD3<Float>(
+                    sin(gTime * 2.0) * pulse,
+                    audioLevel * 1.5,
+                    cos(gTime * 2.0) * pulse
+                )
+                spotLightPosition = basePos + audioOffset
+                lightIntensity = 0.5 + audioLevel * 1.5
+            case .animated:
+                // CameraPath: float3(-.78 + 3. * sin(2.14*t),.05+2.5 * sin(.942*t+1.3),.05 + 3.5 * cos(3.594*t))
+                let pathT = gTime + 0.03
+                let path = SIMD3<Float>(
+                    -0.78 + 3.0 * sin(2.14 * pathT),
+                    0.05 + 2.5 * sin(0.942 * pathT + 1.3),
+                    0.05 + 3.5 * cos(3.594 * pathT)
+                )
+                let offset = SIMD3<Float>(
+                    sin(gTime * 18.4),
+                    cos(gTime * 17.98),
+                    sin(gTime * 22.53)
+                ) * 0.2
+                spotLightPosition = path + offset
+                lightIntensity = 0.9 + sin(gTime * 1.5) * 0.15
+            }
+            
+            return PrecomputedLighting(
+                spotLightPosition: spotLightPosition,
+                lightIntensity: lightIntensity
+            )
+        }
+        
+        // Compute once per frame
+        let precomputedFractal = computePrecomputedFractal(settings: settingsSnapshot)
+        let precomputedLighting = computePrecomputedLighting(
+            time: Float(appModel.clock.time),
+            lightingMode: settingsSnapshot.lightingMode,
+            audioLevel: settingsSnapshot.audioLevel
+        )
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -1107,6 +1187,8 @@ actor Renderer {
                             logDepthScale: RenderSettings.logDepthScale,
                             depthMissValue: RenderSettings.depthMissValue,
                             _depthPadding: 0.0,
+                            precomputedFractal: precomputedFractal,
+                            precomputedLighting: precomputedLighting,
                             colorScheme: colorSchemeParams)
         }
 
@@ -1699,6 +1781,76 @@ actor Renderer {
         // Get color scheme parameters
         let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
+        // === PRECOMPUTE FRAME-UNIFORM VALUES (same as fragment shader) ===
+        let computePrecomputedFractal: PrecomputedFractalParams = {
+            let minRad2 = settingsSnapshot.minDistance
+            let fractalScale = settingsSnapshot.fractalScale
+            let sphereRadius = settingsSnapshot.sphereRadius
+            let iterations = settingsSnapshot.fractalIterations
+            
+            let invMinRad = 1.0 / minRad2
+            var scale = SIMD4<Float>(repeating: fractalScale * invMinRad)
+            scale.w = abs(scale.w)
+            
+            let absScalem1 = abs(fractalScale - 1.0)
+            let absScalePow = pow(max(abs(fractalScale), 1e-6), Float(1 - iterations))
+            let sphereRadiusSq = sphereRadius * sphereRadius
+            let invSphereRadiusSq = 1.0 / sphereRadiusSq
+            
+            return PrecomputedFractalParams(
+                scale: scale,
+                absScalem1: absScalem1,
+                absScalePow: absScalePow,
+                invSphereRadiusSq: invSphereRadiusSq,
+                sphereRadiusSq: sphereRadiusSq
+            )
+        }()
+        
+        let computePrecomputedLighting: PrecomputedLighting = {
+            let time = Float(appModel.clock.time)
+            let gTime = time * 0.01 + 15.00
+            let lightingMode = settingsSnapshot.lightingMode
+            let audioLevel = settingsSnapshot.audioLevel
+            
+            let spotLightPosition: SIMD3<Float>
+            let lightIntensity: Float
+            
+            switch lightingMode {
+            case .staticLight:
+                spotLightPosition = SIMD3<Float>(2.0, 1.5, 2.0)
+                lightIntensity = 1.0
+            case .audioReactive:
+                let basePos = SIMD3<Float>(1.5, 1.0, 1.5)
+                let pulse = audioLevel * 2.0
+                let audioOffset = SIMD3<Float>(
+                    sin(gTime * 2.0) * pulse,
+                    audioLevel * 1.5,
+                    cos(gTime * 2.0) * pulse
+                )
+                spotLightPosition = basePos + audioOffset
+                lightIntensity = 0.5 + audioLevel * 1.5
+            case .animated:
+                let pathT = gTime + 0.03
+                let path = SIMD3<Float>(
+                    -0.78 + 3.0 * sin(2.14 * pathT),
+                    0.05 + 2.5 * sin(0.942 * pathT + 1.3),
+                    0.05 + 3.5 * cos(3.594 * pathT)
+                )
+                let offset = SIMD3<Float>(
+                    sin(gTime * 18.4),
+                    cos(gTime * 17.98),
+                    sin(gTime * 22.53)
+                ) * 0.2
+                spotLightPosition = path + offset
+                lightIntensity = 0.9 + sin(gTime * 1.5) * 0.15
+            }
+            
+            return PrecomputedLighting(
+                spotLightPosition: spotLightPosition,
+                lightIntensity: lightIntensity
+            )
+        }()
+        
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
@@ -1734,6 +1886,8 @@ actor Renderer {
             logDepthScale: RenderSettings.logDepthScale,
             depthMissValue: RenderSettings.depthMissValue,
             _depthPadding: 0.0,
+            precomputedFractal: computePrecomputedFractal,
+            precomputedLighting: computePrecomputedLighting,
             colorScheme: colorSchemeParams
         )
         

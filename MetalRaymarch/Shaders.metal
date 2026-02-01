@@ -229,6 +229,27 @@ FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScal
     return params;
 }
 
+// OPTIMIZED: Use precomputed values from CPU to avoid per-pixel powr() and division
+// This version is preferred when PrecomputedFractalParams is available in uniforms
+FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
+    PrecomputedFractalParams precomputed,
+    float minRad2Val,
+    float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape)
+{
+    FractalParams params;
+    // Use precomputed values (expensive powr() and divisions done on CPU)
+    params.scale = precomputed.scale;
+    params.absScalem1 = precomputed.absScalem1;
+    params.absScalePow = precomputed.absScalePow;
+    params.sphereRadiusSq = precomputed.sphereRadiusSq;
+    params.minDistanceVal = minRad2Val;
+    params.bubbleCenter = bubbleCenter;
+    params.bubbleRadius = bubbleRadius;
+    params.bubbleEnabled = bubbleEnabled;
+    params.bubbleShape = bubbleShape;
+    return params;
+}
+
 // Optimized branchless Map function - THE HOTTEST PATH IN THE ENTIRE SHADER
 // Called potentially 50-100+ times per pixel (raymarch + shadows + normals)
 // Every cycle here matters!
@@ -405,62 +426,6 @@ FORCE_INLINE half3 applyColorPostProcessing(half3 color, ColorSchemeParams schem
 }
 
 // =============================================================================
-
-// Optimized colour function using half precision with color scheme support
-// Enhanced with neon mode orbit trap tracking
-half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme) 
-{
-    float4 scale = float4(fractalScale) / minRad2Val;
-    scale.w = abs(scale.w);
-    float sphereRadiusSq = sphereRadius * sphereRadius;
-
-    float3 p = pos;
-    float3 p0 = p;
-    float trap = 1.0;
-    float minTrap = 1.0;
-    int trapIter = 0;
-    float3 trapPos = p;
-    
-    int steps = max(int(float(colorIters) * quality), 2);
-    for (int i = 0; i < steps; i++)
-    {
-        p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
-        float r2 = dot(p, p);
-        p *= clamp(1.0 / max(r2, sphereRadiusSq), 1.0, 1.0/sphereRadiusSq);
-        p = p * scale.xyz + p0;
-        
-        // Track orbit trap with iteration and position
-        if (r2 < minTrap) {
-            minTrap = r2;
-            trapIter = i;
-            trapPos = p;
-        }
-        trap = min(trap, r2);
-    }
-    
-    // Check if neon mode is active
-    if (scheme.neonIntensity > 0.01f) {
-        // Compute neon orbit trap metrics
-        half trapMin = half(sqrt(trap));
-        half trapIterNorm = half(float(trapIter) / float(steps));
-        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f); // Normalized to 0-1
-        
-        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
-        
-        // If neonIntensity < 1, blend with standard coloring
-        if (scheme.neonIntensity < 0.99f) {
-            half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
-            half3 standardColor = applyColorScheme(c, colorMix, scheme);
-            return mix(standardColor, neonColor, half(scheme.neonIntensity));
-        }
-        return neonColor;
-    }
-    
-    half2 c = saturate(half2(0.3333h * log(half(dot(p,p))) - 1.0h, sqrt(half(trap))));
-    return applyColorScheme(c, colorMix, scheme);
-}
-
-// =============================================================================
 // ORBIT CACHE SYSTEM - Dramatic reduction in redundant Map() calls
 // =============================================================================
 // 
@@ -477,17 +442,32 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
 //   2. Computing normals analytically from cached Jacobian approximation
 //   3. Computing colors directly from cached orbit trap values
 //
+// EXTENDED CACHE: Now also stores fold information to eliminate redundant
+// MapWithFoldInfo() calls in emissive pattern calculations.
+//
 // =============================================================================
 
 // Cached orbit state from Mandelbox iteration
-// Stores everything needed to compute normals and colors without re-iterating
+// Stores everything needed to compute normals, colors, AND emissive patterns
+// without re-iterating the fractal
 struct OrbitCache {
+    // === BASIC ORBIT STATE ===
     float4 p;           // Final iterated position (xyz) and derivative scale (w)
     float3 p0;          // Original starting point (for re-seeding if needed)
     float trap;         // Minimum r² encountered (orbit trap for coloring)
     float distance;     // Computed distance estimate
     int iterationsUsed; // How many iterations were actually performed
     bool valid;         // Whether cache contains valid data
+    
+    // === EXTENDED: Trap iteration tracking for neon coloring ===
+    int trapIteration;     // Which iteration had the minimum trap
+    float3 trapPosition;   // Position at minimum trap (for angle-based coloring)
+    
+    // === EXTENDED: Fold info for emissive patterns ===
+    int boxFolds;          // Number of box folds applied
+    int sphereFolds;       // Number of sphere folds applied (inner/outer)
+    float minRadius;       // Minimum radius reached during iteration
+    float orbitTrapDist;   // Distance to nearest orbit trap point (axis distance)
 };
 
 // Create empty/invalid cache
@@ -496,11 +476,88 @@ FORCE_INLINE OrbitCache makeEmptyOrbitCache() {
     cache.valid = false;
     cache.trap = 1.0f;
     cache.distance = kRayMissThreshold;
+    cache.trapIteration = 0;
+    cache.trapPosition = float3(0.0f);
+    cache.boxFolds = 0;
+    cache.sphereFolds = 0;
+    cache.minRadius = 1e10f;
+    cache.orbitTrapDist = 1e10f;
     return cache;
+}
+
+// Unified colour function - uses cached orbit data when available, otherwise iterates
+// Supports all color modes including neon
+half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme, OrbitCache cache = {}) 
+{
+    float4 p;
+    float trap;
+    int trapIter;
+    float3 trapPos;
+    int steps;
+    
+    if (cache.valid) {
+        // Use cached orbit state
+        p = cache.p;
+        trap = cache.trap;
+        trapIter = cache.trapIteration;
+        trapPos = cache.trapPosition;
+        steps = cache.iterationsUsed;
+    } else {
+        // Compute orbit state
+        float4 scale = float4(fractalScale) / minRad2Val;
+        scale.w = abs(scale.w);
+        float sphereRadiusSq = sphereRadius * sphereRadius;
+
+        p = float4(pos, 1.0);
+        float4 p0 = p;
+        trap = 1.0;
+        float minTrap = 1.0;
+        trapIter = 0;
+        trapPos = pos;
+        
+        steps = max(int(float(colorIters) * quality), 2);
+        for (int i = 0; i < steps; i++)
+        {
+            p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
+            float r2 = dot(p.xyz, p.xyz);
+            p.xyz *= clamp(1.0 / max(r2, sphereRadiusSq), 1.0, 1.0/sphereRadiusSq);
+            p.xyz = p.xyz * scale.xyz + p0.xyz;
+            
+            // Track orbit trap with iteration and position
+            if (r2 < minTrap) {
+                minTrap = r2;
+                trapIter = i;
+                trapPos = p.xyz;
+            }
+            trap = min(trap, r2);
+        }
+    }
+    
+    // Check if neon mode is active
+    if (scheme.neonIntensity > 0.01f) {
+        // Compute neon orbit trap metrics
+        half trapMin = half(sqrt(trap));
+        half trapIterNorm = half(float(trapIter) / float(steps));
+        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f); // Normalized to 0-1
+        
+        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
+        
+        // If neonIntensity < 1, blend with standard coloring
+        if (scheme.neonIntensity < 0.99f) {
+            half2 c = saturate(half2(0.3333h * log(half(dot(p.xyz,p.xyz))) - 1.0h, sqrt(half(trap))));
+            half3 standardColor = applyColorScheme(c, colorMix, scheme);
+            return mix(standardColor, neonColor, half(scheme.neonIntensity));
+        }
+        return neonColor;
+    }
+    
+    half2 c = saturate(half2(0.3333h * log(half(dot(p.xyz,p.xyz))) - 1.0h, sqrt(half(trap))));
+    return applyColorScheme(c, colorMix, scheme);
 }
 
 // Map function that outputs orbit cache for reuse
 // This is the KEY optimization - we iterate once and cache everything needed
+// Now also tracks fold info and trap iteration for coloring/emissive patterns
 FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
 {
     float4 p = float4(pos, 1.0);
@@ -509,25 +566,71 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
     float trap = 1.0f;
     
+    // Extended tracking
+    int trapIter = 0;
+    float3 trapPos = pos;
+    int boxFolds = 0;
+    int sphereFolds = 0;
+    float minRadius = 1e10f;
+    float orbitTrapDist = 1e10f;
+    
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
     
     if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
         UNROLL_FULL
         for (int i = 0; i < loopCount; i++) {
+            // Box fold - track if folding occurred
+            float3 pOld = p.xyz;
             p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+            if (any(p.xyz != pOld)) boxFolds++;
+            
             float r2 = dot(p.xyz, p.xyz);
-            trap = min(trap, r2);
+            float r = sqrt(r2);
+            minRadius = min(minRadius, r);
+            
+            // Orbit trap - distance to nearest axis
+            float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z));
+            orbitTrapDist = min(orbitTrapDist, axisTrap);
+            
+            // Track iteration with minimum trap
+            if (r2 < trap) {
+                trap = r2;
+                trapIter = i;
+                trapPos = p.xyz;
+            }
+            
+            // Sphere fold
             float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
+            if (t > 1.0f) sphereFolds++;  // Sphere fold occurred
             p *= t;
             p = fma(p, params.scale, p0);
         }
     } else {
         UNROLL_8
         for (int i = 0; i < loopCount; i++) {
+            // Box fold - track if folding occurred
+            float3 pOld = p.xyz;
             p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+            if (any(p.xyz != pOld)) boxFolds++;
+            
             float r2 = dot(p.xyz, p.xyz);
-            trap = min(trap, r2);
+            float r = sqrt(r2);
+            minRadius = min(minRadius, r);
+            
+            // Orbit trap - distance to nearest axis
+            float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z));
+            orbitTrapDist = min(orbitTrapDist, axisTrap);
+            
+            // Track iteration with minimum trap
+            if (r2 < trap) {
+                trap = r2;
+                trapIter = i;
+                trapPos = p.xyz;
+            }
+            
+            // Sphere fold
             float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
+            if (t > 1.0f) sphereFolds++;  // Sphere fold occurred
             p *= t;
             p = fma(p, params.scale, p0);
         }
@@ -542,7 +645,7 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
         d = max(d, -bubbleDist);
     }
     
-    // Store orbit state in cache for reuse
+    // Store full orbit state in cache for reuse
     cache.p = p;
     cache.p0 = pos;
     cache.trap = trap;
@@ -550,76 +653,47 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     cache.iterationsUsed = loopCount;
     cache.valid = true;
     
+    // Extended fields
+    cache.trapIteration = trapIter;
+    cache.trapPosition = trapPos;
+    cache.boxFolds = boxFolds;
+    cache.sphereFolds = sphereFolds;
+    cache.minRadius = minRadius;
+    cache.orbitTrapDist = orbitTrapDist;
+    
     return d;
 }
 
 // Compute normal using cached orbit state + small perturbations
-// Instead of 4 full Map() calls (4 × iterations), we do 3 calls with REDUCED iterations
-// The key insight: near the surface, we only need a few iterations for gradient direction
-FORCE_INLINE float3 GetNormalFromCache(float3 pos, float distance, OrbitCache cache, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
+// Unified normal calculation - uses cached center distance when available
+// For Mandelbox with valid cache: uses cache.distance + reduced iterations
+// Otherwise: standard forward differences with full iterations
+FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType, OrbitCache cache = {})
 {
-    // For normals, we need far fewer iterations than for accurate distance
-    // The gradient direction converges much faster than the absolute distance
-    // Using ~40% of iterations gives accurate normals with 60% fewer inner loops
-    int normalIters = max((iterations * 2) / 5, 3);
-    
-    float e = max(distance * 0.0005f, 0.0001f);
-    
-    // We have the center value from cache
-    float d0 = cache.distance;
-    
-    // Create temporary params with reduced iterations for the offset samples
-    // These calls are unavoidable but use far fewer iterations
-    OrbitCache dummy;  // We don't need to cache these
-    
-    // 3 offset samples with reduced iterations
-    float dx = MapWithOrbitCache(pos + float3(e, 0, 0), params, foldingLimit, normalIters, dummy);
-    float dy = MapWithOrbitCache(pos + float3(0, e, 0), params, foldingLimit, normalIters, dummy);
-    float dz = MapWithOrbitCache(pos + float3(0, 0, e), params, foldingLimit, normalIters, dummy);
-    
-    // Compute gradient using forward differences from cached center
-    float3 gradient = float3(dx - d0, dy - d0, dz - d0);
-    
-    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
-}
-
-// Compute color directly from cached orbit state - NO iteration needed!
-// This eliminates the entire color iteration loop (~8-15 iterations saved)
-FORCE_INLINE half3 ColourFromCache(OrbitCache cache, float3 pos, ColorSchemeParams scheme, float colorMix)
-{
-    // Extract color information directly from cached orbit state
-    float4 p = cache.p;
-    float trap = cache.trap;
-    
-    // Same color mapping as original Colour function
-    half2 c = saturate(half2(0.3333h * log(half(dot(p.xyz, p.xyz))) - 1.0h, sqrt(half(trap))));
-    
-    // Extract colors from scheme
-    half3 col1 = half3(scheme.color1);
-    half3 col2 = half3(scheme.color2);
-    half3 col3 = half3(scheme.color3);
-    
-    // Primary color from palette blending
-    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
-    
-    // Alternative color using mix factors
-    half3 altFactors = half3(scheme.altMixFactors);
-    half3 altColor = half3(c.x * altFactors.x, c.y * altFactors.y, altFactors.z + 0.3h * c.y);
-    
-    return mix(finalColor, altColor, half(colorMix));
-}
-
-// Normal via forward differences (4 Map calls total)
-FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
-{
-    float e = distance * 0.001;
-    float d = MapMandelbox(pos, params, foldingLimit, iterations, fractalType);
-    float3 gradient = float3(
-        MapMandelbox(pos + float3(e,0,0), params, foldingLimit, iterations, fractalType) - d,
-        MapMandelbox(pos + float3(0,e,0), params, foldingLimit, iterations, fractalType) - d,
-        MapMandelbox(pos + float3(0,0,e), params, foldingLimit, iterations, fractalType) - d
-    );
-    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+    if (cache.valid && fractalType == 0) {
+        // Optimized path: use cached center distance, reduced iterations
+        int normalIters = max((iterations * 2) / 5, 3);
+        float e = max(distance * 0.0005f, 0.0001f);
+        float d0 = cache.distance;
+        
+        OrbitCache dummy;
+        float dx = MapWithOrbitCache(pos + float3(e, 0, 0), params, foldingLimit, normalIters, dummy);
+        float dy = MapWithOrbitCache(pos + float3(0, e, 0), params, foldingLimit, normalIters, dummy);
+        float dz = MapWithOrbitCache(pos + float3(0, 0, e), params, foldingLimit, normalIters, dummy);
+        
+        float3 gradient = float3(dx - d0, dy - d0, dz - d0);
+        return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+    } else {
+        // Standard path: 4 Map calls with full iterations
+        float e = distance * 0.001;
+        float d = MapMandelbox(pos, params, foldingLimit, iterations, fractalType);
+        float3 gradient = float3(
+            MapMandelbox(pos + float3(e,0,0), params, foldingLimit, iterations, fractalType) - d,
+            MapMandelbox(pos + float3(0,e,0), params, foldingLimit, iterations, fractalType) - d,
+            MapMandelbox(pos + float3(0,0,e), params, foldingLimit, iterations, fractalType) - d
+        );
+        return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+    }
 }
 
 // Far-range coarse raymarch (12 steps, max 80 units)
@@ -711,8 +785,7 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
         }
     }
 
-    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
-    return result;
+    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
 // Main sphere tracing raymarch
@@ -803,6 +876,46 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         }
         
         if (UNLIKELY(t > kMaxRayDistance)) break;
+        
+        glow = fma(saturate(0.04 - h), glowIntensity, glow);
+        t += h;
+    }
+    
+    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+    return result;
+}
+
+// Raymarch with cache that starts from a known distance (for hierarchical acceleration)
+FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
+{
+    SceneResult result;
+    result.cache = makeEmptyOrbitCache();
+    
+    float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
+    float t = max(0.01, startT - 0.3) + dither;
+    
+    float glow = 0.0;
+    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
+    int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
+    float endT = startT + 2.0;
+    
+    NO_UNROLL
+    for(int j = 0; j < maxSteps; j++)
+    {
+        float threshold = fma(t, 0.0006, 0.0005);
+        float3 p = fma(rD, float3(t), rO);
+        float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
+        
+        if(UNLIKELY(h < threshold))
+        {
+            OrbitCache hitCache;
+            MapWithOrbitCache(p, params, foldingLimit, iterations, hitCache);
+            result.cache = hitCache;
+            result.distGlow = float2(t, saturate(glow * 0.25));
+            return result;
+        }
+        
+        if (UNLIKELY(t > endT)) break;
         
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
         t += h;
@@ -1191,6 +1304,7 @@ FORCE_INLINE float MapWithFoldInfo(float3 pos, FractalParams params, float foldi
 
 // Compute emissive glow contribution
 // Returns RGB emissive color to add to final shading
+// Compute emissive glow - uses cached fold info when available, otherwise computes it
 FORCE_INLINE half3 computeEmissive(
     float3 pos,
     float3 normal,
@@ -1204,87 +1318,71 @@ FORCE_INLINE half3 computeEmissive(
     FractalParams params,
     float foldingLimit,
     int iterations,
-    int fractalType
+    int fractalType,
+    OrbitCache cache  // Pass cache - if cache.valid, uses cached data; otherwise computes
 ) {
     if (intensity <= 0.0) return half3(0.0h);
+    
+    // Get fold info - either from cache or by computing
+    int boxFolds, sphereFolds;
+    float minRadius, orbitTrapDist;
+    
+    if (cache.valid) {
+        // Use cached values
+        boxFolds = cache.boxFolds;
+        sphereFolds = cache.sphereFolds;
+        minRadius = cache.minRadius;
+        orbitTrapDist = cache.orbitTrapDist;
+    } else {
+        // Compute fold info
+        FoldInfo info;
+        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
+        boxFolds = info.boxFolds;
+        sphereFolds = info.sphereFolds;
+        minRadius = info.minRadius;
+        orbitTrapDist = info.orbitTrap;
+    }
     
     float emission = 0.0;
     
     if (pattern == 0) {
         // FOLDS: Glow based on fold count
-        FoldInfo info;
-        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
-        
-        // More folds = more glow (normalized to typical range)
-        float foldRatio = float(info.boxFolds + info.sphereFolds) / float(iterations * 2);
+        float foldRatio = float(boxFolds + sphereFolds) / float(iterations * 2);
         emission = smoothstep(threshold, 1.0, foldRatio);
     }
     else if (pattern == 1) {
         // DEPTH: Glow based on iteration depth (deep = glowy)
-        FoldInfo info;
-        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
-        
-        // Small min radius = deep in the fractal
-        float depthFactor = 1.0 - saturate(info.minRadius / (foldingLimit * 2.0));
+        float depthFactor = 1.0 - saturate(minRadius / (foldingLimit * 2.0));
         emission = smoothstep(threshold, 1.0, depthFactor);
     }
     else if (pattern == 2) {
-        // POSITION: Sine-based veins/ridges pattern
+        // POSITION: Sine-based veins/ridges pattern + orbit trap
         float3 freq = float3(5.0, 7.0, 6.0);
         float veins = sin(pos.x * freq.x) * sin(pos.y * freq.y) * sin(pos.z * freq.z);
-        veins = veins * 0.5 + 0.5;  // Normalize to 0-1
-        
-        // Add orbit trap influence
-        FoldInfo info;
-        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 6), fractalType, info);
-        float trap = 1.0 - saturate(info.orbitTrap * 2.0);
-        
+        veins = veins * 0.5 + 0.5;
+        float trap = 1.0 - saturate(orbitTrapDist * 2.0);
         emission = smoothstep(threshold, 1.0, veins * 0.5 + trap * 0.5);
     }
     else if (pattern == 3) {
-        // PULSE: Fold-aware animated glow (symmetric structures light together)
-        // Use fold info to create "cells" that pulse together
-        FoldInfo info;
-        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
-        
-        // Cell ID based on fold count + orbit trap (groups symmetric parts)
-        float cellId = float(info.boxFolds * 3 + info.sphereFolds * 7) + floor(info.orbitTrap * 4.0);
-        
-        // Animated pulse per cell
-        float phase = cellId * 0.7;  // Different phase per cell type
+        // PULSE: Fold-aware animated glow
+        float cellId = float(boxFolds * 3 + sphereFolds * 7) + floor(orbitTrapDist * 4.0);
+        float phase = cellId * 0.7;
         float pulse = sin(gTime * speed * 3.0 + phase);
-        pulse = pulse * 0.5 + 0.5;  // Normalize to 0-1
-        
-        // Add depth-based brightness (deeper = brighter glow)
-        float depthBoost = 1.0 - saturate(info.minRadius / (foldingLimit * 1.5));
-        
-        // Threshold controls which cells glow (lower = more cells)
+        pulse = pulse * 0.5 + 0.5;
+        float depthBoost = 1.0 - saturate(minRadius / (foldingLimit * 1.5));
         float cellMask = step(threshold, fract(cellId * 0.1234));
-        
         emission = pulse * depthBoost * cellMask;
     }
     else if (pattern == 4) {
-        // EDGES: Glow at sharp edges using normal variance
-        // Approximate curvature by checking normal stability
-        float3 n1 = normal;
-        
-        // Sample nearby normals (cheap approximation)
+        // EDGES: Glow at sharp edges
         float3 tangent = normalize(cross(normal, float3(0, 1, 0) + float3(0.001)));
         float3 bitangent = cross(normal, tangent);
-        
-        // High curvature = edge
-        float curvature = 1.0 - abs(dot(n1, normalize(n1 + tangent * 0.1)));
-        curvature += 1.0 - abs(dot(n1, normalize(n1 + bitangent * 0.1)));
-        
-        // Add fold-based edge detection
-        FoldInfo info;
-        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 6), fractalType, info);
-        float foldEdge = float(info.boxFolds) / float(iterations);
-        
+        float curvature = 1.0 - abs(dot(normal, normalize(normal + tangent * 0.1)));
+        curvature += 1.0 - abs(dot(normal, normalize(normal + bitangent * 0.1)));
+        float foldEdge = float(boxFolds) / float(iterations);
         emission = smoothstep(threshold, 1.0, curvature * 0.5 + foldEdge * 0.5);
     }
     
-    // Apply intensity and color
     return half3(emissiveColor) * half(emission * intensity);
 }
 
@@ -1343,8 +1441,11 @@ kernel void adaptiveHierarchical8x8(
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
 
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+    // Use precomputed fractal params (powr() and divisions done on CPU)
+    FractalParams fractalParams = makeFractalParamsFromPrecomputed(
+        uniforms.precomputedFractal,
+        uniforms.minDistance,
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
     float gTime = uniforms.time * 0.01 + 15.00;
     
@@ -1353,8 +1454,11 @@ kernel void adaptiveHierarchical8x8(
     if (localIndex == 0) {
         if (fractalType == 0) {
             int coarseIterations = max(lodIterations / 2, 2);
-            FractalParams coarseParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, coarseIterations,
-                                                           marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+            // Coarse params with reduced iterations - still use precomputed base values
+            FractalParams coarseParams = makeFractalParamsFromPrecomputed(
+                uniforms.precomputedFractal,
+                uniforms.minDistance,
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
             float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, coarseIterations);
             tileStartT = coarseT < kRayMissThreshold ? coarseT : 0.05;
         } else {
@@ -1381,23 +1485,20 @@ kernel void adaptiveHierarchical8x8(
     if (sceneResult.distGlow.x < kRayMissThreshold) {
         float3 p = marchOrigin + adjustedDist * marchDir;
         
-        float3 nor;
-        if (fractalType == 0 && hitCache.valid) {
-            nor = GetNormalFromCache(p, adjustedDist, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
-        } else {
-            nor = GetNormalTetrahedron(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
-        }
+        float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, hitCache);
         
-        // Lighting with mode-based behavior
-        float3 spotLight = computeSpotLightPosition(gTime, uniforms.lightingMode, uniforms.audioLevel);
-        float lightIntensity = computeLightingIntensity(gTime, uniforms.lightingMode, uniforms.audioLevel);
+        // Use precomputed lighting from CPU (eliminates per-pixel CameraPath() and trig)
+        float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
+        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         float3 spot = spotLight - p;
         float atten = length(spot);
         spot /= atten;
         
         int shadowIterations = max(lodIterations - 2, 2);
-        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+        FractalParams shadowParams = makeFractalParamsFromPrecomputed(
+            uniforms.precomputedFractal,
+            uniforms.minDistance,
+            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
         
         half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
@@ -1406,12 +1507,8 @@ kernel void adaptiveHierarchical8x8(
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        if (hitCache.valid) {
-            col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
-        } else {
-            col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
-                        uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme);
-        }
+        col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
+                    uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
         // Specular
@@ -1472,8 +1569,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
 
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+    // Use precomputed fractal params (powr() and divisions done on CPU)
+    FractalParams fractalParams = makeFractalParamsFromPrecomputed(
+        uniforms.precomputedFractal,
+        uniforms.minDistance,
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
     half3 col = half3(0.0h);
     float2 ret;
@@ -1485,76 +1585,61 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     if (ret.x < kRayMissThreshold)
     {
+        // Compute hit position and clip-space depth once (used for depth output and debug visualization)
         float3 p = marchOrigin + ret.x * marchDir;
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = encodeDepthFromClip(clipPos);
+        float depth = encodeDepthFromClip(clipPos);
+        output.depth = depth;
 
-        // Debug: visualize depth as grayscale
+        // Debug: visualize depth as grayscale (early return)
         if (DEBUG_DEPTH_VISUALIZATION) {
-            float depthGray = saturate(output.depth);
+            float depthGray = saturate(depth);
             output.color = float4(depthGray, depthGray, depthGray, 1.0);
             return output;
         }
-    }
-    else
-    {
-        // No hit - far plane (tiny depth so compositor treats as far away)
-        output.depth = 1e-7;
-
-        if (DEBUG_DEPTH_VISUALIZATION) {
-            output.color = float4(0.0, 0.0, 0.0, 1.0);
-            return output;
-        }
-    }
-
-    if (ret.x < kRayMissThreshold)
-    {
-        float3 p = marchOrigin + ret.x * marchDir;
 
         float3 nor;
         if (quality > kMinQualityForNormals) {
-            if (fractalType == 0 && hitCache.valid) {
-                nor = GetNormalFromCache(p, ret.x, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
-            } else {
-                nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
-            }
+            nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, hitCache);
         } else {
             nor = normalize(p - marchOrigin);
         }
 
         if (quality > 0.4) {
-            float3 spotLight = CameraPath(gTime + .03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
+            // Use precomputed spotlight position and intensity from CPU
+            float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
+            float lightIntensity = uniforms.precomputedLighting.lightIntensity;
             float3 spot = spotLight - p;
             float atten = length(spot);
             spot /= atten;
 
             int shadowIterations = max(lodIterations - 2, 2);
-            FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                                            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+            // Shadow params still need per-pixel bubble center, but use precomputed fractal values
+            FractalParams shadowParams = makeFractalParamsFromPrecomputed(
+                uniforms.precomputedFractal,
+                uniforms.minDistance,
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
 
             float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
+            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
-            if (hitCache.valid) {
-                col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
-            } else {
-                col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme);
-            }
+            col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
 
             if (quality > kMinQualityForSpecular) {
                 float3 ref = reflect(marchDir, nor);
-                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
                 float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
                 col += half3(specSpot) * shaSpot * bri;
                 col += half3(specSun) * shaSun * briSun;
             }
             
             // Emissive glow (self-illumination based on patterns)
+            // Single function handles both cached and uncached paths
             if (uniforms.emissiveEnabled != 0) {
                 half3 emissive = computeEmissive(
                     p,
@@ -1569,27 +1654,26 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                     fractalParams,
                     uniforms.foldingLimit,
                     lodIterations,
-                    fractalType
+                    fractalType,
+                    hitCache
                 );
                 col += emissive;
             }
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
-            if (hitCache.valid) {
-                col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix) * diffuse;
-            } else {
-                col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme) * diffuse;
-            }
+            col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache) * diffuse;
         }
-
-        // Compute clip-space depth and write it out for async timewarp
-        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = encodeDepthFromClip(clipPos);
+        // Depth already written at start of this block via clipPos
     }
     else
     {
         // No hit - far plane (tiny depth so compositor treats as far away)
         output.depth = 1e-7;
+
+        if (DEBUG_DEPTH_VISUALIZATION) {
+            output.color = float4(0.0, 0.0, 0.0, 1.0);
+            return output;
+        }
     }
 
     // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
@@ -1660,8 +1744,11 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
 
-    FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
-                                                     marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+    // Use precomputed fractal params (powr() and divisions done on CPU)
+    FractalParams fractalParams = makeFractalParamsFromPrecomputed(
+        uniforms.precomputedFractal,
+        uniforms.minDistance,
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
     SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     float2 ret = sceneResult.distGlow;
@@ -1676,24 +1763,21 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     {
         float3 p = marchOrigin + adjustedDist * marchDir;
         
-        float3 nor;
-        if (hitCache.valid) {
-            nor = GetNormalFromCache(p, adjustedDist, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
-        } else {
-            nor = GetNormalTetrahedron(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
-        }
+        float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, hitCache);
         
         // Quad-shared shadows: leader computes, broadcasts to all 4 pixels
         half shaSpot = 1.0h;
         half shaSun = 1.0h;
         
         int shadowIterations = max(lodIterations - 2, 2);
-        FractalParams shadowParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, shadowIterations,
-                                                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+        FractalParams shadowParams = makeFractalParamsFromPrecomputed(
+            uniforms.precomputedFractal,
+            uniforms.minDistance,
+            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
         
-        // Lighting with mode-based behavior
-        float3 spotLight = computeSpotLightPosition(gTime, uniforms.lightingMode, uniforms.audioLevel);
-        float lightIntensity = computeLightingIntensity(gTime, uniforms.lightingMode, uniforms.audioLevel);
+        // Use precomputed lighting from CPU (eliminates per-pixel CameraPath() and trig)
+        float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
+        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         float3 spot = spotLight - p;
         float atten = length(spot);
         spot /= atten;
@@ -1712,11 +1796,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        if (hitCache.valid) {
-            col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
-        } else {
-            col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme);
-        }
+        col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
         col = (col * bri * shaSpot) + (col * briSun * shaSun);
         
         // Specular
@@ -1741,7 +1821,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
                 fractalParams,
                 uniforms.foldingLimit,
                 lodIterations,
-                fractalType
+                fractalType,
+                hitCache
             );
             col += emissive;
         }

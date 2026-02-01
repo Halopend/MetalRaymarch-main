@@ -119,6 +119,27 @@ typedef struct
     int _padding;                     // Alignment padding
 } ColorSchemeParams;
 
+// === PRECOMPUTED FRACTAL PARAMETERS ===
+// These are frame-uniform values computed once on CPU and shared by all pixels.
+// This eliminates redundant per-pixel calculations like expensive powr() calls.
+typedef struct
+{
+    vector_float4 scale;              // fractalScale / minDistance (xyz), abs(w)
+    float absScalem1;                 // abs(fractalScale - 1.0)
+    float absScalePow;                // powr(abs(fractalScale), 1 - iterations) - EXPENSIVE, precompute!
+    float invSphereRadiusSq;          // 1.0 / (sphereRadius * sphereRadius)
+    float sphereRadiusSq;             // sphereRadius * sphereRadius
+} PrecomputedFractalParams;
+
+// === PRECOMPUTED LIGHTING ===
+// Spotlight position and intensity depend only on time and lighting mode.
+// Computing these per-pixel wastes GPU cycles on identical results.
+typedef struct
+{
+    vector_float3 spotLightPosition;  // Precomputed spotlight world position
+    float lightIntensity;             // Precomputed light intensity multiplier
+} PrecomputedLighting;
+
 typedef struct
 {
     matrix_float4x4 projectionMatrix;
@@ -160,6 +181,9 @@ typedef struct
     float logDepthScale;     // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;    // Sentinel depth for "no hit" rays (e.g., 2.0)
     float _depthPadding;     // Alignment padding
+    // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
+    PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
+    PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } Uniforms;
 
@@ -208,6 +232,9 @@ typedef struct
     float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;        // Sentinel depth for "no hit" rays (e.g., 2.0)
     float _depthPadding;         // Alignment padding
+    // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
+    PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
+    PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 
