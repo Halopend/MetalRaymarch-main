@@ -20,6 +20,11 @@ import Foundation
 import ARKit
 import simd
 
+// MARK: - Debug Configuration
+
+/// Set to true to enable verbose hand tracking debug logging
+private let HAND_TRACKING_DEBUG = false
+
 // MARK: - Hand Tracking Data
 
 /// Lightweight hand tracking data extracted from ARKit
@@ -285,9 +290,9 @@ final class GestureController {
         leftFistActive = false
         menuToggleActive = false
         
-        #if DEBUG
-        print("🔄 GestureController synced with settings")
-        #endif
+        if HAND_TRACKING_DEBUG {
+            print("🔄 GestureController synced with settings")
+        }
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -384,6 +389,7 @@ final class GestureController {
         data.palmPosition = jointPosition(.middleFingerMetacarpal)
         
         // Palm center (average of metacarpals for more accurate palm detection)
+        // OPTIMIZATION: Use SIMD addition with single multiply instead of 4 multiplies
         let indexMeta = jointPosition(.indexFingerMetacarpal)
         let middleMeta = jointPosition(.middleFingerMetacarpal)
         let ringMeta = jointPosition(.ringFingerMetacarpal)
@@ -459,7 +465,7 @@ final class GestureController {
         guard rightHand.isTracked else {
             if menuToggleActive {
                 menuToggleActive = false
-                print("👆 Menu toggle: right hand tracking lost")
+                if HAND_TRACKING_DEBUG { print("👆 Menu toggle: right hand tracking lost") }
             }
             return
         }
@@ -469,8 +475,8 @@ final class GestureController {
         
         let touchStrength = rightHand.middleFingerTouchingPalm()
         
-        // Log touch strength for debugging (always, not just in debug builds)
-        if touchStrength > 0.2 {
+        // Log touch strength for debugging
+        if HAND_TRACKING_DEBUG && touchStrength > 0.2 {
             print("👆 Menu gesture - touchStrength: \(String(format: "%.2f", touchStrength)), threshold: \(menuToggleActivateThreshold), active: \(menuToggleActive), cooldown: \(String(format: "%.2f", menuToggleCooldown))")
         }
         
@@ -487,12 +493,12 @@ final class GestureController {
             // Touch just activated - trigger menu toggle
             menuToggleActive = true
             menuToggleCooldown = menuToggleCooldownDuration
-            print("👆 Menu toggle ACTIVATED - calling onMenuToggle callback")
+            if HAND_TRACKING_DEBUG { print("👆 Menu toggle ACTIVATED - calling onMenuToggle callback") }
             onMenuToggle?()
         } else if !shouldBeActive && menuToggleActive {
             // Touch released
             menuToggleActive = false
-            print("👆 Menu toggle RELEASED")
+            if HAND_TRACKING_DEBUG { print("👆 Menu toggle RELEASED") }
         }
     }
     
@@ -621,12 +627,12 @@ final class GestureController {
             state.startDistance = currentDistance
             state.startParameterValue = currentTarget  // Capture current target when gesture starts
             
-            #if DEBUG
-            let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"]
-            let paramName = paramNames[min(digit, 4)]
-            let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
-            print("🤲 Two-hand \(paramName) gesture STARTED (\(mode))")
-            #endif
+            if HAND_TRACKING_DEBUG {
+                let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"]
+                let paramName = paramNames[min(digit, 4)]
+                let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
+                print("🤲 Two-hand \(paramName) gesture STARTED (\(mode))")
+            }
         }
         
         // Gesture active - set TARGET directly (Renderer smooths to this value)
@@ -665,31 +671,23 @@ final class GestureController {
             if hitLimit {
                 settings.triggerLimitFlash()
             }
-            
-            #if DEBUG
-            struct DebugState { static var counter = 0 }
-            DebugState.counter += 1
-            if DebugState.counter % 60 == 0 {
-                // print("🤲 distance: \(String(format: "%.1f", currentDistance * 100))cm")
-            }
-            #endif
         }
         
         // Gesture ended
         if !bothActive && state.isActive {
             state.isActive = false
-            #if DEBUG
-            let paramName = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"][min(digit, 4)]
-            let reason: String
-            if !leftHand.isTracked || !rightHand.isTracked {
-                reason = "hand tracking lost"
-            } else if leftPinch < releaseThresh || rightPinch < releaseThresh {
-                reason = "pinch released"
-            } else {
-                reason = "hands too far apart"
+            if HAND_TRACKING_DEBUG {
+                let paramName = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"][min(digit, 4)]
+                let reason: String
+                if !leftHand.isTracked || !rightHand.isTracked {
+                    reason = "hand tracking lost"
+                } else if leftPinch < releaseThresh || rightPinch < releaseThresh {
+                    reason = "pinch released"
+                } else {
+                    reason = "hands too far apart"
+                }
+                print("🤲 Two-hand \(paramName) gesture ENDED (\(reason))")
             }
-            print("🤲 Two-hand \(paramName) gesture ENDED (\(reason))")
-            #endif
         }
     }
     
@@ -787,11 +785,9 @@ final class GestureController {
     // MARK: - Pinch Detection
     
     /// Check if pinch is active with hysteresis
+    /// OPTIMIZATION: Inlined for better branch prediction
+    @inline(__always)
     private func isPinchActive(value: Float, wasActive: Bool) -> Bool {
-        if wasActive {
-            return value >= pinchReleaseThreshold
-        } else {
-            return value >= pinchActivateThreshold
-        }
+        return wasActive ? value >= pinchReleaseThreshold : value >= pinchActivateThreshold
     }
 }

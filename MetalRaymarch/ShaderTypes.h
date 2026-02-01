@@ -47,6 +47,10 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexShowHUD             = 3,  // bool: HUD overlay toggle
     FCIndexQualityMode         = 4,  // int: 0=high, 1=medium, 2=low - controls feature degradation
     FCIndexDebugHierarchical   = 5,  // bool: Debug visualization toggle
+    FCIndexMaxRaySteps         = 6,  // int: Max raymarch steps (enables loop optimization)
+    FCIndexEmissiveEnabled     = 7,  // bool: Eliminates emissive code path when false
+    FCIndexNeonModeEnabled     = 8,  // bool: Eliminates neon orbit tracking when false
+    FCIndexColorIterations     = 9,  // int: Color iteration count (enables loop unrolling)
 };
 
 // Fractal type selection

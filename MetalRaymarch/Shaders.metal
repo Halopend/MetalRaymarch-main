@@ -17,15 +17,15 @@
 #define LIKELY(x)   __builtin_expect(!!(x), 1)
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
-// === LOOP UNROLLING PRAGMAS ===
-// NOTE: Metal's compiler automatically unrolls loops with compile-time constant bounds.
-// These pragmas are only *hints* - use sparingly for fixed-count loops where you want
-// to suggest a specific unroll factor. For loops using function constants (FC_*),
-// the compiler handles unrolling automatically when the constant is defined.
-#define UNROLL_FULL _Pragma("unroll")       // Hint: fully unroll (only for small fixed-count loops)
-#define UNROLL_4 _Pragma("unroll(4)")       // Hint: unroll by factor of 4
-#define UNROLL_8 _Pragma("unroll(8)")       // Hint: unroll by factor of 8
-#define NO_UNROLL _Pragma("nounroll")       // Prevent unrolling (for runtime-variable loops)
+// === LOOP UNROLLING STRATEGY ===
+// Metal's compiler automatically unrolls loops when bounds are compile-time constants.
+// With function constants (FC_*), the compiler specializes each pipeline variant
+// and makes optimal unrolling decisions per iteration count. We avoid hardcoded
+// unroll hints to let the compiler choose based on:
+//   - Register pressure at each iteration count
+//   - Loop body complexity
+//   - Target GPU architecture
+// This gives better results than one-size-fits-all unroll factors.
 
 // === LOOP BODY MACROS ===
 // Inline the iteration body for Map functions. Enables the compiler to see
@@ -40,13 +40,13 @@
     p = fma(p, params.scale, p0)
 
 // Extended Map iteration with orbit cache tracking - used by MapWithOrbitCache()
+// OPTIMIZATION: Use rsqrt (hardware-accelerated) instead of sqrt for minRadius
 #define MAP_ITERATION_WITH_CACHE(p, p0, foldingLimit, params, invSphereRadiusSq, i, trap, trapIter, trapPos, boxFolds, sphereFolds, minRadius, orbitTrapDist) \
     { float3 pOld = p.xyz; \
       p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz); \
       if (any(p.xyz != pOld)) boxFolds++; } \
     { float r2 = dot(p.xyz, p.xyz); \
-      float r = sqrt(r2); \
-      minRadius = min(minRadius, r); \
+      minRadius = min(minRadius, r2); /* Store r2, convert to r later with single sqrt */ \
       float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z)); \
       orbitTrapDist = min(orbitTrapDist, axisTrap); \
       if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; } \
@@ -92,6 +92,16 @@ constant bool FC_DEBUG_HIERARCHICAL [[function_constant(5)]];
 // Max ray marching steps - controls main raymarch loop unrolling
 // This is the second most critical loop after Map()
 constant int FC_MAX_RAY_STEPS [[function_constant(6)]];
+
+// Emissive glow feature toggle - eliminates emissive code path when disabled
+constant bool FC_EMISSIVE_ENABLED [[function_constant(7)]];
+
+// Neon color mode toggle - eliminates neon orbit trap computation when disabled
+// (neon mode requires extra orbit tracking in ColourWithScheme)
+constant bool FC_NEON_MODE_ENABLED [[function_constant(8)]];
+
+// Color iterations - when defined, enables loop unrolling in ColourWithScheme
+constant int FC_COLOR_ITERATIONS [[function_constant(9)]];
 
 typedef struct
 {
@@ -183,17 +193,24 @@ constant half3 kGlowColor = half3(0.02h, 0.04h, 0.1h);
 
 // Spotlight direction and attenuation calculation
 // Returns: .xyz = normalized direction to light, .w = attenuation factor
+// OPTIMIZATION: Use rsqrt to combine normalize and length in one operation
 FORCE_INLINE float4 computeSpotlight(float3 hitPos, float3 spotLightPosition) {
     float3 toLight = spotLightPosition - hitPos;
-    float dist = length(toLight);
+    float distSq = dot(toLight, toLight);
+    float invDist = rsqrt(max(distSq, kPowEpsilon));  // 1/distance, hardware accelerated
+    float dist = distSq * invDist;  // distance = distSq / sqrt(distSq) = sqrt(distSq)
     float atten = powr(max(dist, kPowEpsilon), kAttenPower);
-    return float4(toLight / dist, atten);
+    return float4(toLight * invDist, atten);  // toLight * invDist = normalize(toLight)
 }
 
 // Apply fog based on distance
 // fogIntensity: 0 = no fog (returns 1), 1 = full fog (returns ~0)
+// OPTIMIZATION: Use fma and precompute constants
 FORCE_INLINE half3 applyFog(half3 col, float distance, float fogIntensity) {
-    half fogFactor = half(saturate(exp(-distance * fogIntensity * 2.0 + 1.5)));
+    // exp(-distance * fogIntensity * 2.0 + 1.5) = exp(1.5) * exp(-distance * fogIntensity * 2.0)
+    // Precomputed: exp(1.5) ≈ 4.4817
+    float exponent = fma(distance, -fogIntensity * 2.0f, 1.5f);
+    half fogFactor = half(saturate(exp(exponent)));
     return mix(kFogColor, col, fogFactor);
 }
 
@@ -237,11 +254,11 @@ inline float encodeDepthFromClip(float4 clipPos) {
 
 // Interleaved Gradient Noise - temporally stable dithering for reprojection
 // FORCE_INLINE: Called every pixel in raymarching
+// OPTIMIZATION: Precomputed magic constant for time offset
 FORCE_INLINE float interleavedGradientNoise(float2 uv, float time) {
-    float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
-    float noise = fract(magic.z * fract(dot(uv, magic.xy)));
-    // Add small temporal variation to prevent static patterns
-    return fract(fma(time, 0.1, noise));
+    // Combined constants: dot(uv, magic.xy) + time * 0.1
+    float noise = fract(52.9829189f * fract(dot(uv, float2(0.06711056f, 0.00583715f))));
+    return fract(fma(time, 0.1f, noise));
 }
 
 struct FractalParams {
@@ -337,6 +354,7 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
 // trapMin: distance to orbit trap (0 = close, 1 = far)
 // trapIter: normalized iteration depth
 // trapAngle: angle-based variation
+// OPTIMIZATION: Branchless color blending using smoothstep transitions
 FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAngle, ColorSchemeParams scheme)
 {
     half d = saturate(trapMin);
@@ -351,26 +369,24 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
     half glow = pow(1.0h - d, half(scheme.glowSharpness));
     
     // Color mixing based on iteration depth (creates radial color zones)
-    // Low hueFrequency = smooth gradients, high = more color variation
-    half colorPhase = it * half(scheme.hueFrequency) * 0.5h;
-    colorPhase = fract(colorPhase + half(scheme.hueOffset));
+    // BRANCHLESS: Use smoothstep blending instead of if/else cascade
+    half colorPhase = fract(it * half(scheme.hueFrequency) * 0.5h + half(scheme.hueOffset));
     
-    // Blend between the 3 palette colors based on depth
-    half3 baseColor;
-    if (colorPhase < 0.33h) {
-        baseColor = mix(col1, col2, colorPhase * 3.0h);
-    } else if (colorPhase < 0.66h) {
-        baseColor = mix(col2, col3, (colorPhase - 0.33h) * 3.0h);
-    } else {
-        baseColor = mix(col3, col1, (colorPhase - 0.66h) * 3.0h);
-    }
+    // Smooth transitions at phase boundaries (0.33, 0.66)
+    // t1: 0->1 as phase goes 0->0.33, t2: 0->1 as phase goes 0.33->0.66, t3: 0->1 as phase goes 0.66->1
+    half t1 = saturate(colorPhase * 3.0h);                    // Blend col1->col2
+    half t2 = saturate((colorPhase - 0.33h) * 3.0h);          // Blend col2->col3
+    half t3 = saturate((colorPhase - 0.66h) * 3.0h);          // Blend col3->col1
     
-    // Optional soft banding (controlled by bandFrequency, 0 = no bands)
-    half bandEffect = 1.0h;
-    if (scheme.bandFrequency > 0.1h) {
-        half band = sin(d * half(scheme.bandFrequency) * 3.14159h);
-        bandEffect = 0.8h + 0.2h * band * band;
-    }
+    // Combine blends: col1 -> col2 -> col3 -> col1
+    half3 baseColor = mix(col1, col2, t1);           // Phase 0-0.33: col1->col2
+    baseColor = mix(baseColor, col3, t2);            // Phase 0.33-0.66: blend toward col3
+    baseColor = mix(baseColor, col1, t3);            // Phase 0.66-1: blend back toward col1
+    
+    // Optional soft banding - branchless multiply
+    half bandActive = step(0.1h, half(scheme.bandFrequency));
+    half band = sin(d * half(scheme.bandFrequency) * 3.14159h);
+    half bandEffect = 1.0h - bandActive * 0.2h * (1.0h - band * band);
     
     // Saturation boost for neon effect
     half sat = pow(0.9h, half(scheme.saturationPower));
@@ -483,6 +499,12 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
     float3 trapPos;
     int steps;
     
+    // Use function constant when defined for compile-time loop unrolling
+    // This allows the compiler to specialize the loop when colorIterations is known
+    const int baseColorIters = is_function_constant_defined(FC_COLOR_ITERATIONS) 
+        ? FC_COLOR_ITERATIONS 
+        : colorIters;
+    
     if (cache.valid) {
         // Use cached orbit state
         p = cache.p;
@@ -503,7 +525,8 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
         trapIter = 0;
         trapPos = pos;
         
-        steps = max(int(float(colorIters) * quality), 2);
+        // Scale by quality (runtime), but base is specialized per pipeline when FC is defined
+        steps = max(int(float(baseColorIters) * quality), 2);
         for (int i = 0; i < steps; i++)
         {
             p.xyz = clamp(p.xyz, -foldingLimit, foldingLimit) * 2.0 - p.xyz;
@@ -522,7 +545,11 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
     }
     
     // Check if neon mode is active
-    if (scheme.neonIntensity > 0.01f) {
+    // Use function constant when defined to eliminate neon code path entirely
+    const bool neonEnabled = is_function_constant_defined(FC_NEON_MODE_ENABLED)
+        ? FC_NEON_MODE_ENABLED
+        : (scheme.neonIntensity > 0.01f);
+    if (neonEnabled && scheme.neonIntensity > 0.01f) {
         // Compute neon orbit trap metrics
         half trapMin = half(sqrt(trap));
         half trapIterNorm = half(float(trapIter) / float(steps));
@@ -592,7 +619,7 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     cache.trapPosition = trapPos;
     cache.boxFolds = boxFolds;
     cache.sphereFolds = sphereFolds;
-    cache.minRadius = minRadius;
+    cache.minRadius = sqrt(minRadius);  // Convert from r2 to r (single sqrt at end, not per-iteration)
     cache.orbitTrapDist = orbitTrapDist;
     
     return d;
@@ -632,23 +659,23 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
 
 // Far-range coarse raymarch (12 steps, max 80 units) - REMOVED (unused)
 // Near-range coarse raymarch (24 steps, max 12 units)
+// Compiler unrolls based on FC_FRACTAL_ITERATIONS when defined
 FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
 {
-    float t = 0.05;
+    float t = 0.05f;
     
-    UNROLL_8
-    for(int j = 0; j < 24; j++)
+    // Fixed 24 steps - compiler can unroll; inner Map() uses function constants
+    for(int j = 0; j < 24 && t <= kMaxRayDistance; j++)
     {
         float3 p = fma(rD, float3(t), rO);
         float h = Map(p, params, foldingLimit, iterations);
         
-        if(UNLIKELY(h < 0.02)) return t;
-        if (UNLIKELY(t > kMaxRayDistance)) return kRayMissThreshold + 100.0;
+        if(UNLIKELY(h < 0.02f)) return t;
         
         t += h;
     }
     
-    return kRayMissThreshold + 100.0;
+    return kRayMissThreshold + 100.0f;
 }
 
 // Cached scene result - stores orbit state for reuse in normals/colors
@@ -668,10 +695,11 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     
     float glow = 0.0;
     
+    // When FC_MAX_RAY_STEPS is defined, baseMaxSteps is compile-time constant
+    // and compiler can make optimal unrolling decisions per quality preset
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
     
-    NO_UNROLL
     for(int j = 0; j < maxSteps; j++)
     {
         float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
@@ -708,11 +736,11 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     float t = max(0.01, startT - 0.3) + dither;
     
     float glow = 0.0;
+    // Compiler specializes per FC_MAX_RAY_STEPS value
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
     float endT = startT + 2.0;
     
-    NO_UNROLL
     for(int j = 0; j < maxSteps; j++)
     {
         float threshold = fma(t, 0.0006, 0.0005);
@@ -741,102 +769,79 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 // =============================================================================
 
 // Post effects with color scheme support and dynamic animation
+// OPTIMIZATION: Made branchless for better GPU occupancy
 half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half limitFlash = 0.0h, half rayGlow = 0.0h)
 {
-    // === DYNAMIC HUE CYCLING ===
-    // Rotate hue over time for animated color shifts
-    // Use full precision for time calculation to avoid quantization artifacts
-    if (scheme.hueCycleSpeed > 0.001f) {
-        // Keep angle calculation in float precision, wrap to [0, 2π] to prevent precision loss
-        float rawAngle = scheme.animTime * scheme.hueCycleSpeed * 6.28318f;
-        float wrappedAngle = fmod(rawAngle, 6.28318f);  // Wrap to avoid large values
-        half hueAngle = half(wrappedAngle);
-        half cosH = cos(hueAngle);
-        half sinH = sin(hueAngle);
-        // Simplified hue rotation (YIQ-like transform)
-        half3 yiq;
-        yiq.x = dot(rgb, half3(0.299h, 0.587h, 0.114h));  // Luma (Y)
-        yiq.y = dot(rgb, half3(0.596h, -0.274h, -0.322h)); // I
-        yiq.z = dot(rgb, half3(0.211h, -0.523h, 0.312h));  // Q
-        // Rotate I and Q
-        half newY = yiq.y * cosH - yiq.z * sinH;
-        half newZ = yiq.y * sinH + yiq.z * cosH;
-        // Convert back to RGB
-        rgb.r = yiq.x + 0.956h * newY + 0.621h * newZ;
-        rgb.g = yiq.x - 0.272h * newY - 0.647h * newZ;
-        rgb.b = yiq.x - 1.106h * newY + 1.703h * newZ;
-        rgb = saturate(rgb);
-    }
+    // === DYNAMIC HUE CYCLING (BRANCHLESS) ===
+    // Always compute but multiply by active mask; when speed=0, angle=0, cos=1, sin=0 -> identity transform
+    float rawAngle = scheme.animTime * scheme.hueCycleSpeed * 6.28318f;
+    float wrappedAngle = fmod(rawAngle, 6.28318f);
+    half hueAngle = half(wrappedAngle);
+    half cosH = cos(hueAngle);
+    half sinH = sin(hueAngle);
+    // YIQ transform (identity when angle=0: cos=1, sin=0)
+    half3 yiq;
+    yiq.x = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+    yiq.y = dot(rgb, half3(0.596h, -0.274h, -0.322h));
+    yiq.z = dot(rgb, half3(0.211h, -0.523h, 0.312h));
+    half newY = fma(yiq.y, cosH, -yiq.z * sinH);
+    half newZ = fma(yiq.y, sinH, yiq.z * cosH);
+    rgb.r = fma(0.956h, newY, fma(0.621h, newZ, yiq.x));
+    rgb.g = fma(-0.272h, newY, fma(-0.647h, newZ, yiq.x));
+    rgb.b = fma(-1.106h, newY, fma(1.703h, newZ, yiq.x));
+    rgb = saturate(rgb);
     
-    // === PULSE ANIMATION ===
-    // Add breathing/pulsing effect to saturation
-    half pulse = 1.0h;
-    if (scheme.pulseSpeed > 0.001f && scheme.pulseAmount > 0.001f) {
-        // Use float precision for time calculation, wrap to avoid precision loss
-        float rawPulseAngle = scheme.animTime * scheme.pulseSpeed * 6.28318f;
-        float wrappedPulseAngle = fmod(rawPulseAngle, 6.28318f);
-        half pulseWave = 0.5h + 0.5h * sin(half(wrappedPulseAngle));
-        pulse = 1.0h + half(scheme.pulseAmount) * (pulseWave - 0.5h);
-    }
+    // === COMBINED COLOR GRADING PASS ===
+    // OPTIMIZATION: Branchless operations - GPU executes all lanes uniformly
+    // All effects are always computed but multiplied by active mask (0 or 1)
     
-    // Saturation adjustment from scheme (with pulse)
+    // --- Pulse animation (branchless) ---
+    // Use float precision for time, compute pulse wave unconditionally
+    float rawPulseAngle = scheme.animTime * scheme.pulseSpeed * 6.28318f;
+    half pulseWave = 0.5h + 0.5h * sin(half(fmod(rawPulseAngle, 6.28318f)));
+    half pulseActive = step(0.001h, half(scheme.pulseSpeed * scheme.pulseAmount));
+    half pulse = 1.0h + pulseActive * half(scheme.pulseAmount) * (pulseWave - 0.5h);
+    
+    // --- Saturation with pulse ---
     half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
     half satMult = half(scheme.saturation) * pulse;
     rgb = mix(half3(luma), rgb, satMult);
     
-    // Brightness and contrast from scheme
-    rgb += half(scheme.brightness);
-    rgb = mix(half3(0.5h), rgb, half(scheme.contrast));
+    // --- Brightness and contrast (always applied) ---
+    rgb = fma(rgb - half3(0.5h), half3(scheme.contrast), half3(0.5h + scheme.brightness));
     
-    // === RAY-STEP GLOW (cheap bloom approximation) ===
-    // Points near the fractal (high ray steps) get a soft glow
-    if (rayGlow > 0.01h && scheme.glowIntensity > 0.001f) {
-        half glowAmount = rayGlow * half(scheme.glowIntensity);
-        // Additive glow based on the brightest channel
-        half3 glowColor = rgb * (1.0h + glowAmount * 2.0h);
-        rgb = mix(rgb, glowColor, glowAmount * 0.5h);
-    }
+    // --- Ray-step glow (branchless) ---
+    half glowAmount = rayGlow * half(scheme.glowIntensity);
+    half glowActive = step(0.01h, rayGlow) * step(0.001h, half(scheme.glowIntensity));
+    half3 glowColor = rgb * fma(glowAmount, 2.0h, 1.0h);
+    rgb = mix(rgb, glowColor, glowActive * glowAmount * 0.5h);
     
-    // === BLOOM EFFECT (cheap screen-space approximation) ===
-    if (scheme.bloomStrength > 0.001f) {
-        // Bright areas bloom more - threshold based
-        half brightness = dot(rgb, half3(0.299h, 0.587h, 0.114h));
-        half bloomThreshold = 0.7h;
-        half bloomAmount = max(0.0h, brightness - bloomThreshold) * half(scheme.bloomStrength);
-        // Desaturate and brighten for bloom
-        rgb += bloomAmount * half3(0.3h, 0.3h, 0.35h);
-    }
+    // --- Bloom (branchless) ---
+    half brightness = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+    half bloomAmount = max(0.0h, brightness - 0.7h) * half(scheme.bloomStrength);
+    rgb = fma(half3(0.3h, 0.3h, 0.35h), half3(bloomAmount), rgb);
     
-    // === COLOR GRADING: HIGHLIGHTS (Exposure-like) ===
-    // Apply before other grading - affects overall brightness
-    if (abs(scheme.highlights) > 0.001f) {
-        rgb *= half(1.0f + scheme.highlights);
-    }
+    // --- Highlights/exposure (branchless - multiply is cheap) ---
+    rgb *= half(1.0f + scheme.highlights);
     
-    // === COLOR GRADING: VIBRANCE (Smart Saturation) ===
-    // Vibrance applies more saturation to less saturated colors
-    if (scheme.vibrance > 0.001f) {
-        half maxChannel = max(rgb.r, max(rgb.g, rgb.b));
-        half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance);
-        half luma2 = dot(rgb, half3(0.299h, 0.587h, 0.114h));
-        rgb = mix(half3(luma2), rgb, 1.0h + vibranceBoost);
-    }
+    // --- Vibrance (branchless - always compute, zero if inactive) ---
+    half maxChannel = max(rgb.r, max(rgb.g, rgb.b));
+    half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance);
+    half luma2 = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+    rgb = mix(half3(luma2), rgb, 1.0h + vibranceBoost);
     
-    // === COLOR GRADING: SHADOWS (Lift/Crush) ===
-    // Positive values lift shadows, negative values crush them
-    if (abs(scheme.shadows) > 0.001f) {
-        rgb = rgb + half(scheme.shadows) * (1.0h - rgb);
-    }
+    // --- Shadows lift/crush (branchless) ---
+    rgb = fma(half3(scheme.shadows), 1.0h - rgb, rgb);
     
-    // === COLOR GRADING: MIDTONE CURVE (S-Curve) ===
-    // colorCurve > 0 increases midtone contrast, < 0 flattens it
-    if (abs(scheme.colorCurve) > 0.001f) {
-        half curve = half(scheme.colorCurve);
-        half exponent = 1.0h / (1.0h + curve * 0.7h);
-        half mid = 0.5h;
-        half3 delta = rgb - mid;
-        rgb = mid + sign(delta) * 0.5h * powr(abs(delta) * 2.0h, half3(exponent));
-    }
+    // --- Midtone S-curve (branchless with safe fallback) ---
+    // When colorCurve is 0, exponent becomes 1.0 (identity transform)
+    half curve = half(scheme.colorCurve);
+    half exponent = 1.0h / (1.0h + curve * 0.7h);
+    half3 delta = rgb - 0.5h;
+    half3 curveResult = fma(sign(delta), 0.5h * powr(abs(delta) * 2.0h, half3(exponent)), half3(0.5h));
+    // Blend between identity and curved based on curve magnitude
+    half curveActive = step(0.001h, abs(curve));
+    rgb = mix(rgb, curveResult, curveActive);
     
     // Simplified vignette
     half2 q = xy * (1.0h - xy);
@@ -864,15 +869,26 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
 // =============================================================================
 
 // Draw a horizontal bar showing parameter value within range
+// OPTIMIZATION: Use step() instead of branches for GPU-friendly code
 float hudBar(float2 uv, float2 pos, float2 size, float fillAmount) {
     float2 localUV = (uv - pos) / size;
-    if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0) return 0.0;
     
-    // Border (2% edge)
-    float border = (localUV.x < 0.02 || localUV.x > 0.98 || localUV.y < 0.08 || localUV.y > 0.92) ? 0.6 : 0.0;
+    // Early exit check using step (branchless)
+    float inBounds = step(0.0f, localUV.x) * step(localUV.x, 1.0f) * 
+                     step(0.0f, localUV.y) * step(localUV.y, 1.0f);
+    if (inBounds < 0.5f) return 0.0f;
     
-    // Fill bar
-    float fill = (localUV.x > 0.02 && localUV.x < fillAmount * 0.96 + 0.02 && localUV.y > 0.08 && localUV.y < 0.92) ? 1.0 : 0.0;
+    // Border (2% edge) - use branchless comparisons
+    float borderL = step(localUV.x, 0.02f);
+    float borderR = step(0.98f, localUV.x);
+    float borderB = step(localUV.y, 0.08f);
+    float borderT = step(0.92f, localUV.y);
+    float border = max(max(borderL, borderR), max(borderB, borderT)) * 0.6f;
+    
+    // Fill bar - branchless
+    float fillX = step(0.02f, localUV.x) * step(localUV.x, fma(fillAmount, 0.96f, 0.02f));
+    float fillY = step(0.08f, localUV.y) * step(localUV.y, 0.92f);
+    float fill = fillX * fillY;
     
     return max(border, fill);
 }
@@ -927,38 +943,38 @@ half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
 // =============================================================================
 
 // Soft shadow with over-relaxation
+// OPTIMIZATION: Combined exit conditions to reduce branches
 FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
 {
     const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
-    if (qualityMode >= 2) return 0.65;
-    if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65;
+    if (qualityMode >= 2) return 0.65f;
+    if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65f;
     
-    float res = 1.0;
-    float t = 0.08;
-    float prevH = 1e10;
+    float res = 1.0f;
+    float t = 0.08f;
+    float prevH = 1e10f;
     
+    // When FC_SHADOW_ITERATIONS is defined, steps becomes compile-time constant
+    // Compiler unrolls optimally for each quality preset (2-3 steps)
     const int steps = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? 
         (qualityMode == 1 ? 2 : 3) : 
-        int(fma(quality, 2.0, 1.0));
+        int(fma(quality, 2.0f, 1.0f));
     
-    UNROLL_4
-    for (int i = 0; i < steps; i++)
+    for (int i = 0; i < steps && t <= 4.0f && res >= 0.02f; i++)
     {
-        float h = MapMandelbox(fma(rd, float3(t), ro), params, foldingLimit, iterations, fractalType);
+        float3 p = fma(rd, float3(t), ro);
+        float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
         
-        res = min(res, 10.0 * h / t);
+        // Use rcp for division by t (faster on many GPUs)
+        res = min(res, 10.0f * h * (1.0f / t));
         
-        if (UNLIKELY(res < 0.02)) return 0.0;
-        
-        float relax = step(prevH * 0.8, h);
-        float stepDist = mix(h, h * 1.5, relax);
-        t += max(stepDist, 0.15);
+        float relax = step(prevH * 0.8f, h);
+        float stepDist = mix(h, h * 1.5f, relax);
+        t += max(stepDist, 0.15f);
         prevH = h;
-        
-        if (UNLIKELY(t > 4.0)) break;
     }
     
-    return saturate(res);
+    return res < 0.02f ? 0.0f : saturate(res);
 }
 
 // === TILE-BASED RAYMARCHING (4x4 pixel groups) ===
@@ -1283,7 +1299,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             }
             
             // Emissive glow (self-illumination based on cached fold patterns)
-            if (uniforms.emissiveEnabled != 0) {
+            // Use function constant when defined to eliminate this code path entirely
+            const bool emissiveEnabled = is_function_constant_defined(FC_EMISSIVE_ENABLED) 
+                ? FC_EMISSIVE_ENABLED 
+                : (uniforms.emissiveEnabled != 0);
+            if (emissiveEnabled) {
                 half3 emissive = computeEmissive(
                     p,
                     nor,
@@ -1442,7 +1462,11 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         col += half3(specSun) * shaSun * briSun;
         
         // Emissive glow (self-illumination based on cached fold patterns)
-        if (uniforms.emissiveEnabled != 0) {
+        // Use function constant when defined to eliminate this code path entirely
+        const bool emissiveEnabled = is_function_constant_defined(FC_EMISSIVE_ENABLED) 
+            ? FC_EMISSIVE_ENABLED 
+            : (uniforms.emissiveEnabled != 0);
+        if (emissiveEnabled) {
             half3 emissive = computeEmissive(
                 p,
                 nor,

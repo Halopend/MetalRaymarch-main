@@ -209,6 +209,63 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(emissiveSpeed, forKey: .emissiveSpeed)
     }
     
+    // MARK: - Function Constant Derivation
+    
+    /// Derives optimal shader function constants from this preset's settings.
+    /// This enables the Metal compiler to specialize shaders for this preset,
+    /// eliminating unused code paths and enabling loop unrolling.
+    ///
+    /// The derived constants include:
+    /// - `fractalIterations`: Enables Map() loop unrolling
+    /// - `shadowIterations`: Typically fractalIterations - 2
+    /// - `maxRaySteps`: Enables raymarch loop optimization
+    /// - `emissiveEnabled`: Eliminates emissive code when false
+    /// - `neonModeEnabled`: Eliminates neon orbit tracking when false
+    /// - `colorIterations`: Enables color loop unrolling
+    /// - `safetyBubbleEnabled`: Eliminates bubble distance check when false
+    ///
+    /// Usage:
+    /// ```swift
+    /// let config = preset.deriveFunctionConstants()
+    /// let pipeline = try Renderer.buildSpecializedPipeline(config: config, ...)
+    /// ```
+    func deriveFunctionConstants() -> (
+        fractalIterations: Int32,
+        shadowIterations: Int32,
+        maxRaySteps: Int32,
+        emissiveEnabled: Bool,
+        neonModeEnabled: Bool,
+        colorIterations: Int32,
+        safetyBubbleEnabled: Bool,
+        qualityMode: Int32
+    ) {
+        // Derive quality mode from iteration count
+        let qualityMode: Int32
+        switch fractalIterations {
+        case 0...7: qualityMode = 2   // Low
+        case 8...9: qualityMode = 1   // Medium  
+        default: qualityMode = 0      // High
+        }
+        
+        return (
+            fractalIterations: Int32(fractalIterations),
+            shadowIterations: Int32(max(fractalIterations - 2, 2)),
+            maxRaySteps: Int32(maxRaySteps),
+            emissiveEnabled: emissiveEnabled ?? false,
+            neonModeEnabled: colorScheme.isNeonMode,
+            colorIterations: Int32(colorIterations),
+            safetyBubbleEnabled: safetyBubbleEnabled ?? true,
+            qualityMode: qualityMode
+        )
+    }
+    
+    /// Returns a unique key for pipeline caching based on function constants.
+    /// Presets with identical function constant values can share pipelines.
+    var pipelineCacheKey: String {
+        let fc = deriveFunctionConstants()
+        return "FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_E\(fc.emissiveEnabled ? 1 : 0)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
+    }
+    
     /// Create a preset from current render settings
     static func fromSettings(_ settings: RenderSettings, name: String, thumbnailData: Data? = nil) -> FractalPreset {
         var preset = FractalPreset(name: name, thumbnailData: thumbnailData)
@@ -637,6 +694,11 @@ class PresetManager {
     
     /// Load a preset's settings
     func loadPreset(_ preset: FractalPreset, into settings: RenderSettings, includePerformance: Bool = false) {
+        let fc = preset.deriveFunctionConstants()
+        print("📂 [PresetLoad] Loading preset: '\(preset.name)'")
+        print("   Pipeline key: \(preset.pipelineCacheKey)")
+        print("   FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Emissive=\(fc.emissiveEnabled), Neon=\(fc.neonModeEnabled)")
+        
         preset.apply(to: settings, includePerformance: includePerformance)
         // Track for analytics
         UsageAnalytics.shared.trackPresetLoaded(name: preset.name)

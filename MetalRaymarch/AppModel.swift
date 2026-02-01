@@ -99,6 +99,10 @@ class AppModel {
     // Screenshot capture (set by Renderer)
     var captureScreenshotHandler: (() async -> Data?)?
     
+    // Pipeline preparation handler (set by Renderer)
+    // Called when a preset is about to be loaded to ensure the pipeline is ready
+    var preparePipelineHandler: ((FractalPreset) async -> Void)?
+    
     // SharePlay session for collaborative fractal exploration
     var shareSession: FractalShareSession?
     
@@ -1018,15 +1022,15 @@ final class RenderSettings: @unchecked Sendable {
             }
             
             // Handle auto-cycling
+            // OPTIMIZATION: Use rawValue arithmetic instead of allCases iteration
             if _colorSchemeAutoTransition && _colorSchemeTransitionProgress >= 1.0 {
                 _colorSchemeAutoTimer += deltaTime
                 if _colorSchemeAutoTimer >= _colorSchemeAutoInterval {
                     _colorSchemeAutoTimer = 0.0
-                    // Transition to next scheme
-                    let allSchemes = ColorScheme.allCases
-                    if let currentIndex = allSchemes.firstIndex(of: _targetColorScheme) {
-                        let nextIndex = (allSchemes.distance(from: allSchemes.startIndex, to: currentIndex) + 1) % allSchemes.count
-                        let nextScheme = allSchemes[allSchemes.index(allSchemes.startIndex, offsetBy: nextIndex)]
+                    // Transition to next scheme using rawValue arithmetic (faster than allCases lookup)
+                    let currentRaw = _targetColorScheme.rawValue
+                    let nextRaw = (currentRaw + 1) % Int32(ColorScheme.allCases.count)
+                    if let nextScheme = ColorScheme(rawValue: nextRaw) {
                         _colorScheme = _targetColorScheme
                         _targetColorScheme = nextScheme
                         _colorSchemeTransitionProgress = 0.0
@@ -1211,6 +1215,8 @@ final class RenderSettings: @unchecked Sendable {
     
     /// Critically-damped smooth damp function (like Unity's SmoothDamp)
     /// Smoothly moves a value toward a target with velocity tracking and limits
+    /// OPTIMIZATION: Precompute repeated calculations
+    @inline(__always)
     private func smoothDamp(
         current: Float,
         target: Float,
@@ -1220,9 +1226,11 @@ final class RenderSettings: @unchecked Sendable {
         deltaTime: Float
     ) -> Float {
         // Based on Game Programming Gems 4, Chapter 1.10
+        // OPTIMIZATION: Precompute omega and derived values
         let omega = 2.0 / smoothTime
         let x = omega * deltaTime
-        let exp_factor = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x)
+        let x2 = x * x
+        let exp_factor = 1.0 / (1.0 + x + 0.48 * x2 + 0.235 * x2 * x)
         
         var change = current - target
         let originalTo = target
@@ -1232,7 +1240,8 @@ final class RenderSettings: @unchecked Sendable {
         change = max(-maxChange, min(maxChange, change))
         let clampedTarget = current - change
         
-        let temp = (velocity + omega * change) * deltaTime
+        let omegaChange = omega * change
+        let temp = (velocity + omegaChange) * deltaTime
         velocity = (velocity - omega * temp) * exp_factor
         var output = clampedTarget + (change + temp) * exp_factor
         

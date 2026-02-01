@@ -148,6 +148,8 @@ final class UISettingsCache {
     }
     
     // Push a single value to settings (called on slider release or toggle change)
+    // OPTIMIZATION: @inline hint for simple property forwarding
+    @inline(__always)
     func push<T>(_ keyPath: WritableKeyPath<RenderSettings, T>, value: T) {
         settings?[keyPath: keyPath] = value
     }
@@ -303,6 +305,11 @@ struct ContentView: View {
                         settings: appModel.renderSettings,
                         captureScreenshot: { await appModel.captureScreenshot() },
                         onLoadPreset: { preset in
+                            // Ensure pipeline is ready before applying preset
+                            // This builds the specialized pipeline if not already cached
+                            Task {
+                                await appModel.preparePipelineHandler?(preset)
+                            }
                             preset.apply(to: appModel.renderSettings)
                             // Sync gesture controller to prevent jumps when gestures resume
                             appModel.gestureController?.syncWithSettings()

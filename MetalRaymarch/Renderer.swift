@@ -30,7 +30,13 @@ enum FunctionConstantIndex: Int {
     case qualityMode = 4
     case debugHierarchical = 5
     case maxRaySteps = 6  // Base max ray steps (actual count scaled by quality at runtime)
+    case emissiveEnabled = 7  // Eliminates emissive code path when false
+    case neonModeEnabled = 8  // Eliminates neon orbit trap computation when false
+    case colorIterations = 9  // Enables loop unrolling in ColourWithScheme
 }
+
+// Debug logging toggle - set to false for release builds
+private let RENDERER_DEBUG = false
 
 enum RendererError: Error {
     case badVertexDescriptor
@@ -121,17 +127,18 @@ actor Renderer {
     var depthState: MTLDepthStencilState
     var cubeMap: MTLTexture
     
-    // === SPECIALIZED PIPELINES BY (iterations, raySteps) ===
-    // Pre-compiled pipelines with fixed iteration counts via function constants.
-    // The Map() fractal loop unrolls automatically when FC_FRACTAL_ITERATIONS is defined.
-    // Note: raymarch loops do NOT unroll (variable step count from quality multiplier).
-    // Key: PipelineKey(fractalIterations, maxRaySteps)
-    struct PipelineKey: Hashable {
-        let fractalIterations: Int
-        let maxRaySteps: Int
-    }
-    var specializedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
-    var specializedQuadSharedPipelines: [PipelineKey: MTLRenderPipelineState] = [:]
+    // === UNIFIED PIPELINE CACHE ===
+    // All specialized pipelines stored in a single cache with consistent key format.
+    // Key format: "FI{iterations}_RS{raySteps}_E{0|1}_N{0|1}_Q{0|1|2}[_QS]"
+    // This allows preset pipelines and quality preset pipelines to be looked up uniformly.
+    //
+    // Pipeline specialization strategy:
+    // - Quality presets (iter6-iter16): Compiled with emissive=false, neon=false for speed
+    // - Saved presets: Fully specialized with all known function constants
+    // - On-demand: Built lazily when requested config not found in cache
+    
+    /// Unified pipeline cache - all specialized pipelines keyed by function constant signature
+    private var pipelineCache: [String: MTLRenderPipelineState] = [:]
     
     // Cached constant matrices (computed once, reused every frame)
     private let cachedRotationMatrix: matrix_float4x4
@@ -160,6 +167,7 @@ actor Renderer {
     var uniforms: UnsafeMutablePointer<UniformsArray>
 
     let rasterSampleCount: Int = 1
+    let mtlVertexDescriptor: MTLVertexDescriptor  // Stored for pipeline building
     var hasLoggedFoveationAvailability = false
     var hasLoggedWorldTrackingWarning = false
     var hasLoggedDeviceAnchorInfo = false
@@ -235,6 +243,7 @@ actor Renderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents()).bindMemory(to:UniformsArray.self, capacity:1)
 
         let mtlVertexDescriptor = Renderer.buildMetalVertexDescriptor()
+        self.mtlVertexDescriptor = mtlVertexDescriptor
 
         do {
             pipelineState = try Renderer.buildRenderPipelineWithDevice(device: device,
@@ -253,9 +262,9 @@ actor Renderer {
                                                                                  mtlVertexDescriptor: mtlVertexDescriptor,
                                                                                  vertexFunctionName: "vertexShader",
                                                                                  fragmentFunctionName: "fragmentShaderQuadShared")
-            print("✓ Quad-shared pipeline ready (2x2 SIMD grouping)")
+            if RENDERER_DEBUG { print("✓ Quad-shared pipeline ready (2x2 SIMD grouping)") }
         } catch {
-            print("⚠️ Quad-shared pipeline failed: \(error)")
+            if RENDERER_DEBUG { print("⚠️ Quad-shared pipeline failed: \(error)") }
             quadSharedPipelineState = nil
         }
         
@@ -263,20 +272,24 @@ actor Renderer {
         // Key optimization: Map() inner loop (50-100+ calls per pixel) can be fully unrolled
         // when FC_FRACTAL_ITERATIONS is defined as a compile-time constant.
         // Note: The outer raymarch loop does NOT unroll due to runtime quality scaling.
+        //
+        // Quality presets compile out emissive/neon for maximum performance.
+        // For features like emissive/neon, use saved presets which build fully-specialized pipelines.
         
-        // Quality presets: Low (6,32), Mid (9,64), High (12,100), Ultra (16,128)
-        // Only build pipelines for exact preset combinations (4 pipelines, not 16)
         let qualityPresets = QualityPreset.allCases
         
         var pipelineCount = 0
-        print("Building specialized pipelines for \(qualityPresets.count) quality presets...")
+        if RENDERER_DEBUG { print("Building specialized pipelines for \(qualityPresets.count) quality presets...") }
         
         for preset in qualityPresets {
             let iterCount = preset.fractalIterations
             let raySteps = preset.raySteps
-            let key = PipelineKey(fractalIterations: iterCount, maxRaySteps: raySteps)
             let config = FunctionConstantConfig.forQualityPreset(preset)
             let constants = config.toMTLConstants()
+            
+            // Build unified cache key (quality presets have E=0, N=0)
+            let qualityMode: Int = iterCount <= 7 ? 2 : (iterCount <= 9 ? 1 : 0)
+            let unifiedKey = "FI\(iterCount)_RS\(raySteps)_E0_N0_Q\(qualityMode)"
             
             // Standard pipeline
             if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
@@ -286,9 +299,9 @@ actor Renderer {
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 functionConstants: constants
             ) {
-                specializedPipelines[key] = pipeline
+                pipelineCache[unifiedKey] = pipeline
                 pipelineCount += 1
-                print("  ✓ \(preset.rawValue): FI=\(iterCount), RI=\(raySteps)")
+                if RENDERER_DEBUG { print("  ✓ \(preset.rawValue): FI=\(iterCount), RS=\(raySteps) [\(unifiedKey)]") }
             }
             
             // Quad-shared pipeline
@@ -300,10 +313,10 @@ actor Renderer {
                 fragmentFunctionName: "fragmentShaderQuadShared",
                 functionConstants: constants
             ) {
-                specializedQuadSharedPipelines[key] = pipeline
+                pipelineCache[unifiedKey + "_QS"] = pipeline
             }
         }
-        print("✓ Built \(pipelineCount) specialized standard pipelines")
+        if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total with quad-shared)") }
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
@@ -331,20 +344,28 @@ actor Renderer {
             let computeConstants = MTLFunctionConstantValues()
             var fractalIters: Int32 = 6  // Default fractal iterations
             var shadowIters: Int32 = 4   // Default shadow iterations
+            var maxRaySteps: Int32 = 32  // Default max ray steps
             var noSafetyBubble: Bool = false
             var noDebug: Bool = false
+            var noHUD: Bool = false       // Compute doesn't need HUD
+            var noEmissive: Bool = false  // Compile out emissive for compute
+            var noNeon: Bool = false      // Compile out neon for compute
             computeConstants.setConstantValue(&fractalIters, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
             computeConstants.setConstantValue(&shadowIters, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
+            computeConstants.setConstantValue(&maxRaySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
             computeConstants.setConstantValue(&noSafetyBubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
             computeConstants.setConstantValue(&noDebug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
+            computeConstants.setConstantValue(&noHUD, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
+            computeConstants.setConstantValue(&noEmissive, type: .bool, index: FunctionConstantIndex.emissiveEnabled.rawValue)
+            computeConstants.setConstantValue(&noNeon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
             
             // Adaptive 8x8 hierarchical kernel (3-level cascade, 3-8x speedup) - with function constants
             if let kernel8x8 = try? library.makeFunction(name: "adaptiveHierarchical8x8", constantValues: computeConstants) {
                 adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
-                print("✓ Adaptive 8x8 hierarchical pipeline specialized with function constants")
+                if RENDERER_DEBUG { print("✓ Adaptive 8x8 hierarchical pipeline specialized with function constants") }
             } else if let kernel8x8 = library.makeFunction(name: "adaptiveHierarchical8x8") {
                 adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
-                print("✓ Adaptive 8x8 hierarchical pipeline ready (3-level cascade)")
+                if RENDERER_DEBUG { print("✓ Adaptive 8x8 hierarchical pipeline ready (3-level cascade)") }
             }
             
             // Uniform buffer for tile compute (one per eye)
@@ -352,9 +373,9 @@ actor Renderer {
             tileUniformBuffer = device.makeBuffer(length: tileUniformSize, options: .storageModeShared)
             tileUniformBuffer?.label = "TileUniforms"
             
-            print("✓ Tile-based compute pipeline ready (adaptive 8x8)")
+            if RENDERER_DEBUG { print("✓ Tile-based compute pipeline ready (adaptive 8x8)") }
         } catch {
-            print("⚠️ Failed to create tile compute pipelines: \(error)")
+            if RENDERER_DEBUG { print("⚠️ Failed to create tile compute pipelines: \(error)") }
             adaptiveHierarchicalPipeline8x8 = nil
         }
         
@@ -375,6 +396,10 @@ actor Renderer {
             // === RESIDENCY SET ===
             // Pre-validate resource residency for reduced per-frame overhead
             await self.setupResidencySet()
+            
+            // === PRESET PIPELINE PRECOMPILATION ===
+            // Build specialized pipelines for saved presets to avoid hitches when loading
+            await self.precompilePresetPipelines()
         }
     }
     
@@ -403,9 +428,9 @@ actor Renderer {
                 // Request initial residency
                 residencySet?.requestResidency()
                 
-                print("✓ Residency set created with \(residencySet?.allocatedSize ?? 0) bytes")
+                if RENDERER_DEBUG { print("✓ Residency set created with \(residencySet?.allocatedSize ?? 0) bytes") }
             } catch {
-                print("⚠️ Failed to create residency set: \(error)")
+                if RENDERER_DEBUG { print("⚠️ Failed to create residency set: \(error)") }
                 residencySet = nil
             }
         }
@@ -437,13 +462,15 @@ actor Renderer {
             dynamicRenderQualityManager = manager
             
             if layerRenderer.configuration.isFoveationEnabled {
-                print("✓ Dynamic render quality manager initialized (visionOS 26+)")
-                print("  Target: \(settings.dynamicRenderQualityTarget), Range: \(settings.dynamicRenderQualityMin)-\(settings.dynamicRenderQualityMax)")
+                if RENDERER_DEBUG {
+                    print("✓ Dynamic render quality manager initialized (visionOS 26+)")
+                    print("  Target: \(settings.dynamicRenderQualityTarget), Range: \(settings.dynamicRenderQualityMin)-\(settings.dynamicRenderQualityMax)")
+                }
             } else {
-                print("ℹ️ Dynamic render quality: Foveation not enabled (quality adjustment disabled)")
+                if RENDERER_DEBUG { print("ℹ️ Dynamic render quality: Foveation not enabled (quality adjustment disabled)") }
             }
         } else {
-            print("ℹ️ Dynamic render quality: Requires visionOS 26+")
+            if RENDERER_DEBUG { print("ℹ️ Dynamic render quality: Requires visionOS 26+") }
         }
     }
     
@@ -496,33 +523,35 @@ actor Renderer {
             pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
             
             screenshotPipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
-            print("✓ Screenshot capture pipeline ready")
+            if RENDERER_DEBUG { print("✓ Screenshot capture pipeline ready") }
         } catch {
-            print("⚠️ Failed to create screenshot pipeline: \(error)")
+            if RENDERER_DEBUG { print("⚠️ Failed to create screenshot pipeline: \(error)") }
         }
     }
 
     private func startARSession() async {
         // We only request head-tracking permission so we can keep the request minimal
         guard WorldTrackingProvider.isSupported else {
-            print("⚠️ World tracking is not supported on this device")
+            if RENDERER_DEBUG { print("⚠️ World tracking is not supported on this device") }
             return
         }
 
-        print("ℹ️ Requesting only world sensing (for pose) plus hand tracking; no extra sensors requested.")
+        if RENDERER_DEBUG { print("ℹ️ Requesting only world sensing (for pose) plus hand tracking; no extra sensors requested.") }
         var authStatus = await arSession.queryAuthorization(for: [.worldSensing, .handTracking])
         if authStatus[.worldSensing] == .notDetermined || authStatus[.handTracking] == .notDetermined {
-            print("🔐 Requesting ARKit world-sensing + hand-tracking authorization")
+            if RENDERER_DEBUG { print("🔐 Requesting ARKit world-sensing + hand-tracking authorization") }
             authStatus = await arSession.requestAuthorization(for: [.worldSensing, .handTracking])
         }
 
         if authStatus[.worldSensing] != .allowed {
-            print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
-            print("   Pose will be limited (rotation only)")
+            if RENDERER_DEBUG {
+                print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
+                print("   Pose will be limited (rotation only)")
+            }
         }
 
         if authStatus[.handTracking] != .allowed {
-            print("⚠️ Hand tracking not authorized. Status: \(String(describing: authStatus[.handTracking]))")
+            if RENDERER_DEBUG { print("⚠️ Hand tracking not authorized. Status: \(String(describing: authStatus[.handTracking]))") }
         }
         
         do {
@@ -531,13 +560,13 @@ actor Renderer {
                 providers.append(ht)
             }
             try await arSession.run(providers)
-            print("✓ ARKit session started with world tracking and hand tracking")
-            
-            // Log world tracking state
-            print("  World tracking state: \(worldTracking.state)")
+            if RENDERER_DEBUG {
+                print("✓ ARKit session started with world tracking and hand tracking")
+                print("  World tracking state: \(worldTracking.state)")
+            }
         } catch {
             if !hasLoggedWorldTrackingWarning {
-                print("⚠️ ARKit session failed: \(error)")
+                if RENDERER_DEBUG { print("⚠️ ARKit session failed: \(error)") }
                 hasLoggedWorldTrackingWarning = true
             }
         }
@@ -552,6 +581,14 @@ actor Renderer {
             await MainActor.run {
                 appModel.captureScreenshotHandler = {
                     await renderer.captureScreenshot()
+                }
+                
+                // Setup pipeline preparation handler
+                // Called before loading a preset to ensure the specialized pipeline is ready
+                appModel.preparePipelineHandler = { preset in
+                    // Build both standard and quad-shared variants
+                    _ = await renderer.getPipeline(forPreset: preset, useQuadShared: false)
+                    _ = await renderer.getPipeline(forPreset: preset, useQuadShared: true)
                 }
             }
             
@@ -761,6 +798,9 @@ actor Renderer {
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
+        var emissiveEnabled: Bool?         // FC index 7 - eliminates emissive code path
+        var neonModeEnabled: Bool?         // FC index 8 - eliminates neon orbit tracking
+        var colorIterations: Int32?        // FC index 9 - enables loop unrolling in color
         
         /// Creates MTLFunctionConstantValues from this config
         func toMTLConstants() -> MTLFunctionConstantValues {
@@ -787,11 +827,21 @@ actor Renderer {
             if var raySteps = maxRaySteps {
                 constants.setConstantValue(&raySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
             }
+            if var emissive = emissiveEnabled {
+                constants.setConstantValue(&emissive, type: .bool, index: FunctionConstantIndex.emissiveEnabled.rawValue)
+            }
+            if var neon = neonModeEnabled {
+                constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
+            }
+            if var colorIters = colorIterations {
+                constants.setConstantValue(&colorIters, type: .int, index: FunctionConstantIndex.colorIterations.rawValue)
+            }
             
             return constants
         }
         
         /// Creates a config optimized for high performance (Low quality preset: FI=6, RI=32)
+        /// All optional features compiled out for maximum speed.
         static var highPerformance: FunctionConstantConfig {
             return FunctionConstantConfig(
                 fractalIterations: 6,
@@ -800,11 +850,15 @@ actor Renderer {
                 showHUD: false,
                 qualityMode: 2,  // Low quality
                 debugHierarchical: false,
-                maxRaySteps: 32
+                maxRaySteps: 32,
+                emissiveEnabled: false,  // Compile out emissive
+                neonModeEnabled: false,  // Compile out neon
+                colorIterations: 6       // Match fractal iterations
             )
         }
         
         /// Creates a config for high quality rendering (Ultra quality preset: FI=16, RI=128)
+        /// All optional features available.
         static var highQuality: FunctionConstantConfig {
             return FunctionConstantConfig(
                 fractalIterations: 16,
@@ -813,11 +867,16 @@ actor Renderer {
                 showHUD: true,
                 qualityMode: 0,  // High quality
                 debugHierarchical: false,
-                maxRaySteps: 128
+                maxRaySteps: 128,
+                emissiveEnabled: nil,    // Runtime (not specialized)
+                neonModeEnabled: nil,    // Runtime (not specialized)
+                colorIterations: 16      // Match fractal iterations
             )
         }
         
-        /// Creates a config for each quality preset
+        /// Creates a config for each quality preset.
+        /// These pipelines compile out emissive/neon code for maximum performance.
+        /// For presets that need emissive/neon, use fromPreset() instead.
         static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
             let qualityMode: Int32
             switch preset {
@@ -832,30 +891,231 @@ actor Renderer {
                 fractalIterations: Int32(preset.fractalIterations),
                 shadowIterations: Int32(max(preset.fractalIterations - 2, 2)),
                 safetyBubbleEnabled: true,
-                showHUD: true,
+                showHUD: false,              // Compile out HUD for these fast pipelines
                 qualityMode: qualityMode,
                 debugHierarchical: false,
-                maxRaySteps: Int32(preset.raySteps)
+                maxRaySteps: Int32(preset.raySteps),
+                emissiveEnabled: false,      // Compile out emissive code path
+                neonModeEnabled: false,      // Compile out neon orbit tracking
+                colorIterations: Int32(preset.fractalIterations)  // Match fractal iterations
+            )
+        }
+        
+        /// Creates a fully-specialized config from a saved FractalPreset.
+        /// This enables maximum shader optimization by providing all known constants.
+        ///
+        /// Example usage:
+        /// ```swift
+        /// let preset = presetManager.presets.first!
+        /// let config = FunctionConstantConfig.fromPreset(preset)
+        /// let pipeline = try Renderer.buildSpecializedPipeline(config: config, ...)
+        /// ```
+        static func fromPreset(_ preset: FractalPreset) -> FunctionConstantConfig {
+            let fc = preset.deriveFunctionConstants()
+            return FunctionConstantConfig(
+                fractalIterations: fc.fractalIterations,
+                shadowIterations: fc.shadowIterations,
+                safetyBubbleEnabled: fc.safetyBubbleEnabled,
+                showHUD: true,
+                qualityMode: fc.qualityMode,
+                debugHierarchical: false,
+                maxRaySteps: fc.maxRaySteps,
+                emissiveEnabled: fc.emissiveEnabled,
+                neonModeEnabled: fc.neonModeEnabled,
+                colorIterations: fc.colorIterations
             )
         }
     }
     
-    /// Select the best specialized pipeline for the given iteration count and ray steps
-    /// Falls back to general pipeline if no specialized version exists
-    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool) -> MTLRenderPipelineState {
-        let key = PipelineKey(fractalIterations: iterations, maxRaySteps: raySteps)
+    // MARK: - Unified Pipeline Management
+    
+    /// Gets or builds a specialized pipeline for a given preset.
+    /// Uses the unified pipelineCache to avoid redundant compilation.
+    func getPipeline(forPreset preset: FractalPreset, useQuadShared: Bool = false) -> MTLRenderPipelineState {
+        let cacheKey = preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
         
-        if useQuadShared {
-            if let specialized = specializedQuadSharedPipelines[key] {
-                return specialized
-            }
-            return quadSharedPipelineState ?? pipelineState
-        } else {
-            if let specialized = specializedPipelines[key] {
-                return specialized
-            }
-            return pipelineState
+        // Check unified cache first
+        if let cached = pipelineCache[cacheKey] {
+            return cached
         }
+        
+        // Build new specialized pipeline
+        let config = FunctionConstantConfig.fromPreset(preset)
+        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building NEW pipeline for: \(preset.name) [\(cacheKey)]") }
+        
+        do {
+            let pipeline = try Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: config,
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+            )
+            pipelineCache[cacheKey] = pipeline  // Store in unified cache
+            if RENDERER_DEBUG { print("✅ [ShaderCompilation] SUCCESS: Built pipeline [\(cacheKey)]") }
+            return pipeline
+        } catch {
+            if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED to build preset pipeline [\(cacheKey)]: \(error)") }
+            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+        }
+    }
+    
+    /// Precompiles pipelines for a list of presets (e.g., on app launch).
+    /// Call this during loading screen to avoid compilation hitches when switching presets.
+    func precompilePipelines(forPresets presets: [FractalPreset]) {
+        if RENDERER_DEBUG { print("Precompiling \(presets.count) preset pipelines...") }
+        for preset in presets {
+            _ = getPipeline(forPreset: preset, useQuadShared: false)
+            _ = getPipeline(forPreset: preset, useQuadShared: true)
+        }
+        if RENDERER_DEBUG { print("✓ Preset pipeline precompilation complete") }
+    }
+    
+    /// Precompiles pipelines for all saved presets on app launch.
+    /// Runs asynchronously to avoid blocking the main thread.
+    private func precompilePresetPipelines() async {
+        // Access presets from AppModel on main actor
+        let presets = await MainActor.run { 
+            appModel.presetManager.presets
+        }
+        
+        guard !presets.isEmpty else {
+            if RENDERER_DEBUG { print("🔧 [ShaderCompilation] No saved presets to precompile") }
+            return
+        }
+        
+        // Build pipelines for unique configurations only
+        var compiledKeys = Set<String>()
+        var compiledCount = 0
+        
+        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Starting preset pipeline precompilation for \(presets.count) presets...") }
+        
+        for preset in presets {
+            let key = preset.pipelineCacheKey
+            guard !compiledKeys.contains(key) else {
+                if RENDERER_DEBUG { print("  ⏭️  Skipping \(preset.name) - duplicate config [\(key)]") }
+                continue  // Skip duplicate configurations
+            }
+            compiledKeys.insert(key)
+            
+            if RENDERER_DEBUG {
+                let fc = preset.deriveFunctionConstants()
+                print("  🔨 Compiling: \(preset.name)")
+                print("      Key: \(key)")
+                print("      FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Shadow=\(fc.shadowIterations)")
+                print("      Emissive=\(fc.emissiveEnabled), Neon=\(fc.neonModeEnabled), Quality=\(fc.qualityMode)")
+            }
+            
+            // Build both standard and quad-shared variants
+            _ = getPipeline(forPreset: preset, useQuadShared: false)
+            _ = getPipeline(forPreset: preset, useQuadShared: true)
+            compiledCount += 1
+        }
+        
+        if RENDERER_DEBUG {
+            print("✅ [ShaderCompilation] Precompiled \(compiledCount) unique preset pipelines (from \(presets.count) presets)")
+            print("   Unified cache now contains \(pipelineCache.count) pipelines")
+        }
+    }
+    
+    // Track last logged pipeline to avoid spam
+    private var lastLoggedPipelineKey: String = ""
+    
+    /// Select the best specialized pipeline for the current render settings.
+    /// Uses the unified pipelineCache for all lookups - no separate cache tiers.
+    ///
+    /// Pipeline lookup order:
+    /// 1. Exact match in unified cache (includes both quality presets and saved presets)
+    /// 2. Fallback to generic pipeline
+    ///
+    /// On cache miss for a non-standard configuration, consider calling `ensurePipeline()`
+    /// to build on-demand (though this may cause a frame hitch).
+    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool, 
+                        emissiveEnabled: Bool = false, neonMode: Bool = false) -> MTLRenderPipelineState {
+        // Build unified cache key
+        let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_E\(emissiveEnabled ? 1 : 0)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        
+        // 1. Check unified cache (includes both quality presets and saved presets)
+        if let pipeline = pipelineCache[cacheKey] {
+            if RENDERER_DEBUG && lastLoggedPipelineKey != cacheKey {
+                print("🎯 [Pipeline] Using cached pipeline: \(cacheKey)")
+                lastLoggedPipelineKey = cacheKey
+            }
+            return pipeline
+        }
+        
+        // 2. Try fallback to emissive=off/neon=off variant (quality preset)
+        let fallbackKey = "FI\(iterations)_RS\(raySteps)_E0_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        if let pipeline = pipelineCache[fallbackKey] {
+            if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
+                print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: E=\(emissiveEnabled ? 1 : 0) N=\(neonMode ? 1 : 0))")
+                lastLoggedPipelineKey = fallbackKey
+            }
+            return pipeline
+        }
+        
+        // 3. Ultimate fallback to generic pipeline
+        if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
+            print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FI=\(iterations) RS=\(raySteps))")
+            lastLoggedPipelineKey = "fallback"
+        }
+        return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+    }
+    
+    /// Ensures a pipeline exists for the given configuration.
+    /// Builds on-demand if not found in cache. Call this when loading a preset
+    /// to avoid frame hitches during rendering.
+    func ensurePipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
+                        emissiveEnabled: Bool, neonMode: Bool) {
+        let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_E\(emissiveEnabled ? 1 : 0)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        
+        // Already cached
+        if pipelineCache[cacheKey] != nil { return }
+        
+        // Build on-demand
+        if RENDERER_DEBUG { print("🔧 [Pipeline] Building on-demand pipeline: \(cacheKey)") }
+        
+        let config = FunctionConstantConfig(
+            fractalIterations: Int32(iterations),
+            shadowIterations: Int32(max(iterations - 2, 2)),
+            safetyBubbleEnabled: true,
+            showHUD: false,
+            qualityMode: Int32(qualityMode),
+            debugHierarchical: false,
+            maxRaySteps: Int32(raySteps),
+            emissiveEnabled: emissiveEnabled,
+            neonModeEnabled: neonMode,
+            colorIterations: Int32(iterations)
+        )
+        
+        do {
+            let pipeline = try Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: config,
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+            )
+            pipelineCache[cacheKey] = pipeline
+            if RENDERER_DEBUG { print("✅ [Pipeline] Built on-demand: \(cacheKey)") }
+        } catch {
+            if RENDERER_DEBUG { print("❌ [Pipeline] Failed to build on-demand: \(cacheKey): \(error)") }
+        }
+    }
+    
+    /// Returns the number of pipelines currently in the unified cache.
+    var pipelineCacheCount: Int {
+        return pipelineCache.count
+    }
+    
+    /// Returns all cache keys currently in the unified pipeline cache.
+    /// Useful for debugging which pipelines have been compiled.
+    var pipelineCacheKeys: [String] {
+        return Array(pipelineCache.keys).sorted()
     }
     
     /// Build a specialized pipeline with function constants for compile-time optimization
@@ -923,11 +1183,9 @@ actor Renderer {
 
     private func updateDynamicBufferState() {
         /// Update the state of our uniform buffers before rendering
-
-        uniformBufferIndex = (uniformBufferIndex + 1) % maxBuffersInFlight
-
+        /// OPTIMIZATION: Use bitwise AND for modulo when maxBuffersInFlight is power of 2
+        uniformBufferIndex = (uniformBufferIndex + 1) & (maxBuffersInFlight - 1)  // Faster than modulo for power of 2
         uniformBufferOffset = alignedUniformsSize * uniformBufferIndex
-
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents() + uniformBufferOffset).bindMemory(to:UniformsArray.self, capacity:1)
     }
     
@@ -1000,7 +1258,7 @@ actor Renderer {
             if !hasLoggedDynamicQualityStatus && manager.isEnabled {
                 hasLoggedDynamicQualityStatus = true
                 let mode = canUseResolutionScaling ? "resolution + shader params" : "shader params only"
-                print("✓ Dynamic render quality active (\(mode)): adjusting based on FPS")
+                if RENDERER_DEBUG { print("✓ Dynamic render quality active (\(mode)): adjusting based on FPS") }
             }
             
             // Optionally hint scene complexity when fractal parameters change significantly
@@ -1038,12 +1296,14 @@ actor Renderer {
             hasLoggedDeviceAnchorInfo = true
             let transform = anchor.originFromAnchorTransform
             let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
-            print("📍 Device anchor first frame:")
-            print("   Position: (\(position.x), \(position.y), \(position.z))")
-            print("   isTracked: \(anchor.isTracked)")
-            // If position is exactly (0,0,0), world sensing permission may not be granted
-            if position.x == 0 && position.y == 0 && position.z == 0 {
-                print("   ⚠️ Position is origin - world sensing may not be authorized!")
+            if RENDERER_DEBUG {
+                print("📍 Device anchor first frame:")
+                print("   Position: (\(position.x), \(position.y), \(position.z))")
+                print("   isTracked: \(anchor.isTracked)")
+                // If position is exactly (0,0,0), world sensing permission may not be granted
+                if position.x == 0 && position.y == 0 && position.z == 0 {
+                    print("   ⚠️ Position is origin - world sensing may not be authorized!")
+                }
             }
         }
         
@@ -1289,7 +1549,7 @@ actor Renderer {
             }
             
             // Periodic FPS console logging (every 2 seconds)
-            if time - lastFPSConsoleLogTime > 2.0 {
+            if RENDERER_DEBUG && time - lastFPSConsoleLogTime > 2.0 {
                 lastFPSConsoleLogTime = time
                 print("[FPS] \(String(format: "%.1f", updatedFPS)) fps | frame time: \(String(format: "%.2f", deltaTime * 1000))ms")
             }
@@ -1392,12 +1652,18 @@ actor Renderer {
         let currentIterations = settingsSnapshot.fractalIterations
         let currentRaySteps = settingsSnapshot.maxRaySteps
         
+        // Detect neon mode from colorSchemeParams.neonIntensity
+        let isNeonMode = settingsSnapshot.colorSchemeParams.neonIntensity > 0
+        let isEmissive = settingsSnapshot.emissiveEnabled
+        
         // Use specialized pipeline with fixed iteration count
         // This enables Map() loop auto-unrolling via function constants
         let selectedPipeline = selectPipeline(
             forIterations: currentIterations,
             raySteps: currentRaySteps,
-            useQuadShared: useQuadShared
+            useQuadShared: useQuadShared,
+            emissiveEnabled: isEmissive,
+            neonMode: isNeonMode
         )
         renderEncoder.setRenderPipelineState(selectedPipeline)
 
@@ -1508,7 +1774,7 @@ actor Renderer {
         
         if let systemMap = drawable.rasterizationRateMaps.first {
             renderPassDescriptor.rasterizationRateMap = systemMap
-            if !hasLoggedFoveationAvailability {
+            if RENDERER_DEBUG && !hasLoggedFoveationAvailability {
                 print("✓ Using system gaze-tracked rasterization rate map")
                 hasLoggedFoveationAvailability = true
             }
@@ -1550,7 +1816,7 @@ actor Renderer {
 
         let pathText = useAdaptiveCompute ? "compute" : "fragment"
         let fps = frameTimeSeconds > 0 ? (1.0 / frameTimeSeconds) : 0
-        print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms path=\(pathText) MetalFX=\(metalFXText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)")
+        if RENDERER_DEBUG { print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms path=\(pathText) MetalFX=\(metalFXText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)") }
     }
 
 #if canImport(MetalFX)
@@ -1599,7 +1865,7 @@ actor Renderer {
             let physical = map.physicalSize(layer: 0)
             if physical.width == inputTexture.width && physical.height == inputTexture.height {
                 renderPassDescriptor.rasterizationRateMap = map
-                if !hasLoggedFoveationAvailability {
+                if RENDERER_DEBUG && !hasLoggedFoveationAvailability {
                     print("✓ Using system gaze-tracked rasterization rate map (MetalFX input)")
                     hasLoggedFoveationAvailability = true
                 }
@@ -1720,7 +1986,7 @@ actor Renderer {
                 try metalFXManager?.update(configuration: config, viewCount: viewCount)
             }
         } catch {
-            if !hasLoggedMetalFXFallback {
+            if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
                 print("⚠️ MetalFX init/update failed: \(error). Falling back to direct rendering.")
                 hasLoggedMetalFXFallback = true
             }
@@ -1754,7 +2020,7 @@ actor Renderer {
     ) {
         guard let pipeline = adaptiveHierarchicalPipeline8x8,
               let uniformBuffer = tileUniformBuffer else {
-            print("⚠️ Adaptive compute pipeline not available")
+            if RENDERER_DEBUG { print("⚠️ Adaptive compute pipeline not available") }
             return
         }
         let view = drawable.views[viewIndex]
@@ -1900,7 +2166,7 @@ actor Renderer {
         
         // Create compute encoder
         guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
-            print("⚠️ Failed to create compute encoder")
+            if RENDERER_DEBUG { print("⚠️ Failed to create compute encoder") }
             return
         }
         
@@ -1947,7 +2213,7 @@ actor Renderer {
         descriptor.usage = [.shaderWrite, .shaderRead]  // Key: has shaderWrite!
         
         guard let texture = device.makeTexture(descriptor: descriptor) else {
-            print("⚠️ Failed to create compute output texture")
+            if RENDERER_DEBUG { print("⚠️ Failed to create compute output texture") }
             return nil
         }
         texture.label = "Adaptive Compute Output"
@@ -1958,7 +2224,7 @@ actor Renderer {
         // Add to residency set for GPU memory pre-validation
         updateResidencySetForComputeTexture(texture)
         
-        print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers")
+        if RENDERER_DEBUG { print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers") }
         return texture
     }
     
@@ -2040,7 +2306,7 @@ actor Renderer {
                 continue
             }
             if layerRenderer.state == .invalidated {
-                print("Layer is invalidated")
+                if RENDERER_DEBUG { print("Layer is invalidated") }
                 updateImmersiveSpaceStateIfNeeded(.closed)
                 return
             } else if layerRenderer.state == .paused {
@@ -2054,10 +2320,12 @@ actor Renderer {
                 if shouldCaptureScreenshot {
                     shouldCaptureScreenshot = false
                     let screenshotData = renderScreenshot()
-                    if screenshotData != nil {
-                        print("📷 Screenshot captured (\(screenshotData!.count) bytes)")
-                    } else {
-                        print("⚠️ Screenshot capture FAILED")
+                    if RENDERER_DEBUG {
+                        if screenshotData != nil {
+                            print("📷 Screenshot captured (\(screenshotData!.count) bytes)")
+                        } else {
+                            print("⚠️ Screenshot capture FAILED")
+                        }
                     }
                     pendingScreenshotContinuation?.resume(returning: screenshotData)
                     pendingScreenshotContinuation = nil

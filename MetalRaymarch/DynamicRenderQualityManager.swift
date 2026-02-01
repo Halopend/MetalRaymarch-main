@@ -42,13 +42,13 @@ final class DynamicRenderQualityManager {
     var minQuality: Float = 0.5
     
     /// Maximum render quality (1.0 = full resolution)
-    var maxQuality: Float = 1.0
+    var maxQuality: Float = 0.7
     
     /// Default/baseline render quality
-    var defaultQuality: Float = 0.7
+    var defaultQuality: Float = 0.5
     
     /// Rate of quality decrease per second when below threshold
-    var decreaseRate: Float = 0.15
+    var decreaseRate: Float = 0.08
     
     /// Rate of quality increase per second when above threshold
     var increaseRate: Float = 0.08
@@ -85,7 +85,7 @@ final class DynamicRenderQualityManager {
     
     // MARK: - Initialization
     
-    init(defaultQuality: Float = 0.7) {
+    init(defaultQuality: Float = 0.5) {
         self.currentQuality = defaultQuality
         self.defaultQuality = defaultQuality
     }
