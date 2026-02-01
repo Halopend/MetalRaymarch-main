@@ -37,10 +37,11 @@ typedef NS_ENUM(EnumBackingType, TextureIndex)
 };
 
 // Function constant indices for shader specialization
-// These allow compile-time optimization by eliminating branches and enabling loop unrolling
+// When defined, these become compile-time constants enabling automatic loop unrolling
+// and dead code elimination by the Metal compiler.
 typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
 {
-    FCIndexFractalIterations   = 0,  // int: Fractal iteration count for Map() loop unrolling
+    FCIndexFractalIterations   = 0,  // int: Fractal iteration count (enables Map() loop auto-unrolling)
     FCIndexShadowIterations    = 1,  // int: Shadow iteration count
     FCIndexSafetyBubbleEnabled = 2,  // bool: Safety bubble feature toggle
     FCIndexShowHUD             = 3,  // bool: HUD overlay toggle

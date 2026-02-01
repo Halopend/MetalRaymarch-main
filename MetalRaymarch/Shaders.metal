@@ -16,13 +16,44 @@
 // Hint that a branch is likely/unlikely (helps branch predictor)
 #define LIKELY(x)   __builtin_expect(!!(x), 1)
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
-// Unroll loops completely when iteration count is known
-#define UNROLL_FULL _Pragma("unroll")
-// Partial unroll for larger loops
-#define UNROLL_4 _Pragma("unroll(4)")
-#define UNROLL_8 _Pragma("unroll(8)")
-// Disable unrolling for variable-count loops to reduce register pressure
-#define NO_UNROLL _Pragma("nounroll")
+
+// === LOOP UNROLLING PRAGMAS ===
+// NOTE: Metal's compiler automatically unrolls loops with compile-time constant bounds.
+// These pragmas are only *hints* - use sparingly for fixed-count loops where you want
+// to suggest a specific unroll factor. For loops using function constants (FC_*),
+// the compiler handles unrolling automatically when the constant is defined.
+#define UNROLL_FULL _Pragma("unroll")       // Hint: fully unroll (only for small fixed-count loops)
+#define UNROLL_4 _Pragma("unroll(4)")       // Hint: unroll by factor of 4
+#define UNROLL_8 _Pragma("unroll(8)")       // Hint: unroll by factor of 8
+#define NO_UNROLL _Pragma("nounroll")       // Prevent unrolling (for runtime-variable loops)
+
+// === LOOP BODY MACROS ===
+// Inline the iteration body for Map functions. Enables the compiler to see
+// the full loop body for optimization regardless of loop structure.
+
+// Basic Map iteration (no tracking) - used by Map()
+#define MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq) \
+    p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz); \
+    { float r2 = dot(p.xyz, p.xyz); \
+      float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq); \
+      p *= t; } \
+    p = fma(p, params.scale, p0)
+
+// Extended Map iteration with orbit cache tracking - used by MapWithOrbitCache()
+#define MAP_ITERATION_WITH_CACHE(p, p0, foldingLimit, params, invSphereRadiusSq, i, trap, trapIter, trapPos, boxFolds, sphereFolds, minRadius, orbitTrapDist) \
+    { float3 pOld = p.xyz; \
+      p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz); \
+      if (any(p.xyz != pOld)) boxFolds++; } \
+    { float r2 = dot(p.xyz, p.xyz); \
+      float r = sqrt(r2); \
+      minRadius = min(minRadius, r); \
+      float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z)); \
+      orbitTrapDist = min(orbitTrapDist, axisTrap); \
+      if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; } \
+      float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq); \
+      if (t > 1.0f) sphereFolds++; \
+      p *= t; } \
+    p = fma(p, params.scale, p0)
 
 
 // File for Metal kernel and shader functions
@@ -142,6 +173,40 @@ constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this di
 constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
 constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
+// === FOG COLOR ===
+constant half3 kFogColor = half3(0.02h, 0.03h, 0.04h);
+constant half3 kGlowColor = half3(0.02h, 0.04h, 0.1h);
+
+// =============================================================================
+// SHARED HELPER FUNCTIONS - Eliminate duplicate code across shaders
+// =============================================================================
+
+// Spotlight direction and attenuation calculation
+// Returns: .xyz = normalized direction to light, .w = attenuation factor
+FORCE_INLINE float4 computeSpotlight(float3 hitPos, float3 spotLightPosition) {
+    float3 toLight = spotLightPosition - hitPos;
+    float dist = length(toLight);
+    float atten = powr(max(dist, kPowEpsilon), kAttenPower);
+    return float4(toLight / dist, atten);
+}
+
+// Apply fog based on distance
+// fogIntensity: 0 = no fog (returns 1), 1 = full fog (returns ~0)
+FORCE_INLINE half3 applyFog(half3 col, float distance, float fogIntensity) {
+    half fogFactor = half(saturate(exp(-distance * fogIntensity * 2.0 + 1.5)));
+    return mix(kFogColor, col, fogFactor);
+}
+
+// Apply glow contribution from ray steps
+FORCE_INLINE half3 applyGlow(half3 col, half glow) {
+    return col + glow * glow * kGlowColor;
+}
+
+// Clamp color before post-processing
+FORCE_INLINE half3 clampColor(half3 col) {
+    return clamp(col, half3(0.0h), half3(2.0h));
+}
+
 // === BOUNDING SPHERE EARLY EXIT ===
 // Returns -1 if ray misses sphere, otherwise returns entry distance
 inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, float radius) {
@@ -234,8 +299,9 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
 // Called potentially 50-100+ times per pixel (raymarch + shadows + normals)
 // Every cycle here matters!
 // 
-// FUNCTION CONSTANT VERSION: When FC_FRACTAL_ITERATIONS is defined, the compiler
-// can fully unroll the loop and optimize aggressively.
+// When FC_FRACTAL_ITERATIONS is defined (via function constants), loopCount becomes
+// a compile-time constant and the Metal compiler automatically fully unrolls the loop.
+// No pragma hints needed - the compiler is smart enough to optimize constant-bound loops.
 FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
 {
     float4 p = float4(pos, 1.0);
@@ -243,36 +309,18 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     
     float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
 
+    // When FC_FRACTAL_ITERATIONS is defined, this becomes a compile-time constant
+    // and the compiler will automatically unroll the loop.
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
 
-    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
-        UNROLL_FULL
-        for (int i = 0; i < loopCount; i++)
-        {
-            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-            float r2 = dot(p.xyz, p.xyz);
-            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
-            p *= t;
-            p = fma(p, params.scale, p0);
-        }
-    } else {
-        UNROLL_8
-        for (int i = 0; i < loopCount; i++)
-        {
-            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-            float r2 = dot(p.xyz, p.xyz);
-            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
-            p *= t;
-            p = fma(p, params.scale, p0);
-        }
+    for (int i = 0; i < loopCount; i++) {
+        MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq);
     }
     
     // Final distance estimate
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
     // Safety bubble: carve out a shape around the camera to prevent clipping
-    // When is_function_constant_defined is false, this branch is evaluated at runtime
-    // When true, the compiler eliminates the branch entirely
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
     if (bubbleEnabled) {
         float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
@@ -514,66 +562,12 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     float minRadius = 1e10f;
     float orbitTrapDist = 1e10f;
     
+    // When FC_FRACTAL_ITERATIONS is defined, this becomes a compile-time constant
+    // and the compiler will automatically unroll the loop.
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
     
-    if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
-        UNROLL_FULL
-        for (int i = 0; i < loopCount; i++) {
-            // Box fold - track if folding occurred
-            float3 pOld = p.xyz;
-            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-            if (any(p.xyz != pOld)) boxFolds++;
-            
-            float r2 = dot(p.xyz, p.xyz);
-            float r = sqrt(r2);
-            minRadius = min(minRadius, r);
-            
-            // Orbit trap - distance to nearest axis
-            float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z));
-            orbitTrapDist = min(orbitTrapDist, axisTrap);
-            
-            // Track iteration with minimum trap
-            if (r2 < trap) {
-                trap = r2;
-                trapIter = i;
-                trapPos = p.xyz;
-            }
-            
-            // Sphere fold
-            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
-            if (t > 1.0f) sphereFolds++;  // Sphere fold occurred
-            p *= t;
-            p = fma(p, params.scale, p0);
-        }
-    } else {
-        UNROLL_8
-        for (int i = 0; i < loopCount; i++) {
-            // Box fold - track if folding occurred
-            float3 pOld = p.xyz;
-            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-            if (any(p.xyz != pOld)) boxFolds++;
-            
-            float r2 = dot(p.xyz, p.xyz);
-            float r = sqrt(r2);
-            minRadius = min(minRadius, r);
-            
-            // Orbit trap - distance to nearest axis
-            float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z));
-            orbitTrapDist = min(orbitTrapDist, axisTrap);
-            
-            // Track iteration with minimum trap
-            if (r2 < trap) {
-                trap = r2;
-                trapIter = i;
-                trapPos = p.xyz;
-            }
-            
-            // Sphere fold
-            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
-            if (t > 1.0f) sphereFolds++;  // Sphere fold occurred
-            p *= t;
-            p = fma(p, params.scale, p0);
-        }
+    for (int i = 0; i < loopCount; i++) {
+        MAP_ITERATION_WITH_CACHE(p, p0, foldingLimit, params, invSphereRadiusSq, i, trap, trapIter, trapPos, boxFolds, sphereFolds, minRadius, orbitTrapDist);
     }
     
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
@@ -1145,12 +1139,11 @@ kernel void adaptiveHierarchical8x8(
         
         float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, hitCache);
         
-        // Use precomputed lighting from CPU
-        float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
+        // Use precomputed lighting from CPU with helper function
+        float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
+        float3 spot = spotData.xyz;
+        float atten = spotData.w;
         float lightIntensity = uniforms.precomputedLighting.lightIntensity;
-        float3 spot = spotLight - p;
-        float atten = length(spot);
-        spot /= atten;
         
         int shadowIterations = max(lodIterations - 2, 2);
         FractalParams shadowParams = makeFractalParamsFromPrecomputed(
@@ -1161,8 +1154,7 @@ kernel void adaptiveHierarchical8x8(
         half shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         half shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         
-        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
+        half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
@@ -1177,15 +1169,11 @@ kernel void adaptiveHierarchical8x8(
         col += half3(specSun) * shaSun * briSun;
     }
     
-    // Fog (applied regardless of hit, same as fragment shader)
-    // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
-    half fogFactor = half(saturate(exp(-adjustedDist * uniforms.fogIntensity * 2.0 + 1.5)));
-    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
-    
-    // Add glow
+    // Apply fog, glow, and clamp using helper functions
     half glowH = half(glow);
-    col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
-    col = clamp(col, half3(0.0h), half3(2.0h));
+    col = applyFog(col, adjustedDist, uniforms.fogIntensity);
+    col = applyGlow(col, glowH);
+    col = clampColor(col);
     
     // Apply PostEffects with color scheme support
     // (saturation, contrast, vignette, gamma from color scheme)
@@ -1265,11 +1253,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
         if (quality > 0.4) {
             // Use precomputed spotlight position and intensity from CPU
-            float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
+            float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
+            float3 spot = spotData.xyz;
+            float atten = spotData.w;
             float lightIntensity = uniforms.precomputedLighting.lightIntensity;
-            float3 spot = spotLight - p;
-            float atten = length(spot);
-            spot /= atten;
 
             int shadowIterations = max(lodIterations - 2, 2);
             // Shadow params still need per-pixel bubble center, but use precomputed fractal values
@@ -1281,8 +1268,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
 
-            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
+            half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
             col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
@@ -1330,14 +1316,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         }
     }
 
-    // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
-    half fogFactor = half(saturate(exp(-ret.x * uniforms.fogIntensity * 2.0 + 1.5)));
-    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
-
+    // Apply fog, glow, and clamp using helper functions
     half glow = half(ret.y);
-    col += glow * glow * half3(0.02h, 0.04h, 0.1h);
-
-    col = clamp(col, half3(0.0h), half3(2.0h));
+    col = applyFog(col, ret.x, uniforms.fogIntensity);
+    col = applyGlow(col, glow);
+    col = clampColor(col);
 
     if (quality > kMinQualityForPostFX) {
         col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glow);
@@ -1429,12 +1412,11 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
             uniforms.minDistance,
             marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
         
-        // Use precomputed lighting from CPU
-        float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
+        // Use precomputed lighting from CPU with helper function
+        float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
+        float3 spot = spotData.xyz;
+        float atten = spotData.w;
         float lightIntensity = uniforms.precomputedLighting.lightIntensity;
-        float3 spot = spotLight - p;
-        float atten = length(spot);
-        spot /= atten;
         
         if (quadLaneId == 0) {
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
@@ -1446,8 +1428,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         shaSun = quad_broadcast(shaSun, 0);
         
         // Per-pixel lighting with shared shadows
-        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
+        half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
@@ -1488,14 +1469,11 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         output.depth = 1e-7;
     }
     
-    // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
-    half fogFactor = half(saturate(exp(-adjustedDist * uniforms.fogIntensity * 2.0 + 1.5)));
-    col = mix(half3(0.02h, 0.03h, 0.04h), col, fogFactor);
-    
+    // Apply fog, glow, and clamp using helper functions
     half glowH = half(glow);
-    col += glowH * glowH * half3(0.02h, 0.04h, 0.1h);
-    
-    col = clamp(col, half3(0.0h), half3(2.0h));
+    col = applyFog(col, adjustedDist, uniforms.fogIntensity);
+    col = applyGlow(col, glowH);
+    col = clampColor(col);
     
     col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glowH);
     

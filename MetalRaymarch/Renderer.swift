@@ -29,7 +29,7 @@ enum FunctionConstantIndex: Int {
     case showHUD = 3
     case qualityMode = 4
     case debugHierarchical = 5
-    case maxRaySteps = 6  // Max ray marching steps for loop unrolling
+    case maxRaySteps = 6  // Base max ray steps (actual count scaled by quality at runtime)
 }
 
 enum RendererError: Error {
@@ -122,8 +122,9 @@ actor Renderer {
     var cubeMap: MTLTexture
     
     // === SPECIALIZED PIPELINES BY (iterations, raySteps) ===
-    // Pre-compiled pipelines with fixed iteration and ray step counts for full loop unrolling
-    // This is THE critical optimization - Map() loop and raymarch loop can be fully unrolled
+    // Pre-compiled pipelines with fixed iteration counts via function constants.
+    // The Map() fractal loop unrolls automatically when FC_FRACTAL_ITERATIONS is defined.
+    // Note: raymarch loops do NOT unroll (variable step count from quality multiplier).
     // Key: PipelineKey(fractalIterations, maxRaySteps)
     struct PipelineKey: Hashable {
         let fractalIterations: Int
@@ -257,15 +258,10 @@ actor Renderer {
             quadSharedPipelineState = nil
         }
         
-        // === BUILD SPECIALIZED PIPELINES FOR COMMON (iterations, raySteps) COMBINATIONS ===
-        // This is THE critical optimization. Both loops can be unrolled:
-        // 1. Map() inner loop (50-100+ calls per pixel × iterations each)
-        // 2. Scene() raymarch loop (1 call per pixel × raySteps iterations)
-        // With fixed counts, the compiler can fully unroll both loops, eliminating:
-        // - Loop counter overhead
-        // - Branch prediction misses  
-        // - Register spilling from loop variables
-        // Expected: 30-50% overall performance improvement
+        // === BUILD SPECIALIZED PIPELINES FOR QUALITY PRESETS ===
+        // Key optimization: Map() inner loop (50-100+ calls per pixel) can be fully unrolled
+        // when FC_FRACTAL_ITERATIONS is defined as a compile-time constant.
+        // Note: The outer raymarch loop does NOT unroll due to runtime quality scaling.
         
         // Quality presets: Low (6,32), Mid (9,64), High (12,100), Ultra (16,128)
         // Only build pipelines for exact preset combinations (4 pipelines, not 16)
@@ -330,7 +326,7 @@ actor Renderer {
             let library = device.makeDefaultLibrary()!
             
             // Create specialized function constants for compute kernels
-            // Using known iteration count allows full loop unrolling in Map()
+            // Known iteration count enables Map() loop auto-unrolling
             let computeConstants = MTLFunctionConstantValues()
             var fractalIters: Int32 = 6  // Default fractal iterations
             var shadowIters: Int32 = 4   // Default shadow iterations
@@ -1389,8 +1385,8 @@ actor Renderer {
         let currentIterations = settingsSnapshot.fractalIterations
         let currentRaySteps = settingsSnapshot.maxRaySteps
         
-        // Use specialized pipeline with fixed iteration count for full loop unrolling
-        // This is THE critical optimization - Map() inner loop can be fully unrolled
+        // Use specialized pipeline with fixed iteration count
+        // This enables Map() loop auto-unrolling via function constants
         let selectedPipeline = selectPipeline(
             forIterations: currentIterations,
             raySteps: currentRaySteps,
