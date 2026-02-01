@@ -1066,26 +1066,26 @@ actor Renderer {
                             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
-                            foldingLimit: settings.foldingLimit,
-                            sphereRadius: settings.sphereRadius,
-                            safetyBubbleRadius: settings.safetyBubbleRadius,
-                            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
-                            safetyBubbleShape: settings.safetyBubbleShape,
-                            colorIterations: settings.colorIterations,
-                            useHierarchical: settings.useHierarchical ? 1 : 0,
-                            limitFlash: settings.limitFlash,
-                            showHUD: settings.showHUD ? 1 : 0,
-                            activeGesture: Int32(settings.activeGestureIndex),
-                            fractalType: settings.fractalType.rawValue,
-                            lightingMode: settings.lightingMode.rawValue,
-                            audioLevel: settings.audioLevel,
-                            emissiveEnabled: settings.emissiveEnabled ? 1 : 0,
-                            emissivePattern: Int32(settings.emissivePattern),
-                            emissiveIntensity: settings.emissiveIntensity,
-                            emissiveThreshold: settings.emissiveThreshold,
-                            emissiveColor: settings.emissiveColor,
-                            emissiveSpeed: settings.emissiveSpeed,
-                            fogIntensity: settings.fogIntensity,
+                            foldingLimit: settingsSnapshot.foldingLimit,
+                            sphereRadius: settingsSnapshot.sphereRadius,
+                            safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
+                            safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
+                            safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
+                            colorIterations: settingsSnapshot.colorIterations,
+                            useHierarchical: settingsSnapshot.useHierarchical ? 1 : 0,
+                            limitFlash: settingsSnapshot.limitFlash,
+                            showHUD: settingsSnapshot.showHUD ? 1 : 0,
+                            activeGesture: Int32(settingsSnapshot.activeGestureIndex),
+                            fractalType: settingsSnapshot.fractalType.rawValue,
+                            lightingMode: settingsSnapshot.lightingMode.rawValue,
+                            audioLevel: settingsSnapshot.audioLevel,
+                            emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
+                            emissivePattern: Int32(settingsSnapshot.emissivePattern),
+                            emissiveIntensity: settingsSnapshot.emissiveIntensity,
+                            emissiveThreshold: settingsSnapshot.emissiveThreshold,
+                            emissiveColor: settingsSnapshot.emissiveColor,
+                            emissiveSpeed: settingsSnapshot.emissiveSpeed,
+                            fogIntensity: settingsSnapshot.fogIntensity,
                             maxViewDistance: RenderSettings.maxViewDistance,
                             logDepthScale: RenderSettings.logDepthScale,
                             depthMissValue: RenderSettings.depthMissValue,
@@ -1207,7 +1207,6 @@ actor Renderer {
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
 
-        let settings = appModel.renderSettings
         settings.interpolateToTargets(deltaTime: cachedDeltaTime)
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
@@ -1218,7 +1217,6 @@ actor Renderer {
         let settingsSnapshot = settings.snapshot()
 
         self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
-        self.updateGameState(drawable: drawable)
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = settingsSnapshot.tileSize
@@ -1703,18 +1701,18 @@ actor Renderer {
             colorIterations: Int32(settingsSnapshot.colorIterations),
             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
-            debugHierarchical: settings.debugHierarchical ? 1 : 0,
-            limitFlash: settings.limitFlash,
-            fractalType: settings.fractalType.rawValue,
-            lightingMode: settings.lightingMode.rawValue,
-            audioLevel: settings.audioLevel,
-            emissiveEnabled: settings.emissiveEnabled ? 1 : 0,
-            emissivePattern: Int32(settings.emissivePattern),
-            emissiveIntensity: settings.emissiveIntensity,
-            emissiveThreshold: settings.emissiveThreshold,
-            emissiveColor: settings.emissiveColor,
-            emissiveSpeed: settings.emissiveSpeed,
-            fogIntensity: settings.fogIntensity,
+            debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
+            limitFlash: settingsSnapshot.limitFlash,
+            fractalType: settingsSnapshot.fractalType.rawValue,
+            lightingMode: settingsSnapshot.lightingMode.rawValue,
+            audioLevel: settingsSnapshot.audioLevel,
+            emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
+            emissivePattern: Int32(settingsSnapshot.emissivePattern),
+            emissiveIntensity: settingsSnapshot.emissiveIntensity,
+            emissiveThreshold: settingsSnapshot.emissiveThreshold,
+            emissiveColor: settingsSnapshot.emissiveColor,
+            emissiveSpeed: settingsSnapshot.emissiveSpeed,
+            fogIntensity: settingsSnapshot.fogIntensity,
             maxViewDistance: RenderSettings.maxViewDistance,
             logDepthScale: RenderSettings.logDepthScale,
             depthMissValue: RenderSettings.depthMissValue,
