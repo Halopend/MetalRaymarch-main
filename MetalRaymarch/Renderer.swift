@@ -347,16 +347,21 @@ actor Renderer {
         worldTracking = WorldTrackingProvider()
         handTracking = HandTrackingProvider()
         arSession = ARKitSession()
-        // Setup screenshot capture pipeline
-        setupScreenshotCapture()
         
-        // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-        // Initialize dynamic quality manager if available on this OS version
-        setupDynamicRenderQuality()
-        
-        // === RESIDENCY SET ===
-        // Pre-validate resource residency for reduced per-frame overhead
-        setupResidencySet()
+        // Defer actor-isolated setup to after init completes
+        // These methods access actor-isolated properties and must run on this actor
+        Task {
+            // Setup screenshot capture pipeline
+            await self.setupScreenshotCapture()
+            
+            // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
+            // Initialize dynamic quality manager if available on this OS version
+            await self.setupDynamicRenderQuality()
+            
+            // === RESIDENCY SET ===
+            // Pre-validate resource residency for reduced per-frame overhead
+            await self.setupResidencySet()
+        }
     }
     
     /// Setup residency set for GPU resource pre-validation
@@ -1061,26 +1066,30 @@ actor Renderer {
                             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
-                            foldingLimit: settingsSnapshot.foldingLimit,
-                            sphereRadius: settingsSnapshot.sphereRadius,
-                            safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
-                            safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
-                            safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
-                            colorIterations: settingsSnapshot.colorIterations,
-                            useHierarchical: settingsSnapshot.useHierarchical ? 1 : 0,
-                            limitFlash: settingsSnapshot.limitFlash,
-                            showHUD: settingsSnapshot.showHUD ? 1 : 0,
-                            activeGesture: Int32(settingsSnapshot.activeGestureIndex),
-                            fractalType: settingsSnapshot.fractalType.rawValue,
-                            lightingMode: settingsSnapshot.lightingMode.rawValue,
-                            audioLevel: settingsSnapshot.audioLevel,
-                            emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
-                            emissivePattern: Int32(settingsSnapshot.emissivePattern),
-                            emissiveIntensity: settingsSnapshot.emissiveIntensity,
-                            emissiveThreshold: settingsSnapshot.emissiveThreshold,
-                            emissiveColor: settingsSnapshot.emissiveColor,
-                            emissiveSpeed: settingsSnapshot.emissiveSpeed,
-                            fogIntensity: settingsSnapshot.fogIntensity,
+                            foldingLimit: settings.foldingLimit,
+                            sphereRadius: settings.sphereRadius,
+                            safetyBubbleRadius: settings.safetyBubbleRadius,
+                            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
+                            safetyBubbleShape: settings.safetyBubbleShape,
+                            colorIterations: settings.colorIterations,
+                            useHierarchical: settings.useHierarchical ? 1 : 0,
+                            limitFlash: settings.limitFlash,
+                            showHUD: settings.showHUD ? 1 : 0,
+                            activeGesture: Int32(settings.activeGestureIndex),
+                            fractalType: settings.fractalType.rawValue,
+                            lightingMode: settings.lightingMode.rawValue,
+                            audioLevel: settings.audioLevel,
+                            emissiveEnabled: settings.emissiveEnabled ? 1 : 0,
+                            emissivePattern: Int32(settings.emissivePattern),
+                            emissiveIntensity: settings.emissiveIntensity,
+                            emissiveThreshold: settings.emissiveThreshold,
+                            emissiveColor: settings.emissiveColor,
+                            emissiveSpeed: settings.emissiveSpeed,
+                            fogIntensity: settings.fogIntensity,
+                            maxViewDistance: RenderSettings.maxViewDistance,
+                            logDepthScale: RenderSettings.logDepthScale,
+                            depthMissValue: RenderSettings.depthMissValue,
+                            _depthPadding: 0.0,
                             colorScheme: colorSchemeParams)
         }
 
@@ -1158,6 +1167,7 @@ actor Renderer {
 
         // FPS tracking using frame-rate independent exponential decay (Freya Holmér technique)
         // factor = 1 - e^(-speed * dt), speed=10 gives ~63% convergence in 100ms
+        let settings = appModel.renderSettings  // Capture settings early for use in Task closure
         if deltaTime > 0 {
             let instantFPS = 1.0 / deltaTime
             let fpsSmoothFactor = 1.0 - exp(-10.0 * deltaTime)  // speed=10 for responsive but smooth FPS display
@@ -1169,6 +1179,16 @@ actor Renderer {
                 lastFPSUpdateTime = time
                 Task { @MainActor in
                     appModel.fps = updatedFPS
+                    // Sample analytics ~4Hz (matches FPS update rate)
+                    let qualityPreset = QualityPreset.detect(
+                        fractalIterations: settings.fractalIterations,
+                        raySteps: settings.maxRaySteps
+                    )?.rawValue ?? "custom"
+                    UsageAnalytics.shared.sample(
+                        settings: settings,
+                        fps: updatedFPS,
+                        currentQuality: qualityPreset
+                    )
                 }
             }
             
@@ -1198,6 +1218,7 @@ actor Renderer {
         let settingsSnapshot = settings.snapshot()
 
         self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+        self.updateGameState(drawable: drawable)
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = settingsSnapshot.tileSize
@@ -1342,6 +1363,7 @@ actor Renderer {
         let cpuEncodeMs = (CACurrentMediaTime() - cpuEncodeStart) * 1000.0
         let frameTimeSeconds = Double(cachedDeltaTime)
         let logTime = time
+        let capturedMetalFXInputSize = metalFXInputSize  // Capture for concurrent closure
         commandBuffer.addCompletedHandler { [weak self] cb in
             let gpuMs: Double?
             if cb.gpuEndTime > cb.gpuStartTime {
@@ -1359,7 +1381,7 @@ actor Renderer {
                     settingsSnapshot: settingsSnapshot,
                     wantsMetalFX: wantsMetalFX,
                     useAdaptiveCompute: useAdaptiveCompute,
-                    metalFXInputSize: metalFXInputSize,
+                    metalFXInputSize: capturedMetalFXInputSize,
                     viewCount: drawable.views.count
                 )
             }
@@ -1569,11 +1591,15 @@ actor Renderer {
         var inputWidth = max(1, Int(Float(outputWidth) * settingsSnapshot.resolutionScale))
         var inputHeight = max(1, Int(Float(outputHeight) * settingsSnapshot.resolutionScale))
 
+        // When using foveation with MetalFX, the input texture MUST be at least as large as
+        // the rate map's physical size, otherwise Metal validation fails with:
+        // "maximum physical rendering width must be <= minimum attachment width"
         if layerRenderer.configuration.isFoveationEnabled, let map = rasterizationRateMap {
             let physical = map.physicalSize(layer: 0)
             if physical.width > 0 && physical.height > 0 {
-                inputWidth = physical.width
-                inputHeight = physical.height
+                // Ensure input is at least the physical size required by the rate map
+                inputWidth = max(inputWidth, physical.width)
+                inputHeight = max(inputHeight, physical.height)
             }
         }
 
@@ -1677,18 +1703,22 @@ actor Renderer {
             colorIterations: Int32(settingsSnapshot.colorIterations),
             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
-            debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
-            limitFlash: settingsSnapshot.limitFlash,
-            fractalType: settingsSnapshot.fractalType.rawValue,
-            lightingMode: settingsSnapshot.lightingMode.rawValue,
-            audioLevel: settingsSnapshot.audioLevel,
-            emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
-            emissivePattern: Int32(settingsSnapshot.emissivePattern),
-            emissiveIntensity: settingsSnapshot.emissiveIntensity,
-            emissiveThreshold: settingsSnapshot.emissiveThreshold,
-            emissiveColor: settingsSnapshot.emissiveColor,
-            emissiveSpeed: settingsSnapshot.emissiveSpeed,
-            fogIntensity: settingsSnapshot.fogIntensity,
+            debugHierarchical: settings.debugHierarchical ? 1 : 0,
+            limitFlash: settings.limitFlash,
+            fractalType: settings.fractalType.rawValue,
+            lightingMode: settings.lightingMode.rawValue,
+            audioLevel: settings.audioLevel,
+            emissiveEnabled: settings.emissiveEnabled ? 1 : 0,
+            emissivePattern: Int32(settings.emissivePattern),
+            emissiveIntensity: settings.emissiveIntensity,
+            emissiveThreshold: settings.emissiveThreshold,
+            emissiveColor: settings.emissiveColor,
+            emissiveSpeed: settings.emissiveSpeed,
+            fogIntensity: settings.fogIntensity,
+            maxViewDistance: RenderSettings.maxViewDistance,
+            logDepthScale: RenderSettings.logDepthScale,
+            depthMissValue: RenderSettings.depthMissValue,
+            _depthPadding: 0.0,
             colorScheme: colorSchemeParams
         )
         

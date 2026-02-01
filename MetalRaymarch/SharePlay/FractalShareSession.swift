@@ -93,6 +93,8 @@ class FractalShareSession {
                 logger.info("SharePlay activity activated successfully")
                 isOwner = true
                 state = .waiting
+                // Track for analytics
+                UsageAnalytics.shared.trackSharePlayUsed()
             } else {
                 logger.warning("SharePlay activity activation returned false")
                 state = .error("Could not start sharing")
@@ -211,14 +213,8 @@ class FractalShareSession {
         let receiveTask = Task { [weak self] in
             guard let self = self else { return }
             
-            do {
-                for try await (message, _) in messenger.messages(of: FractalSyncMessage.self) {
-                    await self.handleReceivedMessage(message)
-                }
-            } catch {
-                await MainActor.run {
-                    self.logger.error("Message receive error: \(error.localizedDescription)")
-                }
+            for await (message, _) in messenger.messages(of: FractalSyncMessage.self) {
+                await self.handleReceivedMessage(message)
             }
         }
         tasks.insert(receiveTask)

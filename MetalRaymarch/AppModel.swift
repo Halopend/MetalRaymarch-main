@@ -495,6 +495,10 @@ struct RenderSettingsSnapshot {
 }
 
 final class RenderSettings: @unchecked Sendable {
+    // Shared depth pipeline settings (raymarch + depth output + MetalFX input)
+    static let maxViewDistance: Float = 12.0
+    static let logDepthScale: Float = 4.0
+    static let depthMissValue: Float = 2.0
     // os_unfair_lock is a low-level spinlock - fastest for short critical sections
     private var _lock = os_unfair_lock()
     
@@ -508,7 +512,7 @@ final class RenderSettings: @unchecked Sendable {
     
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
-    private var _position: SIMD3<Float> = .zero
+    private var _position: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
     private var _fractalScale: Float = 2.8
     private var _fractalIterations: Int = 9         // Mid quality default
     private var _maxRaySteps: Int = 64              // Mid quality default
@@ -543,8 +547,8 @@ final class RenderSettings: @unchecked Sendable {
     
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
-    private var _colorScheme: ColorScheme = .classic     // Current color scheme
-    private var _targetColorScheme: ColorScheme = .classic // Target for transitions
+    private var _colorScheme: ColorScheme = .nebula      // Current color scheme
+    private var _targetColorScheme: ColorScheme = .nebula // Target for transitions
     private var _colorSchemeTransitionProgress: Float = 1.0 // 0 = previous, 1 = current (complete)
     private var _colorSchemeTransitionDuration: Float = 2.0 // Seconds to transition between schemes
     private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes
@@ -553,7 +557,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeSaturation: Float = 2.0         // Color saturation override (boosted)
     private var _colorSchemeContrast: Float = 1.05          // Contrast override (default 1.05)
     private var _colorSchemeGamma: Float = 0.5              // Gamma override (default 0.5)
-    private var _colorSchemeVibrance: Float = 0.0           // Vibrance boost (0-1)
+    private var _colorSchemeVibrance: Float = 1.0           // Vibrance boost (0-1)
     private var _colorSchemeCurve: Float = 0.0              // Midtone curve adjustment (-1 to 1)
     private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.5 to 0.5)
     private var _colorSchemeHighlights: Float = 0.0         // Highlight boost/reduction (-0.5 to 1.0)
@@ -566,7 +570,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _pulseAmount: Float = 0.0                   // Pulse intensity (0 = off, 0.15 = subtle)
     private var _glowIntensity: Float = 0.0                 // Ray-step glow (0 = off, 0.3 = moderate)
     private var _bloomStrength: Float = 0.0                 // Bloom effect (0 = off, 0.2 = subtle)
-    private var _fogIntensity: Float = 0.5                  // Fog strength (0 = no fog, 1 = full fog)
+    private var _fogIntensity: Float = 0.32                 // Fog strength (0 = no fog, 1 = full fog)
     
     // === EMISSIVE GLOW (Self-illuminating regions) ===
     private var _emissiveEnabled: Bool = false              // Enable emissive glow regions
@@ -590,7 +594,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _targetMinDistance: Float = 0.8
     private var _targetFoldingLimit: Float = 1.0
     private var _targetSphereRadius: Float = 0.5
-    private var _targetPosition: SIMD3<Float> = .zero
+    private var _targetPosition: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
     
     // === VELOCITY STATE FOR SMOOTH DAMP ===
     // Track velocities for critically-damped spring interpolation

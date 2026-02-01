@@ -838,6 +838,8 @@ struct SceneResult {
 
 // Optimized raymarch that caches orbit state on hit
 // For Mandelbox - caches orbit state for normal/color reuse
+// OPTIMIZATION: Use cheap MapUnified during marching, only call MapWithOrbitCache once at hit point
+// This avoids writing the large OrbitCache struct on every step (~60-100 steps per ray)
 FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
 {
     SceneResult result;
@@ -851,8 +853,6 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
     
-    OrbitCache stepCache;
-    
     NO_UNROLL
     for(int j = 0; j < maxSteps; j++)
     {
@@ -860,13 +860,15 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         
         float3 p = fma(rD, float3(t), rO);
         
-        // Use caching Map for Mandelbox - stores orbit state on every step
-        float h = MapWithOrbitCache(p, params, foldingLimit, iterations, stepCache);
+        // Use CHEAP MapUnified during marching - no cache writes (GPU win)
+        float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
         
         if(UNLIKELY(h < threshold))
         {
-            // HIT! Store the cache from this final position for reuse
-            result.cache = stepCache;
+            // HIT! Now compute cache ONCE at the final hit position
+            OrbitCache hitCache;
+            MapWithOrbitCache(p, params, foldingLimit, iterations, hitCache);
+            result.cache = hitCache;
             result.distGlow = float2(t, saturate(glow * 0.25));
             return result;
         }

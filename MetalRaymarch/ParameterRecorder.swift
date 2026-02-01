@@ -260,6 +260,9 @@ class ParameterRecorder {
         // Capture initial frame immediately
         captureFrame()
         
+        // Track for analytics
+        UsageAnalytics.shared.trackRecordingUsed()
+        
         print("🔴 Recording started")
     }
     
