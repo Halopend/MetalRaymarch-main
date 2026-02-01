@@ -111,6 +111,8 @@ final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
 }
 
 actor Renderer {
+    private typealias ImmersiveSpaceState = AppModel.ImmersiveSpaceState
+
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
     var dynamicUniformBuffer: MTLBuffer
