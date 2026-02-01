@@ -69,13 +69,15 @@ enum PointSets {
             }
         }
 
+        // Assume the origin is inside; if not, the near-surface bracket will fail.
+        if escape(.zero) {
+            return Generated(name: "near-surface", points: [], referenceDE: [])
+        }
+
         var attempts = 0
         while pts.count < count, attempts < count * 50 {
             attempts += 1
             let dir = randomDirection()
-
-            // Assume origin is inside; if not, this direction is unreliable.
-            if escape(.zero) { continue }
 
             var rIn: Float = 0
             var rOut: Float? = nil

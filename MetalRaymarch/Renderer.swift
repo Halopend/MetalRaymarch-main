@@ -43,7 +43,8 @@ extension LayerRenderer.Clock.Instant.Duration {
     }
 }
 
-/// Dedicated render thread using a persistent Thread object with high priority.\n/// This avoids thread hopping and preemption that causes micro-stutters with DispatchQueue.
+/// Dedicated render thread using a persistent Thread object with high priority.
+/// This avoids thread hopping and preemption that causes micro-stutters with DispatchQueue.
 final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
     // pendingJobs is protected by lock - safe for Sendable
     private var pendingJobs: [UnownedJob] = []
@@ -1929,5 +1930,4 @@ func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_floa
     mat.columns.3 = SIMD4<Float>(translation, 1)
     return mat
 }
-
 
