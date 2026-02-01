@@ -125,7 +125,6 @@ constant half kPowEpsilonHalf = 1e-4h;
 // Raymarching thresholds
 constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
 constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
-constant float kCoarseMaxDistance = 80.0f;      // Super-coarse max distance
 
 // Shading constants
 constant float kSpecularPower = 10.0f;          // Specular highlight power
@@ -696,26 +695,7 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
     }
 }
 
-// Far-range coarse raymarch (12 steps, max 80 units)
-FORCE_INLINE float SceneFarCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
-{
-    float t = max(startT, 0.05);
-    
-    UNROLL_FULL
-    for(int j = 0; j < 12; j++)
-    {
-        float3 p = fma(rD, float3(t), rO);
-        float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
-        
-        if(UNLIKELY(h < 0.1)) return t;
-        if (UNLIKELY(t > kCoarseMaxDistance)) return kRayMissThreshold + 100.0;
-        
-        t = fma(h, 1.5, t);
-    }
-    
-    return kRayMissThreshold + 100.0;
-}
-
+// Far-range coarse raymarch (12 steps, max 80 units) - REMOVED (unused)
 // Near-range coarse raymarch (24 steps, max 12 units)
 FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
 {
@@ -734,58 +714,6 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     }
     
     return kRayMissThreshold + 100.0;
-}
-
-// Fine raymarch from a known starting distance
-FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
-{
-    float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
-    
-    float t = max(0.01, startT - 0.3) + dither;
-
-    float glow = 0.0;
-    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
-    int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
-    float endT = startT + 2.0;
-    
-    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
-        UNROLL_8
-        for(int j = 0; j < maxSteps; j++)
-        {
-            float threshold = fma(t, 0.0006, 0.0005);
-            float3 p = fma(rD, float3(t), rO);
-            float h = Map(p, params, foldingLimit, iterations);
-            
-            if(UNLIKELY(h < threshold)) {
-                return float2(t, saturate(glow * 0.25));
-            }
-            if (UNLIKELY(t > endT)) break;
-            
-            glow = fma(saturate(0.04 - h), glowIntensity, glow);
-            t += h;
-        }
-    } else {
-        NO_UNROLL
-        for(int j = 0; j < maxSteps; j++)
-        {
-            float threshold = fma(t, 0.0006, 0.0005);
-            
-            float3 p = fma(rD, float3(t), rO);
-            float h = Map(p, params, foldingLimit, iterations);
-            
-            if(UNLIKELY(h < threshold))
-            {
-                return float2(t, saturate(glow * 0.25));
-            }
-            
-            if (UNLIKELY(t > endT)) break;
-            
-            glow = fma(saturate(0.04 - h), glowIntensity, glow);
-            t += h;
-        }
-    }
-
-    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
 // Main sphere tracing raymarch
@@ -1162,25 +1090,10 @@ struct TileHitData {
     bool didHit;            // Whether the tile hit geometry
 };
 
-// Normal via tetrahedron technique (4 samples)
-FORCE_INLINE float3 GetNormalTetrahedron(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
-{
-    float e = max(distance * 0.0005, 0.0001);
-    
-    float2 h = float2(1.0, -1.0) * e;
-    float3 gradient = 
-        h.xyy * MapMandelbox(pos + h.xyy, params, foldingLimit, iterations, fractalType) +
-        h.yyx * MapMandelbox(pos + h.yyx, params, foldingLimit, iterations, fractalType) +
-        h.yxy * MapMandelbox(pos + h.yxy, params, foldingLimit, iterations, fractalType) +
-        h.xxx * MapMandelbox(pos + h.xxx, params, foldingLimit, iterations, fractalType);
-    
-    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
-}
-
 // Forward declaration needed by compute kernels
 float3 CameraPath(float t);
 
-// CameraPath implementation (also used by compute kernels)
+// CameraPath implementation (used for spotlight positioning on CPU now, kept for reference)
 float3 CameraPath(float t)
 {
     float3 p = float3(-.78 + 3. * sin(2.14*t),.05+2.5 * sin(.942*t+1.3),.05 + 3.5 * cos(3.594*t) );
@@ -1188,160 +1101,32 @@ float3 CameraPath(float t)
 }
 
 // =============================================================================
-// LIGHTING MODE HELPERS
-// Compute spotlight position based on lighting mode:
-//   0 = Static: Fixed position, no animation
-//   1 = Animated: Original pulsing/moving spotlight
-//   2 = Audio Reactive: Position and intensity respond to audio level
-// =============================================================================
-
-FORCE_INLINE float3 computeSpotLightPosition(float gTime, int lightingMode, float audioLevel)
-{
-    if (lightingMode == 0) {
-        // Static: Fixed spotlight at a pleasant position
-        return float3(2.0, 1.5, 2.0);
-    }
-    else if (lightingMode == 2) {
-        // Audio Reactive: Base position + audio-driven movement
-        float3 basePos = float3(1.5, 1.0, 1.5);
-        // Audio pulses the light outward and adds vertical bounce
-        float pulse = audioLevel * 2.0;
-        float3 audioOffset = float3(
-            sin(gTime * 2.0) * pulse,
-            audioLevel * 1.5,  // Vertical bounce with audio
-            cos(gTime * 2.0) * pulse
-        );
-        return basePos + audioOffset;
-    }
-    else {
-        // Animated (default): Original pulsing behavior
-        return CameraPath(gTime + 0.03) + float3(sin(gTime*18.4), cos(gTime*17.98), sin(gTime * 22.53)) * 0.2;
-    }
-}
-
-// Compute lighting intensity multiplier based on mode
-FORCE_INLINE float computeLightingIntensity(float gTime, int lightingMode, float audioLevel)
-{
-    if (lightingMode == 0) {
-        // Static: Constant brightness
-        return 1.0;
-    }
-    else if (lightingMode == 2) {
-        // Audio Reactive: Intensity follows audio with some base level
-        return 0.5 + audioLevel * 1.5;  // Range 0.5 to 2.0
-    }
-    else {
-        // Animated: Gentle pulsing
-        return 0.9 + sin(gTime * 1.5) * 0.15;  // Range 0.75 to 1.05
-    }
-}
-
-// =============================================================================
 // EMISSIVE GLOW CALCULATION
-// Computes self-illumination based on position, fold state, or patterns
-// Patterns:
-//   0 = Folds: Glow based on how many times the point was folded
-//   1 = Depth: Glow based on iteration depth reached
-//   2 = Position: Glow based on position-derived patterns (veins/ridges)
-//   3 = Pulse: Animated pulse waves emanating from origin
-//   4 = Edges: Glow at sharp edges/corners of the fractal
+// Computes self-illumination based on cached fold state and patterns
+// Requires valid OrbitCache from raymarching hit
 // =============================================================================
 
-// Track fold information during SDF evaluation for emissive calculation
-struct FoldInfo {
-    int boxFolds;      // Number of box folds applied
-    int sphereFolds;   // Number of sphere folds applied (inner/outer)
-    float minRadius;   // Minimum radius reached during iteration
-    float orbitTrap;   // Distance to nearest orbit trap point
-};
-
-// Evaluate SDF with fold tracking for emissive calculation
-FORCE_INLINE float MapWithFoldInfo(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType, thread FoldInfo& foldInfo)
-{
-    foldInfo.boxFolds = 0;
-    foldInfo.sphereFolds = 0;
-    foldInfo.minRadius = 1e10;
-    foldInfo.orbitTrap = 1e10;
-    
-    float3 z = pos;
-    float dr = 1.0;
-    float scale = params.scale.x;
-    float minRad2 = params.sphereRadiusSq;
-    float fixedRad2 = 1.0;
-    
-    for (int i = 0; i < iterations; i++) {
-        // Box fold - track each fold
-        float3 zOld = z;
-        z = clamp(z, -foldingLimit, foldingLimit) * 2.0 - z;
-        if (any(z != zOld)) foldInfo.boxFolds++;
-        
-        // Sphere fold
-        float r2 = dot(z, z);
-        foldInfo.minRadius = min(foldInfo.minRadius, sqrt(r2));
-        
-        // Orbit trap - distance to nearest axis
-        float trap = min(min(abs(z.x), abs(z.y)), abs(z.z));
-        foldInfo.orbitTrap = min(foldInfo.orbitTrap, trap);
-        
-        if (r2 < minRad2) {
-            float temp = fixedRad2 / minRad2;
-            z *= temp;
-            dr *= temp;
-            foldInfo.sphereFolds++;
-        } else if (r2 < fixedRad2) {
-            float temp = fixedRad2 / r2;
-            z *= temp;
-            dr *= temp;
-            foldInfo.sphereFolds++;
-        }
-        
-        z = scale * z + pos;
-        dr = dr * abs(scale) + 1.0;
-    }
-    
-    return length(z) / abs(dr) - 0.001;
-}
-
-// Compute emissive glow contribution
-// Returns RGB emissive color to add to final shading
-// Compute emissive glow - uses cached fold info when available, otherwise computes it
+// Compute emissive glow - REQUIRES valid cache (always valid on hit)
 FORCE_INLINE half3 computeEmissive(
     float3 pos,
     float3 normal,
-    float distance,
     float gTime,
     int pattern,
     float intensity,
     float threshold,
     float3 emissiveColor,
     float speed,
-    FractalParams params,
-    float foldingLimit,
     int iterations,
-    int fractalType,
-    OrbitCache cache  // Pass cache - if cache.valid, uses cached data; otherwise computes
+    float foldingLimit,
+    OrbitCache cache
 ) {
-    if (intensity <= 0.0) return half3(0.0h);
+    if (intensity <= 0.0 || !cache.valid) return half3(0.0h);
     
-    // Get fold info - either from cache or by computing
-    int boxFolds, sphereFolds;
-    float minRadius, orbitTrapDist;
-    
-    if (cache.valid) {
-        // Use cached values
-        boxFolds = cache.boxFolds;
-        sphereFolds = cache.sphereFolds;
-        minRadius = cache.minRadius;
-        orbitTrapDist = cache.orbitTrapDist;
-    } else {
-        // Compute fold info
-        FoldInfo info;
-        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
-        boxFolds = info.boxFolds;
-        sphereFolds = info.sphereFolds;
-        minRadius = info.minRadius;
-        orbitTrapDist = info.orbitTrap;
-    }
+    // Use cached fold info from raymarching
+    int boxFolds = cache.boxFolds;
+    int sphereFolds = cache.sphereFolds;
+    float minRadius = cache.minRadius;
+    float orbitTrapDist = cache.orbitTrapDist;
     
     float emission = 0.0;
     
@@ -1638,23 +1423,19 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 col += half3(specSun) * shaSun * briSun;
             }
             
-            // Emissive glow (self-illumination based on patterns)
-            // Single function handles both cached and uncached paths
+            // Emissive glow (self-illumination based on cached fold patterns)
             if (uniforms.emissiveEnabled != 0) {
                 half3 emissive = computeEmissive(
                     p,
                     nor,
-                    ret.x,
                     gTime,
                     uniforms.emissivePattern,
                     uniforms.emissiveIntensity,
                     uniforms.emissiveThreshold,
                     uniforms.emissiveColor,
                     uniforms.emissiveSpeed,
-                    fractalParams,
-                    uniforms.foldingLimit,
                     lodIterations,
-                    fractalType,
+                    uniforms.foldingLimit,
                     hitCache
                 );
                 col += emissive;
@@ -1806,22 +1587,19 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
         
-        // Emissive glow (self-illumination based on patterns)
+        // Emissive glow (self-illumination based on cached fold patterns)
         if (uniforms.emissiveEnabled != 0) {
             half3 emissive = computeEmissive(
                 p,
                 nor,
-                adjustedDist,
                 gTime,
                 uniforms.emissivePattern,
                 uniforms.emissiveIntensity,
                 uniforms.emissiveThreshold,
                 uniforms.emissiveColor,
                 uniforms.emissiveSpeed,
-                fractalParams,
-                uniforms.foldingLimit,
                 lodIterations,
-                fractalType,
+                uniforms.foldingLimit,
                 hitCache
             );
             col += emissive;
