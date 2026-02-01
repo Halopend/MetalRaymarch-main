@@ -171,11 +171,9 @@ inline float encodeDepthFromClip(float4 clipPos) {
     return clipPos.z / clipPos.w;
 }
 
-// Blue noise approximation for temporal stability (better than white noise for reprojection)
+// Interleaved Gradient Noise - temporally stable dithering for reprojection
 // FORCE_INLINE: Called every pixel in Scene()
-FORCE_INLINE float blueNoise(float2 uv, float time) {
-    // Interleaved gradient noise - more temporally stable than random
-    // Note: constexpr not available in Metal, but compiler will optimize this literal
+FORCE_INLINE float interleavedGradientNoise(float2 uv, float time) {
     float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
     float noise = fract(magic.z * fract(dot(uv, magic.xy)));
     // Add small temporal variation to prevent static patterns
@@ -186,8 +184,8 @@ struct FractalParams {
     float4 scale;
     float absScalem1;
     float absScalePow;
-    float minRadius2;       // sphereRadius² - used for sphere fold
-    float minDistanceVal;   // original minDistance parameter - used for scale computation
+    float sphereRadiusSq;   // Squared sphere radius for sphere fold
+    float minDistanceVal;
     float3 bubbleCenter;
     float bubbleRadius;
     int bubbleEnabled;
@@ -222,8 +220,8 @@ FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScal
     params.scale.w = abs(params.scale.w);
     params.absScalem1 = abs(fractalScale - 1.0);
     params.absScalePow = powr(max(abs(fractalScale), kPowEpsilon), float(1 - iterations));
-    params.minRadius2 = sphereRadius * sphereRadius;
-    params.minDistanceVal = minRad2Val;  // Store for negative mandelbox
+    params.sphereRadiusSq = sphereRadius * sphereRadius;
+    params.minDistanceVal = minRad2Val;
     params.bubbleCenter = bubbleCenter;
     params.bubbleRadius = bubbleRadius;
     params.bubbleEnabled = bubbleEnabled;
@@ -242,22 +240,17 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
     
-    // Pre-compute reciprocal for sphere fold (division is expensive)
-    float invMinRadius2 = 1.0f / params.minRadius2;
+    float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
 
-    // Use function constant for iteration count when available
-    // This allows the compiler to fully unroll the loop at pipeline creation time
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
 
-    // UNROLL_FULL when using function constants (compiler knows exact count)
-    // UNROLL_8 as fallback for dynamic iteration count
     if (is_function_constant_defined(FC_FRACTAL_ITERATIONS)) {
         UNROLL_FULL
         for (int i = 0; i < loopCount; i++)
         {
             p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
             float r2 = dot(p.xyz, p.xyz);
-            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
             p *= t;
             p = fma(p, params.scale, p0);
         }
@@ -265,18 +258,10 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
         UNROLL_8
         for (int i = 0; i < loopCount; i++)
         {
-            // Box fold: clamp and reflect
-            // Using fma where beneficial for single-instruction execution
             p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-
-            // Branchless sphere fold using clamp
-            // r2 = dot product, single instruction on GPU
             float r2 = dot(p.xyz, p.xyz);
-            // Sphere fold scale factor - clamped reciprocal
-            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
             p *= t;
-
-            // Scale and translate - use fma for xyz, regular mul for w
             p = fma(p, params.scale, p0);
         }
     }
@@ -351,14 +336,9 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
     return saturate(rgb);
 }
 
-// =============================================================================
-// UNIFIED MAP FUNCTION
-// =============================================================================
-
-// Unified distance function - Mandelbox only (simplified after removing other fractal types)
-FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
+// Mandelbox distance function wrapper (fractalType parameter unused, kept for API compatibility)
+FORCE_INLINE float MapMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
 {
-    // fractalType parameter kept for API compatibility but ignored - always Mandelbox
     return Map(pos, params, foldingLimit, iterations);
 }
 
@@ -432,7 +412,7 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
 {
     float4 scale = float4(fractalScale) / minRad2Val;
     scale.w = abs(scale.w);
-    float minRadius2 = sphereRadius * sphereRadius;
+    float sphereRadiusSq = sphereRadius * sphereRadius;
 
     float3 p = pos;
     float3 p0 = p;
@@ -446,7 +426,7 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
     {
         p = clamp(p, -foldingLimit, foldingLimit) * 2.0 - p;
         float r2 = dot(p, p);
-        p *= clamp(1.0 / max(r2, minRadius2), 1.0, 1.0/minRadius2);
+        p *= clamp(1.0 / max(r2, sphereRadiusSq), 1.0, 1.0/sphereRadiusSq);
         p = p * scale.xyz + p0;
         
         // Track orbit trap with iteration and position
@@ -526,8 +506,8 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
     
-    float invMinRadius2 = 1.0f / params.minRadius2;
-    float trap = 1.0f;  // Track minimum r² for orbit trap coloring
+    float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
+    float trap = 1.0f;
     
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
     
@@ -536,8 +516,8 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
         for (int i = 0; i < loopCount; i++) {
             p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
             float r2 = dot(p.xyz, p.xyz);
-            trap = min(trap, r2);  // Track orbit trap
-            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            trap = min(trap, r2);
+            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
             p *= t;
             p = fma(p, params.scale, p0);
         }
@@ -547,7 +527,7 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
             p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
             float r2 = dot(p.xyz, p.xyz);
             trap = min(trap, r2);
-            float t = clamp(1.0f / max(r2, params.minRadius2), 1.0f, invMinRadius2);
+            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
             p *= t;
             p = fma(p, params.scale, p0);
         }
@@ -629,67 +609,51 @@ FORCE_INLINE half3 ColourFromCache(OrbitCache cache, float3 pos, ColorSchemePara
     return mix(finalColor, altColor, half(colorMix));
 }
 
-// Fast normal using forward differences (3 Map calls instead of 4 with central diff)
-// This is called for every hit pixel - force inline to avoid call stack overhead
+// Normal via forward differences (4 Map calls total)
 FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
 {
-    // Epsilon scales with distance to maintain relative precision
     float e = distance * 0.001;
-    float d = MapUnified(pos, params, foldingLimit, iterations, fractalType);
-    // Forward difference gradient - 3 Map calls
-    // GPU can potentially parallelize these since they're independent
+    float d = MapMandelbox(pos, params, foldingLimit, iterations, fractalType);
     float3 gradient = float3(
-        MapUnified(pos + float3(e,0,0), params, foldingLimit, iterations, fractalType) - d,
-        MapUnified(pos + float3(0,e,0), params, foldingLimit, iterations, fractalType) - d,
-        MapUnified(pos + float3(0,0,e), params, foldingLimit, iterations, fractalType) - d
+        MapMandelbox(pos + float3(e,0,0), params, foldingLimit, iterations, fractalType) - d,
+        MapMandelbox(pos + float3(0,e,0), params, foldingLimit, iterations, fractalType) - d,
+        MapMandelbox(pos + float3(0,0,e), params, foldingLimit, iterations, fractalType) - d
     );
-    // Fast normalize - rsqrt is single instruction on GPU
     return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
 }
 
-// === SUPER-COARSE RAYMARCH (for 8x8 tiles) ===
-// Very fast approximate raymarch - 12 steps with aggressive stepping
-// Used for initial distance estimation in large tiles
-FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
+// Far-range coarse raymarch (12 steps, max 80 units)
+FORCE_INLINE float SceneFarCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
 {
     float t = max(startT, 0.05);
     
-    // Fixed 12 steps - unroll completely for maximum speed
     UNROLL_FULL
     for(int j = 0; j < 12; j++)
     {
         float3 p = fma(rD, float3(t), rO);
-        float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
+        float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
         
-        // Loose threshold - we just need approximate distance
         if(UNLIKELY(h < 0.1)) return t;
-        
         if (UNLIKELY(t > kCoarseMaxDistance)) return kRayMissThreshold + 100.0;
         
-        // Aggressive over-relaxation: step 1.5x the SDF value
         t = fma(h, 1.5, t);
     }
     
     return kRayMissThreshold + 100.0;
 }
 
-// === COARSE RAYMARCH ===
-// Fast approximate raymarch for hierarchical rendering
-// Uses fewer iterations but standard stepping to find approximate hit distance
+// Near-range coarse raymarch (24 steps, max 12 units)
 FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
 {
     float t = 0.05;
     
-    // Fixed 24 steps - can unroll partially
     UNROLL_8
     for(int j = 0; j < 24; j++)
     {
         float3 p = fma(rD, float3(t), rO);
         float h = Map(p, params, foldingLimit, iterations);
         
-        // LIKELY: Coarse pass finds hits most of the time
         if(UNLIKELY(h < 0.02)) return t;
-        
         if (UNLIKELY(t > kMaxRayDistance)) return kRayMissThreshold + 100.0;
         
         t += h;
@@ -698,79 +662,77 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     return kRayMissThreshold + 100.0;
 }
 
-// Cached raymarch refinement from a known starting distance
-// Combines refinement behavior with OrbitCache population on hit
-FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
+// Fine raymarch from a known starting distance
+FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
 {
-    SceneResult result;
-    result.cache = makeEmptyOrbitCache();
-
-    if (UNLIKELY(startT > kRayMissThreshold)) {
-        result.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
-        return result;
-    }
-
-    float dither = blueNoise(fragCoord, time) * 0.01;
-
-    // Back up further from the starting point to ensure we don't miss the surface
+    float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
+    
     float t = max(0.01, startT - 0.3) + dither;
 
     float glow = 0.0;
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
     float endT = startT + 2.0;
-
-    NO_UNROLL
-    for(int j = 0; j < maxSteps; j++)
-    {
-        float threshold = fma(t, 0.0006, 0.0005);
-
-        float3 p = fma(rD, float3(t), rO);
-        float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
-
-        if(UNLIKELY(h < threshold))
+    
+    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
+        UNROLL_8
+        for(int j = 0; j < maxSteps; j++)
         {
-            OrbitCache hitCache;
-            MapWithOrbitCache(p, params, foldingLimit, iterations, hitCache);
-            result.cache = hitCache;
-            result.distGlow = float2(t, saturate(glow * 0.25));
-            return result;
+            float threshold = fma(t, 0.0006, 0.0005);
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold)) {
+                return float2(t, saturate(glow * 0.25));
+            }
+            if (UNLIKELY(t > endT)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
         }
-
-        if (UNLIKELY(t > endT)) break;
-
-        glow = fma(saturate(0.04 - h), glowIntensity, glow);
-        t += h;
+    } else {
+        NO_UNROLL
+        for(int j = 0; j < maxSteps; j++)
+        {
+            float threshold = fma(t, 0.0006, 0.0005);
+            
+            float3 p = fma(rD, float3(t), rO);
+            float h = Map(p, params, foldingLimit, iterations);
+            
+            if(UNLIKELY(h < threshold))
+            {
+                return float2(t, saturate(glow * 0.25));
+            }
+            
+            if (UNLIKELY(t > endT)) break;
+            
+            glow = fma(saturate(0.04 - h), glowIntensity, glow);
+            t += h;
+        }
     }
 
     result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
     return result;
 }
 
-// Standard sphere tracing - reliable, no aggressive optimizations
-// This is the main raymarch loop - optimize for typical case (many steps, eventual hit)
-// When FC_MAX_RAY_STEPS is defined, the compiler can optimize the loop more aggressively
+// Main sphere tracing raymarch
 float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
 {
-    // Use temporally stable blue noise dithering for reprojection
-    float dither = blueNoise(fragCoord, time) * 0.015;
+    float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
     float t = 0.05 + dither;
     
     float glow = 0.0;
     
-    // Use function constant for max steps when available
-    // This allows the compiler to know the upper bound at compile time
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
     
-    // When FC_MAX_RAY_STEPS is defined, use partial unrolling for better performance
     if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
         UNROLL_8
         for(int j = 0; j < maxSteps; j++)
         {
             float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
             float3 p = fma(rD, float3(t), rO);
-            float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
+            float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
             
             if(UNLIKELY(h < threshold)) {
                 return float2(t, saturate(glow * 0.25));
@@ -781,29 +743,21 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
             t += h;
         }
     } else {
-        // NO_UNROLL: Variable iteration count, unrolling would bloat code
         NO_UNROLL
         for(int j = 0; j < maxSteps; j++)
         {
-            // Distance-adaptive threshold (standard approach)
             float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
+            float3 p = fma(rD, float3(t), rO);
+            float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
             
-            float3 p = fma(rD, float3(t), rO);  // p = rO + t * rD using fma
-            float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
-            
-            // LIKELY: Most rays eventually hit the fractal
             if(UNLIKELY(h < threshold))
             {
                 return float2(t, saturate(glow * 0.25));
             }
             
-            // UNLIKELY: Early exit is rare with bounded fractal
             if (UNLIKELY(t > kMaxRayDistance)) break;
             
-            // Accumulate glow - saturate is free on GPU
             glow = fma(saturate(0.04 - h), glowIntensity, glow);
-            
-            // Standard sphere tracing: step by the SDF value
             t += h;
         }
     }
@@ -811,33 +765,19 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
     return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
 }
 
-// =============================================================================
-// CACHED SCENE - Returns orbit cache for reuse in normals/colors
-// =============================================================================
-// This is the OPTIMIZED version that caches the orbit state from the final hit point.
-// By returning OrbitCache, we enable:
-//   1. Normal computation with ~60% fewer iterations (use cached center value)
-//   2. Color computation with 0 iterations (use cached orbit trap directly)
-//   3. Overall ~50-70% reduction in inner iteration loops per pixel
-//
-// Usage: Call SceneWithCache, then use GetNormalFromCache and ColourFromCache
-// instead of the standard functions to benefit from cached state.
-
+// Cached scene result - stores orbit state for reuse in normals/colors
 struct SceneResult {
     float2 distGlow;    // .x = distance, .y = glow (same as Scene() return)
     OrbitCache cache;   // Cached orbit state from final hit position
 };
 
-// Optimized raymarch that caches orbit state on hit
-// For Mandelbox - caches orbit state for normal/color reuse
-// OPTIMIZATION: Use cheap MapUnified during marching, only call MapWithOrbitCache once at hit point
-// This avoids writing the large OrbitCache struct on every step (~60-100 steps per ray)
+// Raymarch that caches orbit state on hit for reuse in normals/colors
 FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
     
-    float dither = blueNoise(fragCoord, time) * 0.015;
+    float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
     float t = 0.05 + dither;
     
     float glow = 0.0;
@@ -851,13 +791,10 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
         
         float3 p = fma(rD, float3(t), rO);
-        
-        // Use CHEAP MapUnified during marching - no cache writes (GPU win)
-        float h = MapUnified(p, params, foldingLimit, iterations, fractalType);
+        float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
         
         if(UNLIKELY(h < threshold))
         {
-            // HIT! Now compute cache ONCE at the final hit position
             OrbitCache hitCache;
             MapWithOrbitCache(p, params, foldingLimit, iterations, hitCache);
             result.cache = hitCache;
@@ -1063,44 +1000,35 @@ half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
 
 // =============================================================================
 
-// Ultra-fast shadow with over-relaxation
-// FORCE_INLINE: Called twice per lit pixel (spot + sun)
-// Uses FC_SHADOW_ITERATIONS when defined for compile-time optimization
+// Soft shadow with over-relaxation
 FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
 {
-    // Skip shadows based on quality mode (compile-time check when FC_QUALITY_MODE defined)
     const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
-    if (qualityMode >= 2) return 0.65; // Low quality: skip shadows entirely
+    if (qualityMode >= 2) return 0.65;
     if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65;
     
     float res = 1.0;
     float t = 0.08;
     float prevH = 1e10;
     
-    // Use function constant for shadow iterations when available
-    // Medium quality (mode 1) uses 2 steps, high quality (mode 0) uses 3
     const int steps = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? 
         (qualityMode == 1 ? 2 : 3) : 
-        int(fma(quality, 2.0, 1.0)); // 1-3 steps
+        int(fma(quality, 2.0, 1.0));
     
     UNROLL_4
     for (int i = 0; i < steps; i++)
     {
-        float h = MapUnified(fma(rd, float3(t), ro), params, foldingLimit, iterations, fractalType);
+        float h = MapMandelbox(fma(rd, float3(t), ro), params, foldingLimit, iterations, fractalType);
         
-        // Soft shadow calculation - min is single instruction
         res = min(res, 10.0 * h / t);
         
-        // UNLIKELY: Most shadow rays don't hit
         if (UNLIKELY(res < 0.02)) return 0.0;
         
-        // Over-relaxation: step more aggressively when safe
         float relax = step(prevH * 0.8, h);
         float stepDist = mix(h, h * 1.5, relax);
         t += max(stepDist, 0.15);
         prevH = h;
         
-        // UNLIKELY: Shadows don't trace far
         if (UNLIKELY(t > 4.0)) break;
     }
     
@@ -1121,22 +1049,18 @@ struct TileHitData {
     bool didHit;            // Whether the tile hit geometry
 };
 
-// Per-pixel normal calculation - fast tetrahedron method (4 samples, better accuracy)
-// FORCE_INLINE critical - called for every lit pixel
-FORCE_INLINE float3 GetNormalFast(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
+// Normal via tetrahedron technique (4 samples)
+FORCE_INLINE float3 GetNormalTetrahedron(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType = 0)
 {
     float e = max(distance * 0.0005, 0.0001);
     
-    // Tetrahedron technique - 4 samples gives better gradient estimate
-    // The h vectors form a tetrahedron, giving unbiased gradient
     float2 h = float2(1.0, -1.0) * e;
     float3 gradient = 
-        h.xyy * MapUnified(pos + h.xyy, params, foldingLimit, iterations, fractalType) +
-        h.yyx * MapUnified(pos + h.yyx, params, foldingLimit, iterations, fractalType) +
-        h.yxy * MapUnified(pos + h.yxy, params, foldingLimit, iterations, fractalType) +
-        h.xxx * MapUnified(pos + h.xxx, params, foldingLimit, iterations, fractalType);
+        h.xyy * MapMandelbox(pos + h.xyy, params, foldingLimit, iterations, fractalType) +
+        h.yyx * MapMandelbox(pos + h.yyx, params, foldingLimit, iterations, fractalType) +
+        h.yxy * MapMandelbox(pos + h.yxy, params, foldingLimit, iterations, fractalType) +
+        h.xxx * MapMandelbox(pos + h.xxx, params, foldingLimit, iterations, fractalType);
     
-    // rsqrt is faster than normalize on GPU (single instruction vs sqrt+div)
     return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
 }
 
@@ -1228,9 +1152,9 @@ FORCE_INLINE float MapWithFoldInfo(float3 pos, FractalParams params, float foldi
     
     float3 z = pos;
     float dr = 1.0;
-    float scale = params.scale.x;  // Extract scalar from float4
-    float minRad2 = params.minRadius2;
-    float fixedRad2 = 1.0;  // Standard Mandelbox fixed radius squared
+    float scale = params.scale.x;
+    float minRad2 = params.sphereRadiusSq;
+    float fixedRad2 = 1.0;
     
     for (int i = 0; i < iterations; i++) {
         // Box fold - track each fold
@@ -1457,12 +1381,11 @@ kernel void adaptiveHierarchical8x8(
     if (sceneResult.distGlow.x < kRayMissThreshold) {
         float3 p = marchOrigin + adjustedDist * marchDir;
         
-        // Use cached normal for Mandelbox (saves 40% of iterations)
         float3 nor;
         if (fractalType == 0 && hitCache.valid) {
             nor = GetNormalFromCache(p, adjustedDist, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         } else {
-            nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
+            nor = GetNormalTetrahedron(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         }
         
         // Lighting with mode-based behavior
@@ -1483,7 +1406,6 @@ kernel void adaptiveHierarchical8x8(
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        // Use cached color for Mandelbox (skips iteration entirely)
         if (hitCache.valid) {
             col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
         } else {
@@ -1553,19 +1475,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
-    // ==========================================================================
-    // OPTIMIZED RAYMARCH WITH ORBIT CACHING (Mandelbox)
-    // ==========================================================================
-    // Use the cached system to reduce Map() calls:
-    // - Normal computation: ~60% fewer inner loops (uses reduced iterations + cached center)
-    // - Color computation: 0 iterations (uses cached orbit trap directly)
-    // - Overall: ~50% reduction in total iteration work per pixel
-    
     half3 col = half3(0.0h);
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
     
-    // Use cache-enabled raymarch
     SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
@@ -1600,7 +1513,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
         float3 nor;
         if (quality > kMinQualityForNormals) {
-            // Use cached normal for Mandelbox when cache is valid
             if (fractalType == 0 && hitCache.valid) {
                 nor = GetNormalFromCache(p, ret.x, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
             } else {
@@ -1627,7 +1539,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25);
             half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
 
-            // Use cached color to skip iteration when available
             if (hitCache.valid) {
                 col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
             } else {
@@ -1664,7 +1575,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             }
         } else {
             half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
-            // Use cached color when available (even in low quality mode)
             if (hitCache.valid) {
                 col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix) * diffuse;
             } else {
@@ -1753,8 +1663,6 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     FractalParams fractalParams = makeFractalParams(uniforms.minDistance, uniforms.fractalScale, uniforms.sphereRadius, lodIterations,
                                                      marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
-    // === RAYMARCH WITH ORBIT CACHING ===
-    // Uses orbit caching to skip re-iteration for normals/colors
     SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
     float2 ret = sceneResult.distGlow;
     OrbitCache hitCache = sceneResult.cache;
@@ -1768,17 +1676,14 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     {
         float3 p = marchOrigin + adjustedDist * marchDir;
         
-        // Compute normal - use cache when available for faster gradient estimation
         float3 nor;
         if (hitCache.valid) {
             nor = GetNormalFromCache(p, adjustedDist, hitCache, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         } else {
-            nor = GetNormalFast(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
+            nor = GetNormalTetrahedron(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType);
         }
         
-        // === QUAD-SHARED SHADOWS ===
-        // Shadows are expensive (many SDF evaluations) but vary slowly across a 2x2 quad
-        // Leader computes shadows, broadcasts to all 4 pixels
+        // Quad-shared shadows: leader computes, broadcasts to all 4 pixels
         half shaSpot = 1.0h;
         half shaSun = 1.0h;
         
@@ -1794,7 +1699,6 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         spot /= atten;
         
         if (quadLaneId == 0) {
-            // Only leader computes shadows - expensive!
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         }
@@ -1808,8 +1712,6 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
         
-        // Choose coloring based on fractal type (using color scheme)
-        // Use cached color for Mandelbox to skip iteration entirely
         if (hitCache.valid) {
             col = ColourFromCache(hitCache, p, uniforms.colorScheme, uniforms.colorMix);
         } else {
