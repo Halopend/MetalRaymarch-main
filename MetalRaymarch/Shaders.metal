@@ -171,7 +171,7 @@ inline float encodeDepthFromClip(float4 clipPos) {
 }
 
 // Interleaved Gradient Noise - temporally stable dithering for reprojection
-// FORCE_INLINE: Called every pixel in Scene()
+// FORCE_INLINE: Called every pixel in raymarching
 FORCE_INLINE float interleavedGradientNoise(float2 uv, float time) {
     float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
     float noise = fract(magic.z * fract(dot(uv, magic.xy)));
@@ -207,25 +207,6 @@ FORCE_INLINE float safetyBubbleDistance(float3 pos, float3 bubbleCenter, float b
     
     // Smooth morph between sphere and cube based on bubbleShape parameter
     return mix(sphereDist, cubeDist, bubbleShape);
-}
-
-// FORCE_INLINE: This is called per-pixel, must not have call overhead
-FORCE_INLINE FractalParams makeFractalParams(float minRad2Val, float fractalScale, float sphereRadius, int iterations,
-                                              float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape) {
-    FractalParams params;
-    // Compute scale once, store in register-friendly float4
-    float invMinRad = 1.0f / minRad2Val;
-    params.scale = float4(fractalScale * invMinRad);
-    params.scale.w = abs(params.scale.w);
-    params.absScalem1 = abs(fractalScale - 1.0);
-    params.absScalePow = powr(max(abs(fractalScale), kPowEpsilon), float(1 - iterations));
-    params.sphereRadiusSq = sphereRadius * sphereRadius;
-    params.minDistanceVal = minRad2Val;
-    params.bubbleCenter = bubbleCenter;
-    params.bubbleRadius = bubbleRadius;
-    params.bubbleEnabled = bubbleEnabled;
-    params.bubbleShape = bubbleShape;
-    return params;
 }
 
 // OPTIMIZED: Use precomputed values from CPU to avoid per-pixel powr() and division
@@ -382,46 +363,6 @@ FORCE_INLINE half3 applyColorScheme(half2 c, float colorMix, ColorSchemeParams s
     half3 altColor = half3(c.x * altFactors.x, c.y * altFactors.y, altFactors.z + 0.3h * c.y);
     
     return mix(finalColor, altColor, half(colorMix));
-}
-
-// Apply post-processing (saturation, contrast, gamma) from color scheme
-FORCE_INLINE half3 applyColorPostProcessing(half3 color, ColorSchemeParams scheme)
-{
-    // 1. Highlights adjustment (Exposure-like)
-    color *= half(1.0f + scheme.highlights);
-
-    // 2. Saturation adjustment with Vibrance boost
-    // Vibrance applies more saturation to less saturated parts of the image
-    half luma = dot(color, half3(0.299h, 0.587h, 0.114h));
-    half maxVal = max(color.r, max(color.g, color.b));
-    half satBoost = half(scheme.saturation) + (1.0h - maxVal) * half(scheme.vibrance);
-    color = mix(half3(luma), color, max(0.0h, satBoost));
-    
-    // 3. Contrast adjustment (around 0.5 midpoint)
-    color = (color - 0.5h) * half(scheme.contrast) + 0.5h;
-    
-    // 4. Shadows adjustment (Lift/Crush)
-    color = color + half(scheme.shadows) * (1.0h - color);
-
-    // 5. Brightness offset
-    color += half(scheme.brightness);
-    
-    // 6. Gamma correction (power curve)
-    color = pow(max(color, half3(kPowEpsilonHalf)), half3(scheme.gamma));
-    
-    // 7. Midtone Curve (Soft Contrast/Sigmoid)
-    // colorCurve > 0 increases midtone contrast, < 0 flattens it
-    if (abs(scheme.colorCurve) > 0.001f) {
-        half curve = half(scheme.colorCurve);
-        // exponent < 1 means values are pushed away from mid (more contrast)
-        // exponent > 1 means values are pulled towards mid (less contrast)
-        half exponent = 1.0h / (1.0h + curve * 0.7h); 
-        half mid = 0.5h;
-        half3 delta = color - mid;
-        color = mid + sign(delta) * 0.5h * pow(abs(delta) * 2.0h, exponent);
-    }
-    
-    return saturate(color);
 }
 
 // =============================================================================
@@ -716,59 +657,9 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     return kRayMissThreshold + 100.0;
 }
 
-// Main sphere tracing raymarch
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
-{
-    float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
-    float t = 0.05 + dither;
-    
-    float glow = 0.0;
-    
-    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
-    int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
-    
-    if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
-        UNROLL_8
-        for(int j = 0; j < maxSteps; j++)
-        {
-            float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
-            float3 p = fma(rD, float3(t), rO);
-            float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
-            
-            if(UNLIKELY(h < threshold)) {
-                return float2(t, saturate(glow * 0.25));
-            }
-            if (UNLIKELY(t > kMaxRayDistance)) break;
-            
-            glow = fma(saturate(0.04 - h), glowIntensity, glow);
-            t += h;
-        }
-    } else {
-        NO_UNROLL
-        for(int j = 0; j < maxSteps; j++)
-        {
-            float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
-            float3 p = fma(rD, float3(t), rO);
-            float h = MapMandelbox(p, params, foldingLimit, iterations, fractalType);
-            
-            if(UNLIKELY(h < threshold))
-            {
-                return float2(t, saturate(glow * 0.25));
-            }
-            
-            if (UNLIKELY(t > kMaxRayDistance)) break;
-            
-            glow = fma(saturate(0.04 - h), glowIntensity, glow);
-            t += h;
-        }
-    }
-    
-    return float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
-}
-
 // Cached scene result - stores orbit state for reuse in normals/colors
 struct SceneResult {
-    float2 distGlow;    // .x = distance, .y = glow (same as Scene() return)
+    float2 distGlow;    // .x = distance, .y = glow
     OrbitCache cache;   // Cached orbit state from final hit position
 };
 
@@ -1082,24 +973,6 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
 
 #define TILE_SIZE 4
 
-// Shared tile data structure for threadgroup communication
-struct TileHitData {
-    float hitDistance;      // Distance along center ray
-    float3 hitPoint;        // World-space hit position (center)
-    float glow;             // Glow accumulation
-    bool didHit;            // Whether the tile hit geometry
-};
-
-// Forward declaration needed by compute kernels
-float3 CameraPath(float t);
-
-// CameraPath implementation (used for spotlight positioning on CPU now, kept for reference)
-float3 CameraPath(float t)
-{
-    float3 p = float3(-.78 + 3. * sin(2.14*t),.05+2.5 * sin(.942*t+1.3),.05 + 3.5 * cos(3.594*t) );
-    return p;
-}
-
 // =============================================================================
 // EMISSIVE GLOW CALCULATION
 // Computes self-illumination based on cached fold state and patterns
@@ -1272,7 +1145,7 @@ kernel void adaptiveHierarchical8x8(
         
         float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, hitCache);
         
-        // Use precomputed lighting from CPU (eliminates per-pixel CameraPath() and trig)
+        // Use precomputed lighting from CPU
         float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
         float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         float3 spot = spotLight - p;
@@ -1556,7 +1429,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
             uniforms.minDistance,
             marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
         
-        // Use precomputed lighting from CPU (eliminates per-pixel CameraPath() and trig)
+        // Use precomputed lighting from CPU
         float3 spotLight = uniforms.precomputedLighting.spotLightPosition;
         float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         float3 spot = spotLight - p;
