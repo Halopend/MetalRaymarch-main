@@ -133,6 +133,7 @@ struct TwoHandGestureState {
     var isActive: Bool = false
     var startDistance: Float = 0      // Distance between hands when gesture started
     var startParameterValue: Float = 0  // Parameter value when gesture started
+    var startHeight: Float = 0          // Average Y position of hands when gesture started (for sensitivity scaling)
 }
 
 // MARK: - Gesture Controller
@@ -421,14 +422,12 @@ final class GestureController {
     
     // MARK: - Special Gesture Processing
     
-    /// Process left hand fist gesture for recording toggle
+    /// Process left hand fist gesture for stochastic rendering toggle
     private func processLeftFistGesture() {
         guard leftHand.isTracked else {
             if leftFistActive {
                 leftFistActive = false
-                #if DEBUG
                 print("✊ Left fist: tracking lost")
-                #endif
             }
             return
         }
@@ -445,18 +444,14 @@ final class GestureController {
         
         // Gesture state changed
         if shouldBeActive && !leftFistActive {
-            // Fist just activated - trigger recording toggle
+            // Fist just activated - trigger stochastic rendering toggle
             leftFistActive = true
+            print("✊ Left fist ACTIVATED - toggling stochastic rendering mode")
             onRecordingToggle?()
-            #if DEBUG
-            print("✊ Left fist ACTIVATED - toggling recording")
-            #endif
         } else if !shouldBeActive && leftFistActive {
             // Fist released
             leftFistActive = false
-            #if DEBUG
             print("✊ Left fist RELEASED")
-            #endif
         }
     }
     
@@ -626,12 +621,14 @@ final class GestureController {
             state.isActive = true
             state.startDistance = currentDistance
             state.startParameterValue = currentTarget  // Capture current target when gesture starts
+            // Track starting height (average Y of both hands) for vertical sensitivity scaling
+            state.startHeight = (leftPos.y + rightPos.y) * 0.5
             
             if HAND_TRACKING_DEBUG {
                 let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"]
                 let paramName = paramNames[min(digit, 4)]
                 let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
-                print("🤲 Two-hand \(paramName) gesture STARTED (\(mode))")
+                print("🤲 Two-hand \(paramName) gesture STARTED (\(mode)), startHeight: \(state.startHeight)")
             }
         }
         
@@ -643,7 +640,21 @@ final class GestureController {
             if settings.useRelativeGestures {
                 // RELATIVE: Change based on delta from start distance
                 // Sensitivity: 1 = 10x slower (0.1x), 10 = normal (1.0x)
-                let sensitivityMultiplier = settings.gestureSensitivity / 10.0
+                let baseSensitivityMultiplier = settings.gestureSensitivity / 10.0
+                
+                // VERTICAL SENSITIVITY SCALING:
+                // Lowering hands while spreading decreases sensitivity logarithmically.
+                // 1 meter drop = 100x decrease in sensitivity (log scale).
+                // Formula: multiplier = 10^(-2 * heightDrop) where heightDrop is in meters (0 to 1)
+                let currentHeight = (leftPos.y + rightPos.y) * 0.5
+                let heightDrop = max(0, state.startHeight - currentHeight)  // Only drops matter, not raises
+                let maxDropForScaling: Float = 1.0  // 1 meter = full 100x reduction
+                let normalizedDrop = min(heightDrop / maxDropForScaling, 1.0)  // Clamp to 0-1 range
+                // Logarithmic scaling: 0m drop = 1x, 0.5m drop = 10x slower, 1m drop = 100x slower
+                let verticalScaleFactor = pow(10.0, -2.0 * normalizedDrop)  // Range: 1.0 down to 0.01
+                
+                let sensitivityMultiplier = baseSensitivityMultiplier * verticalScaleFactor
+                
                 let rangeSpan = range.upperBound - range.lowerBound
                 let distSpan = maxHandDistance - minHandDistance
                 let sensitivity = (rangeSpan / distSpan) * sensitivityMultiplier
@@ -701,12 +712,23 @@ final class GestureController {
             return
         }
         
+        // Check if left hand is attempting ANY pinch (user likely wants two-hand gesture)
+        // This prevents drag from starting when user is setting up a two-hand pull-apart
+        let leftAttemptingPinch = leftHand.isTracked && (
+            leftHand.indexPinch >= 0.4 ||   // Index approaching pinch
+            leftHand.middlePinch >= 0.4 ||  // Middle approaching pinch
+            leftHand.ringPinch >= 0.3 ||    // Ring (lower threshold)
+            leftHand.pinkyPinch >= 0.3      // Pinky (lower threshold)
+        )
+        
         let rightPinch = rightHand.indexPinch
         let active: Bool
         if rightIndexDragActive {
-            active = rightHand.isTracked && rightPinch >= pinchReleaseThreshold
+            // Once active, only left pinch causes immediate cancel
+            active = rightHand.isTracked && rightPinch >= pinchReleaseThreshold && !leftAttemptingPinch
         } else {
-            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold
+            // Don't start drag if left hand is attempting any pinch
+            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold && !leftAttemptingPinch
         }
         
         // Gesture started

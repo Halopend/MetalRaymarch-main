@@ -118,7 +118,7 @@ class AppModel {
         
         // Setup gesture callbacks
         gestureController?.onRecordingToggle = { [weak self] in
-            self?.toggleRecording()
+            self?.toggleStochasticRendering()
         }
         
         gestureController?.onMenuToggle = { [weak self] in
@@ -150,6 +150,15 @@ class AppModel {
         } else if recorder.isIdle {
             recorder.startRecording()
         }
+    }
+    
+    /// Toggle stochastic rendering mode (left fist gesture)
+    /// When enabled, accumulates frames over time for better quality at low FPS
+    func toggleStochasticRendering() {
+        let newState = !renderSettings.stochasticRenderingEnabled
+        renderSettings.stochasticRenderingEnabled = newState
+        renderSettings.stochasticFrameCount = 0  // Reset accumulation
+        print("✊ STOCHASTIC RENDERING \(newState ? "ENABLED" : "DISABLED") (left fist gesture)")
     }
     
     /// Callback to open the menu window (set by App scene)
@@ -496,6 +505,10 @@ struct RenderSettingsSnapshot {
     let emissiveSpeed: Float
     let fogIntensity: Float
     let colorSchemeParams: ColorSchemeParams
+    // Stochastic rendering
+    let stochasticRenderingEnabled: Bool
+    let stochasticFrameCount: Int
+    let stochasticMaxFrames: Int
 }
 
 final class RenderSettings: @unchecked Sendable {
@@ -591,6 +604,13 @@ final class RenderSettings: @unchecked Sendable {
     private var _dynamicRenderQualityMin: Float = 0.5       // Minimum quality floor (0.4-0.8)
     private var _dynamicRenderQualityMax: Float = 1.0       // Maximum quality ceiling (0.8-1.0)
     private var _currentRenderQuality: Float = 0.7          // Current quality level (read-only from manager)
+    
+    // === STOCHASTIC RENDERING MODE ===
+    // When enabled, renders fewer pixels per frame and accumulates over time
+    // Useful for extremely complex scenes that can't achieve real-time FPS
+    private var _stochasticRenderingEnabled: Bool = false   // Toggle via left fist gesture
+    private var _stochasticFrameCount: Int = 0              // Current accumulation frame count
+    private var _stochasticMaxFrames: Int = 64              // Max frames to accumulate before reset
     
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
@@ -1003,6 +1023,42 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _currentRenderQuality } }
         set { withLock { _currentRenderQuality = newValue } }
     }
+    
+    // === STOCHASTIC RENDERING ACCESSORS ===
+    
+    /// Enable stochastic rendering mode (accumulates frames over time for complex scenes)
+    var stochasticRenderingEnabled: Bool {
+        get { withLock { _stochasticRenderingEnabled } }
+        set { withLock { _stochasticRenderingEnabled = newValue } }
+    }
+    
+    /// Current frame count in stochastic accumulation (0 to maxFrames)
+    var stochasticFrameCount: Int {
+        get { withLock { _stochasticFrameCount } }
+        set { withLock { _stochasticFrameCount = newValue } }
+    }
+    
+    /// Maximum frames to accumulate before resetting (default 64)
+    var stochasticMaxFrames: Int {
+        get { withLock { _stochasticMaxFrames } }
+        set { withLock { _stochasticMaxFrames = max(1, min(256, newValue)) } }
+    }
+    
+    /// Increment stochastic frame count, returns true if accumulation should continue
+    func incrementStochasticFrame() -> Bool {
+        return withLock {
+            if _stochasticFrameCount < _stochasticMaxFrames {
+                _stochasticFrameCount += 1
+                return true
+            }
+            return false
+        }
+    }
+    
+    /// Reset stochastic accumulation (call when scene parameters change)
+    func resetStochasticAccumulation() {
+        withLock { _stochasticFrameCount = 0 }
+    }
 
     /// Update color scheme transitions and animation time. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
@@ -1139,7 +1195,10 @@ final class RenderSettings: @unchecked Sendable {
                 emissiveColor: _emissiveColor,
                 emissiveSpeed: _emissiveSpeed,
                 fogIntensity: _fogIntensity,
-                colorSchemeParams: makeColorSchemeParamsLocked()
+                colorSchemeParams: makeColorSchemeParamsLocked(),
+                stochasticRenderingEnabled: _stochasticRenderingEnabled,
+                stochasticFrameCount: _stochasticFrameCount,
+                stochasticMaxFrames: _stochasticMaxFrames
             )
         }
     }

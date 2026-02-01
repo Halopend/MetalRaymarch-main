@@ -147,6 +147,16 @@ actor Renderer {
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
     
+    // === STOCHASTIC RENDERING PIPELINES ===
+    var stochasticRaymarchPipeline: MTLComputePipelineState?
+    var stochasticCopyPipeline: MTLComputePipelineState?
+    var stochasticResolvePipeline: MTLComputePipelineState?
+    var stochasticClearPipeline: MTLComputePipelineState?
+    var stochasticUniformBuffer: MTLBuffer?
+    var stochasticAccumulationTextureL: MTLTexture?  // Left eye accumulation
+    var stochasticAccumulationTextureR: MTLTexture?  // Right eye accumulation
+    var stochasticOutputTexture: MTLTexture?         // Intermediate output
+    
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
@@ -191,6 +201,15 @@ actor Renderer {
 
     // Device pose smoothing removed — use raw device anchor from drawable for async timewarp
     
+    // === STOCHASTIC RENDERING STATE ===
+    // Tracks previous frame parameters to detect changes and reset accumulation
+    private var lastStochasticPosition: SIMD3<Float> = .zero
+    private var lastStochasticMinDistance: Float = 0
+    private var lastStochasticFoldingLimit: Float = 0
+    private var lastStochasticSphereRadius: Float = 0
+    private var lastStochasticFractalScale: Float = 0
+    private var stochasticAccumulationTexture: MTLTexture?
+    private var hasLoggedStochasticMode = false
 
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
@@ -374,6 +393,29 @@ actor Renderer {
             tileUniformBuffer?.label = "TileUniforms"
             
             if RENDERER_DEBUG { print("✓ Tile-based compute pipeline ready (adaptive 8x8)") }
+            
+            // === STOCHASTIC RENDERING PIPELINES ===
+            if let stochasticRaymarchKernel = library.makeFunction(name: "stochasticRaymarchKernel") {
+                stochasticRaymarchPipeline = try device.makeComputePipelineState(function: stochasticRaymarchKernel)
+            }
+            if let stochasticCopyKernel = library.makeFunction(name: "copyToAccumulationKernel") {
+                stochasticCopyPipeline = try device.makeComputePipelineState(function: stochasticCopyKernel)
+            }
+            if let stochasticResolveKernel = library.makeFunction(name: "resolveStochasticKernel") {
+                stochasticResolvePipeline = try device.makeComputePipelineState(function: stochasticResolveKernel)
+            }
+            if let stochasticClearKernel = library.makeFunction(name: "clearAccumulationKernel") {
+                stochasticClearPipeline = try device.makeComputePipelineState(function: stochasticClearKernel)
+            }
+            
+            // Stochastic uniform buffer (large enough for StochasticUniforms)
+            let stochasticUniformSize = 1024  // Generous size for StochasticUniforms
+            stochasticUniformBuffer = device.makeBuffer(length: stochasticUniformSize, options: .storageModeShared)
+            stochasticUniformBuffer?.label = "StochasticUniforms"
+            
+            if stochasticRaymarchPipeline != nil {
+                print("✓ Stochastic rendering pipelines ready")
+            }
         } catch {
             if RENDERER_DEBUG { print("⚠️ Failed to create tile compute pipelines: \(error)") }
             adaptiveHierarchicalPipeline8x8 = nil
@@ -1577,8 +1619,62 @@ actor Renderer {
             settings.audioLevel = combinedLevel
         }
         let settingsSnapshot = settings.snapshot()
+        
+        // === STOCHASTIC RENDERING: Detect parameter changes and reset accumulation ===
+        if settingsSnapshot.stochasticRenderingEnabled {
+            // Log mode activation once
+            if !hasLoggedStochasticMode {
+                hasLoggedStochasticMode = true
+                print("✊ STOCHASTIC MODE: Accumulating frames for higher quality at low FPS")
+            }
+            
+            // Check if any scene parameters have changed significantly
+            let positionChanged = simd_distance(settingsSnapshot.position, lastStochasticPosition) > 0.001
+            let minDistChanged = abs(settingsSnapshot.minDistance - lastStochasticMinDistance) > 0.001
+            let foldingChanged = abs(settingsSnapshot.foldingLimit - lastStochasticFoldingLimit) > 0.001
+            let sphereChanged = abs(settingsSnapshot.sphereRadius - lastStochasticSphereRadius) > 0.001
+            let scaleChanged = abs(settingsSnapshot.fractalScale - lastStochasticFractalScale) > 0.001
+            
+            if positionChanged || minDistChanged || foldingChanged || sphereChanged || scaleChanged {
+                // Reset accumulation when scene changes
+                settings.resetStochasticAccumulation()
+                print("✊ STOCHASTIC: Parameters changed, resetting accumulation (frame 0)")
+            } else {
+                // Increment frame count
+                let _ = settings.incrementStochasticFrame()
+            }
+            
+            // Update tracking for next frame
+            lastStochasticPosition = settingsSnapshot.position
+            lastStochasticMinDistance = settingsSnapshot.minDistance
+            lastStochasticFoldingLimit = settingsSnapshot.foldingLimit
+            lastStochasticSphereRadius = settingsSnapshot.sphereRadius
+            lastStochasticFractalScale = settingsSnapshot.fractalScale
+        } else if hasLoggedStochasticMode {
+            // Log mode deactivation
+            hasLoggedStochasticMode = false
+            print("✊ STOCHASTIC MODE: Disabled, returning to real-time rendering")
+        }
 
         self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+
+        // === STOCHASTIC RENDERING PATH ===
+        // When enabled, use progressive refinement instead of real-time rendering
+        if settingsSnapshot.stochasticRenderingEnabled {
+            let stochasticRendered = renderWithStochastic(
+                commandBuffer: commandBuffer,
+                drawable: drawable,
+                settingsSnapshot: settingsSnapshot
+            )
+            
+            if stochasticRendered {
+                drawable.encodePresent(commandBuffer: commandBuffer)
+                commandBuffer.commit()
+                frame.endSubmission()
+                return  // Skip standard rendering
+            }
+            // Fall through to standard rendering if stochastic failed
+        }
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = settingsSnapshot.tileSize
@@ -2265,6 +2361,258 @@ actor Renderer {
         }
         
         blitEncoder.endEncoding()
+    }
+    
+    // MARK: - Stochastic Rendering
+    
+    /// Ensures stochastic accumulation textures exist and match drawable size
+    private func ensureStochasticTextures(for drawable: LayerRenderer.Drawable) -> Bool {
+        let width = drawable.colorTextures[0].width
+        let height = drawable.colorTextures[0].height
+        
+        // Check if existing textures match
+        if let existing = stochasticAccumulationTextureL,
+           existing.width == width,
+           existing.height == height {
+            return true
+        }
+        
+        // Create accumulation textures (one per eye, 2D not array)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba32Float,  // High precision for accumulation
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderWrite, .shaderRead]
+        
+        guard let accumL = device.makeTexture(descriptor: descriptor),
+              let accumR = device.makeTexture(descriptor: descriptor),
+              let output = device.makeTexture(descriptor: descriptor) else {
+            print("⚠️ Failed to create stochastic textures")
+            return false
+        }
+        
+        accumL.label = "Stochastic Accumulation L"
+        accumR.label = "Stochastic Accumulation R"
+        output.label = "Stochastic Output"
+        
+        stochasticAccumulationTextureL = accumL
+        stochasticAccumulationTextureR = accumR
+        stochasticOutputTexture = output
+        
+        print("✊ Created stochastic textures: \(width)×\(height)")
+        return true
+    }
+    
+    /// Renders using stochastic progressive refinement
+    /// Returns true if stochastic rendering was used
+    private func renderWithStochastic(
+        commandBuffer: MTLCommandBuffer,
+        drawable: LayerRenderer.Drawable,
+        settingsSnapshot: RenderSettingsSnapshot
+    ) -> Bool {
+        // Verify we have the pipelines
+        guard let raymarchPipeline = stochasticRaymarchPipeline,
+              let copyPipeline = stochasticCopyPipeline,
+              let resolvePipeline = stochasticResolvePipeline,
+              let clearPipeline = stochasticClearPipeline,
+              let uniformBuffer = stochasticUniformBuffer else {
+            return false
+        }
+        
+        // Ensure textures exist
+        guard ensureStochasticTextures(for: drawable) else {
+            return false
+        }
+        
+        guard let accumL = stochasticAccumulationTextureL,
+              let accumR = stochasticAccumulationTextureR,
+              let outputTex = stochasticOutputTexture else {
+            return false
+        }
+        
+        let frameCount = settingsSnapshot.stochasticFrameCount
+        let maxFrames = settingsSnapshot.stochasticMaxFrames
+        
+        // Clear accumulation on first frame
+        if frameCount == 0 {
+            guard let clearEncoder = commandBuffer.makeComputeCommandEncoder() else { return false }
+            clearEncoder.label = "Stochastic Clear"
+            clearEncoder.setComputePipelineState(clearPipeline)
+            
+            let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+            let threadgroups = MTLSize(
+                width: (accumL.width + 15) / 16,
+                height: (accumL.height + 15) / 16,
+                depth: 1
+            )
+            
+            clearEncoder.setTexture(accumL, index: 0)
+            clearEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            
+            clearEncoder.setTexture(accumR, index: 0)
+            clearEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            
+            clearEncoder.endEncoding()
+        }
+        
+        // Render each eye with stochastic raymarch
+        for viewIndex in 0..<drawable.views.count {
+            let view = drawable.views[viewIndex]
+            let accumTexture = viewIndex == 0 ? accumL : accumR
+            
+            // Get view and projection matrices
+            let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+            let viewMatrix = (deviceTransform * view.transform).inverse
+            let projection = drawable.computeProjection(viewIndex: viewIndex)
+            
+            // Fill uniform buffer with stochastic uniforms
+            // Note: We're using a simplified struct layout that matches the shader
+            struct StochasticUniformsLayout {
+                var projectionMatrix: matrix_float4x4
+                var modelViewMatrix: matrix_float4x4
+                var inverseModelViewMatrix: matrix_float4x4
+                var inverseProjectionMatrix: matrix_float4x4
+                var viewMatrix: matrix_float4x4
+                var inverseViewMatrix: matrix_float4x4
+                var time: Float
+                var minDistance: Float
+                var fractalScale: Float
+                var fractalIterations: Int32
+                var maxRaySteps: Int32
+                var foldingLimit: Float
+                var sphereRadius: Float
+                var safetyBubbleRadius: Float
+                var safetyBubbleEnabled: Int32
+                var frameCount: Int32
+                var maxFrames: Int32
+                var jitterOffsetX: Float
+                var jitterOffsetY: Float
+                var blendWeight: Float
+            }
+            
+            // Model matrix (same as main renderer)
+            let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
+            let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
+            let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
+            let modelView = viewMatrix * modelMatrix
+            
+            // Halton jitter for this frame
+            func halton(_ index: Int, _ base: Int) -> Float {
+                var f: Float = 1.0
+                var r: Float = 0.0
+                var i = index
+                while i > 0 {
+                    f = f / Float(base)
+                    r = r + f * Float(i % base)
+                    i = i / base
+                }
+                return r
+            }
+            let jitterX = halton(frameCount + 1, 2) - 0.5
+            let jitterY = halton(frameCount + 1, 3) - 0.5
+            
+            var uniforms = StochasticUniformsLayout(
+                projectionMatrix: projection,
+                modelViewMatrix: modelView,
+                inverseModelViewMatrix: modelView.inverse,
+                inverseProjectionMatrix: projection.inverse,
+                viewMatrix: viewMatrix,
+                inverseViewMatrix: viewMatrix.inverse,
+                time: Float(appModel.clock.time),
+                minDistance: settingsSnapshot.minDistance,
+                fractalScale: settingsSnapshot.fractalScale,
+                fractalIterations: Int32(settingsSnapshot.fractalIterations),
+                maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
+                foldingLimit: settingsSnapshot.foldingLimit,
+                sphereRadius: settingsSnapshot.sphereRadius,
+                safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
+                safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
+                frameCount: Int32(frameCount),
+                maxFrames: Int32(maxFrames),
+                jitterOffsetX: jitterX,
+                jitterOffsetY: jitterY,
+                blendWeight: 1.0 / Float(frameCount + 1)
+            )
+            
+            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<StochasticUniformsLayout>.size)
+            
+            // Raymarch pass
+            guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            computeEncoder.label = "Stochastic Raymarch Eye \(viewIndex)"
+            computeEncoder.setComputePipelineState(raymarchPipeline)
+            
+            computeEncoder.setTexture(outputTex, index: 0)
+            computeEncoder.setTexture(accumTexture, index: 1)
+            computeEncoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            
+            let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+            let threadgroups = MTLSize(
+                width: (outputTex.width + 15) / 16,
+                height: (outputTex.height + 15) / 16,
+                depth: 1
+            )
+            computeEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            computeEncoder.endEncoding()
+            
+            // Copy output to accumulation for next frame
+            guard let copyEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            copyEncoder.label = "Stochastic Copy Eye \(viewIndex)"
+            copyEncoder.setComputePipelineState(copyPipeline)
+            copyEncoder.setTexture(outputTex, index: 0)
+            copyEncoder.setTexture(accumTexture, index: 1)
+            copyEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            copyEncoder.endEncoding()
+            
+            // Resolve to drawable
+            guard let resolveEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            resolveEncoder.label = "Stochastic Resolve Eye \(viewIndex)"
+            resolveEncoder.setComputePipelineState(resolvePipeline)
+            resolveEncoder.setTexture(accumTexture, index: 0)
+            
+            // Get destination texture for this eye
+            let destTexture: MTLTexture
+            if drawable.colorTextures.count > viewIndex {
+                destTexture = drawable.colorTextures[viewIndex]
+            } else {
+                destTexture = drawable.colorTextures[0]
+            }
+            
+            // We need to write to the drawable - create a temp writable texture and blit
+            // For now, just copy from accumulation to a writable texture
+            resolveEncoder.setTexture(outputTex, index: 1)
+            var fc = Int32(frameCount)
+            resolveEncoder.setBytes(&fc, length: MemoryLayout<Int32>.size, index: 0)
+            resolveEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            resolveEncoder.endEncoding()
+            
+            // Blit resolved output to drawable
+            guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { continue }
+            blitEncoder.label = "Stochastic Blit Eye \(viewIndex)"
+            
+            let destSlice = drawable.colorTextures.count > viewIndex ? 0 : viewIndex
+            blitEncoder.copy(
+                from: outputTex,
+                sourceSlice: 0,
+                sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: outputTex.width, height: outputTex.height, depth: 1),
+                to: destTexture,
+                destinationSlice: destSlice,
+                destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+            )
+            blitEncoder.endEncoding()
+        }
+        
+        // Log progress periodically
+        if frameCount % 16 == 0 {
+            print("✊ STOCHASTIC: Frame \(frameCount + 1)/\(maxFrames) accumulated")
+        }
+        
+        return true
     }
     
     /// Renders using the adaptive 8x8 compute pipeline instead of fragment shaders
