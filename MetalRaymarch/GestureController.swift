@@ -269,6 +269,22 @@ final class GestureController {
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GEOMETRY GESTURE ACTIVITY
+    // Indicates if any gesture affecting fractal geometry is currently active.
+    // Used by RenderSettings to track geometry stability state.
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// True if any two-hand gesture affecting geometry parameters is active
+    /// Geometry parameters: minDistance (index), foldingLimit (middle), 
+    ///                      sphereRadius (ring), fractalScale (pinky)
+    var isGeometryGestureActive: Bool {
+        indexGestureState.isActive ||   // minDistance
+        middleGestureState.isActive ||  // foldingLimit
+        ringGestureState.isActive ||    // sphereRadius
+        pinkyGestureState.isActive      // fractalScale
+    }
+    
     init(renderSettings: RenderSettings) {
         self.renderSettings = renderSettings
         
@@ -559,6 +575,12 @@ final class GestureController {
         
         // Update active gesture for HUD
         settings.activeGestureIndex = activeDigit
+        
+        // ═══════════════════════════════════════════════════════════════════════════
+        // GEOMETRY STABILITY: Push gesture activity to RenderSettings
+        // This drives the geometry state machine (dynamic → settling → stable)
+        // ═══════════════════════════════════════════════════════════════════════════
+        settings.isGeometryGestureActive = isGeometryGestureActive
         
         // SINGLE-HAND gesture: Right index pinch drag → translate
         processRightIndexDrag()

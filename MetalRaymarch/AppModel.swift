@@ -509,6 +509,13 @@ struct RenderSettingsSnapshot {
     let stochasticRenderingEnabled: Bool
     let stochasticFrameCount: Int
     let stochasticMaxFrames: Int
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GEOMETRY STABILITY STATE
+    // When geometry parameters settle, enables optimized "stable geometry" render path
+    // ═══════════════════════════════════════════════════════════════════════════
+    let geometryState: GeometryState
+    let isGeometryGestureActive: Bool
 }
 
 final class RenderSettings: @unchecked Sendable {
@@ -619,6 +626,16 @@ final class RenderSettings: @unchecked Sendable {
     private var _targetFoldingLimit: Float = 1.0
     private var _targetSphereRadius: Float = 0.5
     private var _targetPosition: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GEOMETRY STABILITY TRACKING
+    // Detects when geometry-affecting parameters have settled after gestures end.
+    // Enables the renderer to switch to optimized "stable geometry" path.
+    // ═══════════════════════════════════════════════════════════════════════════
+    private var _geometryState: GeometryState = .stable
+    private var _isGeometryGestureActive: Bool = false  // Set by GestureController
+    private var _geometryStableFrameCount: Int = 0      // Frames since geometry became stable
+    private let geometrySettleThreshold: Float = 0.0001 // Epsilon for "settled" detection
     
     // === VELOCITY STATE FOR SMOOTH DAMP ===
     // Track velocities for critically-damped spring interpolation
@@ -793,6 +810,42 @@ final class RenderSettings: @unchecked Sendable {
     var activeGestureIndex: Int {
         get { withLock { _activeGestureIndex } }
         set { withLock { _activeGestureIndex = newValue } }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GEOMETRY STABILITY ACCESSORS
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Current geometry state (dynamic, settling, or stable)
+    var geometryState: GeometryState {
+        get { withLock { _geometryState } }
+    }
+    
+    /// Whether a geometry-affecting gesture is currently active (set by GestureController)
+    var isGeometryGestureActive: Bool {
+        get { withLock { _isGeometryGestureActive } }
+        set {
+            withLock {
+                let wasActive = _isGeometryGestureActive
+                _isGeometryGestureActive = newValue
+                
+                // State transitions based on gesture activity
+                if newValue && !wasActive {
+                    // Gesture started → immediately go to dynamic
+                    _geometryState = .dynamic
+                    _geometryStableFrameCount = 0
+                } else if !newValue && wasActive {
+                    // Gesture ended → transition to settling
+                    _geometryState = .settling
+                    _geometryStableFrameCount = 0
+                }
+            }
+        }
+    }
+    
+    /// Number of frames geometry has been stable (for accumulation tracking)
+    var geometryStableFrameCount: Int {
+        get { withLock { _geometryStableFrameCount } }
     }
 
     var useRelativeGestures: Bool {
@@ -1198,7 +1251,9 @@ final class RenderSettings: @unchecked Sendable {
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 stochasticRenderingEnabled: _stochasticRenderingEnabled,
                 stochasticFrameCount: _stochasticFrameCount,
-                stochasticMaxFrames: _stochasticMaxFrames
+                stochasticMaxFrames: _stochasticMaxFrames,
+                geometryState: _geometryState,
+                isGeometryGestureActive: _isGeometryGestureActive
             )
         }
     }
@@ -1407,6 +1462,54 @@ final class RenderSettings: @unchecked Sendable {
             _position.x = max(-maxPos, min(maxPos, _position.x))
             _position.y = max(-maxPos, min(maxPos, _position.y))
             _position.z = max(-maxPos, min(maxPos, _position.z))
+            
+            // ═══════════════════════════════════════════════════════════════════════════
+            // GEOMETRY STABILITY STATE MACHINE UPDATE
+            // Check if geometry-affecting parameters have settled (interpolation complete)
+            // ═══════════════════════════════════════════════════════════════════════════
+            let minDistSettled = abs(_minDistance - _targetMinDistance) < geometrySettleThreshold
+            let foldSettled = abs(_foldingLimit - _targetFoldingLimit) < geometrySettleThreshold
+            let sphereSettled = abs(_sphereRadius - _targetSphereRadius) < geometrySettleThreshold
+            // Note: fractalScale is set directly (no smoothing), so it's always "settled"
+            let allGeometrySettled = minDistSettled && foldSettled && sphereSettled
+            
+            switch _geometryState {
+            case .dynamic:
+                // Stay dynamic while gesture is active
+                if !_isGeometryGestureActive {
+                    _geometryState = .settling
+                    _geometryStableFrameCount = 0
+                }
+                
+            case .settling:
+                // Transition to stable once interpolation completes
+                if _isGeometryGestureActive {
+                    _geometryState = .dynamic
+                    _geometryStableFrameCount = 0
+                } else if allGeometrySettled {
+                    _geometryState = .stable
+                    _geometryStableFrameCount = 0
+                    #if DEBUG
+                    print("🎯 GEOMETRY: Transition to STABLE (parameters settled)")
+                    #endif
+                }
+                
+            case .stable:
+                // Break out of stable if gesture starts or parameters drift
+                if _isGeometryGestureActive {
+                    _geometryState = .dynamic
+                    _geometryStableFrameCount = 0
+                    #if DEBUG
+                    print("🎯 GEOMETRY: Transition to DYNAMIC (gesture started)")
+                    #endif
+                } else if allGeometrySettled {
+                    _geometryStableFrameCount += 1
+                } else {
+                    // Parameters changed externally (e.g., slider)
+                    _geometryState = .settling
+                    _geometryStableFrameCount = 0
+                }
+            }
         }
     }
     

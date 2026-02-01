@@ -185,7 +185,15 @@ typedef struct
     float maxViewDistance;   // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;     // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;    // Sentinel depth for "no hit" rays (e.g., 2.0)
-    float _depthPadding;     // Alignment padding
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GEOMETRY STABILITY STATE
+    // Tracks whether fractal geometry is stable (not changing).
+    // When stable, shaders can use optimized paths like temporal accumulation.
+    // ═══════════════════════════════════════════════════════════════════════════
+    int geometryState;       // 0=dynamic, 1=settling, 2=stable
+    int geometryStableFrames; // Number of frames geometry has been stable
+    float _padding1;         // Alignment padding
+    float _padding2;         // Alignment padding
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
@@ -236,7 +244,13 @@ typedef struct
     float maxViewDistance;       // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;        // Sentinel depth for "no hit" rays (e.g., 2.0)
-    float _depthPadding;         // Alignment padding
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GEOMETRY STABILITY STATE
+    // ═══════════════════════════════════════════════════════════════════════════
+    int geometryState;           // 0=dynamic, 1=settling, 2=stable
+    int geometryStableFrames;    // Number of frames geometry has been stable
+    float _padding1;             // Alignment padding
+    float _padding2;             // Alignment padding
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig

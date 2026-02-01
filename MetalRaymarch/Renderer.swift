@@ -1485,7 +1485,13 @@ actor Renderer {
                             maxViewDistance: RenderSettings.maxViewDistance,
                             logDepthScale: RenderSettings.logDepthScale,
                             depthMissValue: RenderSettings.depthMissValue,
-                            _depthPadding: 0.0,
+                            // ═══════════════════════════════════════════════════════════════
+                            // GEOMETRY STABILITY STATE
+                            // ═══════════════════════════════════════════════════════════════
+                            geometryState: Int32(settingsSnapshot.geometryState.rawValue),
+                            geometryStableFrames: Int32(settingsSnapshot.geometryState == .stable ? appModel.renderSettings.geometryStableFrameCount : 0),
+                            _padding1: 0.0,
+                            _padding2: 0.0,
                             precomputedFractal: precomputedFractal,
                             precomputedLighting: precomputedLighting,
                             colorScheme: colorSchemeParams)
@@ -2250,7 +2256,13 @@ actor Renderer {
             maxViewDistance: RenderSettings.maxViewDistance,
             logDepthScale: RenderSettings.logDepthScale,
             depthMissValue: RenderSettings.depthMissValue,
-            _depthPadding: 0.0,
+            // ═══════════════════════════════════════════════════════════════
+            // GEOMETRY STABILITY STATE
+            // ═══════════════════════════════════════════════════════════════
+            geometryState: Int32(settingsSnapshot.geometryState.rawValue),
+            geometryStableFrames: Int32(settingsSnapshot.geometryState == .stable ? appModel.renderSettings.geometryStableFrameCount : 0),
+            _padding1: 0.0,
+            _padding2: 0.0,
             precomputedFractal: computePrecomputedFractal,
             precomputedLighting: computePrecomputedLighting,
             colorScheme: colorSchemeParams
