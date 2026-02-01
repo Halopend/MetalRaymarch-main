@@ -155,6 +155,11 @@ typedef struct
     vector_float3 emissiveColor;  // Emissive color tint
     float emissiveSpeed;     // Animation speed for pulse mode
     float fogIntensity;      // Fog strength (0 = no fog, 1 = full fog)
+    // Depth pipeline settings (shared across raymarch + upscaling)
+    float maxViewDistance;   // Max ray distance (meters) for raymarch + depth normalization
+    float logDepthScale;     // Log depth scale factor (k in log2(1 + k * depth))
+    float depthMissValue;    // Sentinel depth for "no hit" rays (e.g., 2.0)
+    float _depthPadding;     // Alignment padding
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } Uniforms;
 
@@ -198,6 +203,11 @@ typedef struct
     vector_float3 emissiveColor; // Emissive color tint
     float emissiveSpeed;         // Animation speed for pulse mode
     float fogIntensity;          // Fog strength (0 = no fog, 1 = full fog)
+    // Depth pipeline settings (shared across raymarch + upscaling)
+    float maxViewDistance;       // Max ray distance (meters) for raymarch + depth normalization
+    float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))
+    float depthMissValue;        // Sentinel depth for "no hit" rays (e.g., 2.0)
+    float _depthPadding;         // Alignment padding
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 

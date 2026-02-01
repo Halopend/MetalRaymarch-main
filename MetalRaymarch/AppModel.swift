@@ -459,6 +459,10 @@ enum ColorScheme: Int32, CaseIterable, Codable {
 // This is the fastest synchronization primitive on Apple platforms
 // NSLock has ~2-3x more overhead due to Objective-C dispatch
 final class RenderSettings: @unchecked Sendable {
+    // Shared depth pipeline settings (raymarch + depth output + MetalFX input)
+    static let maxViewDistance: Float = 12.0
+    static let logDepthScale: Float = 4.0
+    static let depthMissValue: Float = 2.0
     // os_unfair_lock is a low-level spinlock - fastest for short critical sections
     private var _lock = os_unfair_lock()
     
