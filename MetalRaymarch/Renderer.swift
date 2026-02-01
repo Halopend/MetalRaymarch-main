@@ -192,6 +192,7 @@ actor Renderer {
     private var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
     private var lastPerfLogTime: TimeInterval = 0
     private let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS
+    private var lastFPSConsoleLogTime: TimeInterval = 0  // For periodic FPS console logging
 
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
@@ -1285,6 +1286,12 @@ actor Renderer {
                         currentQuality: qualityPreset
                     )
                 }
+            }
+            
+            // Periodic FPS console logging (every 2 seconds)
+            if time - lastFPSConsoleLogTime > 2.0 {
+                lastFPSConsoleLogTime = time
+                print("[FPS] \(String(format: "%.1f", updatedFPS)) fps | frame time: \(String(format: "%.2f", deltaTime * 1000))ms")
             }
             
             // === DYNAMIC RENDER QUALITY UPDATE ===

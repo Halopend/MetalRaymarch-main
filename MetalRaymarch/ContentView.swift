@@ -192,6 +192,20 @@ struct ContentView: View {
             return .orange
         }
     }
+    
+    /// Color for FPS indicator - green at 90fps, yellow at 60fps, red below 45fps
+    private var fpsIndicatorColor: Color {
+        let fps = appModel.fps
+        if fps >= 85 {
+            return .green
+        } else if fps >= 60 {
+            return .yellow
+        } else if fps >= 45 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -310,12 +324,20 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    // FPS display
+                    // FPS display - prominent for debugging
                     if appModel.immersiveSpaceState == .open {
-                        Text("\(appModel.fps, specifier: "%.0f") FPS")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(fpsIndicatorColor)
+                                .frame(width: 10, height: 10)
+                            Text("\(appModel.fps, specifier: "%.0f") FPS")
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .monospacedDigit()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
                 .padding(.bottom, 8)
