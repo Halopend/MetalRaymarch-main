@@ -458,6 +458,42 @@ enum ColorScheme: Int32, CaseIterable, Codable {
 // RenderSettings uses os_unfair_lock for minimal lock overhead
 // This is the fastest synchronization primitive on Apple platforms
 // NSLock has ~2-3x more overhead due to Objective-C dispatch
+struct RenderSettingsSnapshot {
+    let minDistance: Float
+    let scale: Float
+    let position: SIMD3<Float>
+    let fractalScale: Float
+    let fractalIterations: Int
+    let maxRaySteps: Int
+    let colorMix: Float
+    let lightingPlay: Bool
+    let lightingMode: LightingMode
+    let audioLevel: Float
+    let foldingLimit: Float
+    let sphereRadius: Float
+    let colorIterations: Float
+    let resolutionScale: Float
+    let fractalType: FractalType
+    let tileSize: Int
+    let useHierarchical: Bool
+    let debugHierarchical: Bool
+    let limitFlash: Float
+    let showHUD: Bool
+    let activeGestureIndex: Int
+    let safetyBubbleEnabled: Bool
+    let safetyBubbleRadius: Float
+    let safetyBubbleShape: Float
+    let glowIntensity: Float
+    let emissiveEnabled: Bool
+    let emissivePattern: Int
+    let emissiveIntensity: Float
+    let emissiveThreshold: Float
+    let emissiveColor: SIMD3<Float>
+    let emissiveSpeed: Float
+    let fogIntensity: Float
+    let colorSchemeParams: ColorSchemeParams
+}
+
 final class RenderSettings: @unchecked Sendable {
     // os_unfair_lock is a low-level spinlock - fastest for short critical sections
     private var _lock = os_unfair_lock()
@@ -996,69 +1032,114 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
+    private func makeColorSchemeParamsLocked() -> ColorSchemeParams {
+        let currentPal = _targetColorScheme.palette
+        let previousPal = _colorScheme.palette
+        let currentNeon = _targetColorScheme.neonParams
+        let previousNeon = _colorScheme.neonParams
+        
+        // Interpolate between previous and target palettes
+        let t = _colorSchemeTransitionProgress
+        let color1 = simd_mix(previousPal.color1, currentPal.color1, SIMD3<Float>(repeating: t))
+        let color2 = simd_mix(previousPal.color2, currentPal.color2, SIMD3<Float>(repeating: t))
+        let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
+        let altColor1 = simd_mix(previousPal.altColor1, currentPal.altColor1, SIMD3<Float>(repeating: t))
+        let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
+        
+        // Interpolate neon intensity (0 for non-neon, 1 for neon)
+        let prevNeonIntensity: Float = _colorScheme.isNeonMode ? 1.0 : 0.0
+        let currNeonIntensity: Float = _targetColorScheme.isNeonMode ? 1.0 : 0.0
+        let neonIntensity = prevNeonIntensity + (currNeonIntensity - prevNeonIntensity) * t
+        
+        // Interpolate neon parameters
+        let hueFreq = previousNeon.hueFreq + (currentNeon.hueFreq - previousNeon.hueFreq) * t
+        let hueOffset = previousNeon.hueOffset + (currentNeon.hueOffset - previousNeon.hueOffset) * t
+        let bandFreq = previousNeon.bandFreq + (currentNeon.bandFreq - previousNeon.bandFreq) * t
+        let stripeFreq = previousNeon.stripeFreq + (currentNeon.stripeFreq - previousNeon.stripeFreq) * t
+        let stripeStrength = previousNeon.stripeStrength + (currentNeon.stripeStrength - previousNeon.stripeStrength) * t
+        let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
+        let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
+        
+        return ColorSchemeParams(
+            color1: color1,
+            color2: color2,
+            color3: color3,
+            altColor1: altColor1,
+            altMixFactors: altMixFactors,
+            saturation: _colorSchemeSaturation,
+            contrast: _colorSchemeContrast,
+            gamma: _colorSchemeGamma,
+            brightness: 0.0,
+            vibrance: _colorSchemeVibrance,
+            colorCurve: _colorSchemeCurve,
+            shadows: _colorSchemeShadows,
+            highlights: _colorSchemeHighlights,
+            neonIntensity: neonIntensity,
+            hueFrequency: hueFreq,
+            hueOffset: hueOffset,
+            bandFrequency: bandFreq,
+            stripeFrequency: stripeFreq,
+            stripeStrength: stripeStrength,
+            glowSharpness: glowSharpness,
+            saturationPower: satPower,
+            animTime: _colorAnimTime,
+            hueCycleSpeed: _hueCycleSpeed,
+            pulseSpeed: _pulseSpeed,
+            pulseAmount: _pulseAmount,
+            glowIntensity: _glowIntensity,
+            bloomStrength: _bloomStrength,
+            transitionProgress: t,
+            previousScheme: _colorScheme.rawValue,
+            currentScheme: _targetColorScheme.rawValue,
+            _padding: 0
+        )
+    }
+    
+    /// Get a snapshot of render-critical settings in a single lock.
+    func snapshot() -> RenderSettingsSnapshot {
+        return withLock {
+            RenderSettingsSnapshot(
+                minDistance: _minDistance,
+                scale: _scale,
+                position: _position,
+                fractalScale: _fractalScale,
+                fractalIterations: _fractalIterations,
+                maxRaySteps: _maxRaySteps,
+                colorMix: _colorMix,
+                lightingPlay: _lightingPlay,
+                lightingMode: _lightingMode,
+                audioLevel: _audioLevel,
+                foldingLimit: _foldingLimit,
+                sphereRadius: _sphereRadius,
+                colorIterations: _colorIterations,
+                resolutionScale: _resolutionScale,
+                fractalType: _fractalType,
+                tileSize: _tileSize,
+                useHierarchical: _useHierarchical,
+                debugHierarchical: _debugHierarchical,
+                limitFlash: _limitFlash,
+                showHUD: _showHUD,
+                activeGestureIndex: _activeGestureIndex,
+                safetyBubbleEnabled: _safetyBubbleEnabled,
+                safetyBubbleRadius: _safetyBubbleRadius,
+                safetyBubbleShape: _safetyBubbleShape,
+                glowIntensity: _glowIntensity,
+                emissiveEnabled: _emissiveEnabled,
+                emissivePattern: _emissivePattern,
+                emissiveIntensity: _emissiveIntensity,
+                emissiveThreshold: _emissiveThreshold,
+                emissiveColor: _emissiveColor,
+                emissiveSpeed: _emissiveSpeed,
+                fogIntensity: _fogIntensity,
+                colorSchemeParams: makeColorSchemeParamsLocked()
+            )
+        }
+    }
+    
     /// Get shader parameters for the current color scheme state
     func getColorSchemeParams() -> ColorSchemeParams {
         return withLock {
-            let currentPal = _targetColorScheme.palette
-            let previousPal = _colorScheme.palette
-            let currentNeon = _targetColorScheme.neonParams
-            let previousNeon = _colorScheme.neonParams
-            
-            // Interpolate between previous and target palettes
-            let t = _colorSchemeTransitionProgress
-            let color1 = simd_mix(previousPal.color1, currentPal.color1, SIMD3<Float>(repeating: t))
-            let color2 = simd_mix(previousPal.color2, currentPal.color2, SIMD3<Float>(repeating: t))
-            let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
-            let altColor1 = simd_mix(previousPal.altColor1, currentPal.altColor1, SIMD3<Float>(repeating: t))
-            let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
-            
-            // Interpolate neon intensity (0 for non-neon, 1 for neon)
-            let prevNeonIntensity: Float = _colorScheme.isNeonMode ? 1.0 : 0.0
-            let currNeonIntensity: Float = _targetColorScheme.isNeonMode ? 1.0 : 0.0
-            let neonIntensity = prevNeonIntensity + (currNeonIntensity - prevNeonIntensity) * t
-            
-            // Interpolate neon parameters
-            let hueFreq = previousNeon.hueFreq + (currentNeon.hueFreq - previousNeon.hueFreq) * t
-            let hueOffset = previousNeon.hueOffset + (currentNeon.hueOffset - previousNeon.hueOffset) * t
-            let bandFreq = previousNeon.bandFreq + (currentNeon.bandFreq - previousNeon.bandFreq) * t
-            let stripeFreq = previousNeon.stripeFreq + (currentNeon.stripeFreq - previousNeon.stripeFreq) * t
-            let stripeStrength = previousNeon.stripeStrength + (currentNeon.stripeStrength - previousNeon.stripeStrength) * t
-            let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
-            let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
-            
-            return ColorSchemeParams(
-                color1: color1,
-                color2: color2,
-                color3: color3,
-                altColor1: altColor1,
-                altMixFactors: altMixFactors,
-                saturation: _colorSchemeSaturation,
-                contrast: _colorSchemeContrast,
-                gamma: _colorSchemeGamma,
-                brightness: 0.0,
-                vibrance: _colorSchemeVibrance,
-                colorCurve: _colorSchemeCurve,
-                shadows: _colorSchemeShadows,
-                highlights: _colorSchemeHighlights,
-                neonIntensity: neonIntensity,
-                hueFrequency: hueFreq,
-                hueOffset: hueOffset,
-                bandFrequency: bandFreq,
-                stripeFrequency: stripeFreq,
-                stripeStrength: stripeStrength,
-                glowSharpness: glowSharpness,
-                saturationPower: satPower,
-                animTime: _colorAnimTime,
-                hueCycleSpeed: _hueCycleSpeed,
-                pulseSpeed: _pulseSpeed,
-                pulseAmount: _pulseAmount,
-                glowIntensity: _glowIntensity,
-                bloomStrength: _bloomStrength,
-                transitionProgress: t,
-                previousScheme: _colorScheme.rawValue,
-                currentScheme: _targetColorScheme.rawValue,
-                _padding: 0
-            )
+            makeColorSchemeParamsLocked()
         }
     }
     
