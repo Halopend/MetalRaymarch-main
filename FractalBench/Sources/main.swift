@@ -59,6 +59,13 @@ do {
                     escape: escapeEval,
                     referenceDE: referenceEval
                 )
+                if generated.points.isEmpty {
+                    throw NSError(
+                        domain: "PointSets",
+                        code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "Near-surface generation failed. Ensure the origin is inside the fractal."]
+                    )
+                }
             default:
                 throw NSError(domain: "Main", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unknown pointSet: \(opt.pointSet)"])
             }
