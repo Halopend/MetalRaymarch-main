@@ -48,10 +48,12 @@ extension LayerRenderer.Clock.Instant.Duration {
 final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
     // pendingJobs is protected by lock - safe for Sendable
     private var pendingJobs: [UnownedJob] = []
+    private var pendingJobsHead: Int = 0
     private let lock = NSLock()
     private let semaphore = DispatchSemaphore(value: 0)
     private var isRunning = true
     private var renderThread: Thread?
+    private let pendingJobsCompactionThreshold = 64
     
     init() {
         // Create a persistent high-priority thread for rendering
@@ -79,7 +81,19 @@ final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
     private func dequeueJob() -> UnownedJob? {
         lock.lock()
         defer { lock.unlock() }
-        return pendingJobs.isEmpty ? nil : pendingJobs.removeFirst()
+        guard pendingJobsHead < pendingJobs.count else {
+            pendingJobs.removeAll(keepingCapacity: true)
+            pendingJobsHead = 0
+            return nil
+        }
+
+        let job = pendingJobs[pendingJobsHead]
+        pendingJobsHead += 1
+        if pendingJobsHead >= pendingJobsCompactionThreshold && pendingJobsHead >= pendingJobs.count / 2 {
+            pendingJobs.removeFirst(pendingJobsHead)
+            pendingJobsHead = 0
+        }
+        return job
     }
 
     func enqueue(_ job: UnownedJob) {
@@ -179,6 +193,7 @@ actor Renderer {
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
     
+    private var lastImmersiveSpaceState: ImmersiveSpaceState?
 
 
     var mesh: MTKMesh
@@ -1867,22 +1882,14 @@ actor Renderer {
             }
             if layerRenderer.state == .invalidated {
                 print("Layer is invalidated")
-                Task { @MainActor in
-                    appModel.immersiveSpaceState = .closed
-                }
+                updateImmersiveSpaceStateIfNeeded(.closed)
                 return
             } else if layerRenderer.state == .paused {
-                Task { @MainActor in
-                    appModel.immersiveSpaceState = .inTransition
-                }
+                updateImmersiveSpaceStateIfNeeded(.inTransition)
                 layerRenderer.waitUntilRunning()
                 continue
             } else {
-                Task { @MainActor in
-                    if appModel.immersiveSpaceState != .open {
-                        appModel.immersiveSpaceState = .open
-                    }
-                }
+                updateImmersiveSpaceStateIfNeeded(.open)
                 
                 // Check for pending screenshot request
                 if shouldCaptureScreenshot {
@@ -1900,6 +1907,16 @@ actor Renderer {
                 autoreleasepool {
                     self.renderFrame()
                 }
+            }
+        }
+    }
+
+    private func updateImmersiveSpaceStateIfNeeded(_ state: ImmersiveSpaceState) {
+        guard lastImmersiveSpaceState != state else { return }
+        lastImmersiveSpaceState = state
+        Task { @MainActor in
+            if appModel.immersiveSpaceState != state {
+                appModel.immersiveSpaceState = state
             }
         }
     }
