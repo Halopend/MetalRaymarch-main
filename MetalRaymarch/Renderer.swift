@@ -1103,6 +1103,10 @@ actor Renderer {
                             emissiveColor: settings.emissiveColor,
                             emissiveSpeed: settings.emissiveSpeed,
                             fogIntensity: settings.fogIntensity,
+                            maxViewDistance: RenderSettings.maxViewDistance,
+                            logDepthScale: RenderSettings.logDepthScale,
+                            depthMissValue: RenderSettings.depthMissValue,
+                            _depthPadding: 0.0,
                             colorScheme: colorSchemeParams)
         }
 
@@ -1703,6 +1707,10 @@ actor Renderer {
             emissiveColor: settings.emissiveColor,
             emissiveSpeed: settings.emissiveSpeed,
             fogIntensity: settings.fogIntensity,
+            maxViewDistance: RenderSettings.maxViewDistance,
+            logDepthScale: RenderSettings.logDepthScale,
+            depthMissValue: RenderSettings.depthMissValue,
+            _depthPadding: 0.0,
             colorScheme: colorSchemeParams
         )
         
@@ -1930,4 +1938,3 @@ func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_floa
     mat.columns.3 = SIMD4<Float>(translation, 1)
     return mat
 }
-

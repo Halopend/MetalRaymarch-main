@@ -2,9 +2,9 @@
 //  Shaders.metal
 //
 // === DEPTH BUFFER NOTES (CRITICAL FOR REPROJECTION/ASW) ===
-// visionOS projection outputs z/w in [0, 1] range directly.
-// Depth encoding: output.depth = clipPos.z / clipPos.w (no transformation needed)
-// Far plane (no hit): output.depth = 1e-7 (tiny value = far away for compositor)
+// Depth is encoded in logarithmic space for near-field precision:
+// logDepth = log2(1 + k * rayDepth) / log2(1 + k * maxViewDistance)
+// maxViewDistance, logDepthScale (k), and depthMissValue are provided via uniforms.
 // clearDepth in render passes: 1.0
 //
 // Debug flag for depth visualization (set to 1 to enable)
@@ -124,8 +124,6 @@ constant half kPowEpsilonHalf = 1e-4h;
 // === NAMED CONSTANTS FOR OPTIMIZATION ===
 // Raymarching thresholds
 constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
-constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
-constant float kCoarseMaxDistance = 80.0f;      // Super-coarse max distance
 
 // Shading constants
 constant float kSpecularPower = 10.0f;          // Specular highlight power
@@ -165,10 +163,14 @@ inline int selectAdaptiveLevel(float coarseT) {
     return 3;  // Per-pixel for surface detail
 }
 
-// visionOS projection outputs z/w in [0, 1] range directly.
-// No transformation needed - just pass through for async timewarp/reprojection.
-inline float encodeDepthFromClip(float4 clipPos) {
-    return clipPos.z / clipPos.w;
+// Logarithmic depth encoding for large depth ranges with near-field precision.
+inline float encodeLogDepth(float rayDepth, float maxViewDistance, float logDepthScale) {
+    float clampedDepth = clamp(rayDepth, 0.0, maxViewDistance);
+    float denom = log2(1.0 + logDepthScale * maxViewDistance);
+    if (denom <= 0.0) {
+        return 0.0;
+    }
+    return log2(1.0 + logDepthScale * clampedDepth) / denom;
 }
 
 // Blue noise approximation for temporal stability (better than white noise for reprojection)
@@ -650,7 +652,7 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
 // === SUPER-COARSE RAYMARCH (for 8x8 tiles) ===
 // Very fast approximate raymarch - 12 steps with aggressive stepping
 // Used for initial distance estimation in large tiles
-FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
+FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float foldingLimit, FractalParams params, int iterations, float maxViewDistance, int fractalType = 0)
 {
     float t = max(startT, 0.05);
     
@@ -664,7 +666,7 @@ FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float fo
         // Loose threshold - we just need approximate distance
         if(UNLIKELY(h < 0.1)) return t;
         
-        if (UNLIKELY(t > kCoarseMaxDistance)) return kRayMissThreshold + 100.0;
+        if (UNLIKELY(t > maxViewDistance)) return kRayMissThreshold + 100.0;
         
         // Aggressive over-relaxation: step 1.5x the SDF value
         t = fma(h, 1.5, t);
@@ -676,7 +678,7 @@ FORCE_INLINE float SceneSuperCoarse(float3 rO, float3 rD, float startT, float fo
 // === COARSE RAYMARCH ===
 // Fast approximate raymarch for hierarchical rendering
 // Uses fewer iterations but standard stepping to find approximate hit distance
-FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations)
+FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, float maxViewDistance)
 {
     float t = 0.05;
     
@@ -690,7 +692,7 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
         // LIKELY: Coarse pass finds hits most of the time
         if(UNLIKELY(h < 0.02)) return t;
         
-        if (UNLIKELY(t > kMaxRayDistance)) return kRayMissThreshold + 100.0;
+        if (UNLIKELY(t > maxViewDistance)) return kRayMissThreshold + 100.0;
         
         t += h;
     }
@@ -701,7 +703,7 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
 // === FINE RAYMARCH FROM STARTING POINT ===
 // Refines from a known starting distance (from coarse pass or neighbor)
 // Uses FC_MAX_RAY_STEPS when available for compile-time optimization
-FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time)
+FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, float maxViewDistance)
 {
     float dither = blueNoise(fragCoord, time) * 0.01;
     
@@ -712,7 +714,7 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
     // Use function constant when available for compile-time optimization
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
-    float endT = startT + 2.0;  // Pre-compute end threshold
+    float endT = min(startT + 2.0, maxViewDistance);  // Pre-compute end threshold
     
     // Use partial unrolling when max steps is known at compile time
     if (is_function_constant_defined(FC_MAX_RAY_STEPS)) {
@@ -726,7 +728,7 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
             if(UNLIKELY(h < threshold)) {
                 return float2(t, saturate(glow * 0.25));
             }
-            if (UNLIKELY(t > endT)) break;
+            if (UNLIKELY(t > endT || t > maxViewDistance)) break;
             
             glow = fma(saturate(0.04 - h), glowIntensity, glow);
             t += h;
@@ -745,7 +747,7 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
                 return float2(t, saturate(glow * 0.25));
             }
             
-            if (UNLIKELY(t > endT)) break;
+            if (UNLIKELY(t > endT || t > maxViewDistance)) break;
             
             glow = fma(saturate(0.04 - h), glowIntensity, glow);
             t += h;
@@ -758,7 +760,7 @@ FORCE_INLINE float2 SceneFromStart(float3 rO, float3 rD, float startT, float2 fr
 // Standard sphere tracing - reliable, no aggressive optimizations
 // This is the main raymarch loop - optimize for typical case (many steps, eventual hit)
 // When FC_MAX_RAY_STEPS is defined, the compiler can optimize the loop more aggressively
-float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
+float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, float maxViewDistance, int fractalType = 0)
 {
     // Use temporally stable blue noise dithering for reprojection
     float dither = blueNoise(fragCoord, time) * 0.015;
@@ -783,7 +785,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
             if(UNLIKELY(h < threshold)) {
                 return float2(t, saturate(glow * 0.25));
             }
-            if (UNLIKELY(t > kMaxRayDistance)) break;
+            if (UNLIKELY(t > maxViewDistance)) break;
             
             glow = fma(saturate(0.04 - h), glowIntensity, glow);
             t += h;
@@ -806,7 +808,7 @@ float2 Scene(float3 rO, float3 rD, float2 fragCoord, float quality, int maxSteps
             }
             
             // UNLIKELY: Early exit is rare with bounded fractal
-            if (UNLIKELY(t > kMaxRayDistance)) break;
+            if (UNLIKELY(t > maxViewDistance)) break;
             
             // Accumulate glow - saturate is free on GPU
             glow = fma(saturate(0.04 - h), glowIntensity, glow);
@@ -838,7 +840,7 @@ struct SceneResult {
 
 // Optimized raymarch that caches orbit state on hit
 // For Mandelbox - caches orbit state for normal/color reuse
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, float maxViewDistance, int fractalType = 0)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -871,7 +873,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
             return result;
         }
         
-        if (UNLIKELY(t > kMaxRayDistance)) break;
+        if (UNLIKELY(t > maxViewDistance)) break;
         
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
         t += h;
@@ -1431,8 +1433,8 @@ kernel void adaptiveHierarchical8x8(
     float gTime = uniforms.time * 0.01 + 15.00;
     
     // Use cached Scene for Mandelbox to avoid redundant iterations
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps, 
-                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
+    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
+                       uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, uniforms.maxViewDistance, fractalType);
     
     float adjustedDist = sceneResult.distGlow.x;
     float glow = sceneResult.distGlow.y;
@@ -1551,15 +1553,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     OrbitCache hitCache = makeEmptyOrbitCache();
     
     // Use cache-enabled raymarch
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, uniforms.maxViewDistance, fractalType);
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
 
     if (ret.x < kRayMissThreshold)
     {
-        float3 p = marchOrigin + ret.x * marchDir;
-        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = encodeDepthFromClip(clipPos);
+        output.depth = encodeLogDepth(ret.x, uniforms.maxViewDistance, uniforms.logDepthScale);
 
         // Debug: visualize depth as grayscale
         if (DEBUG_DEPTH_VISUALIZATION) {
@@ -1570,8 +1570,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     }
     else
     {
-        // No hit - far plane (tiny depth so compositor treats as far away)
-        output.depth = 1e-7;
+        // No hit - encode sentinel value for "infinite" depth.
+        output.depth = uniforms.depthMissValue;
 
         if (DEBUG_DEPTH_VISUALIZATION) {
             output.color = float4(0.0, 0.0, 0.0, 1.0);
@@ -1657,14 +1657,12 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             }
         }
 
-        // Compute clip-space depth and write it out for async timewarp
-        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = encodeDepthFromClip(clipPos);
+        output.depth = encodeLogDepth(ret.x, uniforms.maxViewDistance, uniforms.logDepthScale);
     }
     else
     {
-        // No hit - far plane (tiny depth so compositor treats as far away)
-        output.depth = 1e-7;
+        // No hit - encode sentinel value for "infinite" depth.
+        output.depth = uniforms.depthMissValue;
     }
 
     // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
@@ -1740,7 +1738,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
 
     // === RAYMARCH WITH ORBIT CACHING ===
     // Uses orbit caching to skip re-iteration for normals/colors
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, uniforms.maxViewDistance, fractalType);
     float2 ret = sceneResult.distGlow;
     OrbitCache hitCache = sceneResult.cache;
     
@@ -1829,14 +1827,12 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
             col += emissive;
         }
 
-        // Compute clip-space depth and write it out for async timewarp
-        float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);
-        output.depth = encodeDepthFromClip(clipPos);
+        output.depth = encodeLogDepth(adjustedDist, uniforms.maxViewDistance, uniforms.logDepthScale);
     }
     else
     {
-        // No hit - far plane (tiny depth so compositor treats as far away)
-        output.depth = 1e-7;
+        // No hit - encode sentinel value for "infinite" depth.
+        output.depth = uniforms.depthMissValue;
     }
     
     // fogIntensity: 0 = no fog (fogFactor=1), 1 = full fog
@@ -1960,7 +1956,8 @@ fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[s
                                       address::clamp_to_edge);
     
     DepthOutput out;
-    out.depth = sourceTexture.sample(textureSampler, in.texCoord, in.eyeIndex);
+    float rawDepth = sourceTexture.sample(textureSampler, in.texCoord, in.eyeIndex);
+    out.depth = (rawDepth < 0.0 || rawDepth > 1.0) ? 1.0 : rawDepth;
     return out;
 }
 
@@ -1971,7 +1968,7 @@ fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]]
                                       address::clamp_to_edge);
     
     DepthOutput out;
-    out.depth = sourceTexture.sample(textureSampler, in.texCoord);
+    float rawDepth = sourceTexture.sample(textureSampler, in.texCoord);
+    out.depth = (rawDepth < 0.0 || rawDepth > 1.0) ? 1.0 : rawDepth;
     return out;
 }
-
