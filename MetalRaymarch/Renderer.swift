@@ -1000,36 +1000,15 @@ actor Renderer {
         }
     }
 
-    private func updateGameState(drawable: LayerRenderer.Drawable) {
+    private func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot) {
         /// Update any game state before rendering
-
-        let settings = appModel.renderSettings
-        
-        // === INTERPOLATE GESTURE-CONTROLLED VALUES ===
-        // This is the SINGLE source of truth for smoothing gesture parameters.
-        // Called every frame at 90Hz for smooth animation regardless of gesture update rate (30Hz).
-        settings.interpolateToTargets(deltaTime: cachedDeltaTime)
-        
-        // Decay the limit flash effect using actual deltaTime
-        settings.updateLimitFlash(deltaTime: cachedDeltaTime)
-        
-        // === COLOR SCHEME TRANSITION UPDATE ===
-        // Smoothly transition between color schemes
-        settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
-        
-        // === AUDIO REACTIVE UPDATE ===
-        // Pull audio level from analyzer if in audio-reactive mode
-        if settings.lightingMode == .audioReactive && appModel.audioAnalyzer.isCapturing {
-            let combinedLevel = appModel.audioAnalyzer.level * 0.6 + appModel.audioAnalyzer.bassLevel * 0.4
-            settings.audioLevel = combinedLevel
-        }
         
         // Use already-smoothed position from settings (interpolated above)
         // Scale gets its own smoothing since it's not gesture-controlled
         let smoothSpeed: Float = 15.0
         let smoothFactor = 1.0 - exp(-smoothSpeed * cachedDeltaTime)
-        smoothedPosition = settings.position  // Already smoothed by interpolateToTargets
-        smoothedScale = smoothedScale + (settings.scale - smoothedScale) * smoothFactor
+        smoothedPosition = settingsSnapshot.position  // Already smoothed by interpolateToTargets
+        smoothedScale = smoothedScale + (settingsSnapshot.scale - smoothedScale) * smoothFactor
         
         // Use cached rotation matrix (constant, computed once in init)
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
@@ -1065,14 +1044,13 @@ actor Renderer {
             let inverseView = viewMatrix.inverse
 
             // Optional lighting play mode: gently modulate color and glow
-            let baseColorMix = settings.colorMix
-            let baseGlow = settings.glowIntensity
+            let baseColorMix = settingsSnapshot.colorMix
+            let baseGlow = settingsSnapshot.glowIntensity
             let lightingWave = sin(Float(appModel.clock.time) * 1.2)
-            let animatedColorMix = settings.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
-            let animatedGlow = settings.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
+            let animatedColorMix = settingsSnapshot.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
+            let animatedGlow = settingsSnapshot.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
             
-            // Get color scheme parameters (handles transitions internally)
-            let colorSchemeParams = settings.getColorSchemeParams()
+            let colorSchemeParams = settingsSnapshot.colorSchemeParams
             
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
@@ -1082,10 +1060,10 @@ actor Renderer {
                             viewMatrix: viewMatrix,
                             inverseViewMatrix: inverseView,
                             time: Float(appModel.clock.time),
-                            minDistance: settings.minDistance,
-                            fractalScale: settings.fractalScale,
-                            fractalIterations: Int32(settings.fractalIterations),
-                            maxRaySteps: Int32(settings.maxRaySteps),
+                            minDistance: settingsSnapshot.minDistance,
+                            fractalScale: settingsSnapshot.fractalScale,
+                            fractalIterations: Int32(settingsSnapshot.fractalIterations),
+                            maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
                             foldingLimit: settings.foldingLimit,
@@ -1229,10 +1207,21 @@ actor Renderer {
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
 
+        let settings = appModel.renderSettings
+        settings.interpolateToTargets(deltaTime: cachedDeltaTime)
+        settings.updateLimitFlash(deltaTime: cachedDeltaTime)
+        settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
+        if settings.lightingMode == .audioReactive && appModel.audioAnalyzer.isCapturing {
+            let combinedLevel = appModel.audioAnalyzer.level * 0.6 + appModel.audioAnalyzer.bassLevel * 0.4
+            settings.audioLevel = combinedLevel
+        }
+        let settingsSnapshot = settings.snapshot()
+
+        self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
         self.updateGameState(drawable: drawable)
 
         // Check if using adaptive 8x8 compute pipeline
-        let tileSize = settings.tileSize
+        let tileSize = settingsSnapshot.tileSize
         // MetalFX spatial upscaling disabled - causes frame drops without quality benefit
         let wantsMetalFX = false
         let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil && !wantsMetalFX
@@ -1241,7 +1230,8 @@ actor Renderer {
             // Use compute-based rendering for 8x8 adaptive hierarchical
             let computeRendered = renderWithAdaptiveCompute(
                 commandBuffer: commandBuffer,
-                drawable: drawable
+                drawable: drawable,
+                settingsSnapshot: settingsSnapshot
             )
             
             if computeRendered {
@@ -1261,7 +1251,7 @@ actor Renderer {
         if wantsMetalFX {
             metalFXContext = updateMetalFXManager(
                 drawable: drawable,
-                settings: settings,
+                settingsSnapshot: settingsSnapshot,
                 rasterizationRateMap: systemMap
             )
             if let context = metalFXContext {
@@ -1299,8 +1289,8 @@ actor Renderer {
         let useQuadShared = (tileSize == 2)
         
         // Get current iteration count for specialized pipeline selection
-        let currentIterations = appModel.renderSettings.fractalIterations
-        let currentRaySteps = appModel.renderSettings.maxRaySteps
+        let currentIterations = settingsSnapshot.fractalIterations
+        let currentRaySteps = settingsSnapshot.maxRaySteps
         
         // Use specialized pipeline with fixed iteration count for full loop unrolling
         // This is THE critical optimization - Map() inner loop can be fully unrolled
@@ -1388,7 +1378,7 @@ actor Renderer {
                     frameTimeSeconds: frameTimeSeconds,
                     cpuEncodeMs: cpuEncodeMs,
                     gpuMs: gpuMs,
-                    settings: settings,
+                    settingsSnapshot: settingsSnapshot,
                     wantsMetalFX: wantsMetalFX,
                     useAdaptiveCompute: useAdaptiveCompute,
                     metalFXInputSize: capturedMetalFXInputSize,
@@ -1435,7 +1425,7 @@ actor Renderer {
         frameTimeSeconds: Double,
         cpuEncodeMs: Double,
         gpuMs: Double?,
-        settings: RenderSettings,
+        settingsSnapshot: RenderSettingsSnapshot,
         wantsMetalFX: Bool,
         useAdaptiveCompute: Bool,
         metalFXInputSize: SIMD2<Int>?,
@@ -1460,7 +1450,7 @@ actor Renderer {
 
         let pathText = useAdaptiveCompute ? "compute" : "fragment"
         let fps = frameTimeSeconds > 0 ? (1.0 / frameTimeSeconds) : 0
-        print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms path=\(pathText) MetalFX=\(metalFXText) tile=\(settings.tileSize) iters=\(settings.fractalIterations) steps=\(settings.maxRaySteps) views=\(viewCount)")
+        print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms path=\(pathText) MetalFX=\(metalFXText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)")
     }
 
 #if canImport(MetalFX)
@@ -1591,15 +1581,15 @@ actor Renderer {
 
     private func updateMetalFXManager(
         drawable: LayerRenderer.Drawable,
-        settings: RenderSettings,
+        settingsSnapshot: RenderSettingsSnapshot,
         rasterizationRateMap: MTLRasterizationRateMap?
     ) -> (MetalFXManager, Int, Int)? {
         let outputWidth = drawable.colorTextures[0].width
         let outputHeight = drawable.colorTextures[0].height
         let viewCount = drawable.views.count
 
-        var inputWidth = max(1, Int(Float(outputWidth) * settings.resolutionScale))
-        var inputHeight = max(1, Int(Float(outputHeight) * settings.resolutionScale))
+        var inputWidth = max(1, Int(Float(outputWidth) * settingsSnapshot.resolutionScale))
+        var inputHeight = max(1, Int(Float(outputHeight) * settingsSnapshot.resolutionScale))
 
         // When using foveation with MetalFX, the input texture MUST be at least as large as
         // the rate map's physical size, otherwise Metal validation fails with:
@@ -1620,7 +1610,7 @@ actor Renderer {
             outputHeight: outputHeight,
             colorFormat: drawable.colorTextures[0].pixelFormat,
             depthFormat: drawable.depthTextures[0].pixelFormat,
-            scale: settings.resolutionScale
+            scale: settingsSnapshot.resolutionScale
         )
 
         do {
@@ -1659,21 +1649,20 @@ actor Renderer {
         commandBuffer: MTLCommandBuffer,
         outputTexture: MTLTexture,
         drawable: LayerRenderer.Drawable,
-        viewIndex: Int
+        viewIndex: Int,
+        settingsSnapshot: RenderSettingsSnapshot
     ) {
         guard let pipeline = adaptiveHierarchicalPipeline8x8,
               let uniformBuffer = tileUniformBuffer else {
             print("⚠️ Adaptive compute pipeline not available")
             return
         }
-        
-        let settings = appModel.renderSettings
         let view = drawable.views[viewIndex]
         
         // Build model matrix (must match fragment shader exactly!)
         let t: Float = 0.1
-        let currentSmoothedPosition = smoothedPosition + (settings.position - smoothedPosition) * t
-        let currentSmoothedScale = smoothedScale + (settings.scale - smoothedScale) * t
+        let currentSmoothedPosition = smoothedPosition + (settingsSnapshot.position - smoothedPosition) * t
+        let currentSmoothedScale = smoothedScale + (settingsSnapshot.scale - smoothedScale) * t
         
         let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
         let translationMatrix = matrix4x4_translation(currentSmoothedPosition.x, currentSmoothedPosition.y, currentSmoothedPosition.z)
@@ -1693,7 +1682,7 @@ actor Renderer {
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
         
         // Get color scheme parameters
-        let colorSchemeParams = settings.getColorSchemeParams()
+        let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
@@ -1701,18 +1690,18 @@ actor Renderer {
             cameraPos: cameraPos,
             time: Float(appModel.clock.time),
             resolution: SIMD2<Float>(Float(outputTexture.width), Float(outputTexture.height)),
-            minDistance: settings.minDistance,
-            fractalScale: settings.fractalScale,
-            sphereRadius: settings.sphereRadius,
-            safetyBubbleRadius: settings.safetyBubbleRadius,
-            safetyBubbleEnabled: settings.safetyBubbleEnabled ? 1 : 0,
-            safetyBubbleShape: settings.safetyBubbleShape,
-            foldingLimit: settings.foldingLimit,
-            glowIntensity: settings.glowIntensity,
-            colorMix: settings.colorMix,
-            fractalIterations: Int32(settings.fractalIterations),
-            colorIterations: Int32(settings.colorIterations),
-            maxRaySteps: Int32(settings.maxRaySteps),
+            minDistance: settingsSnapshot.minDistance,
+            fractalScale: settingsSnapshot.fractalScale,
+            sphereRadius: settingsSnapshot.sphereRadius,
+            safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
+            safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
+            safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
+            foldingLimit: settingsSnapshot.foldingLimit,
+            glowIntensity: settingsSnapshot.glowIntensity,
+            colorMix: settingsSnapshot.colorMix,
+            fractalIterations: Int32(settingsSnapshot.fractalIterations),
+            colorIterations: Int32(settingsSnapshot.colorIterations),
+            maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settings.debugHierarchical ? 1 : 0,
             limitFlash: settings.limitFlash,
@@ -1844,7 +1833,8 @@ actor Renderer {
     /// Returns true if compute rendering was used
     private func renderWithAdaptiveCompute(
         commandBuffer: MTLCommandBuffer,
-        drawable: LayerRenderer.Drawable
+        drawable: LayerRenderer.Drawable,
+        settingsSnapshot: RenderSettingsSnapshot
     ) -> Bool {
         guard adaptiveHierarchicalPipeline8x8 != nil else { return false }
         
@@ -1858,7 +1848,8 @@ actor Renderer {
                 commandBuffer: commandBuffer,
                 outputTexture: outputTexture,
                 drawable: drawable,
-                viewIndex: viewIndex
+                viewIndex: viewIndex,
+                settingsSnapshot: settingsSnapshot
             )
         }
         
