@@ -7,6 +7,30 @@
 
 import SwiftUI
 
+// MARK: - Scenes Window View
+
+/// Wrapper view for the standalone scenes window
+struct ScenesWindowView: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.dismissWindow) private var dismissWindow
+    
+    var body: some View {
+        Group {
+            if let animationManager = appModel.animationManager {
+                SceneListView(animationManager: animationManager, appModel: appModel)
+            } else {
+                ContentUnavailableView(
+                    "Not Available",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("Animation manager not initialized")
+                )
+            }
+        }
+        .frame(minWidth: 450, minHeight: 400)
+        .glassBackgroundEffect()
+    }
+}
+
 // MARK: - Scene List View
 
 /// Main view showing all saved scenes with create/edit/delete actions
@@ -251,6 +275,10 @@ struct SceneEditorView: View {
                                 onJump: {
                                     // Apply this keyframe's values immediately
                                     applyKeyframe(keyframe)
+                                },
+                                onOverwrite: {
+                                    // Overwrite this keyframe with current settings
+                                    overwriteKeyframe(at: index)
                                 }
                             )
                         }
@@ -275,7 +303,7 @@ struct SceneEditorView: View {
                         }
                     }
                 } footer: {
-                    Text("Tap + to capture current parameters as a new keyframe. Swipe to delete.")
+                    Text("Tap row to load keyframe. ↓ overwrites with current settings. Swipe to delete.")
                 }
             }
             .navigationTitle("Edit Scene")
@@ -336,6 +364,23 @@ struct SceneEditorView: View {
         appModel.preparePipeline(iterations: keyframe.baseFractalIterations, raySteps: keyframe.baseMaxRaySteps)
     }
     
+    private func overwriteKeyframe(at index: Int) {
+        guard index < scene.keyframes.count else { return }
+        let settings = appModel.renderSettings
+        
+        // Preserve existing name, duration, and ID
+        let existingKeyframe = scene.keyframes[index]
+        
+        // Update the existing keyframe's values in place
+        scene.keyframes[index].minDistance = settings.targetMinDistance
+        scene.keyframes[index].foldingLimit = settings.targetFoldingLimit
+        scene.keyframes[index].sphereRadius = settings.targetSphereRadius
+        scene.keyframes[index].fractalScale = settings.fractalScale
+        scene.keyframes[index].position = settings.targetPosition
+        scene.keyframes[index].baseFractalIterations = settings.baseFractalIterations
+        scene.keyframes[index].baseMaxRaySteps = settings.baseMaxRaySteps
+    }
+    
     private func formatDuration(_ duration: TimeInterval) -> String {
         if duration < 60 {
             return String(format: "%.1fs", duration)
@@ -354,6 +399,7 @@ struct KeyframeRowView: View {
     let index: Int
     let onEdit: () -> Void
     let onJump: () -> Void
+    let onOverwrite: () -> Void
     
     var body: some View {
         HStack {
@@ -389,13 +435,14 @@ struct KeyframeRowView: View {
                     .background(Capsule().fill(.secondary.opacity(0.2)))
             }
             
-            // Jump to button
+            // Overwrite button - replace keyframe with current settings
             Button {
-                onJump()
+                onOverwrite()
             } label: {
-                Image(systemName: "arrow.right.circle")
+                Image(systemName: "arrow.down.circle")
             }
             .buttonStyle(.plain)
+            .help("Overwrite with current settings")
             
             // Edit button
             Button {
@@ -404,6 +451,11 @@ struct KeyframeRowView: View {
                 Image(systemName: "slider.horizontal.3")
             }
             .buttonStyle(.plain)
+            .help("Edit keyframe parameters")
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onJump()
         }
     }
     

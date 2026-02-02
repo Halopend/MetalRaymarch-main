@@ -57,6 +57,7 @@ class AppModel {
     let immersiveSpaceID = "ImmersiveSpace"
     let menuWindowID = "MenuWindow"
     let developerWindowID = "DeveloperWindow"
+    let scenesWindowID = "ScenesWindow"
     
     enum ImmersiveSpaceState {
         case closed
@@ -199,9 +200,17 @@ class AppModel {
     /// Callback to open the developer window (set by App scene)
     var openDeveloperWindowHandler: (() -> Void)?
     
+    /// Callback to open the scenes window (set by App scene)
+    var openScenesWindowHandler: (() -> Void)?
+    
     /// Open the developer tools window
     func openDeveloperWindow() {
         openDeveloperWindowHandler?()
+    }
+    
+    /// Open the scenes window
+    func openScenesWindow() {
+        openScenesWindowHandler?()
     }
     
     /// Toggle menu window visibility - hides window content completely (preserves position)

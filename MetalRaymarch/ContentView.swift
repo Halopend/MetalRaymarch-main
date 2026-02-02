@@ -244,7 +244,6 @@ struct ContentView: View {
     @State private var initialPosition: SIMD3<Float> = .zero
     @State private var cameraMode: Bool = false
     @State private var cache = UISettingsCache()
-    @State private var showScenesSheet = false
     
     /// Get parameter ranges for current fractal type
     private var parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
@@ -358,12 +357,6 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
         }
-        .sheet(isPresented: $showScenesSheet) {
-            if let animationManager = appModel.animationManager {
-                SceneListView(animationManager: animationManager, appModel: appModel)
-                    .presentationDetents([.large])
-            }
-        }
     }
     
     // MARK: - Menu Content
@@ -413,7 +406,7 @@ struct ContentView: View {
                     
                     // Scenes button
                     Button {
-                        showScenesSheet = true
+                        appModel.openScenesWindow()
                     } label: {
                         Image(systemName: "film.stack")
                     }

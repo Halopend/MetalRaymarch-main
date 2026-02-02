@@ -66,6 +66,10 @@ struct MetalProjectTestApp: App {
                     appModel.openDeveloperWindowHandler = {
                         openWindow(id: appModel.developerWindowID)
                     }
+                    // Set up handler for scenes window
+                    appModel.openScenesWindowHandler = {
+                        openWindow(id: appModel.scenesWindowID)
+                    }
                 }
         }
         .defaultSize(width: 600, height: 250)
@@ -78,6 +82,15 @@ struct MetalProjectTestApp: App {
                 .environment(appModel)
         }
         .defaultSize(width: 400, height: 500)
+        .windowStyle(.plain)
+        .windowResizability(.contentSize)
+        
+        // Scenes Window
+        Window("Animation Scenes", id: appModel.scenesWindowID) {
+            ScenesWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 500, height: 600)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 
