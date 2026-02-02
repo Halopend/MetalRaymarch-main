@@ -770,7 +770,7 @@ final class RenderSettings: @unchecked Sendable {
     var baseFractalIterations: Int {
         get { withLock { _baseFractalIterations } }
         set { 
-            withLock { 
+            withLock {
                 _baseFractalIterations = newValue
                 _fractalIterations = newValue  // Also update current
             } 
@@ -781,7 +781,7 @@ final class RenderSettings: @unchecked Sendable {
     var baseMaxRaySteps: Int {
         get { withLock { _baseMaxRaySteps } }
         set { 
-            withLock { 
+            withLock {
                 _baseMaxRaySteps = newValue
                 _maxRaySteps = newValue  // Also update current
             } 

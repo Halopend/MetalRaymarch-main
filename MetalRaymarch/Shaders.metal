@@ -316,21 +316,18 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
 // Called potentially 50-100+ times per pixel (raymarch + shadows + normals)
 // Every cycle here matters!
 // 
-// When FC_FRACTAL_ITERATIONS is defined (via function constants), loopCount becomes
-// a compile-time constant and the Metal compiler automatically fully unrolls the loop.
-// No pragma hints needed - the compiler is smart enough to optimize constant-bound loops.
-FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int iterations) 
+// FC_FRACTAL_ITERATIONS MUST be defined as a function constant at pipeline creation.
+// This enables the Metal compiler to fully unroll the loop for maximum performance.
+// No runtime iteration parameter - always uses the compile-time constant.
+FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit) 
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
     
     float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
 
-    // When FC_FRACTAL_ITERATIONS is defined, this becomes a compile-time constant
-    // and the compiler will automatically unroll the loop.
-    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-
-    for (int i = 0; i < loopCount; i++) {
+    // FC_FRACTAL_ITERATIONS is a compile-time constant - loop is fully unrolled
+    for (int i = 0; i < FC_FRACTAL_ITERATIONS; i++) {
         MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq);
     }
     
@@ -404,7 +401,7 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
 // Mandelbox distance function wrapper (fractalType parameter unused, kept for API compatibility)
 FORCE_INLINE float MapMandelbox(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType) 
 {
-    return Map(pos, params, foldingLimit, iterations);
+    return Map(pos, params, foldingLimit);
 }
 
 // =============================================================================
@@ -668,7 +665,7 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     for(int j = 0; j < 24 && t <= kMaxRayDistance; j++)
     {
         float3 p = fma(rD, float3(t), rO);
-        float h = Map(p, params, foldingLimit, iterations);
+        float h = Map(p, params, foldingLimit);
         
         if(UNLIKELY(h < 0.02f)) return t;
         
@@ -1004,10 +1001,10 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
     float t = 0.08f;
     float prevH = 1e10f;
     
-    // When FC_SHADOW_ITERATIONS is defined, steps becomes compile-time constant
-    // Compiler unrolls optimally for each quality preset (2-3 steps)
+    // When FC_SHADOW_ITERATIONS is defined, it's a compile-time constant from the pipeline
+    // enabling the compiler to fully unroll this loop for optimal performance
     const int steps = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? 
-        (qualityMode == 1 ? 2 : 3) : 
+        FC_SHADOW_ITERATIONS : 
         int(fma(quality, 2.0f, 1.0f));
     
     for (int i = 0; i < steps && t <= 4.0f && res >= 0.02f; i++)

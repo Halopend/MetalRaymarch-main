@@ -433,7 +433,12 @@ actor Renderer {
             if RENDERER_DEBUG { print("✓ Tile-based compute pipeline ready (adaptive 8x8)") }
             
             // === STOCHASTIC RENDERING PIPELINES ===
-            if let stochasticRaymarchKernel = library.makeFunction(name: "stochasticRaymarchKernel") {
+            // Use function constants for JIT optimization - stochastic rendering benefits from
+            // specialized iteration counts since it runs higher-quality settings
+            if let stochasticRaymarchKernel = try? library.makeFunction(name: "stochasticRaymarchKernel", constantValues: computeConstants) {
+                stochasticRaymarchPipeline = try device.makeComputePipelineState(function: stochasticRaymarchKernel)
+                if RENDERER_DEBUG { print("✓ Stochastic raymarch pipeline specialized with function constants") }
+            } else if let stochasticRaymarchKernel = library.makeFunction(name: "stochasticRaymarchKernel") {
                 stochasticRaymarchPipeline = try device.makeComputePipelineState(function: stochasticRaymarchKernel)
             }
             if let stochasticCopyKernel = library.makeFunction(name: "copyToAccumulationKernel") {
@@ -457,23 +462,43 @@ actor Renderer {
             
             // === PROGRESSIVE RENDERING PIPELINES ===
             // Different threadgroup configurations for performance experimentation
-            if let depthKernel = library.makeFunction(name: "progressiveDepthPass") {
+            // Use function constants for JIT optimization where applicable
+            if let depthKernel = try? library.makeFunction(name: "progressiveDepthPass", constantValues: computeConstants) {
+                progressiveDepthPipeline = try device.makeComputePipelineState(function: depthKernel)
+                if RENDERER_DEBUG { print("✓ Progressive depth pipeline specialized with function constants") }
+            } else if let depthKernel = library.makeFunction(name: "progressiveDepthPass") {
                 progressiveDepthPipeline = try device.makeComputePipelineState(function: depthKernel)
             }
-            if let colorKernel = library.makeFunction(name: "progressiveColorPass") {
+            if let colorKernel = try? library.makeFunction(name: "progressiveColorPass", constantValues: computeConstants) {
+                progressiveColorPipeline = try device.makeComputePipelineState(function: colorKernel)
+                if RENDERER_DEBUG { print("✓ Progressive color pipeline specialized with function constants") }
+            } else if let colorKernel = library.makeFunction(name: "progressiveColorPass") {
                 progressiveColorPipeline = try device.makeComputePipelineState(function: colorKernel)
             }
-            if let kernel8x4 = library.makeFunction(name: "progressiveSinglePass_8x4") {
+            if let kernel8x4 = try? library.makeFunction(name: "progressiveSinglePass_8x4", constantValues: computeConstants) {
+                progressive8x4Pipeline = try device.makeComputePipelineState(function: kernel8x4)
+                if RENDERER_DEBUG { print("✓ Progressive 8x4 pipeline specialized with function constants") }
+                // Log pipeline characteristics
+                if let pipeline = progressive8x4Pipeline {
+                    print("  maxTotalThreads=\(pipeline.maxTotalThreadsPerThreadgroup), executionWidth=\(pipeline.threadExecutionWidth)")
+                }
+            } else if let kernel8x4 = library.makeFunction(name: "progressiveSinglePass_8x4") {
                 progressive8x4Pipeline = try device.makeComputePipelineState(function: kernel8x4)
                 // Log pipeline characteristics
                 if let pipeline = progressive8x4Pipeline {
                     print("✓ Progressive 8x4 pipeline: maxTotalThreads=\(pipeline.maxTotalThreadsPerThreadgroup), executionWidth=\(pipeline.threadExecutionWidth)")
                 }
             }
-            if let kernel4x8 = library.makeFunction(name: "progressiveSinglePass_4x8") {
+            if let kernel4x8 = try? library.makeFunction(name: "progressiveSinglePass_4x8", constantValues: computeConstants) {
+                progressive4x8Pipeline = try device.makeComputePipelineState(function: kernel4x8)
+                if RENDERER_DEBUG { print("✓ Progressive 4x8 pipeline specialized with function constants") }
+            } else if let kernel4x8 = library.makeFunction(name: "progressiveSinglePass_4x8") {
                 progressive4x8Pipeline = try device.makeComputePipelineState(function: kernel4x8)
             }
-            if let benchmarkKernel = library.makeFunction(name: "benchmarkKernel") {
+            if let benchmarkKernel = try? library.makeFunction(name: "benchmarkKernel", constantValues: computeConstants) {
+                progressiveBenchmarkPipeline = try device.makeComputePipelineState(function: benchmarkKernel)
+                if RENDERER_DEBUG { print("✓ Progressive benchmark pipeline specialized with function constants") }
+            } else if let benchmarkKernel = library.makeFunction(name: "benchmarkKernel") {
                 progressiveBenchmarkPipeline = try device.makeComputePipelineState(function: benchmarkKernel)
             }
             
@@ -1019,7 +1044,7 @@ actor Renderer {
                 maxRaySteps: Int32(preset.raySteps),
                 emissiveEnabled: false,      // Compile out emissive code path
                 neonModeEnabled: false,      // Compile out neon orbit tracking
-                colorIterations: Int32(preset.fractalIterations)  // Match fractal iterations
+                colorIterations: nil         // Use runtime value for color flexibility
             )
         }
         
