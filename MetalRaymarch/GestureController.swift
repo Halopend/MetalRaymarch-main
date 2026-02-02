@@ -296,7 +296,7 @@ final class GestureController {
     /// Call this after loading a preset to prevent jumps when gestures resume.
     func syncWithSettings() {
         guard let settings = renderSettings else { return }
-        accumulatedPosition = settings.targetPosition
+        accumulatedPosition = settings.effectiveTargetPosition
         
         // Reset all gesture states to avoid stale data
         indexGestureState = TwoHandGestureState()
@@ -531,10 +531,14 @@ final class GestureController {
         processTwoHandGesture(
             digit: 1,
             state: &indexGestureState,
-            currentTarget: settings.targetMinDistance,
+            currentTarget: settings.effectiveTargetMinDistance,
             range: ranges.minDistance
         ) { newValue in
-            settings.targetMinDistance = newValue
+            if settings.isAnimationPlaying {
+                settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
+            } else {
+                settings.targetMinDistance = newValue
+            }
             // Track hand gesture usage for analytics
             Task { @MainActor in UsageAnalytics.shared.trackHandGestureUsed() }
         }
@@ -544,10 +548,14 @@ final class GestureController {
         processTwoHandGesture(
             digit: 2,
             state: &middleGestureState,
-            currentTarget: settings.targetFoldingLimit,
+            currentTarget: settings.effectiveTargetFoldingLimit,
             range: ranges.foldingLimit
         ) { newValue in
-            settings.targetFoldingLimit = newValue
+            if settings.isAnimationPlaying {
+                settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
+            } else {
+                settings.targetFoldingLimit = newValue
+            }
         }
         if middleGestureState.isActive { activeDigit = 2 }
         
@@ -555,10 +563,14 @@ final class GestureController {
         processTwoHandGesture(
             digit: 3,
             state: &ringGestureState,
-            currentTarget: settings.targetSphereRadius,
+            currentTarget: settings.effectiveTargetSphereRadius,
             range: ranges.sphereRadius
         ) { newValue in
-            settings.targetSphereRadius = newValue
+            if settings.isAnimationPlaying {
+                settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
+            } else {
+                settings.targetSphereRadius = newValue
+            }
         }
         if ringGestureState.isActive { activeDigit = 3 }
 
@@ -566,10 +578,14 @@ final class GestureController {
         processTwoHandGesture(
             digit: 4,
             state: &pinkyGestureState,
-            currentTarget: settings.fractalScale,
+            currentTarget: settings.effectiveTargetFractalScale,
             range: ranges.fractalScale
         ) { newValue in
-            settings.fractalScale = newValue
+            if settings.isAnimationPlaying {
+                settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
+            } else {
+                settings.fractalScale = newValue
+            }
         }
         if pinkyGestureState.isActive { activeDigit = 4 }
         
@@ -771,10 +787,10 @@ final class GestureController {
         // Gesture started
         if active && !rightIndexDragActive {
             rightIndexDragActive = true
-            rightIndexDragStartPos = settings.targetPosition
+            rightIndexDragStartPos = settings.effectiveTargetPosition
             rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
             rightIndexPrevPalm = rightHand.palmPosition
-            accumulatedPosition = settings.targetPosition
+            accumulatedPosition = settings.effectiveTargetPosition
             #if DEBUG
             print("👆 Right index drag STARTED")
             #endif
@@ -827,7 +843,11 @@ final class GestureController {
 
             // Apply translation (world space) to target
             accumulatedPosition = accumulatedPosition + scaledDelta * translateSensitivity
-            settings.targetPosition = accumulatedPosition
+            if settings.isAnimationPlaying {
+                settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition
+            } else {
+                settings.targetPosition = accumulatedPosition
+            }
             rightIndexPrevPos = currentPos
             rightIndexPrevPalm = currentPos
         }

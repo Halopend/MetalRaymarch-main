@@ -191,12 +191,15 @@ final class AnimationManager {
         }
         
         playhead.state = .playing
+        renderSettings?.isAnimationPlaying = true
         print("▶️ Playing scene '\(currentScene?.name ?? "?")'")
     }
     
     /// Pause playback
     func pause() {
         playhead.state = .paused
+        renderSettings?.isAnimationPlaying = false
+        renderSettings?.commitAnimationOffsetsToTargets()
         print("⏸️ Paused")
     }
     
@@ -204,6 +207,8 @@ final class AnimationManager {
     func stop() {
         playhead.state = .stopped
         playhead.reset()
+        renderSettings?.isAnimationPlaying = false
+        renderSettings?.commitAnimationOffsetsToTargets()
         print("⏹️ Stopped")
     }
     
@@ -303,20 +308,32 @@ final class AnimationManager {
     private func applyKeyframe(_ keyframe: AnimationKeyframe) {
         guard let settings = renderSettings else { return }
         
+        settings.animationBaseMinDistance = keyframe.minDistance
+        settings.animationBaseFoldingLimit = keyframe.foldingLimit
+        settings.animationBaseSphereRadius = keyframe.sphereRadius
+        settings.animationBaseFractalScale = keyframe.fractalScale
+        settings.animationBasePosition = keyframe.position
+        
+        let minDistance = keyframe.minDistance + settings.manualOffsetMinDistance
+        let foldingLimit = keyframe.foldingLimit + settings.manualOffsetFoldingLimit
+        let sphereRadius = keyframe.sphereRadius + settings.manualOffsetSphereRadius
+        let fractalScale = keyframe.fractalScale + settings.manualOffsetFractalScale
+        let position = keyframe.position + settings.manualOffsetPosition
+        
         // Set IMMEDIATE values for responsive animation playback
         // This bypasses the renderer's interpolateToTargets() smoothing
-        settings.minDistance = keyframe.minDistance
-        settings.foldingLimit = keyframe.foldingLimit
-        settings.sphereRadius = keyframe.sphereRadius
-        settings.fractalScale = keyframe.fractalScale
-        settings.position = keyframe.position
+        settings.minDistance = minDistance
+        settings.foldingLimit = foldingLimit
+        settings.sphereRadius = sphereRadius
+        settings.fractalScale = fractalScale
+        settings.position = position
         
         // Also set TARGETS so they're in sync when animation stops
         // This allows hand gestures to blend in naturally
-        settings.targetMinDistance = keyframe.minDistance
-        settings.targetFoldingLimit = keyframe.foldingLimit
-        settings.targetSphereRadius = keyframe.sphereRadius
-        settings.targetPosition = keyframe.position
+        settings.targetMinDistance = minDistance
+        settings.targetFoldingLimit = foldingLimit
+        settings.targetSphereRadius = sphereRadius
+        settings.targetPosition = position
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
