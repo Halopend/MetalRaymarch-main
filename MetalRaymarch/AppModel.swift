@@ -600,6 +600,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
+    
     private var _fractalType: FractalType = .mandelbox  // Current fractal type
     private var _preferFoveated: Bool = false        // Legacy flag (no longer mutually exclusive)
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical

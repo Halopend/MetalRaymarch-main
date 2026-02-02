@@ -39,7 +39,8 @@ final class AnimationManager {
     var playhead = AnimationPlayhead()
     
     /// Global easing function for all transitions
-    var easingFunction: EasingFunction = .easeInOut
+    /// Default to .smooth for continuous motion through keyframes (no stopping)
+    var easingFunction: EasingFunction = .smooth
     
     /// Playback speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
     var playbackSpeed: Double = 1.0
@@ -290,10 +291,25 @@ final class AnimationManager {
         
         // Calculate progress through current segment (0 to 1)
         let rawProgress = Float(playhead.elapsedInSegment / actualDuration)
-        let easedProgress = easingFunction.apply(rawProgress)
         
-        // Interpolate and apply
-        let interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
+        // Interpolate using the appropriate method
+        let interpolated: AnimationKeyframe
+        
+        if easingFunction.usesSplineInterpolation {
+            // Use Catmull-Rom spline for smooth continuous motion through keyframes
+            interpolated = CatmullRomSpline.interpolateKeyframes(
+                scene.keyframes,
+                fromIndex: fromIndex,
+                toIndex: toIndex,
+                t: rawProgress,
+                isLooping: scene.isLooping
+            )
+        } else {
+            // Standard easing interpolation (slows to stop at each keyframe)
+            let easedProgress = easingFunction.apply(rawProgress)
+            interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
+        }
+        
         applyKeyframe(interpolated)
     }
     
@@ -309,6 +325,8 @@ final class AnimationManager {
         settings.foldingLimit = keyframe.foldingLimit
         settings.sphereRadius = keyframe.sphereRadius
         settings.fractalScale = keyframe.fractalScale
+        settings.baseFractalIterations = keyframe.baseFractalIterations
+        settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
         settings.position = keyframe.position
         
         // Also set TARGETS so they're in sync when animation stops
@@ -317,6 +335,8 @@ final class AnimationManager {
         settings.targetFoldingLimit = keyframe.foldingLimit
         settings.targetSphereRadius = keyframe.sphereRadius
         settings.targetPosition = keyframe.position
+        settings.baseFractalIterations = keyframe.baseFractalIterations
+        settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
     }
     
     // ═══════════════════════════════════════════════════════════════════════════

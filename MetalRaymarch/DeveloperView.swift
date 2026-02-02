@@ -77,6 +77,80 @@ struct DeveloperView: View {
                 .padding()
                 .background(themeColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
                 
+                // Quality Settings Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "slider.horizontal.3")
+                            .foregroundStyle(themeColor)
+                        Text("Quality Constraints")
+                            .font(.headline)
+                    }
+                    
+                    VStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Fractal Iterations")
+                                Spacer()
+                                Text("\(appModel.renderSettings.baseFractalIterations)")
+                                    .fontWeight(.bold)
+                                    .monospacedDigit()
+                            }
+                            Slider(value: Binding(
+                                get: { Float(appModel.renderSettings.baseFractalIterations) },
+                                set: { appModel.renderSettings.baseFractalIterations = Int($0) }
+                            ), in: 4...32, step: 1)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Max Ray Steps")
+                                Spacer()
+                                Text("\(appModel.renderSettings.baseMaxRaySteps)")
+                                    .fontWeight(.bold)
+                                    .monospacedDigit()
+                            }
+                            Slider(value: Binding(
+                                get: { Float(appModel.renderSettings.baseMaxRaySteps) },
+                                set: { appModel.renderSettings.baseMaxRaySteps = Int($0) }
+                            ), in: 32...1024, step: 16)
+                        }
+                        
+                        Divider()
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Quality Floor (Min)")
+                                Spacer()
+                                Text(String(format: "%.0f%%", appModel.renderSettings.dynamicRenderQualityMin * 100))
+                                    .fontWeight(.bold)
+                            }
+                            Slider(value: Binding(
+                                get: { appModel.renderSettings.dynamicRenderQualityMin },
+                                set: { appModel.renderSettings.dynamicRenderQualityMin = $0 }
+                            ), in: 0.1...0.8, step: 0.05)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Quality Ceiling (Max)")
+                                Spacer()
+                                Text(String(format: "%.0f%%", appModel.renderSettings.dynamicRenderQualityMax * 100))
+                                    .fontWeight(.bold)
+                            }
+                            Slider(value: Binding(
+                                get: { appModel.renderSettings.dynamicRenderQualityMax },
+                                set: { appModel.renderSettings.dynamicRenderQualityMax = $0 }
+                            ), in: 0.8...1.0, step: 0.05)
+                        }
+                    }
+                    
+                    Text("Quality ceiling limits how many resources are 'dedicated' when performance is high.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                
                 // Pipeline Profiler Section
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {

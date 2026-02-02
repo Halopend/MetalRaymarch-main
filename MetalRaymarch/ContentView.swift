@@ -409,48 +409,54 @@ struct ContentView: View {
 
                         // Quality Sliders - Fractal Iterations and Ray Steps
                         Group {
-                            Text("Quality")
-                                .font(.headline)
+                            HStack {
+                                Text("Quality Settings")
+                                    .font(.headline)
+                                Spacer()
+                                Toggle("", isOn: $cache.dynamicRenderQualityEnabled)
+                                    .labelsHidden()
+                                    .scaleEffect(0.8)
+                            }
                             
                             // Fractal Iterations slider
-                            Text("Fractal Iterations: \(cache.fractalIterations)")
+                            Text("Iterations: \(cache.baseFractalIterations)")
                             Slider(
                                 value: Binding(
-                                    get: { Double(cache.fractalIterations) },
-                                    set: { cache.fractalIterations = Int($0) }
+                                    get: { Double(cache.baseFractalIterations) },
+                                    set: { cache.baseFractalIterations = Int($0) }
                                 ),
-                                in: 2...22,
+                                in: 4...32,
                                 step: 1,
                                 onEditingChanged: { editing in
                                     if !editing {
-                                        // Push to both actual and base values
-                                        cache.push(\.fractalIterations, value: cache.fractalIterations)
-                                        cache.push(\.baseFractalIterations, value: cache.fractalIterations)
-                                        // Trigger pipeline compilation
-                                        appModel.preparePipeline(iterations: cache.fractalIterations, raySteps: cache.maxRaySteps)
+                                        cache.push(\.baseFractalIterations, value: cache.baseFractalIterations)
+                                        appModel.preparePipeline(iterations: cache.baseFractalIterations, raySteps: cache.baseMaxRaySteps)
                                     }
                                 }
                             )
                             
                             // Ray March Steps slider
-                            Text("Ray Steps: \(cache.maxRaySteps)")
+                            Text("Max Steps: \(cache.baseMaxRaySteps)")
                             Slider(
                                 value: Binding(
-                                    get: { Double(cache.maxRaySteps) },
-                                    set: { cache.maxRaySteps = Int($0) }
+                                    get: { Double(cache.baseMaxRaySteps) },
+                                    set: { cache.baseMaxRaySteps = Int($0) }
                                 ),
-                                in: 16...256,
-                                step: 10,
+                                in: 32...1024,
+                                step: 16,
                                 onEditingChanged: { editing in
                                     if !editing {
-                                        // Push to both actual and base values
-                                        cache.push(\.maxRaySteps, value: cache.maxRaySteps)
-                                        cache.push(\.baseMaxRaySteps, value: cache.maxRaySteps)
-                                        // Trigger pipeline compilation
-                                        appModel.preparePipeline(iterations: cache.fractalIterations, raySteps: cache.maxRaySteps)
+                                        cache.push(\.baseMaxRaySteps, value: cache.baseMaxRaySteps)
+                                        appModel.preparePipeline(iterations: cache.baseFractalIterations, raySteps: cache.baseMaxRaySteps)
                                     }
                                 }
                             )
+                            
+                            if !cache.dynamicRenderQualityEnabled {
+                                Text("Dynamic scaling is disabled. These values are fixed.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         // Primary Parameter: Fractal Scale - push on editing end
