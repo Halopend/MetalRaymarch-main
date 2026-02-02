@@ -27,6 +27,9 @@ final class AnimationManager {
             if currentScene?.id != oldValue?.id {
                 playhead.reset()
                 playhead.sceneID = currentScene?.id
+                
+                // Precompile pipelines for all keyframes in this scene
+                precompilePipelinesForCurrentScene()
             }
         }
     }
@@ -55,6 +58,10 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     
     private weak var renderSettings: RenderSettings?
+    
+    /// Callback to prepare shader pipeline for specific iteration/step values
+    /// Set this from AppModel to enable precompilation for animation keyframes
+    var preparePipelineHandler: ((Int, Int) -> Void)?
     
     // ═══════════════════════════════════════════════════════════════════════════
     // FILE STORAGE
@@ -191,8 +198,11 @@ final class AnimationManager {
             return
         }
         
+        // Ensure pipelines are compiled before playback
+        precompilePipelinesForCurrentScene()
+        
         playhead.state = .playing
-        print("▶️ Playing scene '\(currentScene?.name ?? "?")'")
+        print("▶️ Playing scene '\(currentScene?.name ?? "?")'")  
     }
     
     /// Pause playback
@@ -227,6 +237,31 @@ final class AnimationManager {
         
         // Apply the keyframe immediately
         applyKeyframe(scene.keyframes[index])
+    }
+    
+    /// Precompile shader pipelines for all keyframes in the current scene.
+    /// This ensures smooth playback by compiling all needed pipelines ahead of time.
+    private func precompilePipelinesForCurrentScene() {
+        guard let scene = currentScene,
+              let handler = preparePipelineHandler else { return }
+        
+        // Collect unique iteration/step combinations from all keyframes
+        var compiledConfigs = Set<String>()
+        
+        for keyframe in scene.keyframes {
+            let configKey = "\(keyframe.baseFractalIterations)_\(keyframe.baseMaxRaySteps)"
+            
+            // Skip if already compiled in this batch
+            guard !compiledConfigs.contains(configKey) else { continue }
+            compiledConfigs.insert(configKey)
+            
+            // Trigger pipeline compilation via the handler
+            handler(keyframe.baseFractalIterations, keyframe.baseMaxRaySteps)
+        }
+        
+        if !compiledConfigs.isEmpty {
+            print("🔧 [Animation] Precompiled pipelines for \(compiledConfigs.count) unique configs in scene '\(scene.name)'")
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -335,8 +370,6 @@ final class AnimationManager {
         settings.targetFoldingLimit = keyframe.foldingLimit
         settings.targetSphereRadius = keyframe.sphereRadius
         settings.targetPosition = keyframe.position
-        settings.baseFractalIterations = keyframe.baseFractalIterations
-        settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
     }
     
     // ═══════════════════════════════════════════════════════════════════════════

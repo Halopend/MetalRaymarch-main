@@ -1110,7 +1110,7 @@ actor Renderer {
             maxRaySteps: Int32(raySteps),
             emissiveEnabled: settingsSnapshot.emissiveEnabled,
             neonModeEnabled: neon == 1,
-            colorIterations: Int32(iterations)
+            colorIterations: Int32(settingsSnapshot.colorIterations)  // Use actual color iterations, not fractal iterations
         )
         
         print("🔧 [ShaderCompilation] Building pipeline for FI=\(iterations) RS=\(raySteps)...")
@@ -1260,7 +1260,7 @@ actor Renderer {
             maxRaySteps: Int32(raySteps),
             emissiveEnabled: emissiveEnabled,
             neonModeEnabled: neonMode,
-            colorIterations: Int32(iterations)
+            colorIterations: 8  // Color iterations are fixed for consistent coloring
         )
         
         do {

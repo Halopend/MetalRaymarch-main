@@ -140,6 +140,11 @@ class AppModel {
         // Initialize animation manager
         animationManager = AnimationManager(renderSettings: renderSettings)
         
+        // Wire up animation manager's pipeline preparation callback
+        animationManager?.preparePipelineHandler = { [weak self] iterations, raySteps in
+            self?.preparePipeline(iterations: iterations, raySteps: raySteps)
+        }
+        
         // Initialize SharePlay session
         shareSession = FractalShareSession(renderSettings: renderSettings)
         
