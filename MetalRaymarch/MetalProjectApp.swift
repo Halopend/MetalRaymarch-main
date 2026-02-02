@@ -62,9 +62,22 @@ struct MetalProjectTestApp: App {
                     appModel.openMenuWindowHandler = {
                         openWindow(id: appModel.menuWindowID)
                     }
+                    // Set up handler for developer window
+                    appModel.openDeveloperWindowHandler = {
+                        openWindow(id: appModel.developerWindowID)
+                    }
                 }
         }
         .defaultSize(width: 600, height: 250)
+        .windowStyle(.plain)
+        .windowResizability(.contentSize)
+        
+        // Developer Tools Window
+        Window("Developer Tools", id: appModel.developerWindowID) {
+            DeveloperView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 400, height: 500)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 

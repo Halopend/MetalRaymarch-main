@@ -178,6 +178,7 @@ struct ContentView: View {
     @State private var initialPosition: SIMD3<Float> = .zero
     @State private var cameraMode: Bool = false
     @State private var cache = UISettingsCache()
+    @State private var showScenesSheet = false
     
     /// Get parameter ranges for current fractal type
     private var parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
@@ -291,6 +292,12 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
         }
+        .sheet(isPresented: $showScenesSheet) {
+            if let animationManager = appModel.animationManager {
+                SceneListView(animationManager: animationManager, appModel: appModel)
+                    .presentationDetents([.large])
+            }
+        }
     }
     
     // MARK: - Menu Content
@@ -329,6 +336,24 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .help("Reset position to origin and parameters to defaults")
                     
+                    // Developer tools button
+                    Button {
+                        appModel.openDeveloperWindow()
+                    } label: {
+                        Image(systemName: "hammer.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Open Developer Tools")
+                    
+                    // Scenes button
+                    Button {
+                        showScenesSheet = true
+                    } label: {
+                        Image(systemName: "film.stack")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Animation Scenes")
+                    
                     Spacer()
                     
                     // FPS display - prominent for debugging
@@ -356,6 +381,13 @@ struct ContentView: View {
 
             ToggleImmersiveSpaceButton()
             
+            // Animation playback controls (shown when a scene is active)
+            if let animationManager = appModel.animationManager,
+               animationManager.currentScene != nil {
+                AnimationPlaybackControls(animationManager: animationManager)
+                    .padding(.top, 8)
+            }
+            
             if appModel.immersiveSpaceState == .open {
                 ScrollView(.vertical, showsIndicators: true) {
                     LazyVStack(spacing: 12) {
@@ -375,42 +407,50 @@ struct ContentView: View {
                             }
                         }
 
-                        // Quality preset picker - use cache
+                        // Quality Sliders - Fractal Iterations and Ray Steps
                         Group {
-                            Text("Quality Preset")
+                            Text("Quality")
                                 .font(.headline)
                             
-                            Picker("Quality", selection: Binding(
-                                get: {
-                                    QualityPreset.detect(
-                                        fractalIterations: cache.fractalIterations,
-                                        raySteps: cache.maxRaySteps
-                                    ) ?? .iter9
-                                },
-                                set: { preset in
-                                    cache.fractalIterations = preset.fractalIterations
-                                    cache.maxRaySteps = preset.raySteps
-                                    // Push to BASE values so dynamic quality can scale from them
-                                    cache.push(\.baseFractalIterations, value: preset.fractalIterations)
-                                    cache.push(\.baseMaxRaySteps, value: preset.raySteps)
+                            // Fractal Iterations slider
+                            Text("Fractal Iterations: \(cache.fractalIterations)")
+                            Slider(
+                                value: Binding(
+                                    get: { Double(cache.fractalIterations) },
+                                    set: { cache.fractalIterations = Int($0) }
+                                ),
+                                in: 2...22,
+                                step: 1,
+                                onEditingChanged: { editing in
+                                    if !editing {
+                                        // Push to both actual and base values
+                                        cache.push(\.fractalIterations, value: cache.fractalIterations)
+                                        cache.push(\.baseFractalIterations, value: cache.fractalIterations)
+                                        // Trigger pipeline compilation
+                                        appModel.preparePipeline(iterations: cache.fractalIterations, raySteps: cache.maxRaySteps)
+                                    }
                                 }
-                            )) {
-                                ForEach(QualityPreset.allCases, id: \.self) { preset in
-                                    Text(preset.rawValue).tag(preset)
-                                }
-                            }
-                            .pickerStyle(.segmented)
+                            )
                             
-                            // Show current values
-                            HStack {
-                                Text("FI: \(cache.fractalIterations)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text("RI: \(cache.maxRaySteps)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            // Ray March Steps slider
+                            Text("Ray Steps: \(cache.maxRaySteps)")
+                            Slider(
+                                value: Binding(
+                                    get: { Double(cache.maxRaySteps) },
+                                    set: { cache.maxRaySteps = Int($0) }
+                                ),
+                                in: 16...256,
+                                step: 10,
+                                onEditingChanged: { editing in
+                                    if !editing {
+                                        // Push to both actual and base values
+                                        cache.push(\.maxRaySteps, value: cache.maxRaySteps)
+                                        cache.push(\.baseMaxRaySteps, value: cache.maxRaySteps)
+                                        // Trigger pipeline compilation
+                                        appModel.preparePipeline(iterations: cache.fractalIterations, raySteps: cache.maxRaySteps)
+                                    }
+                                }
+                            )
                         }
 
                         // Primary Parameter: Fractal Scale - push on editing end

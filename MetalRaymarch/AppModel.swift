@@ -56,6 +56,7 @@ enum QualityPreset: String, CaseIterable {
 class AppModel {
     let immersiveSpaceID = "ImmersiveSpace"
     let menuWindowID = "MenuWindow"
+    let developerWindowID = "DeveloperWindow"
     
     enum ImmersiveSpaceState {
         case closed
@@ -92,6 +93,9 @@ class AppModel {
     // Parameter recording
     var parameterRecorder: ParameterRecorder?
     
+    // Animation/Scene playback manager
+    var animationManager: AnimationManager?
+    
     // Menu window visibility (toggled by gesture)
     // We hide content and glass to simulate window close while preserving position/size
     var isMenuWindowVisible: Bool = true
@@ -103,6 +107,26 @@ class AppModel {
     // Called when a preset is about to be loaded to ensure the pipeline is ready
     var preparePipelineHandler: ((FractalPreset) async -> Void)?
     
+    // Pipeline preparation for specific iteration/ray step values (set by Renderer)
+    // Called when sliders change to pre-compile the needed pipeline
+    var preparePipelineForValuesHandler: ((Int, Int) async -> Void)?
+    
+    /// Prepare the shader pipeline for specific iteration and ray step values
+    /// Call this when slider values change to avoid compilation hitches
+    func preparePipeline(iterations: Int, raySteps: Int) {
+        Task {
+            await preparePipelineForValuesHandler?(iterations, raySteps)
+        }
+    }
+    
+    // Pipeline profiler trigger (set by Renderer)
+    var triggerProfilerHandler: (() -> Void)?
+    
+    /// Run the pipeline profiler to analyze rendering costs
+    func runProfiler() {
+        triggerProfilerHandler?()
+    }
+    
     // SharePlay session for collaborative fractal exploration
     var shareSession: FractalShareSession?
     
@@ -112,6 +136,9 @@ class AppModel {
         
         // Initialize parameter recorder
         parameterRecorder = ParameterRecorder(renderSettings: renderSettings)
+        
+        // Initialize animation manager
+        animationManager = AnimationManager(renderSettings: renderSettings)
         
         // Initialize SharePlay session
         shareSession = FractalShareSession(renderSettings: renderSettings)
@@ -164,6 +191,14 @@ class AppModel {
     /// Callback to open the menu window (set by App scene)
     var openMenuWindowHandler: (() -> Void)?
     
+    /// Callback to open the developer window (set by App scene)
+    var openDeveloperWindowHandler: (() -> Void)?
+    
+    /// Open the developer tools window
+    func openDeveloperWindow() {
+        openDeveloperWindowHandler?()
+    }
+    
     /// Toggle menu window visibility - hides window content completely (preserves position)
     func toggleMenuWindow() {
         withAnimation(.easeInOut(duration: 0.2)) {
@@ -206,6 +241,20 @@ class AppModel {
             recorder.updatePlayback(deltaTime: deltaTime)
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MARK: - Geometry State - Stable Geometry Rendering
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tracks whether geometry parameters (minDistance, foldingLimit, sphereRadius,
+// fractalScale) are actively changing or have settled. When stable, the renderer
+// can switch to an optimized path with temporal accumulation.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum GeometryState: Int, CaseIterable {
+    case dynamic   = 0  // Geometry parameters are actively changing
+    case settling  = 1  // Parameters stopped changing, waiting for confirmation
+    case stable    = 2  // Parameters confirmed stable, optimized rendering enabled
 }
 
 // Fractal type enum matching ShaderTypes.h
@@ -493,6 +542,7 @@ struct RenderSettingsSnapshot {
     let limitFlash: Float
     let showHUD: Bool
     let activeGestureIndex: Int
+    let gestureSpread: Float
     let safetyBubbleEnabled: Bool
     let safetyBubbleRadius: Float
     let safetyBubbleShape: Float
@@ -560,6 +610,7 @@ final class RenderSettings: @unchecked Sendable {
     // HUD display
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
+    private var _gestureSpread: Float = 0            // Normalized hand spread (0-1) for debug visualization
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
     private var _gestureSensitivity: Float = 5.0     // Gesture sensitivity (1=10x slower, 10=normal speed)
@@ -635,6 +686,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _geometryState: GeometryState = .stable
     private var _isGeometryGestureActive: Bool = false  // Set by GestureController
     private var _geometryStableFrameCount: Int = 0      // Frames since geometry became stable
+    private var _stableGeometryEnabled: Bool = false    // Master toggle for stable geometry path
     private let geometrySettleThreshold: Float = 0.0001 // Epsilon for "settled" detection
     
     // === VELOCITY STATE FOR SMOOTH DAMP ===
@@ -811,14 +863,26 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _activeGestureIndex } }
         set { withLock { _activeGestureIndex = newValue } }
     }
+    
+    var gestureSpread: Float {
+        get { withLock { _gestureSpread } }
+        set { withLock { _gestureSpread = newValue } }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // GEOMETRY STABILITY ACCESSORS
     // ═══════════════════════════════════════════════════════════════════════════
     
+    /// Master toggle for stable geometry rendering path
+    var stableGeometryEnabled: Bool {
+        get { withLock { _stableGeometryEnabled } }
+        set { withLock { _stableGeometryEnabled = newValue } }
+    }
+    
     /// Current geometry state (dynamic, settling, or stable)
+    /// Returns .dynamic if stable geometry is disabled
     var geometryState: GeometryState {
-        get { withLock { _geometryState } }
+        get { withLock { _stableGeometryEnabled ? _geometryState : .dynamic } }
     }
     
     /// Whether a geometry-affecting gesture is currently active (set by GestureController)
@@ -1237,6 +1301,7 @@ final class RenderSettings: @unchecked Sendable {
                 limitFlash: _limitFlash,
                 showHUD: _showHUD,
                 activeGestureIndex: _activeGestureIndex,
+                gestureSpread: _gestureSpread,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
@@ -1252,7 +1317,7 @@ final class RenderSettings: @unchecked Sendable {
                 stochasticRenderingEnabled: _stochasticRenderingEnabled,
                 stochasticFrameCount: _stochasticFrameCount,
                 stochasticMaxFrames: _stochasticMaxFrames,
-                geometryState: _geometryState,
+                geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,
                 isGeometryGestureActive: _isGeometryGestureActive
             )
         }

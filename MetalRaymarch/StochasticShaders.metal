@@ -192,6 +192,32 @@ kernel void stochasticRaymarchKernel(
     float2 resolution = float2(outputTexture.get_width(), outputTexture.get_height());
     float2 uv = (float2(gid) + 0.5) / resolution;
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FOVEATED PRIORITY ACCUMULATION
+    // Accumulate from center outward: foveal region first, then expand.
+    // This mimics how the eye works - sharp center, blurry periphery.
+    // Frame 0-3: progressive radius expansion (25%, 50%, 75%, 100%)
+    // ═══════════════════════════════════════════════════════════════════════════
+    float2 centerOffset = uv - float2(0.5);
+    // Elliptical distance (account for typical VR aspect ratio ~1.0)
+    float fovealDist = length(centerOffset);
+    
+    // Progressive radius: starts at 0.25, grows to 1.0 over first 4 frames
+    // After frame 4, all pixels render every frame for full accumulation
+    float currentRadius = min(1.0, 0.25 + float(uniforms.frameCount) * 0.25);
+    
+    // Skip this pixel if outside current accumulation radius (early frames only)
+    if (uniforms.frameCount < 4 && fovealDist > currentRadius * 0.7) {
+        // Outside current radius - copy previous value (or black if frame 0)
+        if (uniforms.frameCount > 0) {
+            float4 prevColor = accumulationTexture.read(gid);
+            outputTexture.write(prevColor, gid);
+        } else {
+            outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
+        }
+        return;
+    }
+    
     // Get jitter for this pixel and frame
     // Use Halton sequence for better convergence, add per-pixel variation
     float2 baseJitter = get_halton_jitter(uint(uniforms.frameCount));
@@ -371,7 +397,7 @@ kernel void clearAccumulationKernel(
 kernel void computeVarianceKernel(
     texture2d<float, access::read> currentFrame [[texture(0)]],
     texture2d<float, access::read> accumulationTexture [[texture(1)]],
-    texture2d<float, access::write> varianceTexture [[texture(2)]],
+    texture2d<float, access::read_write> varianceTexture [[texture(2)]],
     constant int &frameCount [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
 ) {

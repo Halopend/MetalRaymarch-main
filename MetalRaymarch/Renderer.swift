@@ -157,9 +157,44 @@ actor Renderer {
     var stochasticAccumulationTextureR: MTLTexture?  // Right eye accumulation
     var stochasticOutputTexture: MTLTexture?         // Intermediate output
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STABLE GEOMETRY RENDERING
+    // When geometry parameters are stable, enables higher quality rendering.
+    // NOTE: Temporal accumulation doesn't work well in VR due to head movement
+    // invalidating previous samples. Instead, we use increased quality settings.
+    // ═══════════════════════════════════════════════════════════════════════════
+    private var stableGeometryAccumulationTextureL: MTLTexture?  // Left eye accumulation
+    private var stableGeometryAccumulationTextureR: MTLTexture?  // Right eye accumulation
+    private var stableGeometryOutputTexture: MTLTexture?         // Intermediate output
+    private var stableGeometryTextureSize: SIMD2<Int> = .zero
+    private var stableGeometryAccumulatedFrames: Int = 0         // Frames accumulated so far
+    private var lastStableGeometryState: GeometryState = .dynamic
+    private var hasLoggedStableGeometryMode = false
+    // Head movement tracking - reset accumulation when head moves
+    private var previousHeadPosition: SIMD3<Float> = .zero
+    private var previousHeadRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    private let headMovementThreshold: Float = 0.001  // 1mm movement resets accumulation
+    private let headRotationThreshold: Float = 0.001  // ~0.06 degrees rotation resets
+    
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
     var computeOutputSize: SIMD2<Int> = .zero
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PROGRESSIVE RENDERING PIPELINES
+    // Experiments with different threadgroup sizes for optimal GPU utilization
+    // ═══════════════════════════════════════════════════════════════════════════
+    private var progressiveDepthPipeline: MTLComputePipelineState?
+    private var progressiveColorPipeline: MTLComputePipelineState?
+    private var progressive8x4Pipeline: MTLComputePipelineState?   // 32 threads = 1 SIMD group
+    private var progressive4x8Pipeline: MTLComputePipelineState?   // 32 threads, different layout
+    private var progressiveBenchmarkPipeline: MTLComputePipelineState?
+    private var progressiveUniformBuffer: MTLBuffer?
+    private var progressiveDepthTexture: MTLTexture?
+    private var progressivePreviousFrame: MTLTexture?
+    private var progressiveOutputTexture: MTLTexture?
+    private var progressiveTextureSize: SIMD2<Int> = .zero
+    private var progressiveFrameIndex: Int = 0
     
     // Screenshot capture
     var screenshotTexture: MTLTexture?
@@ -167,6 +202,9 @@ actor Renderer {
     var screenshotDepthTexture: MTLTexture?
     var pendingScreenshotContinuation: CheckedContinuation<Data?, Never>?
     var shouldCaptureScreenshot: Bool = false
+    
+    // Pipeline profiling trigger
+    nonisolated(unsafe) var shouldRunProfiler: Bool = false
 
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
@@ -416,6 +454,36 @@ actor Renderer {
             if stochasticRaymarchPipeline != nil {
                 print("✓ Stochastic rendering pipelines ready")
             }
+            
+            // === PROGRESSIVE RENDERING PIPELINES ===
+            // Different threadgroup configurations for performance experimentation
+            if let depthKernel = library.makeFunction(name: "progressiveDepthPass") {
+                progressiveDepthPipeline = try device.makeComputePipelineState(function: depthKernel)
+            }
+            if let colorKernel = library.makeFunction(name: "progressiveColorPass") {
+                progressiveColorPipeline = try device.makeComputePipelineState(function: colorKernel)
+            }
+            if let kernel8x4 = library.makeFunction(name: "progressiveSinglePass_8x4") {
+                progressive8x4Pipeline = try device.makeComputePipelineState(function: kernel8x4)
+                // Log pipeline characteristics
+                if let pipeline = progressive8x4Pipeline {
+                    print("✓ Progressive 8x4 pipeline: maxTotalThreads=\(pipeline.maxTotalThreadsPerThreadgroup), executionWidth=\(pipeline.threadExecutionWidth)")
+                }
+            }
+            if let kernel4x8 = library.makeFunction(name: "progressiveSinglePass_4x8") {
+                progressive4x8Pipeline = try device.makeComputePipelineState(function: kernel4x8)
+            }
+            if let benchmarkKernel = library.makeFunction(name: "benchmarkKernel") {
+                progressiveBenchmarkPipeline = try device.makeComputePipelineState(function: benchmarkKernel)
+            }
+            
+            // Progressive uniform buffer
+            progressiveUniformBuffer = device.makeBuffer(length: 512, options: .storageModeShared)
+            progressiveUniformBuffer?.label = "ProgressiveUniforms"
+            
+            if progressive8x4Pipeline != nil {
+                print("✓ Progressive rendering pipelines ready (8x4, 4x8 variants)")
+            }
         } catch {
             if RENDERER_DEBUG { print("⚠️ Failed to create tile compute pipelines: \(error)") }
             adaptiveHierarchicalPipeline8x8 = nil
@@ -631,6 +699,18 @@ actor Renderer {
                     // Build both standard and quad-shared variants
                     _ = await renderer.getPipeline(forPreset: preset, useQuadShared: false)
                     _ = await renderer.getPipeline(forPreset: preset, useQuadShared: true)
+                }
+                
+                // Setup pipeline preparation for specific iteration/ray step values
+                // Called when sliders change to pre-compile the needed pipeline
+                appModel.preparePipelineForValuesHandler = { iterations, raySteps in
+                    _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps, useQuadShared: false)
+                    _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps, useQuadShared: true)
+                }
+                
+                // Setup pipeline profiler handler
+                appModel.triggerProfilerHandler = {
+                    renderer.triggerProfiler()
                 }
             }
             
@@ -999,6 +1079,56 @@ actor Renderer {
             return pipeline
         } catch {
             if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED to build preset pipeline [\(cacheKey)]: \(error)") }
+            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+        }
+    }
+    
+    /// Gets or builds a specialized pipeline for specific iteration/ray step values.
+    /// Call this when slider values change to pre-compile the needed pipeline.
+    func getPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool = false) -> MTLRenderPipelineState {
+        // Build cache key matching the preset format
+        let settingsSnapshot = appModel.renderSettings.snapshot()
+        let colorScheme = appModel.renderSettings.colorScheme  // Read directly - not in snapshot
+        let emissive = settingsSnapshot.emissiveEnabled ? 1 : 0
+        let neon = colorScheme.rawValue >= 8 ? 1 : 0  // neonCyber, neonSunset, neonMatrix
+        let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_E\(emissive)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        
+        // Check unified cache first
+        if let cached = pipelineCache[cacheKey] {
+            return cached
+        }
+        
+        // Build new specialized pipeline
+        let config = FunctionConstantConfig(
+            fractalIterations: Int32(iterations),
+            shadowIterations: Int32(max(iterations - 2, 2)),
+            safetyBubbleEnabled: true,
+            showHUD: true,
+            qualityMode: qualityMode,
+            debugHierarchical: false,
+            maxRaySteps: Int32(raySteps),
+            emissiveEnabled: settingsSnapshot.emissiveEnabled,
+            neonModeEnabled: neon == 1,
+            colorIterations: Int32(iterations)
+        )
+        
+        print("🔧 [ShaderCompilation] Building pipeline for FI=\(iterations) RS=\(raySteps)...")
+        
+        do {
+            let pipeline = try Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: config,
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+            )
+            pipelineCache[cacheKey] = pipeline
+            print("✅ [ShaderCompilation] Ready: FI=\(iterations) RS=\(raySteps)")
+            return pipeline
+        } catch {
+            print("❌ [ShaderCompilation] FAILED for FI=\(iterations) RS=\(raySteps): \(error)")
             return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
         }
     }
@@ -1472,6 +1602,7 @@ actor Renderer {
                             limitFlash: settingsSnapshot.limitFlash,
                             showHUD: settingsSnapshot.showHUD ? 1 : 0,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
+                            gestureSpread: settingsSnapshot.gestureSpread,
                             fractalType: settingsSnapshot.fractalType.rawValue,
                             lightingMode: settingsSnapshot.lightingMode.rawValue,
                             audioLevel: settingsSnapshot.audioLevel,
@@ -1617,6 +1748,12 @@ actor Renderer {
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
 
+        // Update scene animation playback on MainActor (sets target values before interpolation)
+        let animDelta = TimeInterval(cachedDeltaTime)
+        Task { @MainActor in
+            self.appModel.animationManager?.update(deltaTime: animDelta)
+        }
+        
         settings.interpolateToTargets(deltaTime: cachedDeltaTime)
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
@@ -1680,6 +1817,73 @@ actor Renderer {
                 return  // Skip standard rendering
             }
             // Fall through to standard rendering if stochastic failed
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════════════
+        // STABLE GEOMETRY RENDERING PATH
+        // When geometry is stable (not changing) AND head is stable, use temporal
+        // accumulation. Automatically resets when geometry or head movement detected.
+        // ═══════════════════════════════════════════════════════════════════════════
+        let geometryState = settingsSnapshot.geometryState
+        
+        // Check for head movement (invalidates temporal accumulation)
+        var headMoved = false
+        if let deviceAnchor = drawable.deviceAnchor {
+            let headTransform = deviceAnchor.originFromAnchorTransform
+            let headPosition = SIMD3<Float>(headTransform.columns.3.x, headTransform.columns.3.y, headTransform.columns.3.z)
+            let headRotation = simd_quatf(headTransform)
+            
+            let posDelta = simd_length(headPosition - previousHeadPosition)
+            let rotDelta = abs(1.0 - abs(simd_dot(headRotation, previousHeadRotation)))
+            
+            if posDelta > headMovementThreshold || rotDelta > headRotationThreshold {
+                headMoved = true
+                if stableGeometryAccumulatedFrames > 0 {
+                    // Head moved - reset accumulation
+                    stableGeometryAccumulatedFrames = 0
+                }
+            }
+            
+            previousHeadPosition = headPosition
+            previousHeadRotation = headRotation
+        }
+        
+        // Detect geometry state transitions
+        if geometryState != lastStableGeometryState {
+            if geometryState == .stable {
+                // Just became stable - reset accumulation to start fresh
+                stableGeometryAccumulatedFrames = 0
+                if !hasLoggedStableGeometryMode {
+                    hasLoggedStableGeometryMode = true
+                    print("🎯 STABLE GEOMETRY: Entering optimized render path (head-aware accumulation)")
+                }
+            } else if lastStableGeometryState == .stable {
+                // Was stable, now dynamic/settling - reset accumulation
+                stableGeometryAccumulatedFrames = 0
+                if hasLoggedStableGeometryMode {
+                    hasLoggedStableGeometryMode = false
+                    print("🎯 STABLE GEOMETRY: Exiting optimized path (geometry changing)")
+                }
+            }
+            lastStableGeometryState = geometryState
+        }
+        
+        // Use stable geometry path when geometry is locked AND head is not moving
+        // (Head movement resets accumulation above, so we only accumulate during stillness)
+        if geometryState == .stable && !headMoved {
+            let stableRendered = renderWithStableGeometry(
+                commandBuffer: commandBuffer,
+                drawable: drawable,
+                settingsSnapshot: settingsSnapshot
+            )
+            
+            if stableRendered {
+                drawable.encodePresent(commandBuffer: commandBuffer)
+                commandBuffer.commit()
+                frame.endSubmission()
+                return  // Skip standard rendering
+            }
+            // Fall through to standard rendering if stable geometry rendering failed
         }
 
         // Check if using adaptive 8x8 compute pipeline
@@ -2627,6 +2831,332 @@ actor Renderer {
         return true
     }
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STABLE GEOMETRY RENDERING
+    // Optimized render path when fractal geometry parameters are stable.
+    // Uses temporal accumulation to progressively improve quality.
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Ensures stable geometry accumulation textures exist and match drawable size
+    private func ensureStableGeometryTextures(for drawable: LayerRenderer.Drawable) -> Bool {
+        let width = drawable.colorTextures[0].width
+        let height = drawable.colorTextures[0].height
+        let requiredSize = SIMD2<Int>(width, height)
+        let drawableFormat = drawable.colorTextures[0].pixelFormat
+        
+        // Check if textures need recreation
+        if stableGeometryTextureSize != requiredSize ||
+           stableGeometryAccumulationTextureL == nil ||
+           stableGeometryAccumulationTextureR == nil ||
+           stableGeometryOutputTexture == nil {
+            
+            // Accumulation textures need high precision for accumulation math
+            let accumDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .rgba16Float,  // High precision for accumulation
+                width: width,
+                height: height,
+                mipmapped: false
+            )
+            accumDescriptor.usage = [.shaderRead, .shaderWrite]
+            accumDescriptor.storageMode = .private
+            
+            stableGeometryAccumulationTextureL = device.makeTexture(descriptor: accumDescriptor)
+            stableGeometryAccumulationTextureL?.label = "StableGeometry Accumulation L"
+            
+            stableGeometryAccumulationTextureR = device.makeTexture(descriptor: accumDescriptor)
+            stableGeometryAccumulationTextureR?.label = "StableGeometry Accumulation R"
+            
+            // Output texture must match drawable format for blit compatibility
+            let outputDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: drawableFormat,  // Match drawable format for blit
+                width: width,
+                height: height,
+                mipmapped: false
+            )
+            outputDescriptor.usage = [.shaderRead, .shaderWrite]
+            outputDescriptor.storageMode = .private
+            
+            stableGeometryOutputTexture = device.makeTexture(descriptor: outputDescriptor)
+            stableGeometryOutputTexture?.label = "StableGeometry Output"
+            
+            stableGeometryTextureSize = requiredSize
+            stableGeometryAccumulatedFrames = 0  // Reset accumulation on resize
+            
+            if RENDERER_DEBUG {
+                print("🎯 STABLE GEOMETRY: Created textures \(width)x\(height), output format: \(drawableFormat.rawValue)")
+            }
+        }
+        
+        return stableGeometryAccumulationTextureL != nil &&
+               stableGeometryAccumulationTextureR != nil &&
+               stableGeometryOutputTexture != nil
+    }
+    
+    /// Renders using stable geometry optimized path with temporal accumulation
+    /// Returns true if stable geometry rendering was used
+    private func renderWithStableGeometry(
+        commandBuffer: MTLCommandBuffer,
+        drawable: LayerRenderer.Drawable,
+        settingsSnapshot: RenderSettingsSnapshot
+    ) -> Bool {
+        // For now, we'll use the stochastic pipeline infrastructure since it already
+        // has temporal accumulation. Later we can create a dedicated optimized pipeline.
+        
+        // Ensure we have the stochastic pipelines to reuse
+        guard let raymarchPipeline = stochasticRaymarchPipeline,
+              let copyPipeline = stochasticCopyPipeline,
+              let resolvePipeline = stochasticResolvePipeline,
+              let clearPipeline = stochasticClearPipeline,
+              let uniformBuffer = stochasticUniformBuffer else {
+            // Fall back to standard rendering if pipelines not available
+            return false
+        }
+        
+        // Ensure stable geometry textures exist
+        guard ensureStableGeometryTextures(for: drawable) else {
+            return false
+        }
+        
+        guard let accumL = stableGeometryAccumulationTextureL,
+              let accumR = stableGeometryAccumulationTextureR,
+              let outputTex = stableGeometryOutputTexture else {
+            return false
+        }
+        
+        let frameCount = stableGeometryAccumulatedFrames
+        let maxFrames = 32  // Accumulate up to 32 frames for stable geometry
+        
+        // Clear accumulation on first frame
+        if frameCount == 0 {
+            guard let clearEncoder = commandBuffer.makeComputeCommandEncoder() else { return false }
+            clearEncoder.label = "StableGeometry Clear"
+            clearEncoder.setComputePipelineState(clearPipeline)
+            
+            let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+            let threadgroups = MTLSize(
+                width: (accumL.width + 15) / 16,
+                height: (accumL.height + 15) / 16,
+                depth: 1
+            )
+            
+            clearEncoder.setTexture(accumL, index: 0)
+            clearEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            
+            clearEncoder.setTexture(accumR, index: 0)
+            clearEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            
+            clearEncoder.endEncoding()
+        }
+        
+        // Only accumulate up to maxFrames
+        if frameCount >= maxFrames {
+            // Just display the accumulated result without adding more samples
+            for viewIndex in 0..<drawable.views.count {
+                let accumTexture = viewIndex == 0 ? accumL : accumR
+                
+                // Resolve accumulated result to output
+                guard let resolveEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+                resolveEncoder.label = "StableGeometry Resolve Eye \(viewIndex)"
+                resolveEncoder.setComputePipelineState(resolvePipeline)
+                resolveEncoder.setTexture(accumTexture, index: 0)
+                resolveEncoder.setTexture(outputTex, index: 1)
+                
+                var fc = Int32(maxFrames - 1)
+                resolveEncoder.setBytes(&fc, length: MemoryLayout<Int32>.size, index: 0)
+                
+                let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+                let threadgroups = MTLSize(
+                    width: (outputTex.width + 15) / 16,
+                    height: (outputTex.height + 15) / 16,
+                    depth: 1
+                )
+                resolveEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+                resolveEncoder.endEncoding()
+                
+                // Blit to drawable
+                guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { continue }
+                blitEncoder.label = "StableGeometry Blit Eye \(viewIndex)"
+                
+                let destTexture: MTLTexture
+                if drawable.colorTextures.count > viewIndex {
+                    destTexture = drawable.colorTextures[viewIndex]
+                } else {
+                    destTexture = drawable.colorTextures[0]
+                }
+                
+                let destSlice = drawable.colorTextures.count > viewIndex ? 0 : viewIndex
+                blitEncoder.copy(
+                    from: outputTex,
+                    sourceSlice: 0,
+                    sourceLevel: 0,
+                    sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                    sourceSize: MTLSize(width: outputTex.width, height: outputTex.height, depth: 1),
+                    to: destTexture,
+                    destinationSlice: destSlice,
+                    destinationLevel: 0,
+                    destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+                )
+                blitEncoder.endEncoding()
+            }
+            return true
+        }
+        
+        // Render each eye with temporal accumulation
+        for viewIndex in 0..<drawable.views.count {
+            let view = drawable.views[viewIndex]
+            let accumTexture = viewIndex == 0 ? accumL : accumR
+            
+            // Get view and projection matrices
+            let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+            let viewMatrix = (deviceTransform * view.transform).inverse
+            let projection = drawable.computeProjection(viewIndex: viewIndex)
+            
+            // Uniform layout matching stochastic shader
+            struct StableGeometryUniformsLayout {
+                var projectionMatrix: matrix_float4x4
+                var modelViewMatrix: matrix_float4x4
+                var inverseModelViewMatrix: matrix_float4x4
+                var inverseProjectionMatrix: matrix_float4x4
+                var viewMatrix: matrix_float4x4
+                var inverseViewMatrix: matrix_float4x4
+                var time: Float
+                var minDistance: Float
+                var fractalScale: Float
+                var fractalIterations: Int32
+                var maxRaySteps: Int32
+                var foldingLimit: Float
+                var sphereRadius: Float
+                var safetyBubbleRadius: Float
+                var safetyBubbleEnabled: Int32
+                var frameCount: Int32
+                var maxFrames: Int32
+                var jitterOffsetX: Float
+                var jitterOffsetY: Float
+                var blendWeight: Float
+            }
+            
+            // Model matrix
+            let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
+            let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
+            let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
+            let modelView = viewMatrix * modelMatrix
+            
+            // Halton jitter for temporal anti-aliasing
+            func halton(_ index: Int, _ base: Int) -> Float {
+                var f: Float = 1.0
+                var r: Float = 0.0
+                var i = index
+                while i > 0 {
+                    f = f / Float(base)
+                    r = r + f * Float(i % base)
+                    i = i / base
+                }
+                return r
+            }
+            let jitterX = halton(frameCount + 1, 2) - 0.5
+            let jitterY = halton(frameCount + 1, 3) - 0.5
+            
+            var uniforms = StableGeometryUniformsLayout(
+                projectionMatrix: projection,
+                modelViewMatrix: modelView,
+                inverseModelViewMatrix: modelView.inverse,
+                inverseProjectionMatrix: projection.inverse,
+                viewMatrix: viewMatrix,
+                inverseViewMatrix: viewMatrix.inverse,
+                time: Float(appModel.clock.time),
+                minDistance: settingsSnapshot.minDistance,
+                fractalScale: settingsSnapshot.fractalScale,
+                fractalIterations: Int32(settingsSnapshot.fractalIterations),
+                maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
+                foldingLimit: settingsSnapshot.foldingLimit,
+                sphereRadius: settingsSnapshot.sphereRadius,
+                safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
+                safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
+                frameCount: Int32(frameCount),
+                maxFrames: Int32(maxFrames),
+                jitterOffsetX: jitterX,
+                jitterOffsetY: jitterY,
+                blendWeight: 1.0 / Float(frameCount + 1)
+            )
+            
+            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<StableGeometryUniformsLayout>.size)
+            
+            // Raymarch pass
+            guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            computeEncoder.label = "StableGeometry Raymarch Eye \(viewIndex)"
+            computeEncoder.setComputePipelineState(raymarchPipeline)
+            
+            computeEncoder.setTexture(outputTex, index: 0)
+            computeEncoder.setTexture(accumTexture, index: 1)
+            computeEncoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            
+            let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+            let threadgroups = MTLSize(
+                width: (outputTex.width + 15) / 16,
+                height: (outputTex.height + 15) / 16,
+                depth: 1
+            )
+            computeEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            computeEncoder.endEncoding()
+            
+            // Copy output to accumulation for next frame
+            guard let copyEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            copyEncoder.label = "StableGeometry Copy Eye \(viewIndex)"
+            copyEncoder.setComputePipelineState(copyPipeline)
+            copyEncoder.setTexture(outputTex, index: 0)
+            copyEncoder.setTexture(accumTexture, index: 1)
+            copyEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            copyEncoder.endEncoding()
+            
+            // Resolve to drawable
+            guard let resolveEncoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            resolveEncoder.label = "StableGeometry Resolve Eye \(viewIndex)"
+            resolveEncoder.setComputePipelineState(resolvePipeline)
+            resolveEncoder.setTexture(accumTexture, index: 0)
+            
+            let destTexture: MTLTexture
+            if drawable.colorTextures.count > viewIndex {
+                destTexture = drawable.colorTextures[viewIndex]
+            } else {
+                destTexture = drawable.colorTextures[0]
+            }
+            
+            resolveEncoder.setTexture(outputTex, index: 1)
+            var fc = Int32(frameCount)
+            resolveEncoder.setBytes(&fc, length: MemoryLayout<Int32>.size, index: 0)
+            resolveEncoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            resolveEncoder.endEncoding()
+            
+            // Blit resolved output to drawable
+            guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { continue }
+            blitEncoder.label = "StableGeometry Blit Eye \(viewIndex)"
+            
+            let destSlice = drawable.colorTextures.count > viewIndex ? 0 : viewIndex
+            blitEncoder.copy(
+                from: outputTex,
+                sourceSlice: 0,
+                sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: outputTex.width, height: outputTex.height, depth: 1),
+                to: destTexture,
+                destinationSlice: destSlice,
+                destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+            )
+            blitEncoder.endEncoding()
+        }
+        
+        // Increment accumulated frame count
+        stableGeometryAccumulatedFrames += 1
+        
+        // Log progress periodically
+        if frameCount == 0 || (frameCount + 1) % 8 == 0 {
+            print("🎯 STABLE GEOMETRY: Frame \(frameCount + 1)/\(maxFrames) accumulated")
+        }
+        
+        return true
+    }
+    
     /// Renders using the adaptive 8x8 compute pipeline instead of fragment shaders
     /// Returns true if compute rendering was used
     private func renderWithAdaptiveCompute(
@@ -2655,6 +3185,536 @@ actor Renderer {
         blitComputeOutputToDrawable(commandBuffer: commandBuffer, drawable: drawable)
         
         return true
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PROGRESSIVE RENDERING WITH THREADGROUP EXPERIMENTS
+    // Tests different threadgroup sizes to find optimal configuration
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Uniform layout for progressive shaders
+    private struct ProgressiveUniformsLayout {
+        var projectionMatrix: matrix_float4x4
+        var viewMatrix: matrix_float4x4
+        var inverseViewMatrix: matrix_float4x4
+        var inverseProjectionMatrix: matrix_float4x4
+        var resolution: SIMD2<Float>
+        var tileOffset: SIMD2<UInt32>
+        var tileSize: SIMD2<UInt32>
+        var time: Float
+        var minDistance: Float
+        var fractalScale: Float
+        var foldingLimit: Float
+        var sphereRadius: Float
+        var fractalIterations: Int32
+        var maxRaySteps: Int32
+        var frameIndex: Int32
+        var totalTiles: Int32
+        var currentTileIndex: Int32
+        var blendWeight: Float
+        var qualityMode: Int32
+        var useDepthFromPrevious: Int32
+    }
+    
+    /// Ensures progressive rendering textures exist and are correct size
+    private func ensureProgressiveTextures(for drawable: LayerRenderer.Drawable, format: MTLPixelFormat) -> Bool {
+        let width = drawable.colorTextures[0].width
+        let height = drawable.colorTextures[0].height
+        let requiredSize = SIMD2(width, height)
+        
+        if progressiveTextureSize == requiredSize &&
+           progressiveDepthTexture != nil &&
+           progressivePreviousFrame != nil &&
+           progressiveOutputTexture != nil {
+            return true
+        }
+        
+        // Create depth texture (R32Float for distance values)
+        let depthDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r32Float,
+            width: width, height: height,
+            mipmapped: false
+        )
+        depthDesc.usage = [.shaderRead, .shaderWrite]
+        depthDesc.storageMode = .private
+        progressiveDepthTexture = device.makeTexture(descriptor: depthDesc)
+        progressiveDepthTexture?.label = "Progressive Depth"
+        
+        // Create previous frame texture (for temporal blending)
+        let colorDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: format,
+            width: width, height: height,
+            mipmapped: false
+        )
+        colorDesc.usage = [.shaderRead, .shaderWrite]
+        colorDesc.storageMode = .private
+        progressivePreviousFrame = device.makeTexture(descriptor: colorDesc)
+        progressivePreviousFrame?.label = "Progressive Previous"
+        
+        // Create output texture
+        progressiveOutputTexture = device.makeTexture(descriptor: colorDesc)
+        progressiveOutputTexture?.label = "Progressive Output"
+        
+        progressiveTextureSize = requiredSize
+        progressiveFrameIndex = 0
+        
+        print("📊 Progressive textures created: \(width)×\(height)")
+        return progressiveDepthTexture != nil && progressivePreviousFrame != nil && progressiveOutputTexture != nil
+    }
+    
+    /// Renders using progressive pipeline with configurable threadgroup size
+    /// - Parameter threadgroupMode: 0 = 8x4 (32 threads), 1 = 4x8 (32 threads), 2 = 16x16 (256 threads for comparison)
+    /// - Returns: true if rendering was performed
+    private func renderWithProgressivePipeline(
+        commandBuffer: MTLCommandBuffer,
+        drawable: LayerRenderer.Drawable,
+        settingsSnapshot: RenderSettingsSnapshot,
+        threadgroupMode: Int = 0
+    ) -> Bool {
+        // Select pipeline based on mode
+        let pipeline: MTLComputePipelineState?
+        let threadsPerGroup: MTLSize
+        
+        switch threadgroupMode {
+        case 0:
+            pipeline = progressive8x4Pipeline
+            threadsPerGroup = MTLSize(width: 8, height: 4, depth: 1)  // 32 threads = 1 SIMD
+        case 1:
+            pipeline = progressive4x8Pipeline
+            threadsPerGroup = MTLSize(width: 4, height: 8, depth: 1)  // 32 threads = 1 SIMD
+        default:
+            pipeline = progressive8x4Pipeline
+            threadsPerGroup = MTLSize(width: 8, height: 4, depth: 1)
+        }
+        
+        guard let computePipeline = pipeline,
+              let uniformBuffer = progressiveUniformBuffer else {
+            return false
+        }
+        
+        let drawableFormat = drawable.colorTextures[0].pixelFormat
+        guard ensureProgressiveTextures(for: drawable, format: drawableFormat) else {
+            return false
+        }
+        
+        guard let outputTex = progressiveOutputTexture,
+              let prevFrame = progressivePreviousFrame else {
+            return false
+        }
+        
+        let width = outputTex.width
+        let height = outputTex.height
+        
+        // Render each eye
+        for viewIndex in 0..<drawable.views.count {
+            let view = drawable.views[viewIndex]
+            
+            // Get view matrices
+            let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+            let viewMatrix = (deviceTransform * view.transform).inverse
+            let projection = drawable.computeProjection(viewIndex: viewIndex)
+            
+            // Fill uniforms
+            var uniforms = ProgressiveUniformsLayout(
+                projectionMatrix: projection,
+                viewMatrix: viewMatrix,
+                inverseViewMatrix: viewMatrix.inverse,
+                inverseProjectionMatrix: projection.inverse,
+                resolution: SIMD2<Float>(Float(width), Float(height)),
+                tileOffset: SIMD2<UInt32>(0, 0),
+                tileSize: SIMD2<UInt32>(UInt32(width), UInt32(height)),
+                time: Float(appModel.clock.time),
+                minDistance: settingsSnapshot.minDistance,
+                fractalScale: settingsSnapshot.fractalScale,
+                foldingLimit: settingsSnapshot.foldingLimit,
+                sphereRadius: settingsSnapshot.sphereRadius,
+                fractalIterations: Int32(settingsSnapshot.fractalIterations),
+                maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
+                frameIndex: Int32(progressiveFrameIndex),
+                totalTiles: 1,
+                currentTileIndex: 0,
+                blendWeight: progressiveFrameIndex == 0 ? 1.0 : 0.1,  // More weight to new frames initially
+                qualityMode: 0,
+                useDepthFromPrevious: progressiveFrameIndex > 0 ? 1 : 0
+            )
+            
+            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<ProgressiveUniformsLayout>.size)
+            
+            // Dispatch compute
+            guard let encoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            encoder.label = "Progressive \(threadgroupMode == 0 ? "8x4" : "4x8") Eye \(viewIndex)"
+            encoder.setComputePipelineState(computePipeline)
+            encoder.setTexture(outputTex, index: 0)
+            encoder.setTexture(prevFrame, index: 1)
+            encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            
+            let threadgroups = MTLSize(
+                width: (width + threadsPerGroup.width - 1) / threadsPerGroup.width,
+                height: (height + threadsPerGroup.height - 1) / threadsPerGroup.height,
+                depth: 1
+            )
+            
+            encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            encoder.endEncoding()
+            
+            // Blit to drawable
+            guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { continue }
+            blitEncoder.label = "Progressive Blit Eye \(viewIndex)"
+            
+            let destTexture: MTLTexture
+            if drawable.colorTextures.count > viewIndex {
+                destTexture = drawable.colorTextures[viewIndex]
+            } else {
+                destTexture = drawable.colorTextures[0]
+            }
+            
+            let destSlice = drawable.colorTextures.count > viewIndex ? 0 : viewIndex
+            blitEncoder.copy(
+                from: outputTex,
+                sourceSlice: 0,
+                sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: width, height: height, depth: 1),
+                to: destTexture,
+                destinationSlice: destSlice,
+                destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+            )
+            
+            // Copy output to previous frame for next iteration
+            blitEncoder.copy(from: outputTex, to: prevFrame)
+            blitEncoder.endEncoding()
+        }
+        
+        progressiveFrameIndex += 1
+        
+        // Log occasionally
+        if progressiveFrameIndex == 1 || progressiveFrameIndex % 60 == 0 {
+            let modeName = threadgroupMode == 0 ? "8×4 (32 threads)" : "4×8 (32 threads)"
+            print("📊 Progressive render frame \(progressiveFrameIndex) using \(modeName)")
+        }
+        
+        return true
+    }
+    
+    /// Benchmarks different threadgroup configurations
+    /// Call this periodically to profile performance
+    func benchmarkThreadgroupSizes() async {
+        guard let pipeline = progressiveBenchmarkPipeline,
+              let uniformBuffer = progressiveUniformBuffer else {
+            print("⚠️ Benchmark pipeline not available")
+            return
+        }
+        
+        // Create test texture
+        let testSize = 1024
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Float,
+            width: testSize, height: testSize,
+            mipmapped: false
+        )
+        desc.usage = [.shaderWrite]
+        desc.storageMode = .private
+        
+        guard let testTexture = device.makeTexture(descriptor: desc) else {
+            print("⚠️ Could not create benchmark texture")
+            return
+        }
+        
+        // Test configurations
+        let configs: [(String, MTLSize)] = [
+            ("4×4 (16)", MTLSize(width: 4, height: 4, depth: 1)),
+            ("8×4 (32)", MTLSize(width: 8, height: 4, depth: 1)),
+            ("4×8 (32)", MTLSize(width: 4, height: 8, depth: 1)),
+            ("8×8 (64)", MTLSize(width: 8, height: 8, depth: 1)),
+            ("16×8 (128)", MTLSize(width: 16, height: 8, depth: 1)),
+            ("16×16 (256)", MTLSize(width: 16, height: 16, depth: 1)),
+            ("32×8 (256)", MTLSize(width: 32, height: 8, depth: 1)),
+        ]
+        
+        print("\n═══════════════════════════════════════════════════")
+        print("📊 THREADGROUP SIZE BENCHMARK")
+        print("   Texture: \(testSize)×\(testSize), Pipeline maxThreads: \(pipeline.maxTotalThreadsPerThreadgroup)")
+        print("═══════════════════════════════════════════════════")
+        
+        for (name, threadSize) in configs {
+            // Skip if exceeds pipeline limits
+            let totalThreads = threadSize.width * threadSize.height
+            if totalThreads > pipeline.maxTotalThreadsPerThreadgroup {
+                print("   \(name): SKIPPED (exceeds \(pipeline.maxTotalThreadsPerThreadgroup) max)")
+                continue
+            }
+            
+            guard let cmdBuffer = commandQueue.makeCommandBuffer() else { continue }
+            
+            // Fill uniforms with test values
+            var uniforms = ProgressiveUniformsLayout(
+                projectionMatrix: matrix_identity_float4x4,
+                viewMatrix: matrix_identity_float4x4,
+                inverseViewMatrix: matrix_identity_float4x4,
+                inverseProjectionMatrix: matrix_identity_float4x4,
+                resolution: SIMD2<Float>(Float(testSize), Float(testSize)),
+                tileOffset: .zero,
+                tileSize: SIMD2<UInt32>(UInt32(testSize), UInt32(testSize)),
+                time: 0,
+                minDistance: 0.5,
+                fractalScale: 2.5,
+                foldingLimit: 1.0,
+                sphereRadius: 0.5,
+                fractalIterations: 6,
+                maxRaySteps: 48,
+                frameIndex: 0,
+                totalTiles: 1,
+                currentTileIndex: 0,
+                blendWeight: 1.0,
+                qualityMode: 0,
+                useDepthFromPrevious: 0
+            )
+            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<ProgressiveUniformsLayout>.size)
+            
+            guard let encoder = cmdBuffer.makeComputeCommandEncoder() else { continue }
+            encoder.setComputePipelineState(pipeline)
+            encoder.setTexture(testTexture, index: 0)
+            encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            
+            let threadgroups = MTLSize(
+                width: (testSize + threadSize.width - 1) / threadSize.width,
+                height: (testSize + threadSize.height - 1) / threadSize.height,
+                depth: 1
+            )
+            
+            encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadSize)
+            encoder.endEncoding()
+            
+            let startTime = CACurrentMediaTime()
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
+            
+            print("   \(name): \(String(format: "%.2f", elapsed))ms")
+        }
+        
+        print("═══════════════════════════════════════════════════\n")
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PIPELINE COMPONENT PROFILER
+    // Tests each part of YOUR rendering pipeline to find bottlenecks
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Uniform layout for diagnostic kernel
+    private struct DiagnosticUniformsLayout {
+        var projectionMatrix: matrix_float4x4
+        var viewMatrix: matrix_float4x4
+        var inverseViewMatrix: matrix_float4x4
+        var inverseProjectionMatrix: matrix_float4x4
+        var resolution: SIMD2<Float>
+        var time: Float
+        var minDistance: Float
+        var fractalScale: Float
+        var foldingLimit: Float
+        var sphereRadius: Float
+        var fractalIterations: Int32
+        var maxRaySteps: Int32
+        var diagnosticMode: Int32
+        var forceIterations: Int32
+        var forceRaySteps: Int32
+    }
+    
+    /// Trigger the pipeline profiler to run on next frame
+    nonisolated func triggerProfiler() {
+        shouldRunProfiler = true
+        print("📊 Pipeline profiler queued...")
+    }
+    
+    /// Profile each component of your rendering pipeline
+    /// Call this to find where time is actually being spent
+    func profilePipelineComponents() {
+        // Capture settings snapshot synchronously
+        let settingsSnapshot = appModel.renderSettings.snapshot()
+        
+        // Create diagnostic pipeline
+        guard let library = device.makeDefaultLibrary(),
+              let diagnosticFunc = library.makeFunction(name: "diagnosticKernel"),
+              let diagnosticPipeline = try? device.makeComputePipelineState(function: diagnosticFunc) else {
+            print("⚠️ Could not create diagnostic pipeline")
+            return
+        }
+        
+        guard let uniformBuffer = device.makeBuffer(length: 512, options: .storageModeShared) else {
+            return
+        }
+        
+        // Test at a reasonable size
+        let testSize = 512
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Float,
+            width: testSize, height: testSize,
+            mipmapped: false
+        )
+        desc.usage = [.shaderWrite]
+        desc.storageMode = .private
+        
+        guard let testTexture = device.makeTexture(descriptor: desc) else {
+            print("⚠️ Could not create test texture")
+            return
+        }
+        
+        // Capture current settings
+        let currentIters = settingsSnapshot.fractalIterations
+        let currentSteps = settingsSnapshot.maxRaySteps
+        let currentScale = settingsSnapshot.fractalScale
+        let currentFold = settingsSnapshot.foldingLimit
+        let currentSphere = settingsSnapshot.sphereRadius
+        let currentMinDist = settingsSnapshot.minDistance
+        
+        print("\n╔═══════════════════════════════════════════════════════════════╗")
+        print("║        PIPELINE COMPONENT PROFILER                            ║")
+        print("╠═══════════════════════════════════════════════════════════════╣")
+        print("║  Current settings:                                            ║")
+        print("║    Iterations: \(currentIters), Ray Steps: \(currentSteps)                          ║")
+        print("║    Scale: \(String(format: "%.2f", currentScale)), Fold: \(String(format: "%.2f", currentFold)), Sphere: \(String(format: "%.2f", currentSphere))                  ║")
+        print("╠═══════════════════════════════════════════════════════════════╣")
+        
+        let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+        let threadgroups = MTLSize(
+            width: (testSize + 15) / 16,
+            height: (testSize + 15) / 16,
+            depth: 1
+        )
+        
+        // Test each diagnostic mode
+        let modes: [(String, Int32)] = [
+            ("Single Map() call (baseline)", 5),
+            ("SDF raymarch only (no shading)", 0),
+            ("SDF + 6-point normal", 1),
+            ("Full shade (SDF + normal + light)", 2),
+            ("100x Map() at fixed pos (iter cost)", 3),
+            ("50x normal calc (normal cost)", 4),
+        ]
+        
+        for (name, mode) in modes {
+            var uniforms = DiagnosticUniformsLayout(
+                projectionMatrix: matrix_identity_float4x4,
+                viewMatrix: matrix_identity_float4x4,
+                inverseViewMatrix: matrix_identity_float4x4,
+                inverseProjectionMatrix: matrix_identity_float4x4,
+                resolution: SIMD2<Float>(Float(testSize), Float(testSize)),
+                time: 0,
+                minDistance: currentMinDist,
+                fractalScale: currentScale,
+                foldingLimit: currentFold,
+                sphereRadius: currentSphere,
+                fractalIterations: Int32(currentIters),
+                maxRaySteps: Int32(currentSteps),
+                diagnosticMode: mode,
+                forceIterations: 0,
+                forceRaySteps: 0
+            )
+            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<DiagnosticUniformsLayout>.size)
+            
+            guard let cmdBuffer = commandQueue.makeCommandBuffer(),
+                  let encoder = cmdBuffer.makeComputeCommandEncoder() else { continue }
+            
+            encoder.setComputePipelineState(diagnosticPipeline)
+            encoder.setTexture(testTexture, index: 0)
+            encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            encoder.endEncoding()
+            
+            let startTime = CACurrentMediaTime()
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
+            
+            print("║  \(name.padding(toLength: 40, withPad: " ", startingAt: 0)) \(String(format: "%6.2f", elapsed))ms ║")
+        }
+        
+        print("╠═══════════════════════════════════════════════════════════════╣")
+        print("║  ITERATION SCALING (fixed ray steps = \(currentSteps)):                    ║")
+        print("╠═══════════════════════════════════════════════════════════════╣")
+        
+        // Test iteration scaling
+        for iters in [2, 4, 6, 8, 10, 12] {
+            var uniforms = DiagnosticUniformsLayout(
+                projectionMatrix: matrix_identity_float4x4,
+                viewMatrix: matrix_identity_float4x4,
+                inverseViewMatrix: matrix_identity_float4x4,
+                inverseProjectionMatrix: matrix_identity_float4x4,
+                resolution: SIMD2<Float>(Float(testSize), Float(testSize)),
+                time: 0,
+                minDistance: currentMinDist,
+                fractalScale: currentScale,
+                foldingLimit: currentFold,
+                sphereRadius: currentSphere,
+                fractalIterations: Int32(currentIters),
+                maxRaySteps: Int32(currentSteps),
+                diagnosticMode: 0,  // SDF only mode
+                forceIterations: Int32(iters),
+                forceRaySteps: 0
+            )
+            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<DiagnosticUniformsLayout>.size)
+            
+            guard let cmdBuffer = commandQueue.makeCommandBuffer(),
+                  let encoder = cmdBuffer.makeComputeCommandEncoder() else { continue }
+            
+            encoder.setComputePipelineState(diagnosticPipeline)
+            encoder.setTexture(testTexture, index: 0)
+            encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            encoder.endEncoding()
+            
+            let startTime = CACurrentMediaTime()
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
+            
+            print("║    \(iters) iterations:                                      \(String(format: "%6.2f", elapsed))ms ║")
+        }
+        
+        print("╠═══════════════════════════════════════════════════════════════╣")
+        print("║  RAY STEP SCALING (fixed iterations = \(currentIters)):                   ║")
+        print("╠═══════════════════════════════════════════════════════════════╣")
+        
+        // Test ray step scaling  
+        for steps in [16, 32, 48, 64, 96, 128] {
+            var uniforms = DiagnosticUniformsLayout(
+                projectionMatrix: matrix_identity_float4x4,
+                viewMatrix: matrix_identity_float4x4,
+                inverseViewMatrix: matrix_identity_float4x4,
+                inverseProjectionMatrix: matrix_identity_float4x4,
+                resolution: SIMD2<Float>(Float(testSize), Float(testSize)),
+                time: 0,
+                minDistance: currentMinDist,
+                fractalScale: currentScale,
+                foldingLimit: currentFold,
+                sphereRadius: currentSphere,
+                fractalIterations: Int32(currentIters),
+                maxRaySteps: Int32(currentSteps),
+                diagnosticMode: 0,  // SDF only mode
+                forceIterations: 0,
+                forceRaySteps: Int32(steps)
+            )
+            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<DiagnosticUniformsLayout>.size)
+            
+            guard let cmdBuffer = commandQueue.makeCommandBuffer(),
+                  let encoder = cmdBuffer.makeComputeCommandEncoder() else { continue }
+            
+            encoder.setComputePipelineState(diagnosticPipeline)
+            encoder.setTexture(testTexture, index: 0)
+            encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+            encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+            encoder.endEncoding()
+            
+            let startTime = CACurrentMediaTime()
+            cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
+            
+            print("║    \(steps) ray steps:                                      \(String(format: "%6.2f", elapsed))ms ║")
+        }
+        
+        print("╚═══════════════════════════════════════════════════════════════╝\n")
     }
 
 
@@ -2689,6 +3749,12 @@ actor Renderer {
                     }
                     pendingScreenshotContinuation?.resume(returning: screenshotData)
                     pendingScreenshotContinuation = nil
+                }
+                
+                // Check for pipeline profiling request
+                if shouldRunProfiler {
+                    shouldRunProfiler = false
+                    profilePipelineComponents()
                 }
                 
                 autoreleasepool {

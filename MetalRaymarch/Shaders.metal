@@ -941,6 +941,56 @@ half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
 }
 
 // =============================================================================
+// DEBUG SPHERE - Visualizes hand spread distance during two-hand gestures
+// Renders a colored sphere in screen space that grows with hand separation
+// =============================================================================
+
+half3 renderDebugSphere(half3 baseColor, float2 uv, int activeGesture, float gestureSpread) {
+    // Debug sphere disabled
+    return baseColor;
+    
+    // Only render when a gesture is active
+    if (activeGesture <= 0 || gestureSpread <= 0.001) {
+        return baseColor;
+    }
+    
+    // Sphere center (slightly below center of screen)
+    float2 center = float2(0.5, 0.4);
+    
+    // Sphere radius scales with gesture spread (0.02 to 0.15 in UV space)
+    float radius = 0.02 + gestureSpread * 0.13;
+    
+    // Distance from center
+    float2 delta = uv - center;
+    // Correct for aspect ratio (assume ~1.0 for VR eyes)
+    float dist = length(delta);
+    
+    // Soft sphere edge
+    float sphereMask = 1.0 - smoothstep(radius * 0.8, radius, dist);
+    
+    if (sphereMask <= 0.001) {
+        return baseColor;
+    }
+    
+    // Color based on active gesture (matches HUD bar colors)
+    half3 gestureColor;
+    switch (activeGesture) {
+        case 1: gestureColor = half3(0.0h, 1.0h, 1.0h); break;  // Cyan - index (minDistance)
+        case 2: gestureColor = half3(1.0h, 1.0h, 0.0h); break;  // Yellow - middle (foldingLimit)
+        case 3: gestureColor = half3(1.0h, 0.0h, 1.0h); break;  // Magenta - ring (sphereRadius)
+        case 4: gestureColor = half3(0.0h, 1.0h, 0.0h); break;  // Green - pinky (fractalScale)
+        default: gestureColor = half3(1.0h, 1.0h, 1.0h); break; // White fallback
+    }
+    
+    // Add some depth/shading to the sphere
+    float shade = 1.0 - (dist / radius) * 0.3;
+    gestureColor *= half(shade);
+    
+    // Blend sphere over base color
+    return mix(baseColor, gestureColor, half(sphereMask * 0.7));
+}
+
+// =============================================================================
 
 // Soft shadow with over-relaxation
 // OPTIMIZATION: Combined exit conditions to reduce branches
@@ -1354,6 +1404,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     if (showHUD) {
         col = renderHUD(col, float2(in.texCoord), uniforms.activeGesture,
                         uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius);
+        // Debug sphere visualization for active gestures
+        col = renderDebugSphere(col, float2(in.texCoord), uniforms.activeGesture, uniforms.gestureSpread);
     }
 
     output.color = float4(float3(col), 1.0);

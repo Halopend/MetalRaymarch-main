@@ -577,6 +577,21 @@ final class GestureController {
         settings.activeGestureIndex = activeDigit
         
         // ═══════════════════════════════════════════════════════════════════════════
+        // DEBUG VISUALIZATION: Calculate hand spread for debug sphere
+        // Normalized 0-1 based on hand distance when gesture is active
+        // ═══════════════════════════════════════════════════════════════════════════
+        if activeDigit > 0 {
+            let leftPos = leftHand.pinchPosition(digit: activeDigit)
+            let rightPos = rightHand.pinchPosition(digit: activeDigit)
+            let currentDistance = simd_length(leftPos - rightPos)
+            // Normalize: minHandDistance (5cm) = 0, maxHandDistance (60cm) = 1
+            let normalized = simd_clamp((currentDistance - minHandDistance) / (maxHandDistance - minHandDistance), 0.0, 1.0)
+            settings.gestureSpread = normalized
+        } else {
+            settings.gestureSpread = 0
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════════════
         // GEOMETRY STABILITY: Push gesture activity to RenderSettings
         // This drives the geometry state machine (dynamic → settling → stable)
         // ═══════════════════════════════════════════════════════════════════════════
