@@ -684,6 +684,20 @@ final class RenderSettings: @unchecked Sendable {
     private var _targetSphereRadius: Float = 0.5
     private var _targetPosition: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
     
+    // === ANIMATION BASE + MANUAL OFFSETS ===
+    // Animation drives base values. Manual gestures apply offsets when animation is playing.
+    private var _isAnimationPlaying: Bool = false
+    private var _animationBaseMinDistance: Float = 0.8
+    private var _animationBaseFoldingLimit: Float = 1.0
+    private var _animationBaseSphereRadius: Float = 0.5
+    private var _animationBaseFractalScale: Float = 2.8
+    private var _animationBasePosition: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
+    private var _manualOffsetMinDistance: Float = 0.0
+    private var _manualOffsetFoldingLimit: Float = 0.0
+    private var _manualOffsetSphereRadius: Float = 0.0
+    private var _manualOffsetFractalScale: Float = 0.0
+    private var _manualOffsetPosition: SIMD3<Float> = .zero
+    
     // ═══════════════════════════════════════════════════════════════════════════
     // GEOMETRY STABILITY TRACKING
     // Detects when geometry-affecting parameters have settled after gestures end.
@@ -1386,6 +1400,91 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _targetPosition = newValue } }
     }
     
+    var isAnimationPlaying: Bool {
+        get { withLock { _isAnimationPlaying } }
+        set { withLock { _isAnimationPlaying = newValue } }
+    }
+    
+    var animationBaseMinDistance: Float {
+        get { withLock { _animationBaseMinDistance } }
+        set { withLock { _animationBaseMinDistance = newValue } }
+    }
+    
+    var animationBaseFoldingLimit: Float {
+        get { withLock { _animationBaseFoldingLimit } }
+        set { withLock { _animationBaseFoldingLimit = newValue } }
+    }
+    
+    var animationBaseSphereRadius: Float {
+        get { withLock { _animationBaseSphereRadius } }
+        set { withLock { _animationBaseSphereRadius = newValue } }
+    }
+    
+    var animationBaseFractalScale: Float {
+        get { withLock { _animationBaseFractalScale } }
+        set { withLock { _animationBaseFractalScale = newValue } }
+    }
+    
+    var animationBasePosition: SIMD3<Float> {
+        get { withLock { _animationBasePosition } }
+        set { withLock { _animationBasePosition = newValue } }
+    }
+    
+    var manualOffsetMinDistance: Float {
+        get { withLock { _manualOffsetMinDistance } }
+        set { withLock { _manualOffsetMinDistance = newValue } }
+    }
+    
+    var manualOffsetFoldingLimit: Float {
+        get { withLock { _manualOffsetFoldingLimit } }
+        set { withLock { _manualOffsetFoldingLimit = newValue } }
+    }
+    
+    var manualOffsetSphereRadius: Float {
+        get { withLock { _manualOffsetSphereRadius } }
+        set { withLock { _manualOffsetSphereRadius = newValue } }
+    }
+    
+    var manualOffsetFractalScale: Float {
+        get { withLock { _manualOffsetFractalScale } }
+        set { withLock { _manualOffsetFractalScale = newValue } }
+    }
+    
+    var manualOffsetPosition: SIMD3<Float> {
+        get { withLock { _manualOffsetPosition } }
+        set { withLock { _manualOffsetPosition = newValue } }
+    }
+    
+    var effectiveTargetMinDistance: Float {
+        withLock {
+            _isAnimationPlaying ? _animationBaseMinDistance + _manualOffsetMinDistance : _targetMinDistance
+        }
+    }
+    
+    var effectiveTargetFoldingLimit: Float {
+        withLock {
+            _isAnimationPlaying ? _animationBaseFoldingLimit + _manualOffsetFoldingLimit : _targetFoldingLimit
+        }
+    }
+    
+    var effectiveTargetSphereRadius: Float {
+        withLock {
+            _isAnimationPlaying ? _animationBaseSphereRadius + _manualOffsetSphereRadius : _targetSphereRadius
+        }
+    }
+    
+    var effectiveTargetFractalScale: Float {
+        withLock {
+            _isAnimationPlaying ? _animationBaseFractalScale + _manualOffsetFractalScale : _fractalScale
+        }
+    }
+    
+    var effectiveTargetPosition: SIMD3<Float> {
+        withLock {
+            _isAnimationPlaying ? _animationBasePosition + _manualOffsetPosition : _targetPosition
+        }
+    }
+    
     // === SMOOTH DAMP PARAMETERS ===
     // Critically-damped spring with velocity/acceleration limits for buttery smooth motion
     
@@ -1597,6 +1696,21 @@ final class RenderSettings: @unchecked Sendable {
             _velocityFoldingLimit = 0.0
             _velocitySphereRadius = 0.0
             _velocityPosition = .zero
+        }
+    }
+    
+    /// When animation stops/pauses, bake manual offsets into targets and clear offsets.
+    func commitAnimationOffsetsToTargets() {
+        withLock {
+            _targetMinDistance = _minDistance
+            _targetFoldingLimit = _foldingLimit
+            _targetSphereRadius = _sphereRadius
+            _targetPosition = _position
+            _manualOffsetMinDistance = 0.0
+            _manualOffsetFoldingLimit = 0.0
+            _manualOffsetSphereRadius = 0.0
+            _manualOffsetFractalScale = 0.0
+            _manualOffsetPosition = .zero
         }
     }
     
