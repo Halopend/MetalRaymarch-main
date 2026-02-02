@@ -27,6 +27,9 @@ final class AnimationManager {
             if currentScene?.id != oldValue?.id {
                 playhead.reset()
                 playhead.sceneID = currentScene?.id
+                
+                // Precompile pipelines for all keyframes in this scene
+                precompilePipelinesForCurrentScene()
             }
         }
     }
@@ -39,7 +42,8 @@ final class AnimationManager {
     var playhead = AnimationPlayhead()
     
     /// Global easing function for all transitions
-    var easingFunction: EasingFunction = .easeInOut
+    /// Default to .smooth for continuous motion through keyframes (no stopping)
+    var easingFunction: EasingFunction = .smooth
     
     /// Playback speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
     var playbackSpeed: Double = 1.0
@@ -54,6 +58,10 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     
     private weak var renderSettings: RenderSettings?
+    
+    /// Callback to prepare shader pipeline for specific iteration/step values
+    /// Set this from AppModel to enable precompilation for animation keyframes
+    var preparePipelineHandler: ((Int, Int) -> Void)?
     
     // ═══════════════════════════════════════════════════════════════════════════
     // FILE STORAGE
@@ -190,9 +198,11 @@ final class AnimationManager {
             return
         }
         
+        // Ensure pipelines are compiled before playback
+        precompilePipelinesForCurrentScene()
+        
         playhead.state = .playing
-        renderSettings?.isAnimationPlaying = true
-        print("▶️ Playing scene '\(currentScene?.name ?? "?")'")
+        print("▶️ Playing scene '\(currentScene?.name ?? "?")'")  
     }
     
     /// Pause playback
@@ -231,6 +241,31 @@ final class AnimationManager {
         
         // Apply the keyframe immediately
         applyKeyframe(scene.keyframes[index])
+    }
+    
+    /// Precompile shader pipelines for all keyframes in the current scene.
+    /// This ensures smooth playback by compiling all needed pipelines ahead of time.
+    private func precompilePipelinesForCurrentScene() {
+        guard let scene = currentScene,
+              let handler = preparePipelineHandler else { return }
+        
+        // Collect unique iteration/step combinations from all keyframes
+        var compiledConfigs = Set<String>()
+        
+        for keyframe in scene.keyframes {
+            let configKey = "\(keyframe.baseFractalIterations)_\(keyframe.baseMaxRaySteps)"
+            
+            // Skip if already compiled in this batch
+            guard !compiledConfigs.contains(configKey) else { continue }
+            compiledConfigs.insert(configKey)
+            
+            // Trigger pipeline compilation via the handler
+            handler(keyframe.baseFractalIterations, keyframe.baseMaxRaySteps)
+        }
+        
+        if !compiledConfigs.isEmpty {
+            print("🔧 [Animation] Precompiled pipelines for \(compiledConfigs.count) unique configs in scene '\(scene.name)'")
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -295,10 +330,25 @@ final class AnimationManager {
         
         // Calculate progress through current segment (0 to 1)
         let rawProgress = Float(playhead.elapsedInSegment / actualDuration)
-        let easedProgress = easingFunction.apply(rawProgress)
         
-        // Interpolate and apply
-        let interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
+        // Interpolate using the appropriate method
+        let interpolated: AnimationKeyframe
+        
+        if easingFunction.usesSplineInterpolation {
+            // Use Catmull-Rom spline for smooth continuous motion through keyframes
+            interpolated = CatmullRomSpline.interpolateKeyframes(
+                scene.keyframes,
+                fromIndex: fromIndex,
+                toIndex: toIndex,
+                t: rawProgress,
+                isLooping: scene.isLooping
+            )
+        } else {
+            // Standard easing interpolation (slows to stop at each keyframe)
+            let easedProgress = easingFunction.apply(rawProgress)
+            interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
+        }
+        
         applyKeyframe(interpolated)
     }
     
@@ -322,11 +372,13 @@ final class AnimationManager {
         
         // Set IMMEDIATE values for responsive animation playback
         // This bypasses the renderer's interpolateToTargets() smoothing
-        settings.minDistance = minDistance
-        settings.foldingLimit = foldingLimit
-        settings.sphereRadius = sphereRadius
-        settings.fractalScale = fractalScale
-        settings.position = position
+        settings.minDistance = keyframe.minDistance
+        settings.foldingLimit = keyframe.foldingLimit
+        settings.sphereRadius = keyframe.sphereRadius
+        settings.fractalScale = keyframe.fractalScale
+        settings.baseFractalIterations = keyframe.baseFractalIterations
+        settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
+        settings.position = keyframe.position
         
         // Also set TARGETS so they're in sync when animation stops
         // This allows hand gestures to blend in naturally

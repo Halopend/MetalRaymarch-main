@@ -13,6 +13,7 @@ import SwiftUI
 struct SceneListView: View {
     @Bindable var animationManager: AnimationManager
     @Bindable var appModel: AppModel
+    @Environment(\.dismiss) private var dismiss
     
     @State private var showingCreateSheet = false
     @State private var newSceneName = ""
@@ -53,6 +54,12 @@ struct SceneListView: View {
             }
             .navigationTitle("Scenes")
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+                
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         newSceneName = "Scene \(animationManager.scenes.count + 1)"
@@ -320,6 +327,13 @@ struct SceneEditorView: View {
         settings.targetSphereRadius = keyframe.sphereRadius
         settings.fractalScale = keyframe.fractalScale
         settings.targetPosition = keyframe.position
+        
+        // Apply quality settings
+        settings.baseFractalIterations = keyframe.baseFractalIterations
+        settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
+        
+        // Ensure pipeline is prepared for these values
+        appModel.preparePipeline(iterations: keyframe.baseFractalIterations, raySteps: keyframe.baseMaxRaySteps)
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {
@@ -428,6 +442,15 @@ struct KeyframeEditorView: View {
                     parameterSlider("Fractal Scale", value: $keyframe.fractalScale, range: 0.5...6.0)
                 }
                 
+                Section {
+                    Stepper("Iterations: \(keyframe.baseFractalIterations)", value: $keyframe.baseFractalIterations, in: 4...32)
+                    Stepper("Max Ray Steps: \(keyframe.baseMaxRaySteps)", value: $keyframe.baseMaxRaySteps, in: 32...1024, step: 16)
+                } header: {
+                    Text("Quality Settings")
+                } footer: {
+                    Text("Note: These snap between values and do not vary smoothly over time.")
+                }
+                
                 Section("Position") {
                     parameterSlider("X", value: $keyframe.positionX, range: -5...5)
                     parameterSlider("Y", value: $keyframe.positionY, range: -5...5)
@@ -520,6 +543,28 @@ struct AnimationPlaybackControls: View {
                     } label: {
                         Text("\(String(format: "%.1f", animationManager.playbackSpeed))x")
                             .font(.caption)
+                    }
+                    
+                    // Easing function picker
+                    Menu {
+                        ForEach(EasingFunction.allCases, id: \.self) { easing in
+                            Button {
+                                animationManager.easingFunction = easing
+                            } label: {
+                                HStack {
+                                    Text(easing.displayName)
+                                    if animationManager.easingFunction == easing {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: animationManager.easingFunction == .smooth ? "waveform.path" : "curve.bezier")
+                            Text(animationManager.easingFunction.displayName)
+                                .font(.caption)
+                        }
                     }
                     
                     Spacer()

@@ -18,8 +18,8 @@ final class UISettingsCache {
     var targetMinDistance: Float = 0.8
     var targetFoldingLimit: Float = 1.0
     var targetSphereRadius: Float = 0.5
-    var fractalIterations: Int = 9
-    var maxRaySteps: Int = 64
+    var baseFractalIterations: Int = 9  // User-set base (UI controls this)
+    var baseMaxRaySteps: Int = 64       // User-set base (UI controls this)
     
     // Color & effects
     var colorScheme: ColorScheme = .nebula
@@ -101,8 +101,8 @@ final class UISettingsCache {
         targetFoldingLimit = settings.targetFoldingLimit
         targetSphereRadius = settings.targetSphereRadius
         // Load BASE values for UI display (these are what user sets)
-        fractalIterations = settings.baseFractalIterations
-        maxRaySteps = settings.baseMaxRaySteps
+        baseFractalIterations = settings.baseFractalIterations
+        baseMaxRaySteps = settings.baseMaxRaySteps
         
         colorScheme = settings.colorScheme
         colorMix = settings.colorMix
@@ -168,6 +168,72 @@ final class UISettingsCache {
     func pushColorScheme(_ scheme: ColorScheme) {
         settings?.transitionToColorScheme(scheme)
         colorScheme = scheme
+    }
+}
+
+// MARK: - Quality Sliders View
+// Extracted to reduce type-checking complexity
+struct QualitySlidersView: View {
+    @Binding var cache: UISettingsCache
+    var preparePipeline: (Int, Int) -> Void
+    
+    var body: some View {
+        Group {
+            HStack {
+                Text("Quality Settings")
+                    .font(.headline)
+                Spacer()
+                Toggle("", isOn: $cache.dynamicRenderQualityEnabled)
+                    .labelsHidden()
+                    .scaleEffect(0.8)
+            }
+            
+            Text("Iterations: \(cache.baseFractalIterations)")
+            Slider(
+                value: iterationsBinding,
+                in: 4...32,
+                step: 1,
+                onEditingChanged: { editing in
+                    if !editing {
+                        cache.push(\.baseFractalIterations, value: cache.baseFractalIterations)
+                        preparePipeline(cache.baseFractalIterations, cache.baseMaxRaySteps)
+                    }
+                }
+            )
+            
+            Text("Max Steps: \(cache.baseMaxRaySteps)")
+            Slider(
+                value: rayStepsBinding,
+                in: 32...1024,
+                step: 16,
+                onEditingChanged: { editing in
+                    if !editing {
+                        cache.push(\.baseMaxRaySteps, value: cache.baseMaxRaySteps)
+                        preparePipeline(cache.baseFractalIterations, cache.baseMaxRaySteps)
+                    }
+                }
+            )
+            
+            if !cache.dynamicRenderQualityEnabled {
+                Text("Dynamic scaling is disabled. These values are fixed.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+    
+    private var iterationsBinding: Binding<Double> {
+        Binding(
+            get: { Double(cache.baseFractalIterations) },
+            set: { cache.baseFractalIterations = Int($0) }
+        )
+    }
+    
+    private var rayStepsBinding: Binding<Double> {
+        Binding(
+            get: { Double(cache.baseMaxRaySteps) },
+            set: { cache.baseMaxRaySteps = Int($0) }
+        )
     }
 }
 
@@ -408,50 +474,12 @@ struct ContentView: View {
                         }
 
                         // Quality Sliders - Fractal Iterations and Ray Steps
-                        Group {
-                            Text("Quality")
-                                .font(.headline)
-                            
-                            // Fractal Iterations slider
-                            Text("Fractal Iterations: \(cache.fractalIterations)")
-                            Slider(
-                                value: Binding(
-                                    get: { Double(cache.fractalIterations) },
-                                    set: { cache.fractalIterations = Int($0) }
-                                ),
-                                in: 2...22,
-                                step: 1,
-                                onEditingChanged: { editing in
-                                    if !editing {
-                                        // Push to both actual and base values
-                                        cache.push(\.fractalIterations, value: cache.fractalIterations)
-                                        cache.push(\.baseFractalIterations, value: cache.fractalIterations)
-                                        // Trigger pipeline compilation
-                                        appModel.preparePipeline(iterations: cache.fractalIterations, raySteps: cache.maxRaySteps)
-                                    }
-                                }
-                            )
-                            
-                            // Ray March Steps slider
-                            Text("Ray Steps: \(cache.maxRaySteps)")
-                            Slider(
-                                value: Binding(
-                                    get: { Double(cache.maxRaySteps) },
-                                    set: { cache.maxRaySteps = Int($0) }
-                                ),
-                                in: 16...256,
-                                step: 10,
-                                onEditingChanged: { editing in
-                                    if !editing {
-                                        // Push to both actual and base values
-                                        cache.push(\.maxRaySteps, value: cache.maxRaySteps)
-                                        cache.push(\.baseMaxRaySteps, value: cache.maxRaySteps)
-                                        // Trigger pipeline compilation
-                                        appModel.preparePipeline(iterations: cache.fractalIterations, raySteps: cache.maxRaySteps)
-                                    }
-                                }
-                            )
-                        }
+                        QualitySlidersView(
+                            cache: $cache,
+                            preparePipeline: { iterations, raySteps in
+                                appModel.preparePipeline(iterations: iterations, raySteps: raySteps)
+                            }
+                        )
 
                         // Primary Parameter: Fractal Scale - push on editing end
                         Text("Fractal Scale (\(String(format: "%.2f", cache.fractalScale)))")
@@ -834,8 +862,8 @@ struct ContentView: View {
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                         Spacer()
-                                        let effectiveIters = Int(Float(cache.fractalIterations) * (0.6 + 0.4 * cache.currentRenderQuality))
-                                        let effectiveSteps = Int(Float(cache.maxRaySteps) * (0.5 + 0.5 * cache.currentRenderQuality))
+                                        let effectiveIters = Int(Float(cache.baseFractalIterations) * (0.6 + 0.4 * cache.currentRenderQuality))
+                                        let effectiveSteps = Int(Float(cache.baseMaxRaySteps) * (0.5 + 0.5 * cache.currentRenderQuality))
                                         Text("FI: \(effectiveIters) RS: \(effectiveSteps)")
                                             .font(.caption.monospacedDigit())
                                             .foregroundStyle(.secondary)
