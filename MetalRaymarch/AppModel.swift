@@ -11,32 +11,23 @@ import os  // For os_unfair_lock - fastest available lock primitive
 
 /// Quality preset that bundles fractal iterations and ray steps
 enum QualityPreset: String, CaseIterable {
-    case iter6 = "6"
-    case iter7 = "7"
-    case iter8 = "8"
-    case iter9 = "9"
-    case iter12 = "12"
-    case iter16 = "16"
+    case low = "Low"        // Fast preview
+    case medium = "Medium"   // Balanced
+    case high = "High"       // Quality
     
     var fractalIterations: Int {
         switch self {
-        case .iter6: return 6
-        case .iter7: return 7
-        case .iter8: return 8
-        case .iter9: return 9
-        case .iter12: return 12
-        case .iter16: return 16
+        case .low: return 6
+        case .medium: return 9
+        case .high: return 12
         }
     }
     
     var raySteps: Int {
         switch self {
-        case .iter6: return 32
-        case .iter7: return 48
-        case .iter8: return 56
-        case .iter9: return 64
-        case .iter12: return 100
-        case .iter16: return 128
+        case .low: return 32
+        case .medium: return 64
+        case .high: return 100   // Max 100 for pre-compiled presets
         }
     }
     
@@ -107,6 +98,10 @@ class AppModel {
     // Pipeline preparation handler (set by Renderer)
     // Called when a preset is about to be loaded to ensure the pipeline is ready
     var preparePipelineHandler: ((FractalPreset) async -> Void)?
+    
+    // Sphere mode toggle - enables/disables the sphere effect by forcing low iterations
+    // Made nonisolated for cross-actor access from Renderer
+    @ObservationIgnored nonisolated(unsafe) var sphereMode: Bool = false
     
     // Pipeline preparation for specific iteration/ray step values (set by Renderer)
     // Called when sliders change to pre-compile the needed pipeline

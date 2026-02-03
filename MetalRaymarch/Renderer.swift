@@ -374,6 +374,43 @@ actor Renderer {
             }
         }
         if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total with quad-shared)") }
+        
+        // Build special sphere mode pipeline (2 iterations for debug sphere effect)
+        let sphereConfig = FunctionConstantConfig(
+            fractalIterations: 2,
+            shadowIterations: 0,
+            safetyBubbleEnabled: nil,
+            showHUD: nil,
+            qualityMode: 2,
+            debugHierarchical: nil,
+            maxRaySteps: 32,
+            emissiveEnabled: false,
+            neonModeEnabled: false
+        )
+        let sphereConstants = sphereConfig.toMTLConstants()
+        let sphereKey = "FI2_RS32_E0_N0_Q2"
+        
+        if let spherePipeline = try? Renderer.buildRenderPipelineWithDevice(
+            device: device,
+            layerRenderer: layerRenderer,
+            rasterSampleCount: rasterSampleCount,
+            mtlVertexDescriptor: mtlVertexDescriptor,
+            functionConstants: sphereConstants
+        ) {
+            pipelineCache[sphereKey] = spherePipeline
+            if RENDERER_DEBUG { print("✓ Built sphere mode pipeline: \(sphereKey)") }
+        }
+        
+        if let sphereQuadPipeline = try? Renderer.buildRenderPipelineWithDevice(
+            device: device,
+            layerRenderer: layerRenderer,
+            rasterSampleCount: rasterSampleCount,
+            mtlVertexDescriptor: mtlVertexDescriptor,
+            fragmentFunctionName: "fragmentShaderQuadShared",
+            functionConstants: sphereConstants
+        ) {
+            pipelineCache[sphereKey + "_QS"] = sphereQuadPipeline
+        }
 
         let depthStateDescriptor = MTLDepthStencilDescriptor()
         depthStateDescriptor.depthCompareFunction = MTLCompareFunction.less
@@ -954,6 +991,7 @@ actor Renderer {
             let constants = MTLFunctionConstantValues()
             
             if var iterations = fractalIterations {
+                print("🔧 [FUNCTION CONSTANT] Setting FC_FRACTAL_ITERATIONS = \(iterations)")
                 constants.setConstantValue(&iterations, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
             }
             if var shadowIters = shadowIterations {
@@ -1027,12 +1065,9 @@ actor Renderer {
         static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
             let qualityMode: Int32
             switch preset {
-            case .iter6: qualityMode = 2
-            case .iter7: qualityMode = 2
-            case .iter8: qualityMode = 1
-            case .iter9: qualityMode = 1
-            case .iter12: qualityMode = 0
-            case .iter16: qualityMode = 0
+            case .low: qualityMode = 2     // 6 iterations - fast preview
+            case .medium: qualityMode = 1  // 9 iterations - balanced
+            case .high: qualityMode = 0    // 12 iterations - quality
             }
             return FunctionConstantConfig(
                 fractalIterations: Int32(preset.fractalIterations),
@@ -1236,6 +1271,7 @@ actor Renderer {
         
         // 1. Check unified cache (includes both quality presets and saved presets)
         if let pipeline = pipelineCache[cacheKey] {
+            print("✅ [PIPELINE CACHE HIT] Using pipeline: \(cacheKey)")
             if RENDERER_DEBUG && lastLoggedPipelineKey != cacheKey {
                 print("🎯 [Pipeline] Using cached pipeline: \(cacheKey)")
                 lastLoggedPipelineKey = cacheKey
@@ -1246,6 +1282,7 @@ actor Renderer {
         // 2. Try fallback to emissive=off/neon=off variant (quality preset)
         let fallbackKey = "FI\(iterations)_RS\(raySteps)_E0_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
         if let pipeline = pipelineCache[fallbackKey] {
+            print("⚠️ [PIPELINE FALLBACK] Using quality-preset fallback: \(fallbackKey) (requested: \(cacheKey))")
             if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
                 print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: E=\(emissiveEnabled ? 1 : 0) N=\(neonMode ? 1 : 0))")
                 lastLoggedPipelineKey = fallbackKey
@@ -1254,6 +1291,7 @@ actor Renderer {
         }
         
         // 3. Ultimate fallback to generic pipeline
+        print("🚨 [PIPELINE ULTIMATE FALLBACK] Using generic pipeline! FI=\(iterations) RS=\(raySteps) - NO FUNCTION CONSTANTS!")
         if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
             print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FI=\(iterations) RS=\(raySteps))")
             lastLoggedPipelineKey = "fallback"
@@ -1273,6 +1311,7 @@ actor Renderer {
         if pipelineCache[cacheKey] != nil { return }
         
         // Build on-demand
+        print("🔨 [BUILD ON-DEMAND] Building pipeline \(cacheKey) with FC_FRACTAL_ITERATIONS=\(iterations)")
         if RENDERER_DEBUG { print("🔧 [Pipeline] Building on-demand pipeline: \(cacheKey)") }
         
         let config = FunctionConstantConfig(
@@ -1287,6 +1326,7 @@ actor Renderer {
             neonModeEnabled: neonMode,
             colorIterations: 8  // Color iterations are fixed for consistent coloring
         )
+        print("   ↳ Config: FI=\(iterations), shadow=\(max(iterations - 2, 2)), raySteps=\(raySteps), emissive=\(emissiveEnabled), neon=\(neonMode)")
         
         do {
             let pipeline = try Renderer.buildSpecializedPipeline(
@@ -1604,6 +1644,9 @@ actor Renderer {
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
             
             // Get fovea center from the view's texture map (normalized 0-1)
+            // 🔍 DEBUG: Log uniforms being sent to GPU
+            print("📊 [UNIFORMS] fractalIterations=\(settingsSnapshot.fractalIterations), bubbleEnabled=\(settingsSnapshot.safetyBubbleEnabled), bubbleRadius=\(settingsSnapshot.safetyBubbleRadius), bubbleShape=\(settingsSnapshot.safetyBubbleShape)")
+            
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
@@ -1786,6 +1829,7 @@ actor Renderer {
             let combinedLevel = appModel.audioAnalyzer.level * 0.6 + appModel.audioAnalyzer.bassLevel * 0.4
             settings.audioLevel = combinedLevel
         }
+        
         let settingsSnapshot = settings.snapshot()
         
         // === STOCHASTIC RENDERING: Detect parameter changes and reset accumulation ===
@@ -1980,12 +2024,19 @@ actor Renderer {
         let useQuadShared = (tileSize == 2)
         
         // Get current iteration count for specialized pipeline selection
-        let currentIterations = settingsSnapshot.fractalIterations
+        // If sphere mode is enabled, force 2 iterations to create the sphere effect
+        let baseIterations = settingsSnapshot.fractalIterations
+        let currentIterations = appModel.sphereMode ? 2 : baseIterations
         let currentRaySteps = settingsSnapshot.maxRaySteps
         
         // Detect neon mode from colorSchemeParams.neonIntensity
         let isNeonMode = settingsSnapshot.colorSchemeParams.neonIntensity > 0
         let isEmissive = settingsSnapshot.emissiveEnabled
+        
+        // 🔍 DEBUG: Log iteration and pipeline selection
+        let qualityMode: Int = currentIterations <= 7 ? 2 : (currentIterations <= 9 ? 1 : 0)
+        let unifiedKey = "FI\(currentIterations)_RS\(currentRaySteps)_E\(isEmissive ? 1 : 0)_N\(isNeonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        print("🎯 [PIPELINE SELECT] Iterations=\(currentIterations), RaySteps=\(currentRaySteps), Quality=\(qualityMode), SphereMode=\(appModel.sphereMode), Key=\(unifiedKey)")
         
         // Use specialized pipeline with fixed iteration count
         // This enables Map() loop auto-unrolling via function constants

@@ -63,6 +63,9 @@ final class UISettingsCache {
     var extendedGestureRange: Bool = true
     var gestureSensitivity: Float = 5.0
     
+    // Sphere mode
+    var sphereMode: Bool = false
+    
     // Dynamic quality
     var dynamicRenderQualityEnabled: Bool = true
     var dynamicRenderQualityMin: Float = 0.5
@@ -204,7 +207,7 @@ struct QualitySlidersView: View {
             Text("Max Steps: \(cache.baseMaxRaySteps)")
             Slider(
                 value: rayStepsBinding,
-                in: 32...1024,
+                in: 32...200,
                 step: 16,
                 onEditingChanged: { editing in
                     if !editing {
@@ -362,6 +365,29 @@ struct ContentView: View {
     // MARK: - Menu Content
     
     private var menuContent: some View {
+        MenuContentView(appModel: appModel, cache: $cache, parameterRanges: parameterRanges, fpsIndicatorColor: fpsIndicatorColor)
+    }
+}
+
+// MARK: - Menu Content Helper View
+struct MenuContentView: View {
+    @Bindable var appModel: AppModel
+    @Binding var cache: UISettingsCache
+    let parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>)
+    let fpsIndicatorColor: Color
+    
+    /// Color for quality indicator based on current quality level
+    private func qualityColor(_ quality: Float) -> Color {
+        if quality >= 0.8 {
+            return .green
+        } else if quality >= 0.6 {
+            return .yellow
+        } else {
+            return .orange
+        }
+    }
+    
+    var body: some View {
         VStack {
             VStack(spacing: 10) {
                 // Presets button at the top
@@ -473,6 +499,14 @@ struct ContentView: View {
                                 appModel.preparePipeline(iterations: iterations, raySteps: raySteps)
                             }
                         )
+                        
+                        // Sphere Mode Toggle - switch between sphere and fractal rendering
+                        HStack {
+                            Toggle("Sphere Mode (Debug)", isOn: $appModel.sphereMode)
+                                .tint(.orange)
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
 
                         // Primary Parameter: Fractal Scale - push on editing end
                         Text("Fractal Scale (\(String(format: "%.2f", cache.fractalScale)))")

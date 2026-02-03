@@ -496,7 +496,7 @@ struct KeyframeEditorView: View {
                 
                 Section {
                     Stepper("Iterations: \(keyframe.baseFractalIterations)", value: $keyframe.baseFractalIterations, in: 4...32)
-                    Stepper("Max Ray Steps: \(keyframe.baseMaxRaySteps)", value: $keyframe.baseMaxRaySteps, in: 32...1024, step: 16)
+                    Stepper("Max Ray Steps: \(keyframe.baseMaxRaySteps)", value: $keyframe.baseMaxRaySteps, in: 32...200, step: 16)
                 } header: {
                     Text("Quality Settings")
                 } footer: {
