@@ -150,10 +150,6 @@ class AppModel {
         shareSession = FractalShareSession(renderSettings: renderSettings)
         
         // Setup gesture callbacks
-        gestureController?.onRecordingToggle = { [weak self] in
-            self?.toggleStochasticRendering()
-        }
-        
         gestureController?.onMenuToggle = { [weak self] in
             print("📋 onMenuToggle callback fired!")
             self?.toggleMenuWindow()
@@ -183,15 +179,6 @@ class AppModel {
         } else if recorder.isIdle {
             recorder.startRecording()
         }
-    }
-    
-    /// Toggle stochastic rendering mode (left fist gesture)
-    /// When enabled, accumulates frames over time for better quality at low FPS
-    func toggleStochasticRendering() {
-        let newState = !renderSettings.stochasticRenderingEnabled
-        renderSettings.stochasticRenderingEnabled = newState
-        renderSettings.stochasticFrameCount = 0  // Reset accumulation
-        print("✊ STOCHASTIC RENDERING \(newState ? "ENABLED" : "DISABLED") (left fist gesture)")
     }
     
     /// Callback to open the menu window (set by App scene)
@@ -257,20 +244,6 @@ class AppModel {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MARK: - Geometry State - Stable Geometry Rendering
-// ═══════════════════════════════════════════════════════════════════════════════
-// Tracks whether geometry parameters (minDistance, foldingLimit, sphereRadius,
-// fractalScale) are actively changing or have settled. When stable, the renderer
-// can switch to an optimized path with temporal accumulation.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-enum GeometryState: Int, CaseIterable {
-    case dynamic   = 0  // Geometry parameters are actively changing
-    case settling  = 1  // Parameters stopped changing, waiting for confirmation
-    case stable    = 2  // Parameters confirmed stable, optimized rendering enabled
-}
-
 // Fractal type enum matching ShaderTypes.h
 enum FractalType: Int32, Codable {
     case mandelbox = 0
@@ -293,6 +266,184 @@ enum LightingMode: Int32, CaseIterable, Codable {
         case .staticLight: return "Static"
         case .animated: return "Animated"
         case .audioReactive: return "Audio Reactive"
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MARK: - Lighting Effects System
+// ═══════════════════════════════════════════════════════════════════════════════
+// Modular lighting effects that can be toggled on/off independently.
+// Each effect is a card in the UI with its own settings.
+// Presets bundle effects together for quick looks.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Hue rotation effect - rotates colors through YIQ color space
+struct HueRotationEffect: Codable {
+    var enabled: Bool = false
+    var speed: Float = 0.1          // Rotation speed (0-0.5)
+    var intensity: Float = 0.5      // Blend amount (0-1), prevents overpowering
+    
+    static var off: HueRotationEffect {
+        HueRotationEffect(enabled: false, speed: 0.0, intensity: 0.0)
+    }
+    
+    static var subtle: HueRotationEffect {
+        HueRotationEffect(enabled: true, speed: 0.05, intensity: 0.3)
+    }
+    
+    static var medium: HueRotationEffect {
+        HueRotationEffect(enabled: true, speed: 0.1, intensity: 0.5)
+    }
+    
+    static var intense: HueRotationEffect {
+        HueRotationEffect(enabled: true, speed: 0.2, intensity: 0.8)
+    }
+}
+
+/// Pulse effect - rhythmic brightness and saturation variation
+struct PulseEffect: Codable {
+    var enabled: Bool = false
+    var speed: Float = 0.5          // Pulse frequency (0-2)
+    var amount: Float = 0.3         // Pulse intensity (0-1)
+    
+    static var off: PulseEffect {
+        PulseEffect(enabled: false, speed: 0.0, amount: 0.0)
+    }
+    
+    static var subtle: PulseEffect {
+        PulseEffect(enabled: true, speed: 0.3, amount: 0.15)
+    }
+    
+    static var medium: PulseEffect {
+        PulseEffect(enabled: true, speed: 0.5, amount: 0.3)
+    }
+    
+    static var intense: PulseEffect {
+        PulseEffect(enabled: true, speed: 1.0, amount: 0.5)
+    }
+}
+
+/// Glow effect - ray-step based inner glow
+struct GlowEffect: Codable {
+    var enabled: Bool = false
+    var intensity: Float = 0.3      // Glow brightness (0-1)
+    
+    static var off: GlowEffect {
+        GlowEffect(enabled: false, intensity: 0.0)
+    }
+    
+    static var subtle: GlowEffect {
+        GlowEffect(enabled: true, intensity: 0.2)
+    }
+    
+    static var medium: GlowEffect {
+        GlowEffect(enabled: true, intensity: 0.4)
+    }
+    
+    static var intense: GlowEffect {
+        GlowEffect(enabled: true, intensity: 0.7)
+    }
+}
+
+/// Bloom effect - bright areas bleed
+struct BloomEffect: Codable {
+    var enabled: Bool = false
+    var strength: Float = 0.2       // Bloom intensity (0-1)
+    
+    static var off: BloomEffect {
+        BloomEffect(enabled: false, strength: 0.0)
+    }
+    
+    static var subtle: BloomEffect {
+        BloomEffect(enabled: true, strength: 0.15)
+    }
+    
+    static var medium: BloomEffect {
+        BloomEffect(enabled: true, strength: 0.3)
+    }
+    
+    static var intense: BloomEffect {
+        BloomEffect(enabled: true, strength: 0.5)
+    }
+}
+
+/// Fog effect - distance-based atmospheric fog
+struct FogEffect: Codable {
+    var enabled: Bool = true
+    var intensity: Float = 0.32     // Fog density (0-1)
+    
+    static var off: FogEffect {
+        FogEffect(enabled: false, intensity: 0.0)
+    }
+    
+    static var subtle: FogEffect {
+        FogEffect(enabled: true, intensity: 0.2)
+    }
+    
+    static var medium: FogEffect {
+        FogEffect(enabled: true, intensity: 0.35)
+    }
+    
+    static var dense: FogEffect {
+        FogEffect(enabled: true, intensity: 0.6)
+    }
+}
+
+/// Lighting preset packages - bundles of effects that work well together
+enum LightingPreset: String, CaseIterable, Codable {
+    case off = "Off"
+    case subtle = "Subtle"
+    case dynamic = "Dynamic"
+    case psychedelic = "Psychedelic"
+    case atmospheric = "Atmospheric"
+    case custom = "Custom"
+    
+    var displayName: String { rawValue }
+    
+    var icon: String {
+        switch self {
+        case .off: return "moon.zzz"
+        case .subtle: return "sun.min"
+        case .dynamic: return "sparkle"
+        case .psychedelic: return "wand.and.rays"
+        case .atmospheric: return "cloud.fog"
+        case .custom: return "slider.horizontal.3"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .off: return "No lighting effects"
+        case .subtle: return "Gentle ambient effects"
+        case .dynamic: return "Moderate animation"
+        case .psychedelic: return "Maximum visual intensity"
+        case .atmospheric: return "Moody fog and glow"
+        case .custom: return "Manual control"
+        }
+    }
+    
+    /// Get the effect bundle for this preset
+    func effects() -> (hue: HueRotationEffect, pulse: PulseEffect, glow: GlowEffect, bloom: BloomEffect, fog: FogEffect) {
+        switch self {
+        case .off:
+            return (.off, .off, .off, .off, .off)
+            
+        case .subtle:
+            return (.subtle, .off, .subtle, .subtle, .subtle)
+            
+        case .dynamic:
+            return (.medium, .medium, .medium, .medium, .medium)
+            
+        case .psychedelic:
+            return (.intense, .intense, .intense, .intense, .medium)
+            
+        case .atmospheric:
+            return (.off, .subtle, .medium, .subtle, .dense)
+            
+        case .custom:
+            // Return current settings unchanged
+            return (.off, .off, .off, .off, .off)
         }
     }
 }
@@ -488,10 +639,14 @@ enum ColorScheme: Int32, CaseIterable, Codable {
         }
     }
     
-    // Create shader-compatible ColorSchemeParams
+    // Create shader-compatible ColorSchemeParams with new modular lighting effects
     func toShaderParams(colorMix: Float, transitionProgress: Float = 1.0, previousScheme: ColorScheme? = nil,
-                        animTime: Float = 0.0, hueCycleSpeed: Float = 0.0, pulseSpeed: Float = 0.0,
-                        pulseAmount: Float = 0.0, glowIntensity: Float = 0.0, bloomStrength: Float = 0.0) -> ColorSchemeParams {
+                        animTime: Float = 0.0, 
+                        hueRotation: HueRotationEffect = .off,
+                        pulse: PulseEffect = .off,
+                        glow: GlowEffect = .off,
+                        bloom: BloomEffect = .off,
+                        fog: FogEffect = .off) -> ColorSchemeParams {
         let pal = palette
         let pp = postProcessing
         let neon = neonParams
@@ -517,12 +672,20 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             stripeStrength: neon.stripeStrength,
             glowSharpness: neon.glowSharpness,
             saturationPower: neon.satPower,
+            // === MODULAR LIGHTING EFFECTS ===
             animTime: animTime,
-            hueCycleSpeed: hueCycleSpeed,
-            pulseSpeed: pulseSpeed,
-            pulseAmount: pulseAmount,
-            glowIntensity: glowIntensity,
-            bloomStrength: bloomStrength,
+            hueRotationEnabled: hueRotation.enabled ? 1 : 0,
+            hueRotationSpeed: hueRotation.speed,
+            hueRotationIntensity: hueRotation.intensity,
+            pulseEnabled: pulse.enabled ? 1 : 0,
+            pulseSpeed: pulse.speed,
+            pulseAmount: pulse.amount,
+            glowEnabled: glow.enabled ? 1 : 0,
+            glowIntensity: glow.intensity,
+            bloomEnabled: bloom.enabled ? 1 : 0,
+            bloomStrength: bloom.strength,
+            fogEnabled: fog.enabled ? 1 : 0,
+            fogIntensity: fog.intensity,
             transitionProgress: transitionProgress,
             previousScheme: previousScheme?.rawValue ?? self.rawValue,
             currentScheme: self.rawValue,
@@ -560,26 +723,13 @@ struct RenderSettingsSnapshot {
     let safetyBubbleEnabled: Bool
     let safetyBubbleRadius: Float
     let safetyBubbleShape: Float
-    let glowIntensity: Float
     let emissiveEnabled: Bool
     let emissivePattern: Int
     let emissiveIntensity: Float
     let emissiveThreshold: Float
     let emissiveColor: SIMD3<Float>
     let emissiveSpeed: Float
-    let fogIntensity: Float
     let colorSchemeParams: ColorSchemeParams
-    // Stochastic rendering
-    let stochasticRenderingEnabled: Bool
-    let stochasticFrameCount: Int
-    let stochasticMaxFrames: Int
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // GEOMETRY STABILITY STATE
-    // When geometry parameters settle, enables optimized "stable geometry" render path
-    // ═══════════════════════════════════════════════════════════════════════════
-    let geometryState: GeometryState
-    let isGeometryGestureActive: Bool
 }
 
 final class RenderSettings: @unchecked Sendable {
@@ -652,15 +802,15 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.5 to 0.5)
     private var _colorSchemeHighlights: Float = 0.0         // Highlight boost/reduction (-0.5 to 1.0)
     
-    // === DYNAMIC COLOR ANIMATION ===
-    // All animation effects default to OFF (0.0) so user must enable them
+    // === MODULAR LIGHTING EFFECTS ===
+    // Card-based lighting system with presets and individual effect toggles
     private var _colorAnimTime: Float = 0.0                 // Running animation time
-    private var _hueCycleSpeed: Float = 0.0                 // Hue rotation speed (0 = off, 0.05 = slow, 0.2 = fast)
-    private var _pulseSpeed: Float = 0.0                    // Pulse frequency (0 = off, 0.3 = slow, 1.0 = fast)
-    private var _pulseAmount: Float = 0.0                   // Pulse intensity (0 = off, 0.15 = subtle)
-    private var _glowIntensity: Float = 0.0                 // Ray-step glow (0 = off, 0.3 = moderate)
-    private var _bloomStrength: Float = 0.0                 // Bloom effect (0 = off, 0.2 = subtle)
-    private var _fogIntensity: Float = 0.32                 // Fog strength (0 = no fog, 1 = full fog)
+    private var _lightingPreset: LightingPreset = .off      // Current preset package
+    private var _hueRotationEffect: HueRotationEffect = .off
+    private var _pulseEffect: PulseEffect = .off
+    private var _glowEffect: GlowEffect = .off
+    private var _bloomEffect: BloomEffect = .off
+    private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     
     // === EMISSIVE GLOW (Self-illuminating regions) ===
     private var _emissiveEnabled: Bool = false              // Enable emissive glow regions
@@ -677,13 +827,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _dynamicRenderQualityMin: Float = 0.5       // Minimum quality floor (0.4-0.8)
     private var _dynamicRenderQualityMax: Float = 1.0       // Maximum quality ceiling (0.8-1.0)
     private var _currentRenderQuality: Float = 0.7          // Current quality level (read-only from manager)
-    
-    // === STOCHASTIC RENDERING MODE ===
-    // When enabled, renders fewer pixels per frame and accumulates over time
-    // Useful for extremely complex scenes that can't achieve real-time FPS
-    private var _stochasticRenderingEnabled: Bool = false   // Toggle via left fist gesture
-    private var _stochasticFrameCount: Int = 0              // Current accumulation frame count
-    private var _stochasticMaxFrames: Int = 64              // Max frames to accumulate before reset
     
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
@@ -706,17 +849,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _manualOffsetSphereRadius: Float = 0.0
     private var _manualOffsetFractalScale: Float = 0.0
     private var _manualOffsetPosition: SIMD3<Float> = .zero
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // GEOMETRY STABILITY TRACKING
-    // Detects when geometry-affecting parameters have settled after gestures end.
-    // Enables the renderer to switch to optimized "stable geometry" path.
-    // ═══════════════════════════════════════════════════════════════════════════
-    private var _geometryState: GeometryState = .stable
-    private var _isGeometryGestureActive: Bool = false  // Set by GestureController
-    private var _geometryStableFrameCount: Int = 0      // Frames since geometry became stable
-    private var _stableGeometryEnabled: Bool = false    // Master toggle for stable geometry path
-    private let geometrySettleThreshold: Float = 0.0001 // Epsilon for "settled" detection
     
     // === VELOCITY STATE FOR SMOOTH DAMP ===
     // Track velocities for critically-damped spring interpolation
@@ -898,49 +1030,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _gestureSpread = newValue } }
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // GEOMETRY STABILITY ACCESSORS
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    /// Master toggle for stable geometry rendering path
-    var stableGeometryEnabled: Bool {
-        get { withLock { _stableGeometryEnabled } }
-        set { withLock { _stableGeometryEnabled = newValue } }
-    }
-    
-    /// Current geometry state (dynamic, settling, or stable)
-    /// Returns .dynamic if stable geometry is disabled
-    var geometryState: GeometryState {
-        get { withLock { _stableGeometryEnabled ? _geometryState : .dynamic } }
-    }
-    
-    /// Whether a geometry-affecting gesture is currently active (set by GestureController)
-    var isGeometryGestureActive: Bool {
-        get { withLock { _isGeometryGestureActive } }
-        set {
-            withLock {
-                let wasActive = _isGeometryGestureActive
-                _isGeometryGestureActive = newValue
-                
-                // State transitions based on gesture activity
-                if newValue && !wasActive {
-                    // Gesture started → immediately go to dynamic
-                    _geometryState = .dynamic
-                    _geometryStableFrameCount = 0
-                } else if !newValue && wasActive {
-                    // Gesture ended → transition to settling
-                    _geometryState = .settling
-                    _geometryStableFrameCount = 0
-                }
-            }
-        }
-    }
-    
-    /// Number of frames geometry has been stable (for accumulation tracking)
-    var geometryStableFrameCount: Int {
-        get { withLock { _geometryStableFrameCount } }
-    }
-
     var useRelativeGestures: Bool {
         get { withLock { _useRelativeGestures } }
         set { withLock { _useRelativeGestures = newValue } }
@@ -1064,40 +1153,82 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _colorSchemeHighlights = max(-0.5, min(1.0, newValue)) } }
     }
     
-    /// Hue cycle speed (rotations per second, 0 = static)
-    var hueCycleSpeed: Float {
-        get { withLock { _hueCycleSpeed } }
-        set { withLock { _hueCycleSpeed = max(0.0, min(1.0, newValue)) } }
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MODULAR LIGHTING EFFECTS - Card-based system with presets
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Current lighting preset package
+    var lightingPreset: LightingPreset {
+        get { withLock { _lightingPreset } }
+        set {
+            withLock {
+                _lightingPreset = newValue
+                // If not custom, apply the preset's effect bundle
+                if newValue != .custom {
+                    let effects = newValue.effects()
+                    _hueRotationEffect = effects.hue
+                    _pulseEffect = effects.pulse
+                    _glowEffect = effects.glow
+                    _bloomEffect = effects.bloom
+                    _fogEffect = effects.fog
+                }
+            }
+        }
     }
     
-    /// Pulse animation speed (Hz)
-    var pulseSpeed: Float {
-        get { withLock { _pulseSpeed } }
-        set { withLock { _pulseSpeed = max(0.0, min(2.0, newValue)) } }
+    /// Hue rotation effect (color cycling through YIQ space)
+    var hueRotationEffect: HueRotationEffect {
+        get { withLock { _hueRotationEffect } }
+        set {
+            withLock {
+                _hueRotationEffect = newValue
+                _lightingPreset = .custom  // Switch to custom when manually adjusted
+            }
+        }
     }
     
-    /// Pulse animation amount (0-1)
-    var pulseAmount: Float {
-        get { withLock { _pulseAmount } }
-        set { withLock { _pulseAmount = max(0.0, min(1.0, newValue)) } }
+    /// Pulse effect (rhythmic brightness and saturation)
+    var pulseEffect: PulseEffect {
+        get { withLock { _pulseEffect } }
+        set {
+            withLock {
+                _pulseEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
     }
     
-    /// Ray-step based glow intensity (0-1)
-    var glowIntensity: Float {
-        get { withLock { _glowIntensity } }
-        set { withLock { _glowIntensity = max(0.0, min(1.0, newValue)) } }
+    /// Glow effect (ray-step based inner glow)
+    var glowEffect: GlowEffect {
+        get { withLock { _glowEffect } }
+        set {
+            withLock {
+                _glowEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
     }
     
-    /// Bloom effect strength (0-1)
-    var bloomStrength: Float {
-        get { withLock { _bloomStrength } }
-        set { withLock { _bloomStrength = max(0.0, min(1.0, newValue)) } }
+    /// Bloom effect (bright areas bleed)
+    var bloomEffect: BloomEffect {
+        get { withLock { _bloomEffect } }
+        set {
+            withLock {
+                _bloomEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
     }
     
-    /// Fog intensity (0-1): 0 = no fog, 1 = heavy fog
-    var fogIntensity: Float {
-        get { withLock { _fogIntensity } }
-        set { withLock { _fogIntensity = max(0.0, min(1.0, newValue)) } }
+    /// Fog effect (distance-based atmospheric haze)
+    var fogEffect: FogEffect {
+        get { withLock { _fogEffect } }
+        set {
+            withLock {
+                _fogEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
     }
     
     // === EMISSIVE GLOW ===
@@ -1170,42 +1301,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _currentRenderQuality = newValue } }
     }
     
-    // === STOCHASTIC RENDERING ACCESSORS ===
-    
-    /// Enable stochastic rendering mode (accumulates frames over time for complex scenes)
-    var stochasticRenderingEnabled: Bool {
-        get { withLock { _stochasticRenderingEnabled } }
-        set { withLock { _stochasticRenderingEnabled = newValue } }
-    }
-    
-    /// Current frame count in stochastic accumulation (0 to maxFrames)
-    var stochasticFrameCount: Int {
-        get { withLock { _stochasticFrameCount } }
-        set { withLock { _stochasticFrameCount = newValue } }
-    }
-    
-    /// Maximum frames to accumulate before resetting (default 64)
-    var stochasticMaxFrames: Int {
-        get { withLock { _stochasticMaxFrames } }
-        set { withLock { _stochasticMaxFrames = max(1, min(256, newValue)) } }
-    }
-    
-    /// Increment stochastic frame count, returns true if accumulation should continue
-    func incrementStochasticFrame() -> Bool {
-        return withLock {
-            if _stochasticFrameCount < _stochasticMaxFrames {
-                _stochasticFrameCount += 1
-                return true
-            }
-            return false
-        }
-    }
-    
-    /// Reset stochastic accumulation (call when scene parameters change)
-    func resetStochasticAccumulation() {
-        withLock { _stochasticFrameCount = 0 }
-    }
-
     /// Update color scheme transitions and animation time. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
         withLock {
@@ -1293,11 +1388,18 @@ final class RenderSettings: @unchecked Sendable {
             glowSharpness: glowSharpness,
             saturationPower: satPower,
             animTime: _colorAnimTime,
-            hueCycleSpeed: _hueCycleSpeed,
-            pulseSpeed: _pulseSpeed,
-            pulseAmount: _pulseAmount,
-            glowIntensity: _glowIntensity,
-            bloomStrength: _bloomStrength,
+            hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,
+            hueRotationSpeed: _hueRotationEffect.speed,
+            hueRotationIntensity: _hueRotationEffect.intensity,
+            pulseEnabled: _pulseEffect.enabled ? 1 : 0,
+            pulseSpeed: _pulseEffect.speed,
+            pulseAmount: _pulseEffect.amount,
+            glowEnabled: _glowEffect.enabled ? 1 : 0,
+            glowIntensity: _glowEffect.intensity,
+            bloomEnabled: _bloomEffect.enabled ? 1 : 0,
+            bloomStrength: _bloomEffect.strength,
+            fogEnabled: _fogEffect.enabled ? 1 : 0,
+            fogIntensity: _fogEffect.intensity,
             transitionProgress: t,
             previousScheme: _colorScheme.rawValue,
             currentScheme: _targetColorScheme.rawValue,
@@ -1334,20 +1436,13 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
-                glowIntensity: _glowIntensity,
                 emissiveEnabled: _emissiveEnabled,
                 emissivePattern: _emissivePattern,
                 emissiveIntensity: _emissiveIntensity,
                 emissiveThreshold: _emissiveThreshold,
                 emissiveColor: _emissiveColor,
                 emissiveSpeed: _emissiveSpeed,
-                fogIntensity: _fogIntensity,
-                colorSchemeParams: makeColorSchemeParamsLocked(),
-                stochasticRenderingEnabled: _stochasticRenderingEnabled,
-                stochasticFrameCount: _stochasticFrameCount,
-                stochasticMaxFrames: _stochasticMaxFrames,
-                geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,
-                isGeometryGestureActive: _isGeometryGestureActive
+                colorSchemeParams: makeColorSchemeParamsLocked()
             )
         }
     }
@@ -1642,53 +1737,6 @@ final class RenderSettings: @unchecked Sendable {
             _position.y = max(-maxPos, min(maxPos, _position.y))
             _position.z = max(-maxPos, min(maxPos, _position.z))
             
-            // ═══════════════════════════════════════════════════════════════════════════
-            // GEOMETRY STABILITY STATE MACHINE UPDATE
-            // Check if geometry-affecting parameters have settled (interpolation complete)
-            // ═══════════════════════════════════════════════════════════════════════════
-            let minDistSettled = abs(_minDistance - _targetMinDistance) < geometrySettleThreshold
-            let foldSettled = abs(_foldingLimit - _targetFoldingLimit) < geometrySettleThreshold
-            let sphereSettled = abs(_sphereRadius - _targetSphereRadius) < geometrySettleThreshold
-            // Note: fractalScale is set directly (no smoothing), so it's always "settled"
-            let allGeometrySettled = minDistSettled && foldSettled && sphereSettled
-            
-            switch _geometryState {
-            case .dynamic:
-                // Stay dynamic while gesture is active
-                if !_isGeometryGestureActive {
-                    _geometryState = .settling
-                    _geometryStableFrameCount = 0
-                }
-                
-            case .settling:
-                // Transition to stable once interpolation completes
-                if _isGeometryGestureActive {
-                    _geometryState = .dynamic
-                    _geometryStableFrameCount = 0
-                } else if allGeometrySettled {
-                    _geometryState = .stable
-                    _geometryStableFrameCount = 0
-                    #if DEBUG
-                    print("🎯 GEOMETRY: Transition to STABLE (parameters settled)")
-                    #endif
-                }
-                
-            case .stable:
-                // Break out of stable if gesture starts or parameters drift
-                if _isGeometryGestureActive {
-                    _geometryState = .dynamic
-                    _geometryStableFrameCount = 0
-                    #if DEBUG
-                    print("🎯 GEOMETRY: Transition to DYNAMIC (gesture started)")
-                    #endif
-                } else if allGeometrySettled {
-                    _geometryStableFrameCount += 1
-                } else {
-                    // Parameters changed externally (e.g., slider)
-                    _geometryState = .settling
-                    _geometryStableFrameCount = 0
-                }
-            }
         }
     }
     

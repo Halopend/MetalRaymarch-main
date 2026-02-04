@@ -20,7 +20,6 @@ struct FractalPreset: Codable, Identifiable {
     var fractalIterations: Int
     var maxRaySteps: Int
     var colorMix: Float
-    var glowIntensity: Float
     var colorIterations: Float
     var position: SIMD3<Float>
     var scale: Float
@@ -50,14 +49,15 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
     
-    // === LIGHTING & EFFECTS (new in v1.1) ===
-    // These capture the full visual look of a preset
-    var fogIntensity: Float?
+    // === MODULAR LIGHTING EFFECTS (v2.0) ===
+    // Card-based lighting system with presets
     var lightingMode: LightingMode?
-    var hueCycleSpeed: Float?
-    var pulseSpeed: Float?
-    var pulseAmount: Float?
-    var bloomStrength: Float?
+    var lightingPreset: LightingPreset?
+    var hueRotationEffect: HueRotationEffect?
+    var pulseEffect: PulseEffect?
+    var glowEffect: GlowEffect?
+    var bloomEffect: BloomEffect?
+    var fogEffect: FogEffect?
     
     // === EMISSIVE SETTINGS (new in v1.1) ===
     var emissiveEnabled: Bool?
@@ -69,13 +69,13 @@ struct FractalPreset: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
-        case fractalIterations, maxRaySteps, colorMix, glowIntensity, colorIterations, position, scale
+        case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius
-        // v1.1 lighting & effects
-        case fogIntensity, lightingMode, hueCycleSpeed, pulseSpeed, pulseAmount, bloomStrength
+        // v2.0 modular lighting effects
+        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect
         case emissiveEnabled, emissivePattern, emissiveIntensity, emissiveThreshold, emissiveColor, emissiveSpeed
     }
     
@@ -90,7 +90,6 @@ struct FractalPreset: Codable, Identifiable {
         self.fractalIterations = 9
         self.maxRaySteps = 64
         self.colorMix = 0.5
-        self.glowIntensity = 0.2
         self.colorIterations = 8.0
         self.position = .zero
         self.scale = 1.0
@@ -121,7 +120,6 @@ struct FractalPreset: Codable, Identifiable {
         fractalIterations = try container.decode(Int.self, forKey: .fractalIterations)
         maxRaySteps = try container.decode(Int.self, forKey: .maxRaySteps)
         colorMix = try container.decode(Float.self, forKey: .colorMix)
-        glowIntensity = try container.decode(Float.self, forKey: .glowIntensity)
         colorIterations = try container.decode(Float.self, forKey: .colorIterations)
         position = try container.decode(SIMD3<Float>.self, forKey: .position)
         scale = try container.decode(Float.self, forKey: .scale)
@@ -143,13 +141,14 @@ struct FractalPreset: Codable, Identifiable {
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         
-        // v1.1 lighting & effects
-        fogIntensity = try container.decodeIfPresent(Float.self, forKey: .fogIntensity)
+        // v2.0 modular lighting effects
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
-        hueCycleSpeed = try container.decodeIfPresent(Float.self, forKey: .hueCycleSpeed)
-        pulseSpeed = try container.decodeIfPresent(Float.self, forKey: .pulseSpeed)
-        pulseAmount = try container.decodeIfPresent(Float.self, forKey: .pulseAmount)
-        bloomStrength = try container.decodeIfPresent(Float.self, forKey: .bloomStrength)
+        lightingPreset = try container.decodeIfPresent(LightingPreset.self, forKey: .lightingPreset)
+        hueRotationEffect = try container.decodeIfPresent(HueRotationEffect.self, forKey: .hueRotationEffect)
+        pulseEffect = try container.decodeIfPresent(PulseEffect.self, forKey: .pulseEffect)
+        glowEffect = try container.decodeIfPresent(GlowEffect.self, forKey: .glowEffect)
+        bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
+        fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         
         // v1.1 emissive settings
         emissiveEnabled = try container.decodeIfPresent(Bool.self, forKey: .emissiveEnabled)
@@ -170,7 +169,6 @@ struct FractalPreset: Codable, Identifiable {
         try container.encode(fractalIterations, forKey: .fractalIterations)
         try container.encode(maxRaySteps, forKey: .maxRaySteps)
         try container.encode(colorMix, forKey: .colorMix)
-        try container.encode(glowIntensity, forKey: .glowIntensity)
         try container.encode(colorIterations, forKey: .colorIterations)
         try container.encode(position, forKey: .position)
         try container.encode(scale, forKey: .scale)
@@ -192,13 +190,14 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
         
-        // v1.1 lighting & effects
-        try container.encodeIfPresent(fogIntensity, forKey: .fogIntensity)
+        // v2.0 modular lighting effects
         try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
-        try container.encodeIfPresent(hueCycleSpeed, forKey: .hueCycleSpeed)
-        try container.encodeIfPresent(pulseSpeed, forKey: .pulseSpeed)
-        try container.encodeIfPresent(pulseAmount, forKey: .pulseAmount)
-        try container.encodeIfPresent(bloomStrength, forKey: .bloomStrength)
+        try container.encodeIfPresent(lightingPreset, forKey: .lightingPreset)
+        try container.encodeIfPresent(hueRotationEffect, forKey: .hueRotationEffect)
+        try container.encodeIfPresent(pulseEffect, forKey: .pulseEffect)
+        try container.encodeIfPresent(glowEffect, forKey: .glowEffect)
+        try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
+        try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         
         // v1.1 emissive settings
         try container.encodeIfPresent(emissiveEnabled, forKey: .emissiveEnabled)
@@ -273,7 +272,6 @@ struct FractalPreset: Codable, Identifiable {
         preset.fractalIterations = settings.fractalIterations
         preset.maxRaySteps = settings.maxRaySteps
         preset.colorMix = settings.colorMix
-        preset.glowIntensity = settings.glowIntensity
         preset.colorIterations = settings.colorIterations
         preset.position = settings.position
         preset.scale = settings.scale
@@ -299,13 +297,14 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
         
-        // v1.1 lighting & effects
-        preset.fogIntensity = settings.fogIntensity
+        // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
-        preset.hueCycleSpeed = settings.hueCycleSpeed
-        preset.pulseSpeed = settings.pulseSpeed
-        preset.pulseAmount = settings.pulseAmount
-        preset.bloomStrength = settings.bloomStrength
+        preset.lightingPreset = settings.lightingPreset
+        preset.hueRotationEffect = settings.hueRotationEffect
+        preset.pulseEffect = settings.pulseEffect
+        preset.glowEffect = settings.glowEffect
+        preset.bloomEffect = settings.bloomEffect
+        preset.fogEffect = settings.fogEffect
         
         // v1.1 emissive settings
         preset.emissiveEnabled = settings.emissiveEnabled
@@ -323,7 +322,6 @@ struct FractalPreset: Codable, Identifiable {
         settings.fractalIterations = fractalIterations
         settings.maxRaySteps = maxRaySteps
         settings.colorMix = colorMix
-        settings.glowIntensity = glowIntensity
         settings.colorIterations = colorIterations
         settings.position = position
         settings.scale = scale
@@ -368,24 +366,27 @@ struct FractalPreset: Codable, Identifiable {
             settings.safetyBubbleRadius = safetyBubbleRadius
         }
         
-        // v1.1 lighting & effects
-        if let fogIntensity = fogIntensity {
-            settings.fogIntensity = fogIntensity
-        }
+        // v2.0 modular lighting effects
         if let lightingMode = lightingMode {
             settings.lightingMode = lightingMode
         }
-        if let hueCycleSpeed = hueCycleSpeed {
-            settings.hueCycleSpeed = hueCycleSpeed
+        if let lightingPreset = lightingPreset {
+            settings.lightingPreset = lightingPreset
         }
-        if let pulseSpeed = pulseSpeed {
-            settings.pulseSpeed = pulseSpeed
+        if let hueRotationEffect = hueRotationEffect {
+            settings.hueRotationEffect = hueRotationEffect
         }
-        if let pulseAmount = pulseAmount {
-            settings.pulseAmount = pulseAmount
+        if let pulseEffect = pulseEffect {
+            settings.pulseEffect = pulseEffect
         }
-        if let bloomStrength = bloomStrength {
-            settings.bloomStrength = bloomStrength
+        if let glowEffect = glowEffect {
+            settings.glowEffect = glowEffect
+        }
+        if let bloomEffect = bloomEffect {
+            settings.bloomEffect = bloomEffect
+        }
+        if let fogEffect = fogEffect {
+            settings.fogEffect = fogEffect
         }
         
         // v1.1 emissive settings
@@ -596,7 +597,7 @@ class PresetManager {
         Max Ray Steps: \(preset.maxRaySteps)
         Color Iterations: \(preset.colorIterations)
         Color Mix: \(preset.colorMix)
-        Glow Intensity: \(preset.glowIntensity)
+        Glow Enabled: \(preset.glowEffect?.enabled ?? false)
         ─────────────────────────────────────────
         """)
     }
@@ -628,7 +629,6 @@ class PresetManager {
         preset.fractalIterations = settings.fractalIterations
         preset.maxRaySteps = settings.maxRaySteps
         preset.colorMix = settings.colorMix
-        preset.glowIntensity = settings.glowIntensity
         preset.colorIterations = settings.colorIterations
         preset.position = settings.position
         preset.scale = settings.scale
@@ -654,13 +654,14 @@ class PresetManager {
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
         
-        // v1.1 lighting & effects
-        preset.fogIntensity = settings.fogIntensity
+        // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
-        preset.hueCycleSpeed = settings.hueCycleSpeed
-        preset.pulseSpeed = settings.pulseSpeed
-        preset.pulseAmount = settings.pulseAmount
-        preset.bloomStrength = settings.bloomStrength
+        preset.lightingPreset = settings.lightingPreset
+        preset.hueRotationEffect = settings.hueRotationEffect
+        preset.pulseEffect = settings.pulseEffect
+        preset.glowEffect = settings.glowEffect
+        preset.bloomEffect = settings.bloomEffect
+        preset.fogEffect = settings.fogEffect
         
         // v1.1 emissive settings
         preset.emissiveEnabled = settings.emissiveEnabled
@@ -744,7 +745,6 @@ class PresetManager {
             newPreset.fractalIterations = importedPreset.fractalIterations
             newPreset.maxRaySteps = importedPreset.maxRaySteps
             newPreset.colorMix = importedPreset.colorMix
-            newPreset.glowIntensity = importedPreset.glowIntensity
             newPreset.colorIterations = importedPreset.colorIterations
             newPreset.position = importedPreset.position
             newPreset.scale = importedPreset.scale
@@ -767,13 +767,14 @@ class PresetManager {
             newPreset.colorSchemeHighlights = importedPreset.colorSchemeHighlights
             newPreset.rating = importedPreset.rating
             
-            // v1.1 lighting & effects
-            newPreset.fogIntensity = importedPreset.fogIntensity
+            // v2.0 modular lighting effects
             newPreset.lightingMode = importedPreset.lightingMode
-            newPreset.hueCycleSpeed = importedPreset.hueCycleSpeed
-            newPreset.pulseSpeed = importedPreset.pulseSpeed
-            newPreset.pulseAmount = importedPreset.pulseAmount
-            newPreset.bloomStrength = importedPreset.bloomStrength
+            newPreset.lightingPreset = importedPreset.lightingPreset
+            newPreset.hueRotationEffect = importedPreset.hueRotationEffect
+            newPreset.pulseEffect = importedPreset.pulseEffect
+            newPreset.glowEffect = importedPreset.glowEffect
+            newPreset.bloomEffect = importedPreset.bloomEffect
+            newPreset.fogEffect = importedPreset.fogEffect
             
             // v1.1 emissive settings
             newPreset.emissiveEnabled = importedPreset.emissiveEnabled
@@ -816,17 +817,18 @@ extension PresetManager {
         preset.minDistance = 1.3423144
         preset.colorIterations = 16
         preset.colorMix = 0.45099074
-        preset.glowIntensity = 0.18124515
         preset.scale = 1.0
         preset.position = SIMD3<Float>(0.09840668, 1.4379398, -3.6177335)
         preset.safetyBubbleEnabled = true
         preset.safetyBubbleRadius = 1.8
-        preset.fogIntensity = 0.14822857
+        // v2.0 modular lighting effects
         preset.lightingMode = .staticLight
-        preset.hueCycleSpeed = 0.0
-        preset.pulseSpeed = 0.46227682
-        preset.pulseAmount = 0.1637325
-        preset.bloomStrength = 0.7048401
+        preset.lightingPreset = .atmospheric
+        preset.hueRotationEffect = HueRotationEffect(enabled: false, speed: 0.0, intensity: 0.5)
+        preset.pulseEffect = PulseEffect(enabled: true, speed: 0.46227682, amount: 0.1637325)
+        preset.glowEffect = GlowEffect(enabled: true, intensity: 0.18124515)
+        preset.bloomEffect = BloomEffect(enabled: true, strength: 0.7048401)
+        preset.fogEffect = FogEffect(enabled: true, intensity: 0.14822857)
         preset.emissiveEnabled = true
         preset.emissivePattern = 1
         preset.emissiveIntensity = 0.04231105
@@ -856,17 +858,18 @@ extension PresetManager {
         preset.minDistance = 0.8117829
         preset.colorIterations = 15
         preset.colorMix = 0.61749166
-        preset.glowIntensity = 0.0
         preset.scale = 1.0
         preset.position = SIMD3<Float>(0.10157842, 1.3497616, -3.3686383)
         preset.safetyBubbleEnabled = true
         preset.safetyBubbleRadius = 1.8
-        preset.fogIntensity = 0.14822857
+        // v2.0 modular lighting effects
         preset.lightingMode = .staticLight
-        preset.hueCycleSpeed = 0.059446618
-        preset.pulseSpeed = 0.46227682
-        preset.pulseAmount = 0.1637325
-        preset.bloomStrength = 0.7048401
+        preset.lightingPreset = .subtle
+        preset.hueRotationEffect = HueRotationEffect(enabled: true, speed: 0.059446618, intensity: 0.3)
+        preset.pulseEffect = PulseEffect(enabled: true, speed: 0.46227682, amount: 0.1637325)
+        preset.glowEffect = GlowEffect(enabled: false, intensity: 0.0)
+        preset.bloomEffect = BloomEffect(enabled: true, strength: 0.7048401)
+        preset.fogEffect = FogEffect(enabled: true, intensity: 0.14822857)
         preset.emissiveEnabled = true
         preset.emissivePattern = 0
         preset.emissiveIntensity = 0.04231105
@@ -909,7 +912,7 @@ extension PresetManager {
             orbit.minDistance = 0.7
             orbit.colorIterations = 8
             orbit.colorMix = 0.55
-            orbit.glowIntensity = 0.45
+            orbit.glowEffect = GlowEffect(enabled: true, intensity: 0.45)
             orbit.scale = 1.0
             orbit.position = SIMD3<Float>(0.0, 0.0, -1.4)
             return orbit

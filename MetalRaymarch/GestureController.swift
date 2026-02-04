@@ -250,11 +250,6 @@ final class GestureController {
     // Accumulated position from drag gestures (target position)
     private var accumulatedPosition: SIMD3<Float> = .zero
     
-    // === FIST GESTURE STATE (Left hand - recording) ===
-    private var leftFistActive: Bool = false
-    private let fistActivateThreshold: Float = 0.75   // Must exceed to start fist gesture
-    private let fistReleaseThreshold: Float = 0.5     // Must fall below to end fist gesture
-    
     // === MENU TOGGLE GESTURE STATE (Right hand - middle finger to palm) ===
     private var menuToggleActive: Bool = false
     private var menuToggleCooldown: Float = 0  // Prevent rapid toggling
@@ -263,27 +258,10 @@ final class GestureController {
     private let menuToggleCooldownDuration: Float = 1.0  // 1 second cooldown
     
     // Gesture callbacks
-    var onRecordingToggle: (() -> Void)?
     var onMenuToggle: (() -> Void)?
     
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // GEOMETRY GESTURE ACTIVITY
-    // Indicates if any gesture affecting fractal geometry is currently active.
-    // Used by RenderSettings to track geometry stability state.
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    /// True if any two-hand gesture affecting geometry parameters is active
-    /// Geometry parameters: minDistance (index), foldingLimit (middle), 
-    ///                      sphereRadius (ring), fractalScale (pinky)
-    var isGeometryGestureActive: Bool {
-        indexGestureState.isActive ||   // minDistance
-        middleGestureState.isActive ||  // foldingLimit
-        ringGestureState.isActive ||    // sphereRadius
-        pinkyGestureState.isActive      // fractalScale
-    }
     
     init(renderSettings: RenderSettings) {
         self.renderSettings = renderSettings
@@ -304,7 +282,6 @@ final class GestureController {
         ringGestureState = TwoHandGestureState()
         pinkyGestureState = TwoHandGestureState()
         rightIndexDragActive = false
-        leftFistActive = false
         menuToggleActive = false
         
         if HAND_TRACKING_DEBUG {
@@ -362,7 +339,6 @@ final class GestureController {
         processGestures()
         
         // Process special gestures
-        processLeftFistGesture()
         processMenuToggleGesture()
     }
     
@@ -437,39 +413,6 @@ final class GestureController {
     }
     
     // MARK: - Special Gesture Processing
-    
-    /// Process left hand fist gesture for stochastic rendering toggle
-    private func processLeftFistGesture() {
-        guard leftHand.isTracked else {
-            if leftFistActive {
-                leftFistActive = false
-                print("✊ Left fist: tracking lost")
-            }
-            return
-        }
-        
-        let fistStrength = leftHand.fistStrength()
-        
-        // Check for fist with hysteresis
-        let shouldBeActive: Bool
-        if leftFistActive {
-            shouldBeActive = fistStrength >= fistReleaseThreshold
-        } else {
-            shouldBeActive = fistStrength >= fistActivateThreshold
-        }
-        
-        // Gesture state changed
-        if shouldBeActive && !leftFistActive {
-            // Fist just activated - trigger stochastic rendering toggle
-            leftFistActive = true
-            print("✊ Left fist ACTIVATED - toggling stochastic rendering mode")
-            onRecordingToggle?()
-        } else if !shouldBeActive && leftFistActive {
-            // Fist released
-            leftFistActive = false
-            print("✊ Left fist RELEASED")
-        }
-    }
     
     /// Process right hand middle finger to palm gesture for menu toggle
     private func processMenuToggleGesture() {
@@ -606,12 +549,6 @@ final class GestureController {
         } else {
             settings.gestureSpread = 0
         }
-        
-        // ═══════════════════════════════════════════════════════════════════════════
-        // GEOMETRY STABILITY: Push gesture activity to RenderSettings
-        // This drives the geometry state machine (dynamic → settling → stable)
-        // ═══════════════════════════════════════════════════════════════════════════
-        settings.isGeometryGestureActive = isGeometryGestureActive
         
         // SINGLE-HAND gesture: Right index pinch drag → translate
         processRightIndexDrag()

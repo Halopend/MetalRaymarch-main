@@ -52,31 +52,6 @@ struct DeveloperView: View {
                 }
                 .padding(.bottom, 4)
                 
-                // Render Toggles Section
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "gearshape.2.fill")
-                            .foregroundStyle(themeColor)
-                        Text("Render Options")
-                            .font(.headline)
-                    }
-                    
-                    Toggle(isOn: Binding(
-                        get: { appModel.renderSettings.stableGeometryEnabled },
-                        set: { appModel.renderSettings.stableGeometryEnabled = $0 }
-                    )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Stable Geometry Path")
-                            Text("Temporal accumulation when geometry is static")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .tint(themeColor)
-                }
-                .padding()
-                .background(themeColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                
                 // Quality Settings Section
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {

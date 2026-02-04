@@ -109,13 +109,31 @@ typedef struct
     float glowSharpness;              // How sharp the bright cores are (default 3.0)
     float saturationPower;            // Power for saturation curve, <1 flattens to 1.0 (default 0.4)
     
-    // Dynamic animation parameters
+    // === MODULAR LIGHTING EFFECTS ===
+    // Animation time (shared by all effects)
     float animTime;                   // Current animation time (seconds)
-    float hueCycleSpeed;              // Speed of hue rotation (0 = static, 0.1 = slow)
-    float pulseSpeed;                 // Speed of brightness/saturation pulse (0 = static)
-    float pulseAmount;                // Amount of pulse effect (0-1)
-    float glowIntensity;              // Ray-step based glow intensity (0-1)
-    float bloomStrength;              // Cheap bloom effect strength (0-1)
+    
+    // Hue Rotation Effect - rotates colors through YIQ space
+    int hueRotationEnabled;           // 0 = off, 1 = on
+    float hueRotationSpeed;           // Rotation speed (0-0.5)
+    float hueRotationIntensity;       // Blend intensity (0-1), prevents overpowering
+    
+    // Pulse Effect - rhythmic brightness/saturation variation
+    int pulseEnabled;                 // 0 = off, 1 = on
+    float pulseSpeed;                 // Pulse frequency (0-2)
+    float pulseAmount;                // Pulse intensity (0-1)
+    
+    // Glow Effect - ray-step based inner glow
+    int glowEnabled;                  // 0 = off, 1 = on
+    float glowIntensity;              // Glow brightness (0-1)
+    
+    // Bloom Effect - bright areas bleed
+    int bloomEnabled;                 // 0 = off, 1 = on
+    float bloomStrength;              // Bloom intensity (0-1)
+    
+    // Fog Effect - distance-based atmospheric fog
+    int fogEnabled;                   // 0 = off, 1 = on
+    float fogIntensity;               // Fog density (0-1)
     
     // Animation/transition
     float transitionProgress;         // 0-1: blend from previous to current scheme
@@ -186,15 +204,6 @@ typedef struct
     float maxViewDistance;   // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;     // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;    // Sentinel depth for "no hit" rays (e.g., 2.0)
-    // ═══════════════════════════════════════════════════════════════════════════
-    // GEOMETRY STABILITY STATE
-    // Tracks whether fractal geometry is stable (not changing).
-    // When stable, shaders can use optimized paths like temporal accumulation.
-    // ═══════════════════════════════════════════════════════════════════════════
-    int geometryState;       // 0=dynamic, 1=settling, 2=stable
-    int geometryStableFrames; // Number of frames geometry has been stable
-    float _padding1;         // Alignment padding
-    float _padding2;         // Alignment padding
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
@@ -245,13 +254,6 @@ typedef struct
     float maxViewDistance;       // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;        // Sentinel depth for "no hit" rays (e.g., 2.0)
-    // ═══════════════════════════════════════════════════════════════════════════
-    // GEOMETRY STABILITY STATE
-    // ═══════════════════════════════════════════════════════════════════════════
-    int geometryState;           // 0=dynamic, 1=settling, 2=stable
-    int geometryStableFrames;    // Number of frames geometry has been stable
-    float _padding1;             // Alignment padding
-    float _padding2;             // Alignment padding
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig

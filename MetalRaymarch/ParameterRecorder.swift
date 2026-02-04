@@ -330,7 +330,7 @@ class ParameterRecorder {
             foldingLimit: settings.foldingLimit,
             sphereRadius: settings.sphereRadius,
             colorMix: settings.colorMix,
-            glowIntensity: settings.glowIntensity,
+            glowIntensity: settings.glowEffect.intensity,
             colorIterations: settings.colorIterations,
             colorSchemeVibrance: settings.colorSchemeVibrance,
             colorSchemeCurve: settings.colorSchemeCurve,
@@ -405,7 +405,9 @@ class ParameterRecorder {
             settings.targetSphereRadius = frame.sphereRadius
             settings.fractalScale = frame.fractalScale
             settings.colorMix = frame.colorMix
-            settings.glowIntensity = frame.glowIntensity
+            var glow = settings.glowEffect
+            glow.intensity = frame.glowIntensity
+            settings.glowEffect = glow
             settings.colorIterations = frame.colorIterations
             settings.colorSchemeVibrance = frame.colorSchemeVibrance
             settings.colorSchemeCurve = frame.colorSchemeCurve

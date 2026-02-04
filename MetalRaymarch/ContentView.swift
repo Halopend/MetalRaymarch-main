@@ -36,13 +36,13 @@ final class UISettingsCache {
     var colorSchemeShadows: Float = 0.0
     var colorSchemeHighlights: Float = 0.0
     
-    // Animation
-    var hueCycleSpeed: Float = 0.0
-    var pulseSpeed: Float = 0.0
-    var pulseAmount: Float = 0.0
-    var glowIntensity: Float = 0.0
-    var bloomStrength: Float = 0.0
-    var fogIntensity: Float = 0.32
+    // === MODULAR LIGHTING EFFECTS ===
+    var lightingPreset: LightingPreset = .off
+    var hueRotationEffect: HueRotationEffect = .off
+    var pulseEffect: PulseEffect = .off
+    var glowEffect: GlowEffect = .off
+    var bloomEffect: BloomEffect = .off
+    var fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     
     // Emissive
     var emissiveEnabled: Bool = false
@@ -118,12 +118,12 @@ final class UISettingsCache {
         colorSchemeShadows = settings.colorSchemeShadows
         colorSchemeHighlights = settings.colorSchemeHighlights
         
-        hueCycleSpeed = settings.hueCycleSpeed
-        pulseSpeed = settings.pulseSpeed
-        pulseAmount = settings.pulseAmount
-        glowIntensity = settings.glowIntensity
-        bloomStrength = settings.bloomStrength
-        fogIntensity = settings.fogIntensity
+        lightingPreset = settings.lightingPreset
+        hueRotationEffect = settings.hueRotationEffect
+        pulseEffect = settings.pulseEffect
+        glowEffect = settings.glowEffect
+        bloomEffect = settings.bloomEffect
+        fogEffect = settings.fogEffect
         
         emissiveEnabled = settings.emissiveEnabled
         emissivePattern = settings.emissivePattern
@@ -168,6 +168,16 @@ final class UISettingsCache {
     func pushColorScheme(_ scheme: ColorScheme) {
         settings?.transitionToColorScheme(scheme)
         colorScheme = scheme
+    }
+    
+    /// Reload lighting effect values from settings (call after changing lighting preset)
+    func reloadLightingEffects() {
+        guard let settings = settings else { return }
+        hueRotationEffect = settings.hueRotationEffect
+        pulseEffect = settings.pulseEffect
+        glowEffect = settings.glowEffect
+        bloomEffect = settings.bloomEffect
+        fogEffect = settings.fogEffect
     }
 }
 
@@ -614,42 +624,12 @@ struct ContentView: View {
                                 
                                 Divider()
                                 
-                                // === DYNAMIC LIGHTING / ANIMATION ===
-                                Text("Lighting Animation").font(.headline)
-                                
-                                Text("Hue Cycle Speed: \(cache.hueCycleSpeed, specifier: "%.3f")")
-                                Slider(value: $cache.hueCycleSpeed, in: 0...0.5, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.hueCycleSpeed, value: cache.hueCycleSpeed) }
-                                })
-                                
-                                Text("Pulse Speed: \(cache.pulseSpeed, specifier: "%.2f")")
-                                Slider(value: $cache.pulseSpeed, in: 0...2, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.pulseSpeed, value: cache.pulseSpeed) }
-                                })
-                                
-                                Text("Pulse Amount: \(cache.pulseAmount, specifier: "%.2f")")
-                                Slider(value: $cache.pulseAmount, in: 0...1, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.pulseAmount, value: cache.pulseAmount) }
-                                })
-                                
-                                Text("Glow Intensity: \(cache.glowIntensity, specifier: "%.2f")")
-                                Slider(value: $cache.glowIntensity, in: 0...1, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.glowIntensity, value: cache.glowIntensity) }
-                                })
-                                
-                                Text("Bloom Strength: \(cache.bloomStrength, specifier: "%.2f")")
-                                Slider(value: $cache.bloomStrength, in: 0...1, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.bloomStrength, value: cache.bloomStrength) }
-                                })
-                                
-                                Text("Fog Intensity: \(cache.fogIntensity, specifier: "%.2f")")
-                                Slider(value: $cache.fogIntensity, in: 0...1, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.fogIntensity, value: cache.fogIntensity) }
-                                })
+                                // === MODULAR LIGHTING EFFECTS ===
+                                LightingEffectsSection(cache: $cache)
                                 
                                 Divider()
                                 
-                                // === EMISSIVE GLOW ===
+                                // === EMISSIVE GLOW (Self-Illumination) ===
                                 Text("Emissive Glow").font(.headline)
                                 
                                 Toggle("Enable Emissive", isOn: $cache.emissiveEnabled)

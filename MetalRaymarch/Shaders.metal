@@ -769,71 +769,86 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 // =============================================================================
 
 // Post effects with color scheme support and dynamic animation
-// OPTIMIZATION: Made branchless for better GPU occupancy
+// OPTIMIZATION: Now properly skips disabled effects using branches (cleaner than branchless)
 half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half limitFlash = 0.0h, half rayGlow = 0.0h)
 {
-    // === DYNAMIC HUE CYCLING (BRANCHLESS) ===
-    // Always compute but multiply by active mask; when speed=0, angle=0, cos=1, sin=0 -> identity transform
-    float rawAngle = scheme.animTime * scheme.hueCycleSpeed * 6.28318f;
-    float wrappedAngle = fmod(rawAngle, 6.28318f);
-    half hueAngle = half(wrappedAngle);
-    half cosH = cos(hueAngle);
-    half sinH = sin(hueAngle);
-    // YIQ transform (identity when angle=0: cos=1, sin=0)
-    half3 yiq;
-    yiq.x = dot(rgb, half3(0.299h, 0.587h, 0.114h));
-    yiq.y = dot(rgb, half3(0.596h, -0.274h, -0.322h));
-    yiq.z = dot(rgb, half3(0.211h, -0.523h, 0.312h));
-    half newY = fma(yiq.y, cosH, -yiq.z * sinH);
-    half newZ = fma(yiq.y, sinH, yiq.z * cosH);
-    rgb.r = fma(0.956h, newY, fma(0.621h, newZ, yiq.x));
-    rgb.g = fma(-0.272h, newY, fma(-0.647h, newZ, yiq.x));
-    rgb.b = fma(-1.106h, newY, fma(1.703h, newZ, yiq.x));
-    rgb = saturate(rgb);
+    // === DYNAMIC HUE CYCLING (OPTIONAL EFFECT WITH INTENSITY CONTROL) ===
+    // Only process if enabled - uses YIQ color space rotation
+    // Intensity parameter allows blending rotated color back with original to prevent overpowering
+    if (scheme.hueRotationEnabled) {
+        float rawAngle = scheme.animTime * scheme.hueRotationSpeed * 6.28318f;
+        float wrappedAngle = fmod(rawAngle, 6.28318f);
+        half hueAngle = half(wrappedAngle);
+        half cosH = cos(hueAngle);
+        half sinH = sin(hueAngle);
+        
+        // Convert RGB to YIQ
+        half3 yiq;
+        yiq.x = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+        yiq.y = dot(rgb, half3(0.596h, -0.274h, -0.322h));
+        yiq.z = dot(rgb, half3(0.211h, -0.523h, 0.312h));
+        
+        // Rotate I and Q components
+        half newY = fma(yiq.y, cosH, -yiq.z * sinH);
+        half newZ = fma(yiq.y, sinH, yiq.z * cosH);
+        
+        // Convert back to RGB
+        half3 rotated;
+        rotated.r = fma(0.956h, newY, fma(0.621h, newZ, yiq.x));
+        rotated.g = fma(-0.272h, newY, fma(-0.647h, newZ, yiq.x));
+        rotated.b = fma(-1.106h, newY, fma(1.703h, newZ, yiq.x));
+        rotated = saturate(rotated);
+        
+        // Blend rotated with original based on intensity
+        rgb = mix(rgb, rotated, half(scheme.hueRotationIntensity));
+    }
     
-    // === COMBINED COLOR GRADING PASS ===
-    // OPTIMIZATION: Branchless operations - GPU executes all lanes uniformly
-    // All effects are always computed but multiplied by active mask (0 or 1)
+    // === PULSE EFFECT (OPTIONAL) ===
+    // Rhythmic brightness and saturation variation
+    half pulse = 1.0h;
+    if (scheme.pulseEnabled) {
+        float rawPulseAngle = scheme.animTime * scheme.pulseSpeed * 6.28318f;
+        half pulseWave = 0.5h + 0.5h * sin(half(fmod(rawPulseAngle, 6.28318f)));
+        pulse = 1.0h + half(scheme.pulseAmount) * (pulseWave - 0.5h);
+    }
     
-    // --- Pulse animation (branchless) ---
-    // Use float precision for time, compute pulse wave unconditionally
-    float rawPulseAngle = scheme.animTime * scheme.pulseSpeed * 6.28318f;
-    half pulseWave = 0.5h + 0.5h * sin(half(fmod(rawPulseAngle, 6.28318f)));
-    half pulseActive = step(0.001h, half(scheme.pulseSpeed * scheme.pulseAmount));
-    half pulse = 1.0h + pulseActive * half(scheme.pulseAmount) * (pulseWave - 0.5h);
-    
-    // --- Saturation with pulse ---
+    // === SATURATION WITH PULSE ===
     half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
     half satMult = half(scheme.saturation) * pulse;
     rgb = mix(half3(luma), rgb, satMult);
     
-    // --- Brightness and contrast (always applied) ---
+    // === BRIGHTNESS AND CONTRAST (ALWAYS APPLIED) ===
     rgb = fma(rgb - half3(0.5h), half3(scheme.contrast), half3(0.5h + scheme.brightness));
     
-    // --- Ray-step glow (branchless) ---
-    half glowAmount = rayGlow * half(scheme.glowIntensity);
-    half glowActive = step(0.01h, rayGlow) * step(0.001h, half(scheme.glowIntensity));
-    half3 glowColor = rgb * fma(glowAmount, 2.0h, 1.0h);
-    rgb = mix(rgb, glowColor, glowActive * glowAmount * 0.5h);
+    // === GLOW EFFECT (OPTIONAL) ===
+    if (scheme.glowEnabled) {
+        half glowAmount = rayGlow * half(scheme.glowIntensity);
+        if (glowAmount > 0.01h) {
+            half3 glowColor = rgb * fma(glowAmount, 2.0h, 1.0h);
+            rgb = mix(rgb, glowColor, glowAmount * 0.5h);
+        }
+    }
     
-    // --- Bloom (branchless) ---
-    half brightness = dot(rgb, half3(0.299h, 0.587h, 0.114h));
-    half bloomAmount = max(0.0h, brightness - 0.7h) * half(scheme.bloomStrength);
-    rgb = fma(half3(0.3h, 0.3h, 0.35h), half3(bloomAmount), rgb);
+    // === BLOOM EFFECT (OPTIONAL) ===
+    if (scheme.bloomEnabled) {
+        half brightness = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+        half bloomAmount = max(0.0h, brightness - 0.7h) * half(scheme.bloomStrength);
+        rgb = fma(half3(0.3h, 0.3h, 0.35h), half3(bloomAmount), rgb);
+    }
     
-    // --- Highlights/exposure (branchless - multiply is cheap) ---
+    // === HIGHLIGHTS/EXPOSURE (ALWAYS APPLIED) ===
     rgb *= half(1.0f + scheme.highlights);
     
-    // --- Vibrance (branchless - always compute, zero if inactive) ---
+    // === VIBRANCE (ALWAYS APPLIED) ===
     half maxChannel = max(rgb.r, max(rgb.g, rgb.b));
     half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance);
     half luma2 = dot(rgb, half3(0.299h, 0.587h, 0.114h));
     rgb = mix(half3(luma2), rgb, 1.0h + vibranceBoost);
     
-    // --- Shadows lift/crush (branchless) ---
+    // === SHADOWS LIFT/CRUSH (ALWAYS APPLIED) ===
     rgb = fma(half3(scheme.shadows), 1.0h - rgb, rgb);
     
-    // --- Midtone S-curve (branchless with safe fallback) ---
+    // === MIDTONE S-CURVE (ALWAYS APPLIED) ===
     // When colorCurve is 0, exponent becomes 1.0 (identity transform)
     half curve = half(scheme.colorCurve);
     half exponent = 1.0h / (1.0h + curve * 0.7h);

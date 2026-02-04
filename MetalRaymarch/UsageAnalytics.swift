@@ -201,7 +201,7 @@ class UsageAnalytics: ObservableObject {
         sphereRadiusAccum += settings.sphereRadius * dtf
         minDistanceAccum += settings.minDistance * dtf
         colorMixAccum += settings.colorMix * dtf
-        glowIntensityAccum += settings.glowIntensity * dtf
+        glowIntensityAccum += settings.glowEffect.intensity * dtf
         safetyBubbleRadiusAccum += settings.safetyBubbleRadius * dtf
         fpsAccum += Float(fps) * dtf
         renderQualityAccum += settings.currentRenderQuality * dtf
@@ -306,9 +306,9 @@ class UsageAnalytics: ObservableObject {
         record["fractalIterations"] = preset.fractalIterations as NSNumber
         
         // Effects
-        record["glowIntensity"] = preset.glowIntensity as NSNumber
-        record["fogIntensity"] = (preset.fogIntensity ?? 0.5) as NSNumber
-        record["bloomStrength"] = (preset.bloomStrength ?? 0.0) as NSNumber
+        record["glowIntensity"] = (preset.glowEffect?.intensity ?? 0.0) as NSNumber
+        record["fogIntensity"] = (preset.fogEffect?.intensity ?? 0.5) as NSNumber
+        record["bloomStrength"] = (preset.bloomEffect?.strength ?? 0.0) as NSNumber
         
         // Emissive
         record["emissiveEnabled"] = (preset.emissiveEnabled ?? false) ? 1 : 0
@@ -317,8 +317,8 @@ class UsageAnalytics: ObservableObject {
         
         // Lighting
         record["lightingMode"] = preset.lightingMode?.displayName ?? "Animated"
-        record["hueCycleSpeed"] = (preset.hueCycleSpeed ?? 0.0) as NSNumber
-        record["pulseSpeed"] = (preset.pulseSpeed ?? 0.0) as NSNumber
+        record["hueCycleSpeed"] = (preset.hueRotationEffect?.speed ?? 0.0) as NSNumber
+        record["pulseSpeed"] = (preset.pulseEffect?.speed ?? 0.0) as NSNumber
         
         // Position (useful to see if people explore far from origin)
         record["positionX"] = preset.position.x as NSNumber
