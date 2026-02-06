@@ -254,6 +254,12 @@ typedef struct
     float maxViewDistance;       // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;        // Sentinel depth for "no hit" rays (e.g., 2.0)
+    // === TEMPORAL REPROJECTION ===
+    matrix_float4x4 currentViewProjMatrix;   // Current frame: modelView * projection (for depth write)
+    matrix_float4x4 previousViewProjMatrix;  // Previous frame: modelView * projection (for reprojection)
+    matrix_float4x4 currentInvViewProjMatrix; // Inverse of currentViewProjMatrix (pixel → model space)
+    int temporalReprojectionEnabled;         // 0 = off (first frame / parameter change), 1 = on
+    float pad_temporal[3];                   // Align to 16 bytes
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig

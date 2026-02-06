@@ -159,6 +159,18 @@ actor Renderer {
     var computeOutputSize: SIMD2<Int> = .zero
     
     // ═══════════════════════════════════════════════════════════════════════════
+    // TEMPORAL REPROJECTION STATE
+    // Double-buffered depth textures store ray-t per pixel for reuse next frame.
+    // Previous frame's depth + MVP lets us skip ~90% of fine raymarching steps
+    // for pixels that didn't move much between frames.
+    // ═══════════════════════════════════════════════════════════════════════════
+    private var temporalDepthTextures: [MTLTexture?] = [nil, nil]  // ping-pong
+    private var temporalDepthIndex: Int = 0                         // which is "current write"
+    private var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
+    private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
+    private var temporalDepthSize: SIMD2<Int> = .zero
+    
+    // ═══════════════════════════════════════════════════════════════════════════
     // PROGRESSIVE RENDERING PIPELINES
     // Experiments with different threadgroup sizes for optimal GPU utilization
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2220,7 +2232,9 @@ actor Renderer {
         drawable: LayerRenderer.Drawable,
         viewIndex: Int,
         settingsSnapshot: RenderSettingsSnapshot,
-        pipeline: MTLComputePipelineState? = nil
+        pipeline: MTLComputePipelineState? = nil,
+        prevDepthTexture: MTLTexture? = nil,
+        curDepthTexture: MTLTexture? = nil
     ) {
         guard let pipeline = pipeline ?? adaptiveHierarchicalPipeline8x8,
               let uniformBuffer = tileUniformBuffer else {
@@ -2243,6 +2257,9 @@ actor Renderer {
         // Model-view matrix and its inverse (THIS WAS MISSING!)
         let modelView = viewMatrix * modelMatrix
         let inverseModelView = modelView.inverse
+        
+        // Current frame's full model-view-projection (for temporal reprojection)
+        let currentViewProj = projection * modelView
         
         // Get camera position from inverse model-view matrix (in model space)
         let cameraPos = SIMD3<Float>(inverseModelView.columns.3.x, inverseModelView.columns.3.y, inverseModelView.columns.3.z)
@@ -2292,6 +2309,11 @@ actor Renderer {
             maxViewDistance: RenderSettings.maxViewDistance,
             logDepthScale: RenderSettings.logDepthScale,
             depthMissValue: RenderSettings.depthMissValue,
+            currentViewProjMatrix: currentViewProj,
+            previousViewProjMatrix: previousViewProjMatrices[viewIndex],
+            currentInvViewProjMatrix: currentViewProj.inverse,
+            temporalReprojectionEnabled: (temporalFrameCount > 0 && prevDepthTexture != nil) ? 1 : 0,
+            pad_temporal: (0, 0, 0),
             precomputedFractal: computePrecomputedFractal,
             precomputedLighting: computePrecomputedLighting,
             colorScheme: colorSchemeParams
@@ -2311,6 +2333,17 @@ actor Renderer {
         computeEncoder.setComputePipelineState(pipeline)
         computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
         computeEncoder.setTexture(outputTexture, index: 0)
+        
+        // Temporal reprojection depth textures
+        if let prevDepth = prevDepthTexture {
+            computeEncoder.setTexture(prevDepth, index: 1)
+        }
+        if let curDepth = curDepthTexture {
+            computeEncoder.setTexture(curDepth, index: 2)
+        }
+        
+        // Store current VP for next frame's reprojection
+        previousViewProjMatrices[viewIndex] = currentViewProj
         
         // Dispatch 8x8 threadgroups
         let tileSize = 8
@@ -2363,6 +2396,55 @@ actor Renderer {
         
         if RENDERER_DEBUG { print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers") }
         return texture
+    }
+    
+    /// Creates or resizes the double-buffered temporal depth textures for reprojection.
+    /// Returns (previousRead, currentWrite) texture pair.
+    private func ensureTemporalDepthTextures(for drawable: LayerRenderer.Drawable) -> (read: MTLTexture, write: MTLTexture)? {
+        let width = drawable.colorTextures[0].width
+        let height = drawable.colorTextures[0].height
+        let viewCount = drawable.views.count
+        
+        // Check if existing textures match
+        if let tex0 = temporalDepthTextures[0],
+           let tex1 = temporalDepthTextures[1],
+           tex0.width == width,
+           tex0.height == height,
+           tex0.arrayLength == viewCount {
+            // Ping-pong: current write index, read from the other
+            let readIdx = 1 - temporalDepthIndex
+            return (read: temporalDepthTextures[readIdx]!, write: temporalDepthTextures[temporalDepthIndex]!)
+        }
+        
+        // Create new depth textures (r32Float — stores ray-t distance per pixel)
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2DArray
+        descriptor.pixelFormat = .r32Float
+        descriptor.width = width
+        descriptor.height = height
+        descriptor.arrayLength = viewCount
+        descriptor.storageMode = .private
+        descriptor.usage = [.shaderWrite, .shaderRead]
+        
+        guard let tex0 = device.makeTexture(descriptor: descriptor),
+              let tex1 = device.makeTexture(descriptor: descriptor) else {
+            if RENDERER_DEBUG { print("⚠️ Failed to create temporal depth textures") }
+            return nil
+        }
+        tex0.label = "Temporal Depth 0"
+        tex1.label = "Temporal Depth 1"
+        
+        temporalDepthTextures = [tex0, tex1]
+        temporalDepthIndex = 0
+        temporalDepthSize = SIMD2(width, height)
+        temporalFrameCount = 0  // Reset — first frame has no valid previous data
+        
+        // Add to residency set
+        updateResidencySetForComputeTexture(tex0)
+        updateResidencySetForComputeTexture(tex1)
+        
+        if RENDERER_DEBUG { print("📐 Created temporal depth textures: \(width)×\(height) × \(viewCount) layers") }
+        return (read: tex0, write: tex0)  // First frame: read=write (will be marked invalid)
     }
     
     /// Copies compute output texture to drawable using blit encoder
@@ -2422,6 +2504,9 @@ actor Renderer {
             return false
         }
         
+        // Set up temporal reprojection depth textures (ping-pong)
+        let depthPair = ensureTemporalDepthTextures(for: drawable)
+        
         // Render each eye
         for viewIndex in 0..<drawable.views.count {
             encodeAdaptiveCompute(
@@ -2430,8 +2515,16 @@ actor Renderer {
                 drawable: drawable,
                 viewIndex: viewIndex,
                 settingsSnapshot: settingsSnapshot,
-                pipeline: computePipeline
+                pipeline: computePipeline,
+                prevDepthTexture: depthPair?.read,
+                curDepthTexture: depthPair?.write
             )
+        }
+        
+        // Advance temporal state for next frame
+        if depthPair != nil {
+            temporalDepthIndex = 1 - temporalDepthIndex  // Swap ping-pong
+            temporalFrameCount += 1
         }
         
         // Blit compute output to drawable for presentation

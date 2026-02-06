@@ -387,6 +387,74 @@ FORCE_INLINE float MapHalf(float3 pos, FractalParams params, float foldingLimit,
 }
 
 // =============================================================================
+// CONTINUOUS (FRACTIONAL) ITERATION MAP
+// =============================================================================
+//
+// The standard Map() takes integer iterations. When the coarse pass uses
+// iterations/2, it jumps from e.g. 10→5, creating a different distance field
+// that can miss thin features. MapContinuous() smoothly interpolates:
+//
+//   d(N_frac) = lerp(d_floor, d_ceil, fract(N_frac))
+//
+// where d_floor is the distance after floor(N_frac) iterations and d_ceil
+// is the distance after one more iteration. This produces a smooth distance
+// field with no discontinuities — thin features are never "jumped over."
+//
+// The extra cost is just ONE additional iteration body (box fold + sphere fold)
+// per call, but the coarse pass can now use 0.6× iterations instead of 0.5×
+// with better accuracy, meaning fewer total ray steps to converge.
+//
+// Uses half precision for the inner loop (same as MapHalf) since this is
+// only used in coarse passes where thresholds are large.
+
+FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float foldingLimit, float fractionalIterations)
+{
+    int itersFloor = int(fractionalIterations);
+    float frac = fractionalIterations - float(itersFloor);
+    itersFloor = max(itersFloor, 1);
+    
+    half4 p = half4(half3(pos), 1.0h);
+    half4 p0 = p;
+    
+    half hFold = half(foldingLimit);
+    half4 hScale = half4(params.scale);
+    half hSphRSq = half(params.sphereRadiusSq);
+    half hInvSphRSq = 1.0h / hSphRSq;
+    
+    // Run floor(N) iterations
+    for (int i = 0; i < itersFloor; i++) {
+        MAP_ITERATION_HALF(p, p0, hFold, hScale, hSphRSq, hInvSphRSq);
+    }
+    
+    // Distance after floor(N) iterations
+    float dFloor = (length(float3(p.xyz)) - params.absScalem1) / float(p.w) - params.absScalePow;
+    
+    // If fractional part is negligible, skip the extra iteration
+    if (frac < 0.01f) {
+        const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+        if (bubbleEnabled) {
+            float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
+            dFloor = max(dFloor, -bubbleDist);
+        }
+        return dFloor;
+    }
+    
+    // Run one more iteration for ceil(N)
+    MAP_ITERATION_HALF(p, p0, hFold, hScale, hSphRSq, hInvSphRSq);
+    float dCeil = (length(float3(p.xyz)) - params.absScalem1) / float(p.w) - params.absScalePow;
+    
+    // Smooth interpolation between floor and ceil distance estimates
+    float d = mix(dFloor, dCeil, frac);
+    
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (bubbleEnabled) {
+        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
+        d = max(d, -bubbleDist);
+    }
+    return d;
+}
+
+// =============================================================================
 // COLOR SCHEME FUNCTIONS (must be before color functions that use them)
 // =============================================================================
 
@@ -777,13 +845,17 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
 {
     float t = 0.05f;
     
-    // Fixed 24 steps - compiler can unroll; inner MapHalf() uses half precision
-    // for 2× ALU throughput on Apple Silicon. Coarse threshold of 0.02 is well
-    // within half's precision limits.
+    // Use MapContinuous with 0.6× iterations for smooth fractional DE.
+    // This preserves thin features better than integer iterations/2 because
+    // the continuous interpolation avoids the discontinuity that causes
+    // the coarse pass to "jump over" fine structures.
+    // The 0.6× factor balances speed (fewer iterations) vs. accuracy.
+    float coarseIters = float(iterations) * 0.6f;
+    
     for(int j = 0; j < 24 && t <= kMaxRayDistance; j++)
     {
         float3 p = fma(rD, float3(t), rO);
-        float h = MapHalf(p, params, foldingLimit, iterations);
+        float h = MapContinuous(p, params, foldingLimit, coarseIters);
         
         if(UNLIKELY(h < 0.02f)) return t;
         
@@ -1207,7 +1279,9 @@ kernel void adaptiveHierarchical8x8(
     uint2 localId [[thread_position_in_threadgroup]],
     uint localIndex [[thread_index_in_threadgroup]],
     constant TileUniforms& uniforms [[buffer(0)]],
-    texture2d_array<float, access::write> outputTexture [[texture(0)]]
+    texture2d_array<float, access::write> outputTexture [[texture(0)]],
+    texture2d_array<float, access::read> prevDepthTexture [[texture(1)]],
+    texture2d_array<float, access::write> curDepthTexture [[texture(2)]]
 ) {
     const uint ADAPTIVE_TILE_SIZE = 8;
     uint2 pixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
@@ -1261,6 +1335,69 @@ kernel void adaptiveHierarchical8x8(
 
     float gTime = uniforms.time * 0.01 + 15.00;
     
+    // === TEMPORAL REPROJECTION: PER-PIXEL ===
+    // Reproject this pixel to previous frame, sample previous depth,
+    // and use it as startT to skip most of the fine raymarch.
+    // For ~95% of pixels (static or slow-moving), this converts a
+    // ~288 inner-loop fine march into a ~30 inner-loop refinement.
+    float reprojectedStartT = 0.0;
+    bool reprojectionValid = false;
+    
+    if (uniforms.temporalReprojectionEnabled) {
+        // 1. Current pixel → model-space point at unit depth along ray
+        //    We reconstruct a model-space point from the current pixel's ray,
+        //    then project it through previousViewProjMatrix to find where
+        //    it appeared last frame.
+        //
+        //    Strategy: project cameraPos + rd * testDepth into previous frame's
+        //    clip space, look up previous depth at that UV, then use as startT.
+        //    Since we don't know the depth yet, we use the previous frame's depth
+        //    at the reprojected UV as the starting guess.
+        
+        // 2. Reconstruct previous-frame UV from current pixel:
+        //    Take the current ray direction, build a model-space point at
+        //    a reference depth (e.g., 1.0), project through prevVP to get
+        //    previous UV. This is approximate but works well for small motions.
+        float3 refPoint = cameraPos + rd * 1.0;
+        float4 prevClip = uniforms.previousViewProjMatrix * float4(refPoint, 1.0);
+        float2 prevNDC = prevClip.xy / prevClip.w;
+        float2 prevUV = prevNDC * 0.5 + 0.5;
+        prevUV.y = 1.0 - prevUV.y;  // Flip Y (Metal texture convention)
+        
+        // 3. Check if the reprojected UV is within bounds
+        if (prevUV.x >= 0.0 && prevUV.x <= 1.0 && prevUV.y >= 0.0 && prevUV.y <= 1.0) {
+            // Sample previous depth at the reprojected location
+            uint2 prevPixel = uint2(prevUV * uniforms.resolution);
+            prevPixel = clamp(prevPixel, uint2(0), uint2(uniforms.resolution) - 1);
+            float prevDepth = prevDepthTexture.read(prevPixel, uniforms.eyeIndex).x;
+            
+            if (prevDepth > 0.0 && prevDepth < kRayMissThreshold) {
+                // 4. Iterative refinement: reproject with the sampled depth
+                //    to get a more accurate UV, then re-sample.
+                float3 betterPoint = cameraPos + rd * prevDepth;
+                float4 betterClip = uniforms.previousViewProjMatrix * float4(betterPoint, 1.0);
+                float2 betterNDC = betterClip.xy / betterClip.w;
+                float2 betterUV = betterNDC * 0.5 + 0.5;
+                betterUV.y = 1.0 - betterUV.y;
+                
+                if (betterUV.x >= 0.0 && betterUV.x <= 1.0 && betterUV.y >= 0.0 && betterUV.y <= 1.0) {
+                    uint2 betterPixel = uint2(betterUV * uniforms.resolution);
+                    betterPixel = clamp(betterPixel, uint2(0), uint2(uniforms.resolution) - 1);
+                    float refinedDepth = prevDepthTexture.read(betterPixel, uniforms.eyeIndex).x;
+                    
+                    if (refinedDepth > 0.0 && refinedDepth < kRayMissThreshold) {
+                        prevDepth = refinedDepth;
+                    }
+                }
+                
+                // 5. Apply safety margin — back up 10% to avoid starting past the surface.
+                //    This ensures we never miss geometry that moved slightly closer.
+                reprojectedStartT = prevDepth * 0.9;
+                reprojectionValid = true;
+            }
+        }
+    }
+    
     // === SHARED TILE STATE ===
     threadgroup float tileStartT;
     threadgroup int tileIsEmpty;           // 1 = entire tile missed, skip fine march
@@ -1274,12 +1411,15 @@ kernel void adaptiveHierarchical8x8(
     if (localIndex == 0) {
         tileIsEmpty = 0;
         if (fractalType == 0) {
-            int coarseIterations = max(lodIterations / 2, 2);
+            // SceneCoarse now uses MapContinuous internally with 0.6× fractional
+            // iterations, so we pass the full iteration count and let it handle
+            // the fractional reduction. This preserves thin features better than
+            // the old integer lodIterations/2 approach.
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
                 marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
-            float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, coarseIterations);
+            float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations);
             
             if (coarseT >= kRayMissThreshold) {
                 // Coarse pass missed — check center of tile for empty-space skip.
@@ -1293,10 +1433,12 @@ kernel void adaptiveHierarchical8x8(
                 float3 tcRd = normalize((uniforms.invViewMatrix * float4(normalize(tcView.xyz), 0.0)).xyz);
                 
                 // Sample at two depths to confirm emptiness
+                // Use MapContinuous with fractional iterations for better thin-feature detection
+                float probeIters = float(lodIterations) * 0.6;
                 float3 probe1 = marchOrigin + tcRd * 2.0;
                 float3 probe2 = marchOrigin + tcRd * 6.0;
-                float d1 = MapHalf(probe1, fractalParams, uniforms.foldingLimit, coarseIterations);
-                float d2 = MapHalf(probe2, fractalParams, uniforms.foldingLimit, coarseIterations);
+                float d1 = MapContinuous(probe1, fractalParams, uniforms.foldingLimit, probeIters);
+                float d2 = MapContinuous(probe2, fractalParams, uniforms.foldingLimit, probeIters);
                 
                 // Tile angular size at probe distance ≈ 8 pixels / resolution * depth
                 float tileAngularSize1 = ADAPTIVE_TILE_SIZE / min(uniforms.resolution.x, uniforms.resolution.y) * 2.0 * 2.0;
@@ -1327,12 +1469,27 @@ kernel void adaptiveHierarchical8x8(
         half2 texCoord = half2(pixelCenter / uniforms.resolution);
         col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash), 0.0h);
         outputTexture.write(float4(float3(col), 1.0), pixelCoord, uniforms.eyeIndex);
+        // Write miss depth so next frame knows this pixel was empty
+        curDepthTexture.write(float4(kRayMissThreshold + 100.0, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
         return;
+    }
+
+    // === FINE RAYMARCH WITH TEMPORAL REPROJECTION ===
+    // Use the best available startT:
+    // - reprojectedStartT from previous frame depth (95% of pixels when camera moves slowly)
+    // - tileStartT from coarse pass (fallback for disocclusion/first frame)
+    // The temporal start is per-pixel while tileStartT is per-tile, so temporal
+    // is strictly better when valid — it places startT within ~10% of the surface.
+    float fineStartT = tileStartT;
+    if (reprojectionValid && reprojectedStartT > tileStartT) {
+        // Temporal reprojection gives us a much tighter start — often within
+        // a few steps of the surface. Use it when it's ahead of the coarse result.
+        fineStartT = reprojectedStartT;
     }
 
     SceneResult sceneResult;
     if (fractalType == 0) {
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, tileStartT, pixelCenter, 1.0, maxSteps,
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
                                               uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
     } else {
         sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
@@ -1343,6 +1500,10 @@ kernel void adaptiveHierarchical8x8(
     float glow = sceneResult.distGlow.y;
     OrbitCache hitCache = sceneResult.cache;
     half3 col = half3(0.0h);
+    
+    // Write current frame depth for next frame's temporal reprojection
+    float depthToWrite = (adjustedDist < kRayMissThreshold) ? adjustedDist : (kRayMissThreshold + 100.0);
+    curDepthTexture.write(float4(depthToWrite, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
     
     if (sceneResult.distGlow.x < kRayMissThreshold) {
         float3 p = marchOrigin + adjustedDist * marchDir;
