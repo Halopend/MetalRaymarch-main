@@ -140,6 +140,13 @@ actor Renderer {
     /// Unified pipeline cache - all specialized pipelines keyed by function constant signature
     private var pipelineCache: [String: MTLRenderPipelineState] = [:]
     
+    /// Compute pipeline cache - specialized compute kernels keyed by "FI{n}_RS{n}"
+    /// Mirrors the render pipeline cache but for the adaptive hierarchical compute path.
+    /// Each entry has Map()/Shadow loops fully unrolled for that iteration count.
+    private var computePipelineCache: [String: MTLComputePipelineState] = [:]
+    /// Track last compute pipeline key to avoid log spam
+    private var lastComputePipelineKey: String = ""
+    
     // Cached constant matrices (computed once, reused every frame)
     private let cachedRotationMatrix: matrix_float4x4
     
@@ -357,34 +364,38 @@ actor Renderer {
         do {
             let library = device.makeDefaultLibrary()!
             
-            // Create specialized function constants for compute kernels
-            // Known iteration count enables Map() loop auto-unrolling
-            let computeConstants = MTLFunctionConstantValues()
-            var fractalIters: Int32 = 6  // Default fractal iterations
-            var shadowIters: Int32 = 4   // Default shadow iterations
-            var maxRaySteps: Int32 = 32  // Default max ray steps
-            var noSafetyBubble: Bool = false
-            var noDebug: Bool = false
-            var noHUD: Bool = false       // Compute doesn't need HUD
-            var noEmissive: Bool = false  // Compile out emissive for compute
-            var noNeon: Bool = false      // Compile out neon for compute
-            computeConstants.setConstantValue(&fractalIters, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
-            computeConstants.setConstantValue(&shadowIters, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
-            computeConstants.setConstantValue(&maxRaySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
-            computeConstants.setConstantValue(&noSafetyBubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
-            computeConstants.setConstantValue(&noDebug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
-            computeConstants.setConstantValue(&noHUD, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
-            computeConstants.setConstantValue(&noEmissive, type: .bool, index: FunctionConstantIndex.emissiveEnabled.rawValue)
-            computeConstants.setConstantValue(&noNeon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
-            
-            // Adaptive 8x8 hierarchical kernel (3-level cascade, 3-8x speedup) - with function constants
-            if let kernel8x8 = try? library.makeFunction(name: "adaptiveHierarchical8x8", constantValues: computeConstants) {
-                adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
-                if RENDERER_DEBUG { print("✓ Adaptive 8x8 hierarchical pipeline specialized with function constants") }
-            } else if let kernel8x8 = library.makeFunction(name: "adaptiveHierarchical8x8") {
-                adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
-                if RENDERER_DEBUG { print("✓ Adaptive 8x8 hierarchical pipeline ready (3-level cascade)") }
+            // === COMPUTE PIPELINE CACHE ===
+            // Build specialized compute pipelines for each quality preset.
+            // Each pipeline bakes FC_FRACTAL_ITERATIONS / FC_SHADOW_ITERATIONS / FC_MAX_RAY_STEPS
+            // so the Map() inner loop is fully unrolled per iteration count.
+            if RENDERER_DEBUG { print("Building specialized compute pipelines for \(QualityPreset.allCases.count) quality presets...") }
+            var computeBuilt = 0
+            for preset in QualityPreset.allCases {
+                let fi = Int32(preset.fractalIterations)
+                let rs = Int32(preset.raySteps)
+                let si = Int32(max(preset.fractalIterations - 2, 2))
+                let key = "FI\(fi)_RS\(rs)"
+                
+                if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
+                                                       fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
+                    computePipelineCache[key] = pipeline
+                    computeBuilt += 1
+                    if RENDERER_DEBUG { print("  ✓ Compute \(preset.rawValue): FI=\(fi), RS=\(rs) [\(key)]") }
+                }
             }
+            // Build a GENERIC fallback pipeline (no function constants baked in).
+            // The shader reads iterations/steps from uniforms at runtime, so this
+            // always matches precomputed absScalePow. Used only when exact-match
+            // lookup and on-demand build both fail.
+            // NOTE: Must use makeFunction(name:constantValues:) with EMPTY constants
+            // because the kernel declares function constants — Metal refuses plain
+            // makeFunction(name:). Empty MTLFunctionConstantValues leaves all FCs
+            // undefined, so is_function_constant_defined() returns false in the shader.
+            let emptyConstants = MTLFunctionConstantValues()
+            if let kernel8x8 = try? library.makeFunction(name: "adaptiveHierarchical8x8", constantValues: emptyConstants) {
+                adaptiveHierarchicalPipeline8x8 = try device.makeComputePipelineState(function: kernel8x8)
+            }
+            if RENDERER_DEBUG { print("✓ Built \(computeBuilt) specialized compute pipelines + 1 generic fallback") }
             
             // Uniform buffer for tile compute (one per eye)
             let tileUniformSize = MemoryLayout<TileUniforms>.stride * 2
@@ -393,35 +404,9 @@ actor Renderer {
             
             if RENDERER_DEBUG { print("✓ Tile-based compute pipeline ready (adaptive 8x8)") }
             
-            // === PROGRESSIVE RENDERING PIPELINES ===
-            // Different threadgroup configurations for performance experimentation
-            if let depthKernel = library.makeFunction(name: "progressiveDepthPass") {
-                progressiveDepthPipeline = try device.makeComputePipelineState(function: depthKernel)
-            }
-            if let colorKernel = library.makeFunction(name: "progressiveColorPass") {
-                progressiveColorPipeline = try device.makeComputePipelineState(function: colorKernel)
-            }
-            if let kernel8x4 = library.makeFunction(name: "progressiveSinglePass_8x4") {
-                progressive8x4Pipeline = try device.makeComputePipelineState(function: kernel8x4)
-                // Log pipeline characteristics
-                if let pipeline = progressive8x4Pipeline {
-                    print("✓ Progressive 8x4 pipeline: maxTotalThreads=\(pipeline.maxTotalThreadsPerThreadgroup), executionWidth=\(pipeline.threadExecutionWidth)")
-                }
-            }
-            if let kernel4x8 = library.makeFunction(name: "progressiveSinglePass_4x8") {
-                progressive4x8Pipeline = try device.makeComputePipelineState(function: kernel4x8)
-            }
-            if let benchmarkKernel = library.makeFunction(name: "benchmarkKernel") {
-                progressiveBenchmarkPipeline = try device.makeComputePipelineState(function: benchmarkKernel)
-            }
-            
-            // Progressive uniform buffer
+            // Progressive uniform buffer (for diagnostic kernels)
             progressiveUniformBuffer = device.makeBuffer(length: 512, options: .storageModeShared)
             progressiveUniformBuffer?.label = "ProgressiveUniforms"
-            
-            if progressive8x4Pipeline != nil {
-                print("✓ Progressive rendering pipelines ready (8x4, 4x8 variants)")
-            }
         } catch {
             if RENDERER_DEBUG { print("⚠️ Failed to create tile compute pipelines: \(error)") }
             adaptiveHierarchicalPipeline8x8 = nil
@@ -642,8 +627,11 @@ actor Renderer {
                 // Setup pipeline preparation for specific iteration/ray step values
                 // Called when sliders change to pre-compile the needed pipeline
                 appModel.preparePipelineForValuesHandler = { iterations, raySteps in
+                    // Pre-build render pipelines
                     _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps, useQuadShared: false)
                     _ = await renderer.getPipeline(forIterations: iterations, raySteps: raySteps, useQuadShared: true)
+                    // Pre-build matching compute pipeline so tileSize=8 path is ready
+                    _ = await renderer.selectComputePipeline(fractalIterations: iterations, maxRaySteps: raySteps)
                 }
                 
                 // Setup pipeline profiler handler
@@ -1228,6 +1216,105 @@ actor Renderer {
         return Array(pipelineCache.keys).sorted()
     }
     
+    /// Returns all cache keys currently in the compute pipeline cache.
+    var computePipelineCacheKeys: [String] {
+        return Array(computePipelineCache.keys).sorted()
+    }
+    
+    // MARK: - Compute Pipeline Cache
+    
+    /// Builds a specialized compute pipeline with function constants baked in.
+    /// The Metal compiler fully unrolls Map()/Shadow loops for the given iteration counts.
+    ///
+    /// - Parameters:
+    ///   - library: The default Metal library
+    ///   - kernelName: Compute kernel function name
+    ///   - fractalIterations: FC_FRACTAL_ITERATIONS value to bake in
+    ///   - shadowIterations: FC_SHADOW_ITERATIONS value to bake in
+    ///   - maxRaySteps: FC_MAX_RAY_STEPS value to bake in
+    /// - Returns: Specialized compute pipeline, or nil on failure
+    static func buildComputePipeline(device: MTLDevice, library: MTLLibrary, kernelName: String,
+                              fractalIterations: Int32, shadowIterations: Int32, maxRaySteps: Int32) -> MTLComputePipelineState? {
+        let constants = MTLFunctionConstantValues()
+        var fi = fractalIterations
+        var si = shadowIterations
+        var rs = maxRaySteps
+        var bubble: Bool = false
+        var debug: Bool = false
+        var hud: Bool = false
+        var emissive: Bool = false
+        var neon: Bool = false
+        
+        constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
+        constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
+        constants.setConstantValue(&rs, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
+        constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+        constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
+        constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
+        constants.setConstantValue(&emissive, type: .bool, index: FunctionConstantIndex.emissiveEnabled.rawValue)
+        constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
+        
+        guard let function = try? library.makeFunction(name: kernelName, constantValues: constants) else {
+            if RENDERER_DEBUG { print("⚠️ [ComputeCache] Failed to specialize \(kernelName) with FI=\(fi) RS=\(rs)") }
+            return nil
+        }
+        
+        do {
+            return try device.makeComputePipelineState(function: function)
+        } catch {
+            if RENDERER_DEBUG { print("⚠️ [ComputeCache] Failed to build compute pipeline: \(error)") }
+            return nil
+        }
+    }
+    
+    /// Selects the best compute pipeline for the given iteration/ray-step settings.
+    ///
+    /// CRITICAL: The selected pipeline's baked FC_FRACTAL_ITERATIONS MUST match the
+    /// iteration count used to precompute absScalePow on CPU. If there's a mismatch,
+    /// the distance estimator produces wrong values (p.w accumulates over FC iterations
+    /// but absScalePow was computed for settings.iterations), causing visual artifacts.
+    ///
+    /// Lookup order:
+    /// 1. Exact match in computePipelineCache
+    /// 2. Builds on-demand for exact configuration (cached for future frames)
+    /// 3. Falls back to generic (no function constants) pipeline — shader uses runtime params
+    func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
+        let exactKey = "FI\(fractalIterations)_RS\(maxRaySteps)"
+        
+        // 1. Exact match — FC values match precomputed absScalePow
+        if let pipeline = computePipelineCache[exactKey] {
+            if RENDERER_DEBUG && lastComputePipelineKey != exactKey {
+                print("🎯 [ComputeCache] Exact hit: \(exactKey)")
+                lastComputePipelineKey = exactKey
+            }
+            return pipeline
+        }
+        
+        // 2. Build on-demand for this exact configuration
+        //    DO NOT use "nearest preset" — a pipeline with wrong FC_FRACTAL_ITERATIONS
+        //    causes absScalePow mismatch and visual degradation (the caching bug).
+        if let library = device.makeDefaultLibrary() {
+            let fi = Int32(fractalIterations)
+            let si = Int32(max(fractalIterations - 2, 2))
+            let rs = Int32(maxRaySteps)
+            if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
+                                                   fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
+                computePipelineCache[exactKey] = pipeline
+                if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
+                lastComputePipelineKey = exactKey
+                return pipeline
+            }
+        }
+        
+        // 3. Ultimate fallback — generic pipeline with NO function constants.
+        //    Shader reads iterations from uniforms at runtime, matching absScalePow.
+        if RENDERER_DEBUG && lastComputePipelineKey != "fallback" {
+            print("⚠️ [ComputeCache] Using fallback generic compute pipeline")
+            lastComputePipelineKey = "fallback"
+        }
+        return adaptiveHierarchicalPipeline8x8
+    }
+    
     /// Build a specialized pipeline with function constants for compile-time optimization
     static func buildSpecializedPipeline(device: MTLDevice,
                                          layerRenderer: LayerRenderer,
@@ -1382,6 +1469,76 @@ actor Renderer {
         }
     }
 
+    // MARK: - Shared Precomputation Helpers
+    
+    /// Precompute fractal parameters on CPU (eliminates per-pixel powr() and division on GPU)
+    private static func makePrecomputedFractal(from settings: RenderSettingsSnapshot) -> PrecomputedFractalParams {
+        let minRad2 = settings.minDistance
+        let fractalScale = settings.fractalScale
+        let sphereRadius = settings.sphereRadius
+        let iterations = settings.fractalIterations
+        
+        let invMinRad = 1.0 / minRad2
+        var scale = SIMD4<Float>(repeating: fractalScale * invMinRad)
+        scale.w = abs(scale.w)
+        
+        let absScalem1 = abs(fractalScale - 1.0)
+        let absScalePow = pow(max(abs(fractalScale), 1e-6), Float(1 - iterations))
+        let sphereRadiusSq = sphereRadius * sphereRadius
+        let invSphereRadiusSq = 1.0 / sphereRadiusSq
+        
+        return PrecomputedFractalParams(
+            scale: scale,
+            absScalem1: absScalem1,
+            absScalePow: absScalePow,
+            invSphereRadiusSq: invSphereRadiusSq,
+            sphereRadiusSq: sphereRadiusSq
+        )
+    }
+    
+    /// Precompute lighting parameters on CPU (eliminates per-pixel CameraPath trig on GPU)
+    private static func makePrecomputedLighting(time: Float, lightingMode: LightingMode, audioLevel: Float) -> PrecomputedLighting {
+        let gTime = time * 0.01 + 15.00
+        
+        let spotLightPosition: SIMD3<Float>
+        let lightIntensity: Float
+        
+        switch lightingMode {
+        case .staticLight:
+            spotLightPosition = SIMD3<Float>(2.0, 1.5, 2.0)
+            lightIntensity = 1.0
+        case .audioReactive:
+            let basePos = SIMD3<Float>(1.5, 1.0, 1.5)
+            let pulse = audioLevel * 2.0
+            let audioOffset = SIMD3<Float>(
+                sin(gTime * 2.0) * pulse,
+                audioLevel * 1.5,
+                cos(gTime * 2.0) * pulse
+            )
+            spotLightPosition = basePos + audioOffset
+            lightIntensity = 0.5 + audioLevel * 1.5
+        case .animated:
+            let pathT = gTime + 0.03
+            let path = SIMD3<Float>(
+                -0.78 + 3.0 * sin(2.14 * pathT),
+                0.05 + 2.5 * sin(0.942 * pathT + 1.3),
+                0.05 + 3.5 * cos(3.594 * pathT)
+            )
+            let offset = SIMD3<Float>(
+                sin(gTime * 18.4),
+                cos(gTime * 17.98),
+                sin(gTime * 22.53)
+            ) * 0.2
+            spotLightPosition = path + offset
+            lightIntensity = 0.9 + sin(gTime * 1.5) * 0.15
+        }
+        
+        return PrecomputedLighting(
+            spotLightPosition: spotLightPosition,
+            lightIntensity: lightIntensity
+        )
+    }
+
     private func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot) {
         /// Update any game state before rendering
         
@@ -1420,78 +1577,8 @@ actor Renderer {
         // === PRECOMPUTE FRAME-UNIFORM VALUES ===
         // These are computed once per frame on CPU, shared by all pixels
         // Eliminates expensive per-pixel calculations like powr() and CameraPath()
-        
-        func computePrecomputedFractal(settings: RenderSettingsSnapshot) -> PrecomputedFractalParams {
-            let minRad2 = settings.minDistance
-            let fractalScale = settings.fractalScale
-            let sphereRadius = settings.sphereRadius
-            let iterations = settings.fractalIterations
-            
-            let invMinRad = 1.0 / minRad2
-            var scale = SIMD4<Float>(repeating: fractalScale * invMinRad)
-            scale.w = abs(scale.w)
-            
-            let absScalem1 = abs(fractalScale - 1.0)
-            // This is the expensive powr() call we're eliminating from the GPU
-            let absScalePow = pow(max(abs(fractalScale), 1e-6), Float(1 - iterations))
-            let sphereRadiusSq = sphereRadius * sphereRadius
-            let invSphereRadiusSq = 1.0 / sphereRadiusSq
-            
-            return PrecomputedFractalParams(
-                scale: scale,
-                absScalem1: absScalem1,
-                absScalePow: absScalePow,
-                invSphereRadiusSq: invSphereRadiusSq,
-                sphereRadiusSq: sphereRadiusSq
-            )
-        }
-        
-        func computePrecomputedLighting(time: Float, lightingMode: LightingMode, audioLevel: Float) -> PrecomputedLighting {
-            let gTime = time * 0.01 + 15.00
-            
-            let spotLightPosition: SIMD3<Float>
-            let lightIntensity: Float
-            
-            switch lightingMode {
-            case .staticLight:
-                spotLightPosition = SIMD3<Float>(2.0, 1.5, 2.0)
-                lightIntensity = 1.0
-            case .audioReactive:
-                let basePos = SIMD3<Float>(1.5, 1.0, 1.5)
-                let pulse = audioLevel * 2.0
-                let audioOffset = SIMD3<Float>(
-                    sin(gTime * 2.0) * pulse,
-                    audioLevel * 1.5,
-                    cos(gTime * 2.0) * pulse
-                )
-                spotLightPosition = basePos + audioOffset
-                lightIntensity = 0.5 + audioLevel * 1.5
-            case .animated:
-                // CameraPath: float3(-.78 + 3. * sin(2.14*t),.05+2.5 * sin(.942*t+1.3),.05 + 3.5 * cos(3.594*t))
-                let pathT = gTime + 0.03
-                let path = SIMD3<Float>(
-                    -0.78 + 3.0 * sin(2.14 * pathT),
-                    0.05 + 2.5 * sin(0.942 * pathT + 1.3),
-                    0.05 + 3.5 * cos(3.594 * pathT)
-                )
-                let offset = SIMD3<Float>(
-                    sin(gTime * 18.4),
-                    cos(gTime * 17.98),
-                    sin(gTime * 22.53)
-                ) * 0.2
-                spotLightPosition = path + offset
-                lightIntensity = 0.9 + sin(gTime * 1.5) * 0.15
-            }
-            
-            return PrecomputedLighting(
-                spotLightPosition: spotLightPosition,
-                lightIntensity: lightIntensity
-            )
-        }
-        
-        // Compute once per frame
-        let precomputedFractal = computePrecomputedFractal(settings: settingsSnapshot)
-        let precomputedLighting = computePrecomputedLighting(
+        let precomputedFractal = Self.makePrecomputedFractal(from: settingsSnapshot)
+        let precomputedLighting = Self.makePrecomputedLighting(
             time: Float(appModel.clock.time),
             lightingMode: settingsSnapshot.lightingMode,
             audioLevel: settingsSnapshot.audioLevel
@@ -2132,24 +2219,21 @@ actor Renderer {
         outputTexture: MTLTexture,
         drawable: LayerRenderer.Drawable,
         viewIndex: Int,
-        settingsSnapshot: RenderSettingsSnapshot
+        settingsSnapshot: RenderSettingsSnapshot,
+        pipeline: MTLComputePipelineState? = nil
     ) {
-        guard let pipeline = adaptiveHierarchicalPipeline8x8,
+        guard let pipeline = pipeline ?? adaptiveHierarchicalPipeline8x8,
               let uniformBuffer = tileUniformBuffer else {
             if RENDERER_DEBUG { print("⚠️ Adaptive compute pipeline not available") }
             return
         }
         let view = drawable.views[viewIndex]
         
-        // Build model matrix (must match fragment shader exactly!)
-        let t: Float = 0.1
-        let currentSmoothedPosition = smoothedPosition + (settingsSnapshot.position - smoothedPosition) * t
-        let currentSmoothedScale = smoothedScale + (settingsSnapshot.scale - smoothedScale) * t
-        
-        let rotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
-        let translationMatrix = matrix4x4_translation(currentSmoothedPosition.x, currentSmoothedPosition.y, currentSmoothedPosition.z)
-        let scaleMatrix = matrix4x4_scale(currentSmoothedScale, currentSmoothedScale, currentSmoothedScale)
-        let modelMatrix = translationMatrix * rotationMatrix * scaleMatrix
+        // Build model matrix — use already-smoothed values from updateGameState()
+        // (previously applied additional smoothing here, causing double-smoothing)
+        let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
+        let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
+        let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
         
         // Build view matrix (same as fragment shader)
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
@@ -2167,74 +2251,12 @@ actor Renderer {
         let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
         // === PRECOMPUTE FRAME-UNIFORM VALUES (same as fragment shader) ===
-        let computePrecomputedFractal: PrecomputedFractalParams = {
-            let minRad2 = settingsSnapshot.minDistance
-            let fractalScale = settingsSnapshot.fractalScale
-            let sphereRadius = settingsSnapshot.sphereRadius
-            let iterations = settingsSnapshot.fractalIterations
-            
-            let invMinRad = 1.0 / minRad2
-            var scale = SIMD4<Float>(repeating: fractalScale * invMinRad)
-            scale.w = abs(scale.w)
-            
-            let absScalem1 = abs(fractalScale - 1.0)
-            let absScalePow = pow(max(abs(fractalScale), 1e-6), Float(1 - iterations))
-            let sphereRadiusSq = sphereRadius * sphereRadius
-            let invSphereRadiusSq = 1.0 / sphereRadiusSq
-            
-            return PrecomputedFractalParams(
-                scale: scale,
-                absScalem1: absScalem1,
-                absScalePow: absScalePow,
-                invSphereRadiusSq: invSphereRadiusSq,
-                sphereRadiusSq: sphereRadiusSq
-            )
-        }()
-        
-        let computePrecomputedLighting: PrecomputedLighting = {
-            let time = Float(appModel.clock.time)
-            let gTime = time * 0.01 + 15.00
-            let lightingMode = settingsSnapshot.lightingMode
-            let audioLevel = settingsSnapshot.audioLevel
-            
-            let spotLightPosition: SIMD3<Float>
-            let lightIntensity: Float
-            
-            switch lightingMode {
-            case .staticLight:
-                spotLightPosition = SIMD3<Float>(2.0, 1.5, 2.0)
-                lightIntensity = 1.0
-            case .audioReactive:
-                let basePos = SIMD3<Float>(1.5, 1.0, 1.5)
-                let pulse = audioLevel * 2.0
-                let audioOffset = SIMD3<Float>(
-                    sin(gTime * 2.0) * pulse,
-                    audioLevel * 1.5,
-                    cos(gTime * 2.0) * pulse
-                )
-                spotLightPosition = basePos + audioOffset
-                lightIntensity = 0.5 + audioLevel * 1.5
-            case .animated:
-                let pathT = gTime + 0.03
-                let path = SIMD3<Float>(
-                    -0.78 + 3.0 * sin(2.14 * pathT),
-                    0.05 + 2.5 * sin(0.942 * pathT + 1.3),
-                    0.05 + 3.5 * cos(3.594 * pathT)
-                )
-                let offset = SIMD3<Float>(
-                    sin(gTime * 18.4),
-                    cos(gTime * 17.98),
-                    sin(gTime * 22.53)
-                ) * 0.2
-                spotLightPosition = path + offset
-                lightIntensity = 0.9 + sin(gTime * 1.5) * 0.15
-            }
-            
-            return PrecomputedLighting(
-                spotLightPosition: spotLightPosition,
-                lightIntensity: lightIntensity
-            )
-        }()
+        let computePrecomputedFractal = Self.makePrecomputedFractal(from: settingsSnapshot)
+        let computePrecomputedLighting = Self.makePrecomputedLighting(
+            time: Float(appModel.clock.time),
+            lightingMode: settingsSnapshot.lightingMode,
+            audioLevel: settingsSnapshot.audioLevel
+        )
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
@@ -2389,7 +2411,12 @@ actor Renderer {
         drawable: LayerRenderer.Drawable,
         settingsSnapshot: RenderSettingsSnapshot
     ) -> Bool {
-        guard adaptiveHierarchicalPipeline8x8 != nil else { return false }
+        // Select the best compute pipeline for current iteration/ray step settings
+        let fi = settingsSnapshot.fractalIterations
+        let rs = settingsSnapshot.maxRaySteps
+        let computePipeline = selectComputePipeline(fractalIterations: fi, maxRaySteps: rs)
+        
+        guard computePipeline != nil else { return false }
         
         guard let outputTexture = ensureComputeOutputTexture(for: drawable) else {
             return false
@@ -2402,7 +2429,8 @@ actor Renderer {
                 outputTexture: outputTexture,
                 drawable: drawable,
                 viewIndex: viewIndex,
-                settingsSnapshot: settingsSnapshot
+                settingsSnapshot: settingsSnapshot,
+                pipeline: computePipeline
             )
         }
         
