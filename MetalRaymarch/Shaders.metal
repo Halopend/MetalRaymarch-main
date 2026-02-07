@@ -168,7 +168,13 @@ vertex ColorInOut screenshotVertexShader(Vertex in [[stage_in]],
 // --- Fractal Code Port ---
 // Spatial Rendering optimizations for visionOS
 
-constant float3 sunDir = float3(0.3235, 0.0924, 0.2773); // NOT normalized (length ~0.44), tuned for visual balance
+// Soft lighting: original un-normalized sunDir (length ~0.44)
+// The shorter vector naturally softens shadows (shorter march range), diffuse
+// (smaller dot product range), and specular (0.44^10 ≈ 0 vs 1.0^10 = 1).
+constant float3 sunDirSoft  = float3(0.3235, 0.0924, 0.2773);
+// Sharp lighting: normalized sunDir — crisper shadows, stronger specular
+constant float3 sunDirSharp = float3(0.7420, 0.2119, 0.6360);
+
 constant float kPowEpsilon = 1e-6f;
 constant half kPowEpsilonHalf = 1e-4h;
 
@@ -680,10 +686,92 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
     return applyColorScheme(c, colorMix, scheme);
 }
 
-// Map function that outputs orbit cache for reuse
-// This is the KEY optimization - we iterate once and cache everything needed
-// Now also tracks fold info and trap iteration for coloring/emissive patterns
-FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
+// === MapWithOrbitCache: Two variants for lean/full orbit tracking ===
+//
+// PERFORMANCE INSIGHT: The full cache tracks boxFolds, sphereFolds, minRadius,
+// and orbitTrapDist on every iteration (~6 extra ops/iter). These fields are ONLY
+// consumed by computeEmissive(), which is guarded by FC_EMISSIVE_ENABLED.
+// When emissive is disabled (the common case), we use the lean variant that
+// skips all fold tracking — saving ~72 ops per hit pixel at 12 iterations.
+//
+// Both variants compute: Jacobian (for analytic normals), trap values (for coloring).
+
+// LEAN variant: Jacobian + trap tracking only (normals + colors)
+// Used when emissive is disabled — the common path
+FORCE_INLINE float MapWithOrbitCacheLean(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
+{
+    float4 p = float4(pos, 1.0);
+    float4 p0 = p;
+    
+    float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
+    float trap = 1.0f;
+    int trapIter = 0;
+    float3 trapPos = pos;
+    
+    // Analytic Jacobian for zero-cost normals
+    float3x3 J = float3x3(1.0f);
+    
+    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
+    
+    for (int i = 0; i < loopCount; i++) {
+        // --- Box fold with Jacobian (NO fold counting) ---
+        float3 pOld = p.xyz;
+        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+        
+        float3 boxDiag = select(float3(-1.0f), float3(1.0f),
+                               abs(pOld.xyz) < float3(foldingLimit));
+        J[0] *= boxDiag;
+        J[1] *= boxDiag;
+        J[2] *= boxDiag;
+        
+        // --- Sphere fold with Jacobian (NO minRadius/orbitTrap tracking) ---
+        float r2 = dot(p.xyz, p.xyz);
+        if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; }
+        
+        float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
+        
+        J *= t;
+        p *= t;
+        
+        // --- Scale + translate with Jacobian ---
+        float s = params.scale.x;
+        p = fma(p, params.scale, p0);
+        J = s * J;
+        J[0][0] += 1.0f;
+        J[1][1] += 1.0f;
+        J[2][2] += 1.0f;
+    }
+    
+    float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
+    
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (bubbleEnabled) {
+        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
+        d = max(d, -bubbleDist);
+    }
+    
+    cache.p = p;
+    cache.p0 = pos;
+    cache.trap = trap;
+    cache.distance = d;
+    cache.iterationsUsed = loopCount;
+    cache.valid = true;
+    cache.trapIteration = trapIter;
+    cache.trapPosition = trapPos;
+    // Zero out emissive fields (unused in lean path)
+    cache.boxFolds = 0;
+    cache.sphereFolds = 0;
+    cache.minRadius = 0.0f;
+    cache.orbitTrapDist = 0.0f;
+    cache.jacobian = J;
+    cache.hasJacobian = true;
+    
+    return d;
+}
+
+// FULL variant: Jacobian + trap + fold tracking (normals + colors + emissive)
+// Only used when emissive is enabled
+FORCE_INLINE float MapWithOrbitCacheFull(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
@@ -691,7 +779,6 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
     float trap = 1.0f;
     
-    // Extended tracking
     int trapIter = 0;
     float3 trapPos = pos;
     int boxFolds = 0;
@@ -699,33 +786,23 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     float minRadius = 1e10f;
     float orbitTrapDist = 1e10f;
     
-    // === ANALYTIC JACOBIAN ACCUMULATION ===
-    // Accumulate dF/dp0 through the chain rule at each iteration.
-    // Each Mandelbox iteration is: p = scale * sphereFold(boxFold(p)) + p0
-    // The Jacobian of this w.r.t. input is the product of per-step Jacobians.
-    // At the end, the gradient of the distance function is J^T * normalize(p).
-    // This eliminates 3 extra Map() calls for finite-difference normals.
-    float3x3 J = float3x3(1.0f);  // Identity — dF/dp0 starts as identity
+    float3x3 J = float3x3(1.0f);
     
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
     
     for (int i = 0; i < loopCount; i++) {
-        // --- Box fold with Jacobian ---
+        // --- Box fold with Jacobian + fold counting ---
         float3 pOld = p.xyz;
         p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
         if (any(p.xyz != pOld)) boxFolds++;
         
-        // Box fold derivative: d/dp_j(2*clamp(p_j) - p_j)
-        // = 2*1_{|p_j|<fold} - 1 = +1 if unclamped, -1 if clamped
-        // This is a diagonal matrix
         float3 boxDiag = select(float3(-1.0f), float3(1.0f),
                                abs(pOld.xyz) < float3(foldingLimit));
-        // J = diag(boxDiag) * J
         J[0] *= boxDiag;
         J[1] *= boxDiag;
         J[2] *= boxDiag;
         
-        // --- Sphere fold with Jacobian ---
+        // --- Sphere fold with Jacobian + full tracking ---
         float r2 = dot(p.xyz, p.xyz);
         minRadius = min(minRadius, r2);
         float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z));
@@ -735,21 +812,13 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
         float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
         if (t > 1.0f) sphereFolds++;
         
-        // Sphere fold derivative: d/dp(p * t(r2))
-        // If t is clamped (t=1 or t=1/sphereRadiusSq), derivative is t*I
-        // If t = 1/r2 (unclamped), derivative is (1/r2)*I - (2/r4)*p*p^T
-        // We use the simpler diagonal approximation t*I which is exact when t is clamped
-        // and a good approximation near the surface where normals are most critical.
-        // J = t * J  (scalar multiply — very cheap)
         J *= t;
         p *= t;
         
         // --- Scale + translate with Jacobian ---
-        // p = scale * p + p0  =>  dF/dp0 = scale * J + I
-        float s = params.scale.x;  // Mandelbox uses uniform scale
+        float s = params.scale.x;
         p = fma(p, params.scale, p0);
         J = s * J;
-        // Add identity for the +p0 term: dF/dp0 += I
         J[0][0] += 1.0f;
         J[1][1] += 1.0f;
         J[2][2] += 1.0f;
@@ -757,34 +826,43 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
-    // Safety bubble
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
     if (bubbleEnabled) {
         float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
         d = max(d, -bubbleDist);
     }
     
-    // Store full orbit state in cache for reuse
     cache.p = p;
     cache.p0 = pos;
     cache.trap = trap;
     cache.distance = d;
     cache.iterationsUsed = loopCount;
     cache.valid = true;
-    
-    // Extended fields
     cache.trapIteration = trapIter;
     cache.trapPosition = trapPos;
     cache.boxFolds = boxFolds;
     cache.sphereFolds = sphereFolds;
     cache.minRadius = sqrt(minRadius);
     cache.orbitTrapDist = orbitTrapDist;
-    
-    // Jacobian for analytic normals
     cache.jacobian = J;
     cache.hasJacobian = true;
     
     return d;
+}
+
+// Dispatch to lean or full variant based on emissive state.
+// When FC_EMISSIVE_ENABLED is defined as a function constant, the compiler
+// dead-code-eliminates the unused variant entirely — zero overhead.
+FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
+{
+    const bool emissiveEnabled = is_function_constant_defined(FC_EMISSIVE_ENABLED) 
+        ? FC_EMISSIVE_ENABLED : true;  // Default to full when FC not set
+    
+    if (emissiveEnabled) {
+        return MapWithOrbitCacheFull(pos, params, foldingLimit, iterations, cache);
+    } else {
+        return MapWithOrbitCacheLean(pos, params, foldingLimit, iterations, cache);
+    }
 }
 
 // Compute normal using cached orbit state
@@ -892,11 +970,14 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
         
         float3 p = fma(rD, float3(t), rO);
-        // Use Map() directly (skip MapMandelbox wrapper — fractalType is always 0)
+        // Use Map() for the march loop (no Jacobian overhead)
         float h = Map(p, params, foldingLimit, iterations);
         
         if(UNLIKELY(h < threshold))
         {
+            // Re-iterate with full orbit cache + Jacobian for normals/colors.
+            // This is one redundant iteration set at the hit point, but far cheaper
+            // than accumulating Jacobian on every step of the march loop.
             OrbitCache hitCache;
             MapWithOrbitCache(p, params, foldingLimit, iterations, hitCache);
             result.cache = hitCache;
@@ -926,18 +1007,27 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     float glow = 0.0;
     // Compiler specializes per FC_MAX_RAY_STEPS value
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
-    int maxSteps = max(int(float(baseMaxSteps) * quality * 0.5), 8);
+    
+    // OPTIMIZATION: When startT comes from temporal reprojection, we're already
+    // within ~0.3 units of the surface. The search window is only 2.3 units wide,
+    // so we need far fewer steps than the full half-budget. Scale steps by how
+    // tight the start is relative to full-range marching.
+    // - startT < 1.0 (near camera): likely coarse start, use full half-budget
+    // - startT > 1.0 (temporal reproj): tight window, use reduced budget (0.25×)
+    float stepScale = (startT > 1.0f) ? 0.25f : 0.5f;
+    int maxSteps = max(int(float(baseMaxSteps) * quality * stepScale), 8);
     float endT = startT + 2.0;
     
     for(int j = 0; j < maxSteps; j++)
     {
         float threshold = fma(t, 0.0006, 0.0005);
         float3 p = fma(rD, float3(t), rO);
-        // Use Map() directly (skip MapMandelbox wrapper — fractalType is always 0)
+        // Use Map() for the march loop (no Jacobian overhead)
         float h = Map(p, params, foldingLimit, iterations);
         
         if(UNLIKELY(h < threshold))
         {
+            // Re-iterate with full orbit cache + Jacobian for normals/colors.
             OrbitCache hitCache;
             MapWithOrbitCache(p, params, foldingLimit, iterations, hitCache);
             result.cache = hitCache;
@@ -1025,27 +1115,32 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
         rgb = fma(half3(0.3h, 0.3h, 0.35h), half3(bloomAmount), rgb);
     }
     
-    // === HIGHLIGHTS/EXPOSURE (ALWAYS APPLIED) ===
-    rgb *= half(1.0f + scheme.highlights);
+    // === HIGHLIGHTS/EXPOSURE (skip when identity) ===
+    if (abs(scheme.highlights) > 0.001f) {
+        rgb *= half(1.0f + scheme.highlights);
+    }
     
-    // === VIBRANCE (ALWAYS APPLIED) ===
-    half maxChannel = max(rgb.r, max(rgb.g, rgb.b));
-    half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance);
-    half luma2 = dot(rgb, half3(0.299h, 0.587h, 0.114h));
-    rgb = mix(half3(luma2), rgb, 1.0h + vibranceBoost);
+    // === VIBRANCE (skip when ~0) ===
+    if (abs(scheme.vibrance) > 0.001f) {
+        half maxChannel = max(rgb.r, max(rgb.g, rgb.b));
+        half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance);
+        half luma2 = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+        rgb = mix(half3(luma2), rgb, 1.0h + vibranceBoost);
+    }
     
-    // === SHADOWS LIFT/CRUSH (ALWAYS APPLIED) ===
-    rgb = fma(half3(scheme.shadows), 1.0h - rgb, rgb);
+    // === SHADOWS LIFT/CRUSH (skip when identity) ===
+    if (abs(scheme.shadows) > 0.001f) {
+        rgb = fma(half3(scheme.shadows), 1.0h - rgb, rgb);
+    }
     
-    // === MIDTONE S-CURVE (ALWAYS APPLIED) ===
-    // When colorCurve is 0, exponent becomes 1.0 (identity transform)
-    half curve = half(scheme.colorCurve);
-    half exponent = 1.0h / (1.0h + curve * 0.7h);
-    half3 delta = rgb - 0.5h;
-    half3 curveResult = fma(sign(delta), 0.5h * powr(abs(delta) * 2.0h, half3(exponent)), half3(0.5h));
-    // Blend between identity and curved based on curve magnitude
-    half curveActive = step(0.001h, abs(curve));
-    rgb = mix(rgb, curveResult, curveActive);
+    // === MIDTONE S-CURVE (skip expensive powr when curve ≈ 0) ===
+    // powr() is expensive on GPU — only compute when curve is actually active
+    if (abs(scheme.colorCurve) > 0.001f) {
+        half curve = half(scheme.colorCurve);
+        half exponent = 1.0h / (1.0h + curve * 0.7h);
+        half3 delta = rgb - 0.5h;
+        rgb = fma(sign(delta), 0.5h * powr(abs(delta) * 2.0h, half3(exponent)), half3(0.5h));
+    }
     
     // Simplified vignette
     half2 q = xy * (1.0h - xy);
@@ -1170,11 +1265,16 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
     
     // When FC_SHADOW_ITERATIONS is defined, steps becomes compile-time constant
     // Compiler unrolls optimally for each quality preset (2-3 steps)
+    // OPTIMIZATION: Medium quality uses 2 steps (was 2-3), reduces shadow Map evals by ~33%
     const int steps = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? 
-        (qualityMode == 1 ? 2 : 3) : 
+        (qualityMode >= 1 ? 2 : 3) : 
         int(fma(quality, 2.0f, 1.0f));
     
-    for (int i = 0; i < steps && t <= 4.0f && res >= 0.02f; i++)
+    // OPTIMIZATION: Reduce shadow march range for medium quality.
+    // Shadows beyond ~2.5 units have minimal visual impact and waste iterations.
+    const float shadowRange = (qualityMode >= 1) ? 2.5f : 4.0f;
+    
+    for (int i = 0; i < steps && t <= shadowRange && res >= 0.02f; i++)
     {
         float3 p = fma(rd, float3(t), ro);
         // Use MapHalf — shadow rays have coarse thresholds (0.02+),
@@ -1399,22 +1499,26 @@ kernel void adaptiveHierarchical8x8(
     }
     
     // === SHARED TILE STATE ===
-    threadgroup float tileStartT;
-    threadgroup int tileIsEmpty;           // 1 = entire tile missed, skip fine march
-    threadgroup half tg_shaSpot;           // Shared spotlight shadow (1 eval per tile)
-    threadgroup half tg_shaSun;            // Shared sun shadow (1 eval per tile)
+    threadgroup float tileStartT = 0.05f;
+    threadgroup int tileIsEmpty = 0;       // 1 = entire tile missed, skip fine march
+    threadgroup half tg_shaSpot = 0.0h;    // Shared spotlight shadow (1 eval per tile)
+    threadgroup half tg_shaSun = 0.0h;     // Shared sun shadow (1 eval per tile)
 
     // === COARSE PASS + EMPTY-SPACE EARLY EXIT ===
     // Thread 0 does a coarse raymarch to find approximate start distance.
     // If the coarse distance is far beyond the tile diagonal, the tile is empty
     // and all 64 threads skip the expensive fine march.
+    //
+    // OPTIMIZATION: When thread 0 has valid temporal reprojection, skip the
+    // coarse pass entirely — we already know the surface is near reprojectedStartT.
+    // This saves a 24-step SceneCoarse + 2 MapContinuous probes (~50 Map evals).
     if (localIndex == 0) {
         tileIsEmpty = 0;
-        if (fractalType == 0) {
-            // SceneCoarse now uses MapContinuous internally with 0.6× fractional
-            // iterations, so we pass the full iteration count and let it handle
-            // the fractional reduction. This preserves thin features better than
-            // the old integer lodIterations/2 approach.
+        if (reprojectionValid) {
+            // Temporal reprojection is valid for thread 0 — surface definitely exists
+            // near this depth. Use reprojected depth as tile start, skip coarse+probes.
+            tileStartT = max(0.05f, reprojectedStartT * 0.85f);
+        } else if (fractalType == 0) {
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
@@ -1423,8 +1527,6 @@ kernel void adaptiveHierarchical8x8(
             
             if (coarseT >= kRayMissThreshold) {
                 // Coarse pass missed — check center of tile for empty-space skip.
-                // Evaluate a single Map() at the tile center ray at modest distance.
-                // If distance > tile angular span at that depth, whole tile is empty.
                 float2 tileCenter = float2(tileId * ADAPTIVE_TILE_SIZE) + float2(ADAPTIVE_TILE_SIZE * 0.5);
                 float2 tileCenterNDC = (tileCenter / uniforms.resolution) * 2.0 - 1.0;
                 tileCenterNDC.y = -tileCenterNDC.y;
@@ -1432,15 +1534,12 @@ kernel void adaptiveHierarchical8x8(
                 float4 tcView = uniforms.invProjMatrix * tcClip;
                 float3 tcRd = normalize((uniforms.invViewMatrix * float4(normalize(tcView.xyz), 0.0)).xyz);
                 
-                // Sample at two depths to confirm emptiness
-                // Use MapContinuous with fractional iterations for better thin-feature detection
                 float probeIters = float(lodIterations) * 0.6;
                 float3 probe1 = marchOrigin + tcRd * 2.0;
                 float3 probe2 = marchOrigin + tcRd * 6.0;
                 float d1 = MapContinuous(probe1, fractalParams, uniforms.foldingLimit, probeIters);
                 float d2 = MapContinuous(probe2, fractalParams, uniforms.foldingLimit, probeIters);
                 
-                // Tile angular size at probe distance ≈ 8 pixels / resolution * depth
                 float tileAngularSize1 = ADAPTIVE_TILE_SIZE / min(uniforms.resolution.x, uniforms.resolution.y) * 2.0 * 2.0;
                 float tileAngularSize2 = ADAPTIVE_TILE_SIZE / min(uniforms.resolution.x, uniforms.resolution.y) * 2.0 * 6.0;
                 
@@ -1453,6 +1552,7 @@ kernel void adaptiveHierarchical8x8(
             }
         } else {
             tileStartT = 0.05;
+            tileIsEmpty = 0;
         }
     }
 
@@ -1517,6 +1617,13 @@ kernel void adaptiveHierarchical8x8(
         float atten = spotData.w;
         float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         
+        // Vibrance-driven lighting sharpness: 0 = soft (original), 1 = sharp (normalized)
+        // Also scales spotlight ripple: low vibrance = calmer, high = more dramatic
+        float v = uniforms.colorScheme.vibrance;
+        float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
+        float sunDiffuseScale = mix(0.2f, 0.0872f, v);
+        lightIntensity *= mix(0.5f, 1.2f, v);
+        
         // === SHARED SHADOW COMPUTATION ===
         // Only thread 0 computes shadows, then broadcasts to all 64 threads
         // via threadgroup memory. Shadow varies slowly over 8x8 pixel tiles,
@@ -1538,7 +1645,7 @@ kernel void adaptiveHierarchical8x8(
         half shaSun = tg_shaSun;
         
         half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
-        half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+        half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
                     uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
@@ -1640,6 +1747,13 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             float3 spot = spotData.xyz;
             float atten = spotData.w;
             float lightIntensity = uniforms.precomputedLighting.lightIntensity;
+            
+            // Vibrance-driven lighting sharpness: 0 = soft (original), 1 = sharp (normalized)
+            // Also scales spotlight ripple: low vibrance = calmer, high = more dramatic
+            float v = uniforms.colorScheme.vibrance;
+            float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
+            float sunDiffuseScale = mix(0.2f, 0.0872f, v);
+            lightIntensity *= mix(0.5f, 1.2f, v);
 
             int shadowIterations = max(lodIterations - 2, 2);
             // Shadow params still need per-pixel bubble center, but use precomputed fractal values
@@ -1652,7 +1766,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
 
             half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
-            half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+            half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
 
             col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
             col = (col * bri * shaSpot) + (col * briSun * shaSun);
@@ -1687,7 +1801,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 col += emissive;
             }
         } else {
-            half diffuse = half(max(dot(nor, sunDir), 0.0) * 0.5 + 0.3);
+            float v = uniforms.colorScheme.vibrance;
+            float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
+            float sunDiffuseScale = mix(0.2f, 0.0872f, v);
+            half diffuse = half(max(dot(nor, sunDir), 0.0) * sunDiffuseScale * 2.5 + 0.3);
             col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache) * diffuse;
         }
         // Depth already written at start of this block via clipPos
@@ -1776,7 +1893,27 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
 
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    // === QUAD-SHARED COARSE PASS: Leader finds approximate start distance ===
+    // Lane 0 does a cheap coarse raymarch, then broadcasts the result.
+    // All 4 lanes then do a shorter fine march from that starting point,
+    // significantly reducing total Map() evaluations.
+    float coarseStartT = 0.05;
+    if (fractalType == 0) {
+        float leaderCoarseT = 0.05;
+        if (quadLaneId == 0) {
+            leaderCoarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, fractalParams, lodIterations);
+        }
+        coarseStartT = quad_broadcast(leaderCoarseT, 0);
+    }
+    
+    SceneResult sceneResult;
+    if (coarseStartT < kRayMissThreshold) {
+        // Coarse pass found something — start fine march from nearby
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    } else {
+        // Coarse pass missed — full march needed
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    }
     float2 ret = sceneResult.distGlow;
     OrbitCache hitCache = sceneResult.cache;
     
@@ -1807,6 +1944,13 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         float atten = spotData.w;
         float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         
+        // Vibrance-driven lighting sharpness: 0 = soft (original), 1 = sharp (normalized)
+        // Also scales spotlight ripple: low vibrance = calmer, high = more dramatic
+        float v = uniforms.colorScheme.vibrance;
+        float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
+        float sunDiffuseScale = mix(0.2f, 0.0872f, v);
+        lightIntensity *= mix(0.5f, 1.2f, v);
+        
         if (quadLaneId == 0) {
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
@@ -1818,7 +1962,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         // Per-pixel lighting with shared shadows
         half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
-        half briSun = half(max(dot(sunDir, nor), 0.0) * 0.2);
+        half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
         col = (col * bri * shaSpot) + (col * briSun * shaSun);

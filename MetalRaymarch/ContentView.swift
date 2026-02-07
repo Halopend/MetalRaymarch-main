@@ -187,47 +187,81 @@ struct QualitySlidersView: View {
     @Binding var cache: UISettingsCache
     var preparePipeline: (Int, Int) -> Void
     
+    /// Detected quality preset from current slider values
+    private var detectedPreset: QualityPreset? {
+        QualityPreset.detect(fractalIterations: cache.baseFractalIterations, raySteps: cache.baseMaxRaySteps)
+    }
+    
     var body: some View {
         Group {
             HStack {
-                Text("Quality Settings")
+                Text("Quality")
                     .font(.headline)
                 Spacer()
-                Toggle("", isOn: $cache.dynamicRenderQualityEnabled)
-                    .labelsHidden()
-                    .scaleEffect(0.8)
             }
             
-            Text("Iterations: \(cache.baseFractalIterations)")
-            Slider(
-                value: iterationsBinding,
-                in: 4...32,
-                step: 1,
-                onEditingChanged: { editing in
-                    if !editing {
-                        cache.push(\.baseFractalIterations, value: cache.baseFractalIterations)
-                        preparePipeline(cache.baseFractalIterations, cache.baseMaxRaySteps)
+            // Simple 4-option quality picker
+            HStack(spacing: 8) {
+                ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
+                    Button {
+                        cache.baseFractalIterations = preset.fractalIterations
+                        cache.baseMaxRaySteps = preset.raySteps
+                        cache.push(\.baseFractalIterations, value: preset.fractalIterations)
+                        cache.push(\.baseMaxRaySteps, value: preset.raySteps)
+                        preparePipeline(preset.fractalIterations, preset.raySteps)
+                    } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: preset.icon)
+                                .font(.caption)
+                            Text(preset.displayName)
+                                .font(.caption2)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(detectedPreset == preset ? .blue : .secondary)
+                }
+            }
+            
+            // Advanced: raw sliders for fine-tuning
+            DisclosureGroup("Advanced") {
+                VStack(spacing: 8) {
+                    Text("Fractal Iterations: \(cache.baseFractalIterations)")
+                        .font(.caption)
+                    Slider(
+                        value: iterationsBinding,
+                        in: 4...20,
+                        step: 1,
+                        onEditingChanged: { editing in
+                            if !editing {
+                                cache.push(\.baseFractalIterations, value: cache.baseFractalIterations)
+                                preparePipeline(cache.baseFractalIterations, cache.baseMaxRaySteps)
+                            }
+                        }
+                    )
+                    
+                    Text("Max Ray Steps: \(cache.baseMaxRaySteps)")
+                        .font(.caption)
+                    Slider(
+                        value: rayStepsBinding,
+                        in: 32...256,
+                        step: 8,
+                        onEditingChanged: { editing in
+                            if !editing {
+                                cache.push(\.baseMaxRaySteps, value: cache.baseMaxRaySteps)
+                                preparePipeline(cache.baseFractalIterations, cache.baseMaxRaySteps)
+                            }
+                        }
+                    )
+                    
+                    if detectedPreset == nil {
+                        Text("Custom settings — shader compiling on demand")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
                     }
                 }
-            )
-            
-            Text("Max Steps: \(cache.baseMaxRaySteps)")
-            Slider(
-                value: rayStepsBinding,
-                in: 32...1024,
-                step: 16,
-                onEditingChanged: { editing in
-                    if !editing {
-                        cache.push(\.baseMaxRaySteps, value: cache.baseMaxRaySteps)
-                        preparePipeline(cache.baseFractalIterations, cache.baseMaxRaySteps)
-                    }
-                }
-            )
-            
-            if !cache.dynamicRenderQualityEnabled {
-                Text("Dynamic scaling is disabled. These values are fixed.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                .padding(.leading, 8)
             }
         }
     }
@@ -356,10 +390,8 @@ struct ContentView: View {
         )
         // Hide content when menu window is "closed" - window stays but becomes invisible
         // This preserves window position while avoiding the white bar
-        .opacity(appModel.isMenuWindowVisible ? 0.7 : 0)
-        .allowsHitTesting(appModel.isMenuWindowVisible)
+        .opacity(0.7)
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
-        .opacity(appModel.isMenuWindowVisible ? 0.7 : 0)  // Also hide the glass background
         .onAppear {
             cache.startSync(with: appModel.renderSettings)
             speed = Float(appModel.clock.speed)
@@ -425,9 +457,15 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    // FPS display - prominent for debugging
+                    // FPS display + pipeline status
                     if appModel.immersiveSpaceState == .open {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 6) {
+                            // Pipeline compilation indicator
+                            Image(systemName: appModel.isUsingSpecializedPipeline ? "bolt.fill" : "bolt.slash")
+                                .font(.caption2)
+                                .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
+                                .help(appModel.isUsingSpecializedPipeline ? "Optimized shader active" : "Using generic shader — compiling…")
+                            
                             Circle()
                                 .fill(fpsIndicatorColor)
                                 .frame(width: 10, height: 10)

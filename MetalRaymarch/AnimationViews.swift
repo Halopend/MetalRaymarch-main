@@ -368,10 +368,7 @@ struct SceneEditorView: View {
         guard index < scene.keyframes.count else { return }
         let settings = appModel.renderSettings
         
-        // Preserve existing name, duration, and ID
-        let existingKeyframe = scene.keyframes[index]
-        
-        // Update the existing keyframe's values in place
+        // Update the existing keyframe's values in place (preserves name, duration, ID)
         scene.keyframes[index].minDistance = settings.targetMinDistance
         scene.keyframes[index].foldingLimit = settings.targetFoldingLimit
         scene.keyframes[index].sphereRadius = settings.targetSphereRadius

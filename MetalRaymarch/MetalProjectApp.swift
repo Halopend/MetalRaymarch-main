@@ -52,6 +52,7 @@ struct MetalProjectTestApp: App {
     @State private var appModel = AppModel()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some Scene {
         Window(appModel.menuWindowID, id: appModel.menuWindowID) {
@@ -61,6 +62,10 @@ struct MetalProjectTestApp: App {
                     // Set up handler for gesture-based window control
                     appModel.openMenuWindowHandler = {
                         openWindow(id: appModel.menuWindowID)
+                    }
+                    // Set up handler to dismiss the menu window for real
+                    appModel.dismissMenuWindowHandler = { [dismissWindow] in
+                        dismissWindow(id: appModel.menuWindowID)
                     }
                     // Set up handler for developer window
                     appModel.openDeveloperWindowHandler = {

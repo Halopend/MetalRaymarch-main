@@ -367,7 +367,6 @@ final class AnimationManager {
         let minDistance = keyframe.minDistance + settings.manualOffsetMinDistance
         let foldingLimit = keyframe.foldingLimit + settings.manualOffsetFoldingLimit
         let sphereRadius = keyframe.sphereRadius + settings.manualOffsetSphereRadius
-        let fractalScale = keyframe.fractalScale + settings.manualOffsetFractalScale
         let position = keyframe.position + settings.manualOffsetPosition
         
         // Set IMMEDIATE values for responsive animation playback
@@ -445,10 +444,13 @@ final class AnimationManager {
             decoder.dateDecodingStrategy = .iso8601
             var scene = try decoder.decode(AnimationScene.self, from: data)
             
+            // Capture all keyframes before re-creating with new ID
+            let originalKeyframes = scene.keyframes
+            
             // Give it a new ID to avoid conflicts
             scene = AnimationScene(
                 name: scene.name + " (imported)",
-                initialKeyframe: scene.keyframes.first ?? AnimationKeyframe(
+                initialKeyframe: originalKeyframes.first ?? AnimationKeyframe(
                     name: "Default",
                     duration: 0,
                     minDistance: 0.8,
@@ -459,9 +461,9 @@ final class AnimationManager {
                 )
             )
             
-            // Copy remaining keyframes
-            for _ in 1..<scene.keyframes.count {
-                // This is a workaround - we'd need a better approach for full import
+            // Append remaining keyframes from the original
+            if originalKeyframes.count > 1 {
+                scene.keyframes.append(contentsOf: originalKeyframes.dropFirst())
             }
             
             scenes.append(scene)

@@ -917,20 +917,20 @@ actor Renderer {
             )
         }
         
-        /// Creates a config for high quality rendering (Ultra quality preset: FI=16, RI=128)
+        /// Creates a config for high quality rendering (Ultra quality preset: FI=12, RS=100)
         /// All optional features available.
         static var highQuality: FunctionConstantConfig {
             return FunctionConstantConfig(
-                fractalIterations: 16,
-                shadowIterations: 14,
+                fractalIterations: 12,
+                shadowIterations: 10,
                 safetyBubbleEnabled: true,
                 showHUD: true,
                 qualityMode: 0,  // High quality
                 debugHierarchical: false,
-                maxRaySteps: 128,
+                maxRaySteps: 100,
                 emissiveEnabled: nil,    // Runtime (not specialized)
                 neonModeEnabled: nil,    // Runtime (not specialized)
-                colorIterations: 16      // Match fractal iterations
+                colorIterations: 12      // Match fractal iterations
             )
         }
         
@@ -940,12 +940,10 @@ actor Renderer {
         static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
             let qualityMode: Int32
             switch preset {
-            case .iter6: qualityMode = 2
-            case .iter7: qualityMode = 2
-            case .iter8: qualityMode = 1
-            case .iter9: qualityMode = 1
-            case .iter12: qualityMode = 0
-            case .iter16: qualityMode = 0
+            case .low: qualityMode = 2
+            case .medium: qualityMode = 1
+            case .high: qualityMode = 1
+            case .ultra: qualityMode = 0
             }
             return FunctionConstantConfig(
                 fractalIterations: Int32(preset.fractalIterations),
@@ -1153,6 +1151,7 @@ actor Renderer {
                 print("🎯 [Pipeline] Using cached pipeline: \(cacheKey)")
                 lastLoggedPipelineKey = cacheKey
             }
+            appModel.isUsingSpecializedPipeline = true
             return pipeline
         }
         
@@ -1163,6 +1162,7 @@ actor Renderer {
                 print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: E=\(emissiveEnabled ? 1 : 0) N=\(neonMode ? 1 : 0))")
                 lastLoggedPipelineKey = fallbackKey
             }
+            appModel.isUsingSpecializedPipeline = true
             return pipeline
         }
         
@@ -1171,6 +1171,7 @@ actor Renderer {
             print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FI=\(iterations) RS=\(raySteps))")
             lastLoggedPipelineKey = "fallback"
         }
+        appModel.isUsingSpecializedPipeline = false
         return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
     }
     
@@ -2407,7 +2408,7 @@ actor Renderer {
         
         // Check if existing textures match
         if let tex0 = temporalDepthTextures[0],
-           let tex1 = temporalDepthTextures[1],
+           let _ = temporalDepthTextures[1],
            tex0.width == width,
            tex0.height == height,
            tex0.arrayLength == viewCount {
@@ -2834,7 +2835,7 @@ actor Renderer {
             
             let startTime = CACurrentMediaTime()
             cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
+            await cmdBuffer.completed()
             let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
             
             print("   \(name): \(String(format: "%.2f", elapsed))ms")
