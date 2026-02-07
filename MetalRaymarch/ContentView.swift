@@ -13,7 +13,7 @@ import RealityKit
 @Observable
 final class UISettingsCache {
     // Fractal parameters
-    var fractalType: FractalType = .mandelbox
+    var fractalType: FractalModelType = .mandelbox
     var fractalScale: Float = 2.0
     var targetMinDistance: Float = 0.8
     var targetFoldingLimit: Float = 1.0
@@ -54,6 +54,7 @@ final class UISettingsCache {
     
     // Lighting - simplified
     var lightingMode: LightingMode = .animated
+    var lightingSoftness: Float = 0.0  // 0 = sharp vibrance-driven, 1 = classic soft
     
     // Safety & display
     var showHUD: Bool = true
@@ -133,6 +134,7 @@ final class UISettingsCache {
         emissiveSpeed = settings.emissiveSpeed
         
         lightingMode = settings.lightingMode
+        lightingSoftness = settings.lightingSoftness
         
         showHUD = settings.showHUD
         safetyBubbleRadius = settings.safetyBubbleRadius
@@ -155,7 +157,7 @@ final class UISettingsCache {
     }
     
     @MainActor
-    func pushFractalType(_ type: FractalType, gestureController: GestureController?) {
+    func pushFractalType(_ type: FractalModelType, gestureController: GestureController?) {
         let oldType = settings?.fractalType
         settings?.fractalType = type
         if oldType != type {
@@ -506,7 +508,7 @@ struct ContentView: View {
                                 .font(.headline)
                             
                             Picker("Fractal", selection: $cache.fractalType) {
-                                Text("Mandelbox").tag(FractalType.mandelbox)
+                                Text("Mandelbox").tag(FractalModelType.mandelbox)
                             }
                             .pickerStyle(.segmented)
                             .onChange(of: cache.fractalType) { _, newValue in

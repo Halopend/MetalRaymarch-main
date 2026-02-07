@@ -25,7 +25,7 @@ struct FractalPreset: Codable, Identifiable {
     var scale: Float
 
     // Scene-style settings
-    var fractalType: FractalType
+    var fractalType: FractalModelType
     var colorScheme: ColorScheme
     var colorSchemeSaturation: Float
     var colorSchemeContrast: Float
@@ -123,7 +123,7 @@ struct FractalPreset: Codable, Identifiable {
         colorIterations = try container.decode(Float.self, forKey: .colorIterations)
         position = try container.decode(SIMD3<Float>.self, forKey: .position)
         scale = try container.decode(Float.self, forKey: .scale)
-        fractalType = try container.decodeIfPresent(FractalType.self, forKey: .fractalType) ?? .mandelbox
+        fractalType = try container.decodeIfPresent(FractalModelType.self, forKey: .fractalType) ?? .mandelbox
         colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
         colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 2.0
         colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.05

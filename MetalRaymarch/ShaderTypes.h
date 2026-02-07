@@ -200,6 +200,7 @@ typedef struct
     vector_float3 emissiveColor;  // Emissive color tint
     float emissiveSpeed;     // Animation speed for pulse mode
     float fogIntensity;      // Fog strength (0 = no fog, 1 = full fog)
+    float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     // Depth pipeline settings (shared across raymarch + upscaling)
     float maxViewDistance;   // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;     // Log depth scale factor (k in log2(1 + k * depth))
@@ -250,6 +251,7 @@ typedef struct
     vector_float3 emissiveColor; // Emissive color tint
     float emissiveSpeed;         // Animation speed for pulse mode
     float fogIntensity;          // Fog strength (0 = no fog, 1 = full fog)
+    float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     // Depth pipeline settings (shared across raymarch + upscaling)
     float maxViewDistance;       // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))

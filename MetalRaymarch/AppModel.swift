@@ -9,7 +9,29 @@ import SwiftUI
 import ARKit
 import os  // For os_unfair_lock - fastest available lock primitive
 
-/// Quality preset that bundles fractal iterations and ray steps
+// Fractal type enum matching ShaderTypes.h
+enum FractalModelType: Int32, Codable {
+    case mandelbox = 0
+    case mandelbulb = 1
+    case menger = 2
+    case infinity = 3
+    case tetrahedron = 4
+    case prism = 5
+    case sphereProjection = 6
+    
+    var displayName: String {
+        switch self {
+        case .mandelbox: return "Mandelbox"
+        case .mandelbulb: return "Mandelbulb"
+        case .menger: return "Menger"
+        case .infinity: return "Infinity"
+        case .tetrahedron: return "Tetrahedron"
+        case .prism: return "Prism"
+        case .sphereProjection: return "Sphere Projection"
+        }
+    }
+}
+
 /// Quality preset that bundles fractal iterations and ray steps.
 /// Reduced to 4 presets to minimize pipeline permutations (each preset compiles
 /// a specialized shader with baked loop counts).
@@ -214,7 +236,7 @@ class AppModel {
         openScenesWindowHandler?()
     }
     
-    /// Toggle menu window visibility - hides window content completely (preserves position)
+    /// Toggle menu window visibility — dismisses or opens the window for real
     func toggleMenuWindow() {
         if isMenuWindowVisible {
             isMenuWindowVisible = false
@@ -228,7 +250,7 @@ class AppModel {
     }
     
     /// Ensure window content is visible - call when exiting immersive mode or on app launch
-    /// This prevents the window from being invisible when gestures toggled it hidden during immersive mode
+    /// Opens the window if it was previously dismissed
     func ensureWindowContentVisible() {
         if !isMenuWindowVisible {
             isMenuWindowVisible = true
@@ -258,15 +280,18 @@ class AppModel {
     }
 }
 
-// Fractal type enum matching ShaderTypes.h
-enum FractalType: Int32, Codable {
-    case mandelbox = 0
-    
-    var displayName: String {
-        switch self {
-        case .mandelbox: return "Mandelbox"
-        }
-    }
+// ═══════════════════════════════════════════════════════════════════════════════
+// MARK: - Geometry State - Stable Geometry Rendering
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tracks whether geometry parameters (minDistance, foldingLimit, sphereRadius,
+// fractalScale) are actively changing or have settled. When stable, the renderer
+// can switch to an optimized path with temporal accumulation.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum GeometryState: Int, CaseIterable {
+    case dynamic   = 0  // Geometry parameters are actively changing
+    case settling  = 1  // Parameters stopped changing, waiting for confirmation
+    case stable    = 2  // Parameters confirmed stable, optimized rendering enabled
 }
 
 // Lighting mode controls animated light movement and audio reactivity
@@ -726,7 +751,7 @@ struct RenderSettingsSnapshot {
     let sphereRadius: Float
     let colorIterations: Float
     let resolutionScale: Float
-    let fractalType: FractalType
+    let fractalType: FractalModelType
     let tileSize: Int
     let useHierarchical: Bool
     let debugHierarchical: Bool
@@ -737,6 +762,7 @@ struct RenderSettingsSnapshot {
     let safetyBubbleEnabled: Bool
     let safetyBubbleRadius: Float
     let safetyBubbleShape: Float
+    let sphereProjectionMode: Int  // 0=off, 1=outward, 2=inward, 3=intersection, 4=animated, 5=octree, 6=layered, 7=spiral
     let emissiveEnabled: Bool
     let emissivePattern: Int
     let emissiveIntensity: Float
@@ -744,6 +770,22 @@ struct RenderSettingsSnapshot {
     let emissiveColor: SIMD3<Float>
     let emissiveSpeed: Float
     let colorSchemeParams: ColorSchemeParams
+    let lightingSoftness: Float
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DOPPELGANGER MODE
+    // Pre-fold reflection that creates an exact structural twin of the fractal
+    // ═══════════════════════════════════════════════════════════════════════════
+    let doppelgangerEnabled: Bool
+    let doppelgangerPlane: SIMD3<Float>   // Mirror plane normal (normalized)
+    let doppelgangerOffset: Float         // Signed distance of mirror plane from origin
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GEOMETRY STABILITY STATE
+    // When geometry parameters settle, enables optimized "stable geometry" render path
+    // ═══════════════════════════════════════════════════════════════════════════
+    let geometryState: GeometryState
+    let isGeometryGestureActive: Bool
 }
 
 final class RenderSettings: @unchecked Sendable {
@@ -779,7 +821,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
     
-    private var _fractalType: FractalType = .mandelbox  // Current fractal type
+    private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
     private var _preferFoveated: Bool = false        // Legacy flag (no longer mutually exclusive)
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
@@ -799,6 +841,12 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
     
+    // Sphere projection mode
+    // 0 = off (normal fractal), 1 = outward projection, 2 = inward projection, 
+    // 3 = intersection highlight, 4 = animated blend, 5 = reverse octree,
+    // 6 = layered depth, 7 = spiral sample
+    private var _sphereProjectionMode: Int = 0
+    
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
     private var _colorScheme: ColorScheme = .nebula      // Current color scheme
@@ -815,6 +863,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeCurve: Float = 0.0              // Midtone curve adjustment (-1 to 1)
     private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.5 to 0.5)
     private var _colorSchemeHighlights: Float = 0.0         // Highlight boost/reduction (-0.5 to 1.0)
+    private var _lightingSoftness: Float = 0.0               // 0 = sharp vibrance-driven, 1 = classic soft lighting
     
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
@@ -833,6 +882,19 @@ final class RenderSettings: @unchecked Sendable {
     private var _emissiveThreshold: Float = 0.5             // Threshold for triggering glow (0-1)
     private var _emissiveColor: SIMD3<Float> = SIMD3<Float>(0.3, 0.6, 1.0)  // Blue-white default
     private var _emissiveSpeed: Float = 1.0                 // Animation speed for pulse mode
+    
+    // === DOPPELGANGER MODE ===
+    private var _doppelgangerEnabled: Bool = false              // Pre-fold mirror creates structural twin
+    private var _doppelgangerPlane: SIMD3<Float> = SIMD3<Float>(1, 0, 0)  // Mirror plane normal (x-axis default)
+    private var _doppelgangerOffset: Float = 0.0               // Mirror plane distance from origin
+    
+    // === GEOMETRY STABILITY STATE ===
+    // Tracks whether geometry parameters have settled for optimization
+    private var _geometryState: GeometryState = .dynamic
+    private var _isGeometryGestureActive: Bool = false
+    private var _stableGeometryEnabled: Bool = true          // Enable geometry stability tracking
+    private var _geometryStableFrameCount: Int = 0           // Frames since geometry settled
+    private let geometrySettleThreshold: Float = 0.001       // Threshold for considering parameters settled
     
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
@@ -977,7 +1039,7 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _resolutionScale = max(0.5, min(1.0, newValue)) } }
     }
     
-    var fractalType: FractalType {
+    var fractalType: FractalModelType {
         get { withLock { _fractalType } }
         set { withLock { _fractalType = newValue } }
     }
@@ -1080,6 +1142,20 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
     }
     
+    /// Sphere projection mode
+    /// 0 = off (normal fractal rendering)
+    /// 1 = outward projection (sample fractal from beyond sphere)
+    /// 2 = inward projection (sample fractal from center toward surface)
+    /// 3 = intersection highlight (rim where fractal meets sphere)
+    /// 4 = animated blend (pulsing between sphere and fractal)
+    /// 5 = reverse octree (sample from 8 octant directions, blend)
+    /// 6 = layered depth (multiple depth samples blended)
+    /// 7 = spiral sample (rotating sample position)
+    var sphereProjectionMode: Int {
+        get { withLock { _sphereProjectionMode } }
+        set { withLock { _sphereProjectionMode = max(0, min(7, newValue)) } }
+    }
+    
     // === COLOR SCHEME SETTINGS ===
     // Controls the color palette and transitions for fractal coloring
     
@@ -1147,6 +1223,12 @@ final class RenderSettings: @unchecked Sendable {
     var colorSchemeVibrance: Float {
         get { withLock { _colorSchemeVibrance } }
         set { withLock { _colorSchemeVibrance = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Lighting softness (0 = sharp vibrance-driven, 1 = classic soft)
+    var lightingSoftness: Float {
+        get { withLock { _lightingSoftness } }
+        set { withLock { _lightingSoftness = max(0.0, min(1.0, newValue)) } }
     }
     
     /// Midtone curve adjustment (-1 to 1)
@@ -1283,6 +1365,26 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _emissiveSpeed = max(0.1, min(5.0, newValue)) } }
     }
     
+    // === DOPPELGANGER MODE ===
+    
+    /// Enable doppelganger pre-fold (creates structural twin)
+    var doppelgangerEnabled: Bool {
+        get { withLock { _doppelgangerEnabled } }
+        set { withLock { _doppelgangerEnabled = newValue } }
+    }
+    
+    /// Mirror plane normal (normalized direction vector)
+    var doppelgangerPlane: SIMD3<Float> {
+        get { withLock { _doppelgangerPlane } }
+        set { withLock { _doppelgangerPlane = simd_normalize(newValue) } }
+    }
+    
+    /// Mirror plane offset from origin along the plane normal
+    var doppelgangerOffset: Float {
+        get { withLock { _doppelgangerOffset } }
+        set { withLock { _doppelgangerOffset = newValue } }
+    }
+    
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     
     /// Enable dynamic render quality adjustment based on FPS
@@ -1401,6 +1503,7 @@ final class RenderSettings: @unchecked Sendable {
             stripeStrength: stripeStrength,
             glowSharpness: glowSharpness,
             saturationPower: satPower,
+            // === MODULAR LIGHTING EFFECTS ===
             animTime: _colorAnimTime,
             hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,
             hueRotationSpeed: _hueRotationEffect.speed,
@@ -1450,13 +1553,20 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
+                sphereProjectionMode: _sphereProjectionMode,
                 emissiveEnabled: _emissiveEnabled,
                 emissivePattern: _emissivePattern,
                 emissiveIntensity: _emissiveIntensity,
                 emissiveThreshold: _emissiveThreshold,
                 emissiveColor: _emissiveColor,
                 emissiveSpeed: _emissiveSpeed,
-                colorSchemeParams: makeColorSchemeParamsLocked()
+                colorSchemeParams: makeColorSchemeParamsLocked(),
+                lightingSoftness: _lightingSoftness,
+                doppelgangerEnabled: _doppelgangerEnabled,
+                doppelgangerPlane: _doppelgangerPlane,
+                doppelgangerOffset: _doppelgangerOffset,
+                geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,
+                isGeometryGestureActive: _isGeometryGestureActive
             )
         }
     }
@@ -1751,6 +1861,53 @@ final class RenderSettings: @unchecked Sendable {
             _position.y = max(-maxPos, min(maxPos, _position.y))
             _position.z = max(-maxPos, min(maxPos, _position.z))
             
+            // ═══════════════════════════════════════════════════════════════════════════
+            // GEOMETRY STABILITY STATE MACHINE UPDATE
+            // Check if geometry-affecting parameters have settled (interpolation complete)
+            // ═══════════════════════════════════════════════════════════════════════════
+            let minDistSettled = abs(_minDistance - _targetMinDistance) < geometrySettleThreshold
+            let foldSettled = abs(_foldingLimit - _targetFoldingLimit) < geometrySettleThreshold
+            let sphereSettled = abs(_sphereRadius - _targetSphereRadius) < geometrySettleThreshold
+            // Note: fractalScale is set directly (no smoothing), so it's always "settled"
+            let allGeometrySettled = minDistSettled && foldSettled && sphereSettled
+            
+            switch _geometryState {
+            case .dynamic:
+                // Stay dynamic while gesture is active
+                if !_isGeometryGestureActive {
+                    _geometryState = .settling
+                    _geometryStableFrameCount = 0
+                }
+                
+            case .settling:
+                // Transition to stable once interpolation completes
+                if _isGeometryGestureActive {
+                    _geometryState = .dynamic
+                    _geometryStableFrameCount = 0
+                } else if allGeometrySettled {
+                    _geometryState = .stable
+                    _geometryStableFrameCount = 0
+                    #if DEBUG
+                    print("🎯 GEOMETRY: Transition to STABLE (parameters settled)")
+                    #endif
+                }
+                
+            case .stable:
+                // Break out of stable if gesture starts or parameters drift
+                if _isGeometryGestureActive {
+                    _geometryState = .dynamic
+                    _geometryStableFrameCount = 0
+                    #if DEBUG
+                    print("🎯 GEOMETRY: Transition to DYNAMIC (gesture started)")
+                    #endif
+                } else if allGeometrySettled {
+                    _geometryStableFrameCount += 1
+                } else {
+                    // Parameters changed externally (e.g., slider)
+                    _geometryState = .settling
+                    _geometryStableFrameCount = 0
+                }
+            }
         }
     }
     

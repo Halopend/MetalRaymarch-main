@@ -95,6 +95,50 @@ struct LightingEffectsSection: View {
             
             Divider()
             
+            // Lighting softness: blend between classic and vibrance-driven lighting
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Lighting Style", systemImage: "sun.max.fill")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(cache.lightingSoftness < 0.3 ? "Sharp" : cache.lightingSoftness > 0.7 ? "Classic" : "Blended")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                HStack {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Slider(value: Binding(
+                        get: { cache.lightingSoftness },
+                        set: { cache.lightingSoftness = $0 }
+                    ), in: 0...1, onEditingChanged: { editing in
+                        if !editing {
+                            cache.push(\.lightingSoftness, value: cache.lightingSoftness)
+                        }
+                    })
+                    Image(systemName: "cloud.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Text("Sharp = vibrance-driven contrast • Classic = soft original lighting")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.orange.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+            )
+            
+            Divider()
+            
             // Individual effect cards
             Text("Individual Effects")
                 .font(.headline)

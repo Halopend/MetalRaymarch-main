@@ -240,6 +240,36 @@ FORCE_INLINE half3 clampColor(half3 col) {
     return clamp(col, half3(0.0h), half3(2.0h));
 }
 
+// === LIGHTING BLEND: Classic (soft) ↔ Current (vibrance-driven sharp) ===
+// lightingSoftness: 0 = current vibrance-driven system, 1 = classic fixed lighting
+// This allows smooth blending between the old lighting look and the new one.
+struct LightingParams {
+    float3 sunDir;
+    float sunDiffuseScale;
+    float lightIntensity;
+};
+
+FORCE_INLINE LightingParams computeBlendedLighting(float vibrance, float lightingSoftness, float baseLightIntensity) {
+    LightingParams params;
+    
+    // Current system: vibrance drives sun direction, diffuse, and intensity
+    float3 sunDirNew = mix(sunDirSoft, sunDirSharp, vibrance);
+    float sunDiffuseNew = mix(0.2f, 0.0872f, vibrance);
+    float intensityScaleNew = mix(0.5f, 1.2f, vibrance);
+    
+    // Classic system: fixed sun direction, fixed diffuse, no intensity scaling
+    float3 sunDirClassic = sunDirSoft;  // Original un-normalized direction
+    float sunDiffuseClassic = 0.2f;     // Original fixed value
+    float intensityScaleClassic = 1.0f; // No scaling in classic mode
+    
+    // Blend between current and classic based on softness
+    params.sunDir = mix(sunDirNew, sunDirClassic, lightingSoftness);
+    params.sunDiffuseScale = mix(sunDiffuseNew, sunDiffuseClassic, lightingSoftness);
+    params.lightIntensity = baseLightIntensity * mix(intensityScaleNew, intensityScaleClassic, lightingSoftness);
+    
+    return params;
+}
+
 // === BOUNDING SPHERE EARLY EXIT ===
 // Returns -1 if ray misses sphere, otherwise returns entry distance
 inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, float radius) {
@@ -1512,6 +1542,7 @@ kernel void adaptiveHierarchical8x8(
     // OPTIMIZATION: When thread 0 has valid temporal reprojection, skip the
     // coarse pass entirely — we already know the surface is near reprojectedStartT.
     // This saves a 24-step SceneCoarse + 2 MapContinuous probes (~50 Map evals).
+    tileIsEmpty = 0;
     if (localIndex == 0) {
         tileIsEmpty = 0;
         if (reprojectionValid) {
@@ -1615,14 +1646,14 @@ kernel void adaptiveHierarchical8x8(
         float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
         float3 spot = spotData.xyz;
         float atten = spotData.w;
-        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         
-        // Vibrance-driven lighting sharpness: 0 = soft (original), 1 = sharp (normalized)
-        // Also scales spotlight ripple: low vibrance = calmer, high = more dramatic
-        float v = uniforms.colorScheme.vibrance;
-        float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
-        float sunDiffuseScale = mix(0.2f, 0.0872f, v);
-        lightIntensity *= mix(0.5f, 1.2f, v);
+        // Blended lighting: classic soft ↔ vibrance-driven sharp
+        LightingParams lp = computeBlendedLighting(
+            uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
+            uniforms.precomputedLighting.lightIntensity);
+        float3 sunDir = lp.sunDir;
+        float sunDiffuseScale = lp.sunDiffuseScale;
+        float lightIntensity = lp.lightIntensity;
         
         // === SHARED SHADOW COMPUTATION ===
         // Only thread 0 computes shadows, then broadcasts to all 64 threads
@@ -1746,14 +1777,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
             float3 spot = spotData.xyz;
             float atten = spotData.w;
-            float lightIntensity = uniforms.precomputedLighting.lightIntensity;
             
-            // Vibrance-driven lighting sharpness: 0 = soft (original), 1 = sharp (normalized)
-            // Also scales spotlight ripple: low vibrance = calmer, high = more dramatic
-            float v = uniforms.colorScheme.vibrance;
-            float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
-            float sunDiffuseScale = mix(0.2f, 0.0872f, v);
-            lightIntensity *= mix(0.5f, 1.2f, v);
+            // Blended lighting: classic soft ↔ vibrance-driven sharp
+            LightingParams lp = computeBlendedLighting(
+                uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
+                uniforms.precomputedLighting.lightIntensity);
+            float3 sunDir = lp.sunDir;
+            float sunDiffuseScale = lp.sunDiffuseScale;
+            float lightIntensity = lp.lightIntensity;
 
             int shadowIterations = max(lodIterations - 2, 2);
             // Shadow params still need per-pixel bubble center, but use precomputed fractal values
@@ -1801,10 +1832,15 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 col += emissive;
             }
         } else {
-            float v = uniforms.colorScheme.vibrance;
-            float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
-            float sunDiffuseScale = mix(0.2f, 0.0872f, v);
-            half diffuse = half(max(dot(nor, sunDir), 0.0) * sunDiffuseScale * 2.5 + 0.3);
+            // Blended lighting for low-quality path
+            LightingParams lp = computeBlendedLighting(
+                uniforms.colorScheme.vibrance, uniforms.lightingSoftness, 1.0f);
+            float3 sunDir = lp.sunDir;
+            float sunDiffuseScale = lp.sunDiffuseScale;
+            // Classic low-quality used: dot * 0.5 + 0.3
+            // Current uses: dot * sunDiffuseScale * 2.5 + 0.3
+            float diffuseMultiplier = mix(sunDiffuseScale * 2.5f, 0.5f, uniforms.lightingSoftness);
+            half diffuse = half(max(dot(nor, sunDir), 0.0) * diffuseMultiplier + 0.3);
             col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache) * diffuse;
         }
         // Depth already written at start of this block via clipPos
@@ -1942,14 +1978,14 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
         float3 spot = spotData.xyz;
         float atten = spotData.w;
-        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         
-        // Vibrance-driven lighting sharpness: 0 = soft (original), 1 = sharp (normalized)
-        // Also scales spotlight ripple: low vibrance = calmer, high = more dramatic
-        float v = uniforms.colorScheme.vibrance;
-        float3 sunDir = mix(sunDirSoft, sunDirSharp, v);
-        float sunDiffuseScale = mix(0.2f, 0.0872f, v);
-        lightIntensity *= mix(0.5f, 1.2f, v);
+        // Blended lighting: classic soft ↔ vibrance-driven sharp
+        LightingParams lp = computeBlendedLighting(
+            uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
+            uniforms.precomputedLighting.lightIntensity);
+        float3 sunDir = lp.sunDir;
+        float sunDiffuseScale = lp.sunDiffuseScale;
+        float lightIntensity = lp.lightIntensity;
         
         if (quadLaneId == 0) {
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));

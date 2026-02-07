@@ -90,8 +90,8 @@ struct FractalSyncMessage: Codable, Sendable {
         settings.scale = scale
         
         // Fractal parameters
-        if let fractal = FractalType(rawValue: fractalType) {
-            settings.fractalType = fractal
+        if let fractalModel = FractalModelType(rawValue: fractalType) {
+            settings.fractalType = fractalModel
         }
         settings.fractalScale = fractalScale
         settings.fractalIterations = fractalIterations
