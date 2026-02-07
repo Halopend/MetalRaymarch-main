@@ -147,8 +147,24 @@ actor Renderer {
     /// Track last compute pipeline key to avoid log spam
     private var lastComputePipelineKey: String = ""
     
+    // === COMPUTE PIPELINE SELECTION FAST-PATH ===
+    private var lastComputeFI: Int = -1
+    private var lastComputeRS: Int = -1
+    private var lastSelectedComputePipeline: MTLComputePipelineState?
+    
+    /// Cached default Metal library — avoids device.makeDefaultLibrary() on every compute cache miss
+    private var cachedDefaultLibrary: MTLLibrary?
+    
     // Cached constant matrices (computed once, reused every frame)
     private let cachedRotationMatrix: matrix_float4x4
+    
+    // === FRAME-LEVEL CACHED VALUES ===
+    // Computed once in updateGameState(), reused in encodeAdaptiveCompute() per eye.
+    // Eliminates redundant makePrecomputedFractal/Lighting + model matrix computation.
+    private var cachedFrameTime: Float = 0
+    private var cachedPrecomputedFractal: PrecomputedFractalParams = PrecomputedFractalParams()
+    private var cachedPrecomputedLighting: PrecomputedLighting = PrecomputedLighting()
+    private var cachedModelMatrix: matrix_float4x4 = matrix_identity_float4x4
     
     // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
@@ -1130,20 +1146,43 @@ actor Renderer {
     // Track last logged pipeline to avoid spam
     private var lastLoggedPipelineKey: String = ""
     
+    // === PIPELINE SELECTION FAST-PATH CACHE ===
+    // Avoids per-frame String interpolation + Dictionary lookup when parameters haven't changed.
+    // selectPipeline() is called every frame; caching the last result short-circuits the common case.
+    private var lastSelectIter: Int = -1
+    private var lastSelectRS: Int = -1
+    private var lastSelectQS: Bool = false
+    private var lastSelectEmissive: Bool = false
+    private var lastSelectNeon: Bool = false
+    private var lastSelectedPipeline: MTLRenderPipelineState?
+    private var lastSelectedIsSpecialized: Bool = false
+    
     /// Select the best specialized pipeline for the current render settings.
     /// Uses the unified pipelineCache for all lookups - no separate cache tiers.
     ///
-    /// Pipeline lookup order:
-    /// 1. Exact match in unified cache (includes both quality presets and saved presets)
-    /// 2. Fallback to generic pipeline
+    /// OPTIMIZATION: Fast-path returns cached result when parameters haven't changed,
+    /// avoiding String interpolation + Dictionary lookup on every frame.
     ///
-    /// On cache miss for a non-standard configuration, consider calling `ensurePipeline()`
-    /// to build on-demand (though this may cause a frame hitch).
+    /// Pipeline lookup order:
+    /// 1. Fast-path: same params as last frame → return cached result
+    /// 2. Exact match in unified cache (includes both quality presets and saved presets)
+    /// 3. Fallback to generic pipeline
     func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool, 
                         emissiveEnabled: Bool = false, neonMode: Bool = false) -> MTLRenderPipelineState {
-        // Build unified cache key
+        // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
+        if iterations == lastSelectIter && raySteps == lastSelectRS &&
+           useQuadShared == lastSelectQS && emissiveEnabled == lastSelectEmissive &&
+           neonMode == lastSelectNeon, let cached = lastSelectedPipeline {
+            appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
+            return cached
+        }
+        
+        // Build unified cache key (only on parameter change)
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let cacheKey = "FI\(iterations)_RS\(raySteps)_E\(emissiveEnabled ? 1 : 0)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        
+        let result: MTLRenderPipelineState
+        var isSpecialized = true
         
         // 1. Check unified cache (includes both quality presets and saved presets)
         if let pipeline = pipelineCache[cacheKey] {
@@ -1151,28 +1190,39 @@ actor Renderer {
                 print("🎯 [Pipeline] Using cached pipeline: \(cacheKey)")
                 lastLoggedPipelineKey = cacheKey
             }
-            appModel.isUsingSpecializedPipeline = true
-            return pipeline
+            result = pipeline
         }
-        
         // 2. Try fallback to emissive=off/neon=off variant (quality preset)
-        let fallbackKey = "FI\(iterations)_RS\(raySteps)_E0_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
-        if let pipeline = pipelineCache[fallbackKey] {
-            if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
-                print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: E=\(emissiveEnabled ? 1 : 0) N=\(neonMode ? 1 : 0))")
-                lastLoggedPipelineKey = fallbackKey
+        else {
+            let fallbackKey = "FI\(iterations)_RS\(raySteps)_E0_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+            if let pipeline = pipelineCache[fallbackKey] {
+                if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
+                    print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: E=\(emissiveEnabled ? 1 : 0) N=\(neonMode ? 1 : 0))")
+                    lastLoggedPipelineKey = fallbackKey
+                }
+                result = pipeline
             }
-            appModel.isUsingSpecializedPipeline = true
-            return pipeline
+            // 3. Ultimate fallback to generic pipeline
+            else {
+                if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
+                    print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FI=\(iterations) RS=\(raySteps))")
+                    lastLoggedPipelineKey = "fallback"
+                }
+                isSpecialized = false
+                result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+            }
         }
         
-        // 3. Ultimate fallback to generic pipeline
-        if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
-            print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FI=\(iterations) RS=\(raySteps))")
-            lastLoggedPipelineKey = "fallback"
-        }
-        appModel.isUsingSpecializedPipeline = false
-        return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+        // Cache for next frame's fast-path
+        lastSelectIter = iterations
+        lastSelectRS = raySteps
+        lastSelectQS = useQuadShared
+        lastSelectEmissive = emissiveEnabled
+        lastSelectNeon = neonMode
+        lastSelectedPipeline = result
+        lastSelectedIsSpecialized = isSpecialized
+        appModel.isUsingSpecializedPipeline = isSpecialized
+        return result
     }
     
     /// Ensures a pipeline exists for the given configuration.
@@ -1282,16 +1332,26 @@ actor Renderer {
     
     /// Selects the best compute pipeline for the given iteration/ray-step settings.
     ///
+    /// OPTIMIZATION: Fast-path returns cached result when FI/RS haven't changed,
+    /// avoiding String interpolation + Dictionary lookup on every frame.
+    ///
     /// CRITICAL: The selected pipeline's baked FC_FRACTAL_ITERATIONS MUST match the
     /// iteration count used to precompute absScalePow on CPU. If there's a mismatch,
     /// the distance estimator produces wrong values (p.w accumulates over FC iterations
     /// but absScalePow was computed for settings.iterations), causing visual artifacts.
     ///
     /// Lookup order:
-    /// 1. Exact match in computePipelineCache
-    /// 2. Builds on-demand for exact configuration (cached for future frames)
-    /// 3. Falls back to generic (no function constants) pipeline — shader uses runtime params
+    /// 1. Fast-path: same params as last frame → return cached result
+    /// 2. Exact match in computePipelineCache
+    /// 3. Builds on-demand for exact configuration (cached for future frames)
+    /// 4. Falls back to generic (no function constants) pipeline — shader uses runtime params
     func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
+        // Fast-path: parameters unchanged since last call
+        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS,
+           let cached = lastSelectedComputePipeline {
+            return cached
+        }
+        
         let exactKey = "FI\(fractalIterations)_RS\(maxRaySteps)"
         
         // 1. Exact match — FC values match precomputed absScalePow
@@ -1300,13 +1360,18 @@ actor Renderer {
                 print("🎯 [ComputeCache] Exact hit: \(exactKey)")
                 lastComputePipelineKey = exactKey
             }
+            lastComputeFI = fractalIterations
+            lastComputeRS = maxRaySteps
+            lastSelectedComputePipeline = pipeline
             return pipeline
         }
         
         // 2. Build on-demand for this exact configuration
         //    DO NOT use "nearest preset" — a pipeline with wrong FC_FRACTAL_ITERATIONS
         //    causes absScalePow mismatch and visual degradation (the caching bug).
-        if let library = device.makeDefaultLibrary() {
+        let library = cachedDefaultLibrary ?? device.makeDefaultLibrary()
+        if cachedDefaultLibrary == nil { cachedDefaultLibrary = library }
+        if let library = library {
             let fi = Int32(fractalIterations)
             let si = Int32(max(fractalIterations - 2, 2))
             let rs = Int32(maxRaySteps)
@@ -1315,6 +1380,9 @@ actor Renderer {
                 computePipelineCache[exactKey] = pipeline
                 if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
                 lastComputePipelineKey = exactKey
+                lastComputeFI = fractalIterations
+                lastComputeRS = maxRaySteps
+                lastSelectedComputePipeline = pipeline
                 return pipeline
             }
         }
@@ -1325,7 +1393,11 @@ actor Renderer {
             print("⚠️ [ComputeCache] Using fallback generic compute pipeline")
             lastComputePipelineKey = "fallback"
         }
-        return adaptiveHierarchicalPipeline8x8
+        let fallback = adaptiveHierarchicalPipeline8x8
+        lastComputeFI = fractalIterations
+        lastComputeRS = maxRaySteps
+        lastSelectedComputePipeline = fallback
+        return fallback
     }
     
     /// Build a specialized pipeline with function constants for compile-time optimization
@@ -1590,12 +1662,26 @@ actor Renderer {
         // === PRECOMPUTE FRAME-UNIFORM VALUES ===
         // These are computed once per frame on CPU, shared by all pixels
         // Eliminates expensive per-pixel calculations like powr() and CameraPath()
+        let frameTime = Float(appModel.clock.time)  // Cache once — used in uniforms + precomputed
         let precomputedFractal = Self.makePrecomputedFractal(from: settingsSnapshot)
         let precomputedLighting = Self.makePrecomputedLighting(
-            time: Float(appModel.clock.time),
+            time: frameTime,
             lightingMode: settingsSnapshot.lightingMode,
             audioLevel: settingsSnapshot.audioLevel
         )
+        
+        // Hoist lightingWave out of per-eye loop — sin() is identical for both eyes
+        let baseColorMix = settingsSnapshot.colorMix
+        let baseGlow = settingsSnapshot.colorSchemeParams.glowIntensity
+        let lightingWave = sin(frameTime * 1.2)
+        let animatedColorMix = settingsSnapshot.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
+        let animatedGlow = settingsSnapshot.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
+        
+        // Cache frame-level values for reuse in encodeAdaptiveCompute (avoids recomputing per eye)
+        cachedFrameTime = frameTime
+        cachedPrecomputedFractal = precomputedFractal
+        cachedPrecomputedLighting = precomputedLighting
+        cachedModelMatrix = modelMatrix
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -1607,13 +1693,6 @@ actor Renderer {
             let inverseModelView = modelView.inverse
             let inverseView = viewMatrix.inverse
 
-            // Optional lighting play mode: gently modulate color and glow
-            let baseColorMix = settingsSnapshot.colorMix
-            let baseGlow = settingsSnapshot.colorSchemeParams.glowIntensity
-            let lightingWave = sin(Float(appModel.clock.time) * 1.2)
-            let animatedColorMix = settingsSnapshot.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
-            let animatedGlow = settingsSnapshot.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
-            
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
             
             // Get fovea center from the view's texture map (normalized 0-1)
@@ -1623,7 +1702,7 @@ actor Renderer {
                             inverseProjectionMatrix: inverseProjection,
                             viewMatrix: viewMatrix,
                             inverseViewMatrix: inverseView,
-                            time: Float(appModel.clock.time),
+                            time: frameTime,
                             minDistance: settingsSnapshot.minDistance,
                             fractalScale: settingsSnapshot.fractalScale,
                             fractalIterations: Int32(settingsSnapshot.fractalIterations),
@@ -1798,9 +1877,7 @@ actor Renderer {
 
         // Check if using adaptive 8x8 compute pipeline
         let tileSize = settingsSnapshot.tileSize
-        // MetalFX spatial upscaling disabled - causes frame drops without quality benefit
-        let wantsMetalFX = false
-        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil && !wantsMetalFX
+        let useAdaptiveCompute = (tileSize == 8) && adaptiveHierarchicalPipeline8x8 != nil
         
         if useAdaptiveCompute {
             // Use compute-based rendering for 8x8 adaptive hierarchical
@@ -1820,33 +1897,7 @@ actor Renderer {
         
         // Fall back to fragment-based rendering
         let renderPassDescriptor = MTLRenderPassDescriptor()
-        var metalFXInputSize: SIMD2<Int>?
-#if canImport(MetalFX)
-        let systemMap = drawable.rasterizationRateMaps.first
-        var metalFXContext: (manager: MetalFXManager, inputWidth: Int, inputHeight: Int)?
-        if wantsMetalFX {
-            metalFXContext = updateMetalFXManager(
-                drawable: drawable,
-                settingsSnapshot: settingsSnapshot,
-                rasterizationRateMap: systemMap
-            )
-            if let context = metalFXContext {
-                metalFXInputSize = SIMD2(context.inputWidth, context.inputHeight)
-                configureMetalFXRenderTargets(
-                    renderPassDescriptor: renderPassDescriptor,
-                    metalFX: context.manager,
-                    drawable: drawable,
-                    rasterizationRateMap: systemMap
-                )
-            } else {
-                configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
-            }
-        } else {
-            configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
-        }
-#else
         configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
-#endif
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             fatalError("Failed to create render encoder")
@@ -1890,16 +1941,7 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        let viewports: [MTLViewport]
-    #if canImport(MetalFX)
-        if let context = metalFXContext {
-            viewports = scaledViewports(for: drawable, targetWidth: context.inputWidth, targetHeight: context.inputHeight)
-        } else {
-            viewports = drawable.views.map { $0.textureMap.viewport }
-        }
-    #else
-        viewports = drawable.views.map { $0.textureMap.viewport }
-    #endif
+        let viewports: [MTLViewport] = drawable.views.map { $0.textureMap.viewport }
         renderEncoder.setViewports(viewports)
 
         if drawable.views.count > 1 {
@@ -1935,17 +1977,9 @@ actor Renderer {
 
         renderEncoder.endEncoding()
         
-    #if canImport(MetalFX)
-        if let context = metalFXContext {
-            try? context.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: nil)
-            blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: context.manager, drawable: drawable)
-        }
-    #endif
-
         let cpuEncodeMs = (CACurrentMediaTime() - cpuEncodeStart) * 1000.0
         let frameTimeSeconds = Double(cachedDeltaTime)
         let logTime = time
-        let capturedMetalFXInputSize = metalFXInputSize  // Capture for concurrent closure
         commandBuffer.addCompletedHandler { [weak self] cb in
             let gpuMs: Double?
             if cb.gpuEndTime > cb.gpuStartTime {
@@ -1961,9 +1995,7 @@ actor Renderer {
                     cpuEncodeMs: cpuEncodeMs,
                     gpuMs: gpuMs,
                     settingsSnapshot: settingsSnapshot,
-                    wantsMetalFX: wantsMetalFX,
                     useAdaptiveCompute: useAdaptiveCompute,
-                    metalFXInputSize: capturedMetalFXInputSize,
                     viewCount: drawable.views.count
                 )
             }
@@ -2008,9 +2040,7 @@ actor Renderer {
         cpuEncodeMs: Double,
         gpuMs: Double?,
         settingsSnapshot: RenderSettingsSnapshot,
-        wantsMetalFX: Bool,
         useAdaptiveCompute: Bool,
-        metalFXInputSize: SIMD2<Int>?,
         viewCount: Int
     ) {
         let frameMs = frameTimeSeconds * 1000.0
@@ -2021,18 +2051,10 @@ actor Renderer {
         lastPerfLogTime = nowTime
 
         let gpuText = gpuMs.map { String(format: "%.2f", $0) } ?? "n/a"
-        let metalFXText: String
-        if wantsMetalFX, let size = metalFXInputSize {
-            metalFXText = "on (input \(size.x)x\(size.y))"
-        } else if wantsMetalFX {
-            metalFXText = "on (input n/a)"
-        } else {
-            metalFXText = "off"
-        }
 
         let pathText = useAdaptiveCompute ? "compute" : "fragment"
         let fps = frameTimeSeconds > 0 ? (1.0 / frameTimeSeconds) : 0
-        if RENDERER_DEBUG { print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms path=\(pathText) MetalFX=\(metalFXText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)") }
+        if RENDERER_DEBUG { print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms path=\(pathText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)") }
     }
 
 #if canImport(MetalFX)
@@ -2244,11 +2266,8 @@ actor Renderer {
         }
         let view = drawable.views[viewIndex]
         
-        // Build model matrix — use already-smoothed values from updateGameState()
-        // (previously applied additional smoothing here, causing double-smoothing)
-        let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
-        let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
-        let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
+        // Build model matrix — reuse cached value from updateGameState() instead of recomputing
+        let modelMatrix = cachedModelMatrix
         
         // Build view matrix (same as fragment shader)
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
@@ -2268,19 +2287,17 @@ actor Renderer {
         // Get color scheme parameters
         let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
-        // === PRECOMPUTE FRAME-UNIFORM VALUES (same as fragment shader) ===
-        let computePrecomputedFractal = Self.makePrecomputedFractal(from: settingsSnapshot)
-        let computePrecomputedLighting = Self.makePrecomputedLighting(
-            time: Float(appModel.clock.time),
-            lightingMode: settingsSnapshot.lightingMode,
-            audioLevel: settingsSnapshot.audioLevel
-        )
+        // === REUSE PRECOMPUTED VALUES from updateGameState() ===
+        // These are frame-uniform (identical for both eyes), computed once per frame.
+        let computePrecomputedFractal = cachedPrecomputedFractal
+        let computePrecomputedLighting = cachedPrecomputedLighting
+        let frameTime = cachedFrameTime
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
             cameraPos: cameraPos,
-            time: Float(appModel.clock.time),
+            time: frameTime,
             resolution: SIMD2<Float>(Float(outputTexture.width), Float(outputTexture.height)),
             minDistance: settingsSnapshot.minDistance,
             fractalScale: settingsSnapshot.fractalScale,

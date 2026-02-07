@@ -10,33 +10,41 @@ import ARKit
 import os  // For os_unfair_lock - fastest available lock primitive
 
 /// Quality preset that bundles fractal iterations and ray steps
+/// Quality preset that bundles fractal iterations and ray steps.
+/// Reduced to 4 presets to minimize pipeline permutations (each preset compiles
+/// a specialized shader with baked loop counts).
 enum QualityPreset: String, CaseIterable {
-    case iter6 = "6"
-    case iter7 = "7"
-    case iter8 = "8"
-    case iter9 = "9"
-    case iter12 = "12"
-    case iter16 = "16"
+    case low = "Low"
+    case medium = "Medium"
+    case high = "High"
+    case ultra = "Ultra"
     
     var fractalIterations: Int {
         switch self {
-        case .iter6: return 6
-        case .iter7: return 7
-        case .iter8: return 8
-        case .iter9: return 9
-        case .iter12: return 12
-        case .iter16: return 16
+        case .low: return 6
+        case .medium: return 8
+        case .high: return 9
+        case .ultra: return 12
         }
     }
     
     var raySteps: Int {
         switch self {
-        case .iter6: return 32
-        case .iter7: return 48
-        case .iter8: return 56
-        case .iter9: return 64
-        case .iter12: return 100
-        case .iter16: return 128
+        case .low: return 32
+        case .medium: return 56
+        case .high: return 64
+        case .ultra: return 100
+        }
+    }
+    
+    var displayName: String { rawValue }
+    
+    var icon: String {
+        switch self {
+        case .low: return "hare"
+        case .medium: return "gauge.with.dots.needle.33percent"
+        case .high: return "gauge.with.dots.needle.67percent"
+        case .ultra: return "gauge.with.dots.needle.100percent"
         }
     }
     
@@ -72,6 +80,9 @@ class AppModel {
     @ObservationIgnored nonisolated(unsafe) var isAppActive: Bool = true
 
     var fps: Double = 0
+    
+    /// Whether the renderer is currently using a specialized (compiled) pipeline vs generic fallback
+    @ObservationIgnored nonisolated(unsafe) var isUsingSpecializedPipeline: Bool = false
     
     nonisolated let renderSettings = RenderSettings()
     
@@ -184,6 +195,9 @@ class AppModel {
     /// Callback to open the menu window (set by App scene)
     var openMenuWindowHandler: (() -> Void)?
     
+    /// Callback to dismiss the menu window (set by App scene)
+    var dismissMenuWindowHandler: (() -> Void)?
+    
     /// Callback to open the developer window (set by App scene)
     var openDeveloperWindowHandler: (() -> Void)?
     
@@ -202,24 +216,24 @@ class AppModel {
     
     /// Toggle menu window visibility - hides window content completely (preserves position)
     func toggleMenuWindow() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isMenuWindowVisible.toggle()
-        }
-        // If showing, also ensure window is open (in case it was natively closed)
         if isMenuWindowVisible {
+            isMenuWindowVisible = false
+            dismissMenuWindowHandler?()
+            print("📋 Menu window dismissed")
+        } else {
+            isMenuWindowVisible = true
             openMenuWindowHandler?()
+            print("📋 Menu window opened")
         }
-        print("📋 Menu window \(isMenuWindowVisible ? "shown" : "hidden")")
     }
     
     /// Ensure window content is visible - call when exiting immersive mode or on app launch
     /// This prevents the window from being invisible when gestures toggled it hidden during immersive mode
     func ensureWindowContentVisible() {
         if !isMenuWindowVisible {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                isMenuWindowVisible = true
-            }
-            print("📋 Menu window restored to visible state")
+            isMenuWindowVisible = true
+            openMenuWindowHandler?()
+            print("📋 Menu window restored (re-opened)")
         }
     }
     
