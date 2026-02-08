@@ -204,10 +204,10 @@ final class GestureController {
     // - Large exploration ranges for dramatic parameter sweeps
     // - Scale controls overall density, foldingLimit controls box boundaries
     private static let mandelboxRanges = FractalParamRanges(
-        minDistance: 0.8...5.0,           // minRadius² - affects sphere fold cutoff
-        foldingLimit: 0.5...13.0,         // Box fold boundary - wide range
-        sphereRadius: 0.1...2.0,          // Sphere inversion radius
-        fractalScale: 1.5...4.0,          // Typical positive scale range
+        minDistance: -2.0...8.0,          // minRadius² - affects sphere fold cutoff (now includes negative for inverted effects)
+        foldingLimit: -5.0...20.0,        // Box fold boundary - wide range with negatives for unusual topology
+        sphereRadius: -3.0...4.0,         // Sphere inversion radius (negative for inverse effects)
+        fractalScale: -3.0...5.0,         // FAMOUS NEGATIVE SCALING FACTOR - creates stunning inverse fractals
         defaultMinDistance: 0.8,
         defaultFoldingLimit: 1.0,
         defaultSphereRadius: 0.5,
@@ -218,10 +218,10 @@ final class GestureController {
     // - Much wider ranges for extreme exploration
     // - Allows reaching more unusual/exotic parameter combinations
     private static let mandelboxExtendedRanges = FractalParamRanges(
-        minDistance: 0.1...10.0,          // Extended: much wider minRadius² range
-        foldingLimit: 0.1...20.0,         // Extended: allows very tight and very loose folds
-        sphereRadius: 0.01...5.0,         // Extended: from tiny to large sphere inversions
-        fractalScale: 0.5...6.0,          // Extended: includes sub-1 scales for different effects
+        minDistance: -5.0...15.0,         // Extended: extreme minRadius² range with deep negatives
+        foldingLimit: -10.0...30.0,       // Extended: allows very tight and very loose folds, deep inverse folding
+        sphereRadius: -5.0...8.0,         // Extended: from negative to large sphere inversions
+        fractalScale: -5.0...8.0,         // Extended: EXTREME negative scaling for wild inverse effects
         defaultMinDistance: 0.8,
         defaultFoldingLimit: 1.0,
         defaultSphereRadius: 0.5,

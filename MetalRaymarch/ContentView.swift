@@ -526,7 +526,7 @@ struct ContentView: View {
 
                         // Primary Parameter: Fractal Scale - push on editing end
                         Text("Fractal Scale (\(String(format: "%.2f", cache.fractalScale)))")
-                        Slider(value: $cache.fractalScale, in: 1.0...5.0, onEditingChanged: { editing in
+                        Slider(value: $cache.fractalScale, in: -3.0...5.0, onEditingChanged: { editing in
                             if !editing { cache.push(\.fractalScale, value: cache.fractalScale) }
                         })
 
