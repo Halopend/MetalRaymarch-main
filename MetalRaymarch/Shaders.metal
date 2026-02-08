@@ -113,6 +113,9 @@ constant bool FC_NEON_MODE_ENABLED [[function_constant(8)]];
 // Color iterations - when defined, enables loop unrolling in ColourWithScheme
 constant int FC_COLOR_ITERATIONS [[function_constant(9)]];
 
+// Shadow sharing toggle - allows per-pixel shadows when disabled
+constant bool FC_SHARE_SHADOWS [[function_constant(10)]];
+
 typedef struct
 {
     float3 position [[attribute(VertexAttributePosition)]];
@@ -183,10 +186,10 @@ constant half kPowEpsilonHalf = 1e-4h;
 constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
 constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
 
-// Shading constants
+// Shading constants (tuned for softer, less harsh lighting)
 constant float kSpecularPower = 10.0f;          // Specular highlight power
-constant float kSpecularIntensity = 2.0f;       // Specular intensity multiplier
-constant float kAttenPower = 1.5f;              // Light attenuation power
+constant float kSpecularIntensity = 1.2f;       // Specular intensity multiplier (reduced from 2.0 for softer look)
+constant float kAttenPower = 1.2f;              // Light attenuation power (reduced from 1.5 for smoother falloff)
 
 // Quality thresholds
 constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quality
@@ -252,9 +255,9 @@ struct LightingParams {
 FORCE_INLINE LightingParams computeBlendedLighting(float vibrance, float lightingSoftness, float baseLightIntensity) {
     LightingParams params;
     
-    // Current system: vibrance drives sun direction, diffuse, and intensity
+    // Current system: vibrance drives sun direction and intensity
     float3 sunDirNew = mix(sunDirSoft, sunDirSharp, vibrance);
-    float sunDiffuseNew = mix(0.2f, 0.0872f, vibrance);
+    float sunDiffuseNew = 0.15f;        // Slightly lower than classic for sharper look when vibrant
     float intensityScaleNew = mix(0.5f, 1.2f, vibrance);
     
     // Classic system: fixed sun direction, fixed diffuse, no intensity scaling
@@ -262,7 +265,7 @@ FORCE_INLINE LightingParams computeBlendedLighting(float vibrance, float lightin
     float sunDiffuseClassic = 0.2f;     // Original fixed value
     float intensityScaleClassic = 1.0f; // No scaling in classic mode
     
-    // Blend between current and classic based on softness
+    // Blend between current and classic based on softness for smooth transitions
     params.sunDir = mix(sunDirNew, sunDirClassic, lightingSoftness);
     params.sunDiffuseScale = mix(sunDiffuseNew, sunDiffuseClassic, lightingSoftness);
     params.lightIntensity = baseLightIntensity * mix(intensityScaleNew, intensityScaleClassic, lightingSoftness);
@@ -1286,8 +1289,9 @@ half3 renderDebugSphere(half3 baseColor, float2 uv, int activeGesture, float ges
 FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
 {
     const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
-    if (qualityMode >= 2) return 0.65f;
-    if (UNLIKELY(quality < kMinQualityForShadows)) return 0.65f;
+    // Return higher minimum for softer shadows (0.35 = more fill light in shadows)
+    if (qualityMode >= 2) return 0.35f;
+    if (UNLIKELY(quality < kMinQualityForShadows)) return 0.35f;
     
     float res = 1.0f;
     float t = 0.08f;
@@ -1320,7 +1324,8 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
         prevH = h;
     }
     
-    return res < 0.02f ? 0.0f : saturate(res);
+    // Clamp to minimum 0.2 for ambient fill - prevents harsh black shadows
+    return max(saturate(res), 0.2f);
 }
 
 // === TILE-BASED RAYMARCHING (4x4 pixel groups) ===
@@ -1332,10 +1337,61 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
 // =============================================================================
 // EMISSIVE GLOW CALCULATION
 // Computes self-illumination based on cached fold state and patterns
-// Requires valid OrbitCache from raymarching hit
+// Falls back to live fold sampling when enabled for richer detail
 // =============================================================================
 
-// Compute emissive glow - REQUIRES valid cache (always valid on hit)
+// Track fold information during SDF evaluation for emissive calculation
+struct FoldInfo {
+    int boxFolds;
+    int sphereFolds;
+    float minRadius;
+    float orbitTrap;
+};
+
+// Evaluate SDF with fold tracking (reintroduces legacy emissive feel)
+FORCE_INLINE float MapWithFoldInfo(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType, thread FoldInfo& foldInfo) {
+    foldInfo.boxFolds = 0;
+    foldInfo.sphereFolds = 0;
+    foldInfo.minRadius = 1e10;
+    foldInfo.orbitTrap = 1e10;
+    
+    float3 z = pos;
+    float dr = 1.0;
+    float scale = params.scale.x;
+    float minRad2 = params.minDistanceVal; // reuse existing minimum distance parameter
+    float fixedRad2 = params.sphereRadiusSq;
+    float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
+    
+    for (int i = 0; i < iterations; i++) {
+        float3 zOld = z;
+        z = clamp(z, -foldingLimit, foldingLimit) * 2.0 - z;
+        if (any(z != zOld)) foldInfo.boxFolds++;
+        
+        float r2 = dot(z, z);
+        foldInfo.minRadius = min(foldInfo.minRadius, sqrt(r2));
+        float trap = min(min(abs(z.x), abs(z.y)), abs(z.z));
+        foldInfo.orbitTrap = min(foldInfo.orbitTrap, trap);
+        
+        if (r2 < minRad2) {
+            float temp = fixedRad2 / max(minRad2, kPowEpsilon);
+            z *= temp;
+            dr *= temp;
+            foldInfo.sphereFolds++;
+        } else if (r2 < fixedRad2) {
+            float temp = clamp(1.0f / max(r2, kPowEpsilon), 1.0f, invSphereRadiusSq);
+            z *= temp;
+            dr *= temp;
+            foldInfo.sphereFolds++;
+        }
+        
+        z = scale * z + pos;
+        dr = dr * abs(scale) + 1.0;
+    }
+    
+    return length(z) / abs(dr) - 0.001;
+}
+
+// Compute emissive glow - prefers cache but refreshes fold data when needed
 FORCE_INLINE half3 computeEmissive(
     float3 pos,
     float3 normal,
@@ -1347,30 +1403,41 @@ FORCE_INLINE half3 computeEmissive(
     float speed,
     int iterations,
     float foldingLimit,
+    FractalParams params,
+    int fractalType,
     OrbitCache cache
 ) {
-    if (intensity <= 0.0 || !cache.valid) return half3(0.0h);
+    if (intensity <= 0.0) return half3(0.0h);
     
-    // Use cached fold info from raymarching
-    int boxFolds = cache.boxFolds;
-    int sphereFolds = cache.sphereFolds;
-    float minRadius = cache.minRadius;
-    float orbitTrapDist = cache.orbitTrapDist;
+    // Start with cached fold info when available
+    int boxFolds = cache.valid ? cache.boxFolds : 0;
+    int sphereFolds = cache.valid ? cache.sphereFolds : 0;
+    float minRadius = cache.valid ? cache.minRadius : 1e10;
+    float orbitTrapDist = cache.valid ? cache.orbitTrapDist : 1e10;
+    
+    // When cache is missing or emissive patterns need richer detail, refresh via MapWithFoldInfo
+    // Only refresh when intensity is significant to avoid noise from unnecessary re-computation
+    bool refreshFoldInfo = !cache.valid || intensity > 0.5;
+    if (refreshFoldInfo) {
+        FoldInfo info;
+        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
+        boxFolds = info.boxFolds;
+        sphereFolds = info.sphereFolds;
+        minRadius = info.minRadius;
+        orbitTrapDist = info.orbitTrap;
+    }
     
     float emission = 0.0;
     
     if (pattern == 0) {
-        // FOLDS: Glow based on fold count
         float foldRatio = float(boxFolds + sphereFolds) / float(iterations * 2);
         emission = smoothstep(threshold, 1.0, foldRatio);
     }
     else if (pattern == 1) {
-        // DEPTH: Glow based on iteration depth (deep = glowy)
         float depthFactor = 1.0 - saturate(minRadius / (foldingLimit * 2.0));
         emission = smoothstep(threshold, 1.0, depthFactor);
     }
     else if (pattern == 2) {
-        // POSITION: Sine-based veins/ridges pattern + orbit trap
         float3 freq = float3(5.0, 7.0, 6.0);
         float veins = sin(pos.x * freq.x) * sin(pos.y * freq.y) * sin(pos.z * freq.z);
         veins = veins * 0.5 + 0.5;
@@ -1378,7 +1445,6 @@ FORCE_INLINE half3 computeEmissive(
         emission = smoothstep(threshold, 1.0, veins * 0.5 + trap * 0.5);
     }
     else if (pattern == 3) {
-        // PULSE: Fold-aware animated glow
         float cellId = float(boxFolds * 3 + sphereFolds * 7) + floor(orbitTrapDist * 4.0);
         float phase = cellId * 0.7;
         float pulse = sin(gTime * speed * 3.0 + phase);
@@ -1388,7 +1454,6 @@ FORCE_INLINE half3 computeEmissive(
         emission = pulse * depthBoost * cellMask;
     }
     else if (pattern == 4) {
-        // EDGES: Glow at sharp edges
         float3 tangent = normalize(cross(normal, float3(0, 1, 0) + float3(0.001)));
         float3 bitangent = cross(normal, tangent);
         float curvature = 1.0 - abs(dot(normal, normalize(normal + tangent * 0.1)));
@@ -1655,32 +1720,49 @@ kernel void adaptiveHierarchical8x8(
         float sunDiffuseScale = lp.sunDiffuseScale;
         float lightIntensity = lp.lightIntensity;
         
-        // === SHARED SHADOW COMPUTATION ===
-        // Only thread 0 computes shadows, then broadcasts to all 64 threads
-        // via threadgroup memory. Shadow varies slowly over 8x8 pixel tiles,
-        // so sharing is visually imperceptible. Saves 63 Shadow() evaluations
-        // per tile (~2600+ fewer fractal iteration loops per tile).
+        const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
+            ? FC_SHARE_SHADOWS
+            : (uniforms.lightingSoftness < 0.9f);
         int shadowIterations = max(lodIterations - 2, 2);
-        if (localIndex == 0) {
+        half shaSpot = 1.0h;
+        half shaSun = 1.0h;
+        if (shareShadows) {
+            // Only thread 0 computes shadows, then broadcasts to all 64 threads
+            // via threadgroup memory. Shadow varies slowly over 8x8 pixel tiles,
+            // so sharing is visually imperceptible. Saves 63 Shadow() evaluations
+            // per tile (~2600+ fewer fractal iteration loops per tile).
+            if (localIndex == 0) {
+                FractalParams shadowParams = makeFractalParamsFromPrecomputed(
+                    uniforms.precomputedFractal,
+                    uniforms.minDistance,
+                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+                
+                tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+                tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            shaSpot = tg_shaSpot;
+            shaSun = tg_shaSun;
+        } else {
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
                 marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
-            
-            tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
-            tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+            shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+            shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         }
-        threadgroup_barrier(mem_flags::mem_threadgroup);
         
-        half shaSpot = tg_shaSpot;
-        half shaSun = tg_shaSun;
-        
-        half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
+        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
+        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
                     uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
-        col = (col * bri * shaSpot) + (col * briSun * shaSun);
+        
+        // Add ambient term (0.15) to prevent pure black in shadows + hemisphere ambient
+        half hemisphereAO = half(nor.y * 0.5 + 0.5); // Simple sky/ground ambient
+        half ambient = 0.15h + hemisphereAO * 0.1h;
+        col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
         
         // Specular
         float3 ref = reflect(marchDir, nor);
@@ -1796,11 +1878,16 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
 
-            half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
+            float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
+            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
             half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
 
             col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
-            col = (col * bri * shaSpot) + (col * briSun * shaSun);
+            
+            // Add ambient term to prevent harsh shadows
+            half hemisphereAO = half(nor.y * 0.5 + 0.5);
+            half ambient = 0.15h + hemisphereAO * 0.1h;
+            col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
 
             if (quality > kMinQualityForSpecular) {
                 float3 ref = reflect(marchDir, nor);
@@ -1827,6 +1914,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                     uniforms.emissiveSpeed,
                     lodIterations,
                     uniforms.foldingLimit,
+                    fractalParams,
+                    fractalType,
                     hitCache
                 );
                 col += emissive;
@@ -1964,7 +2053,10 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, hitCache);
         
-        // Quad-shared shadows: leader computes, broadcasts to all 4 pixels
+        // Quad-shared shadows with optional per-pixel fallback
+        const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
+            ? FC_SHARE_SHADOWS
+            : (uniforms.lightingSoftness < 0.9f);
         half shaSpot = 1.0h;
         half shaSun = 1.0h;
         
@@ -1987,21 +2079,29 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         float sunDiffuseScale = lp.sunDiffuseScale;
         float lightIntensity = lp.lightIntensity;
         
-        if (quadLaneId == 0) {
+        if (shareShadows) {
+            if (quadLaneId == 0) {
+                shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+                shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
+            }
+            shaSpot = quad_broadcast(shaSpot, 0);
+            shaSun = quad_broadcast(shaSun, 0);
+        } else {
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType));
         }
         
-        // Broadcast shadow values to all 4 pixels in quad
-        shaSpot = quad_broadcast(shaSpot, 0);
-        shaSun = quad_broadcast(shaSun, 0);
-        
         // Per-pixel lighting with shared shadows
-        half bri = half(max(dot(spot, nor), 0.0) / atten * 0.25 * lightIntensity);
+        float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
+        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
         half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
-        col = (col * bri * shaSpot) + (col * briSun * shaSun);
+        
+        // Add ambient term to prevent harsh shadows
+        half hemisphereAO = half(nor.y * 0.5 + 0.5);
+        half ambient = 0.15h + hemisphereAO * 0.1h;
+        col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
         
         // Specular
         float3 ref = reflect(marchDir, nor);
@@ -2027,6 +2127,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
                 uniforms.emissiveSpeed,
                 lodIterations,
                 uniforms.foldingLimit,
+                fractalParams,
+                fractalType,
                 hitCache
             );
             col += emissive;
