@@ -33,6 +33,8 @@ enum FunctionConstantIndex: Int {
     case emissiveEnabled = 7  // Eliminates emissive code path when false
     case neonModeEnabled = 8  // Eliminates neon orbit trap computation when false
     case colorIterations = 9  // Enables loop unrolling in ColourWithScheme
+    // index 10 = FC_SHARE_SHADOWS (set in shader only)
+    case shadowsEnabled = 11  // GMT-fractals: compile-out entire shadow computation
 }
 
 // Debug logging toggle - set to false for release builds
@@ -877,6 +879,7 @@ actor Renderer {
         var emissiveEnabled: Bool?         // FC index 7 - eliminates emissive code path
         var neonModeEnabled: Bool?         // FC index 8 - eliminates neon orbit tracking
         var colorIterations: Int32?        // FC index 9 - enables loop unrolling in color
+        var shadowsEnabled: Bool?          // FC index 11 - GMT-fractals: compile-out shadows entirely
         
         /// Creates MTLFunctionConstantValues from this config
         func toMTLConstants() -> MTLFunctionConstantValues {
@@ -911,6 +914,9 @@ actor Renderer {
             }
             if var colorIters = colorIterations {
                 constants.setConstantValue(&colorIters, type: .int, index: FunctionConstantIndex.colorIterations.rawValue)
+            }
+            if var shadows = shadowsEnabled {
+                constants.setConstantValue(&shadows, type: .bool, index: FunctionConstantIndex.shadowsEnabled.rawValue)
             }
             
             return constants
@@ -1734,6 +1740,11 @@ actor Renderer {
                             maxViewDistance: RenderSettings.maxViewDistance,
                             logDepthScale: RenderSettings.logDepthScale,
                             depthMissValue: RenderSettings.depthMissValue,
+                            // === GMT-FRACTALS OPTIMIZATIONS ===
+                            stepMultiplier: settingsSnapshot.stepMultiplier,
+                            boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
+                            blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
+                            pad_gmt: 0.0,
                             precomputedFractal: precomputedFractal,
                             precomputedLighting: precomputedLighting,
                             colorScheme: colorSchemeParams)
@@ -2329,6 +2340,11 @@ actor Renderer {
             maxViewDistance: RenderSettings.maxViewDistance,
             logDepthScale: RenderSettings.logDepthScale,
             depthMissValue: RenderSettings.depthMissValue,
+            // === GMT-FRACTALS OPTIMIZATIONS ===
+            stepMultiplier: settingsSnapshot.stepMultiplier,
+            boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
+            blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
+            pad_gmt: 0.0,
             currentViewProjMatrix: currentViewProj,
             previousViewProjMatrix: previousViewProjMatrices[viewIndex],
             currentInvViewProjMatrix: currentViewProj.inverse,

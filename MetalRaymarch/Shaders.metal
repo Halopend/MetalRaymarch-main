@@ -116,6 +116,9 @@ constant int FC_COLOR_ITERATIONS [[function_constant(9)]];
 // Shadow sharing toggle - allows per-pixel shadows when disabled
 constant bool FC_SHARE_SHADOWS [[function_constant(10)]];
 
+// Shadow enable toggle - eliminates entire shadow computation when disabled
+constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
+
 typedef struct
 {
     float3 position [[attribute(VertexAttributePosition)]];
@@ -417,6 +420,38 @@ FORCE_INLINE float MapHalf(float3 pos, FractalParams params, float foldingLimit,
     // Final distance estimate in float for precision
     float d = (length(float3(p.xyz)) - params.absScalem1) / float(p.w) - params.absScalePow;
     
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (bubbleEnabled) {
+        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
+        d = max(d, -bubbleDist);
+    }
+    return d;
+}
+
+// =============================================================================
+// GEOMETRY-ONLY DISTANCE ESTIMATOR (Inspired by GMT-fractals DE_Dist())
+// =============================================================================
+// Stripped-down Map variant for shadows, AO, and normal fallback paths.
+// Removes ALL tracking: no trap, no trapIter, no trapPos, no boxFolds,
+// no sphereFolds, no minRadius, no orbitTrapDist, no Jacobian.
+// Just pure box fold → sphere fold → scale, returning distance.
+// This saves ~6 extra ops per iteration vs MAP_ITERATION_WITH_CACHE.
+FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLimit, int iterations)
+{
+    float4 p = float4(pos, 1.0);
+    float4 p0 = p;
+    
+    float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
+    
+    const int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
+    
+    for (int i = 0; i < loopCount; i++) {
+        MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq);
+    }
+    
+    float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
+    
+    // Safety bubble check (compile-time eliminated when disabled)
     const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
     if (bubbleEnabled) {
         float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
@@ -983,13 +1018,27 @@ struct SceneResult {
 };
 
 // Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
     float t = 0.05 + dither;
+    
+    // === BOUNDING SPHERE PRE-TEST (GMT-fractals technique) ===
+    // Skip empty space before the fractal's bounding volume.
+    // When boundingSphereRadius > 0, ray-sphere intersect jumps t to the
+    // sphere entry point, saving dozens of wasted Map() evaluations in void.
+    if (boundingSphereRadius > 0.0) {
+        float sphereT = rayIntersectBoundingSphere(rO, rD, float3(0.0), boundingSphereRadius);
+        if (sphereT < 0.0) {
+            // Ray misses bounding sphere entirely — no fractal geometry possible
+            result.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
+            return result;
+        }
+        t = max(t, sphereT);
+    }
     
     float glow = 0.0;
     
@@ -1021,7 +1070,11 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         if (UNLIKELY(t > kMaxRayDistance)) break;
         
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
-        t += h;
+        // STEP OVER-RELAXATION (GMT-fractals technique)
+        // stepMultiplier > 1.0 takes larger steps, converging faster at the risk
+        // of stepping through thin features. 1.2-1.5 is safe for Mandelbox;
+        // CPU adjusts dynamically based on geometry state.
+        t += h * stepMultiplier;
     }
     
     result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
@@ -1029,7 +1082,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
 }
 
 // Raymarch with cache that starts from a known distance (for hierarchical acceleration)
-FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0)
+FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, float stepMultiplier = 1.0)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -1071,7 +1124,8 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         if (UNLIKELY(t > endT)) break;
         
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
-        t += h;
+        // STEP OVER-RELAXATION (GMT-fractals technique)
+        t += h * stepMultiplier;
     }
     
     result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
@@ -1286,8 +1340,20 @@ half3 renderDebugSphere(half3 baseColor, float2 uv, int activeGesture, float ges
 
 // Soft shadow with over-relaxation
 // OPTIMIZATION: Combined exit conditions to reduce branches
+// GMT-FRACTALS TECHNIQUE: FC_SHADOWS_ENABLED allows compile-time elimination of
+// entire shadow computation. When disabled, returns a flat ambient shadow value
+// (0.35) — zero Map() evaluations, zero ALU cost.
+// Also uses MapDistOnly instead of MapHalf — removes all fold/trap tracking
+// from shadow rays, saving ~6 ops per iteration per shadow step.
 FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations, int fractalType = 0)
 {
+    // === COMPILE-TIME SHADOW ELIMINATION (GMT-fractals technique) ===
+    // When FC_SHADOWS_ENABLED is defined as false, the compiler eliminates
+    // the entire shadow march — zero Map evaluations, zero GPU cost.
+    // This is the single biggest perf win during interaction/movement.
+    const bool shadowsEnabled = is_function_constant_defined(FC_SHADOWS_ENABLED) ? FC_SHADOWS_ENABLED : true;
+    if (!shadowsEnabled) return 0.35f;
+    
     const int qualityMode = is_function_constant_defined(FC_QUALITY_MODE) ? FC_QUALITY_MODE : 0;
     // Return higher minimum for softer shadows (0.35 = more fill light in shadows)
     if (qualityMode >= 2) return 0.35f;
@@ -1311,9 +1377,11 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
     for (int i = 0; i < steps && t <= shadowRange && res >= 0.02f; i++)
     {
         float3 p = fma(rd, float3(t), ro);
-        // Use MapHalf — shadow rays have coarse thresholds (0.02+),
-        // well within half precision. 2× throughput on Apple Silicon.
-        float h = MapHalf(p, params, foldingLimit, iterations);
+        // GEOMETRY-ONLY DE (GMT-fractals technique): MapDistOnly strips all
+        // fold tracking, orbit traps, and Jacobian from shadow rays.
+        // Shadow rays only need distance — the ~6 extra ops per iteration
+        // in Map/MapHalf for tracking are pure waste here.
+        float h = MapDistOnly(p, params, foldingLimit, iterations);
         
         // Use rcp for division by t (faster on many GPUs)
         res = min(res, 10.0f * h * (1.0f / t));
@@ -1610,6 +1678,26 @@ kernel void adaptiveHierarchical8x8(
     tileIsEmpty = 0;
     if (localIndex == 0) {
         tileIsEmpty = 0;
+        
+        // === BOUNDING SPHERE TILE EARLY-EXIT (GMT-fractals technique) ===
+        // Before coarse raymarching, test the tile-center ray against the bounding sphere.
+        // If the bounding sphere is enabled and the center ray misses it, the entire
+        // 8x8 tile is guaranteed empty — skip coarse march + probes entirely.
+        if (uniforms.boundingSphereRadius > 0.0) {
+            float2 tileCenter = float2(tileId * ADAPTIVE_TILE_SIZE) + float2(ADAPTIVE_TILE_SIZE * 0.5);
+            float2 tileCenterNDC = (tileCenter / uniforms.resolution) * 2.0 - 1.0;
+            tileCenterNDC.y = -tileCenterNDC.y;
+            float4 tcClip = float4(tileCenterNDC.x, tileCenterNDC.y, 0.0, 1.0);
+            float4 tcView = uniforms.invProjMatrix * tcClip;
+            float3 tcRd = normalize((uniforms.invViewMatrix * float4(normalize(tcView.xyz), 0.0)).xyz);
+            float bsT = rayIntersectBoundingSphere(marchOrigin, tcRd, float3(0.0), uniforms.boundingSphereRadius);
+            if (bsT < 0.0) {
+                tileIsEmpty = 1;
+                tileStartT = 0.05;
+            }
+        }
+        
+        if (!tileIsEmpty) {
         if (reprojectionValid) {
             // Temporal reprojection is valid for thread 0 — surface definitely exists
             // near this depth. Use reprojected depth as tile start, skip coarse+probes.
@@ -1650,6 +1738,7 @@ kernel void adaptiveHierarchical8x8(
             tileStartT = 0.05;
             tileIsEmpty = 0;
         }
+        } // end if (!tileIsEmpty)
     }
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -1686,10 +1775,10 @@ kernel void adaptiveHierarchical8x8(
     SceneResult sceneResult;
     if (fractalType == 0) {
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
-                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
+                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.stepMultiplier);
     } else {
         sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                                     uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType);
+                                     uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.boundingSphereRadius, uniforms.stepMultiplier);
     }
     
     float adjustedDist = sceneResult.distGlow.x;
@@ -1828,7 +1917,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
     
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.boundingSphereRadius, uniforms.stepMultiplier);
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
 
@@ -2034,10 +2123,10 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     SceneResult sceneResult;
     if (coarseStartT < kRayMissThreshold) {
         // Coarse pass found something — start fine march from nearby
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.stepMultiplier);
     } else {
         // Coarse pass missed — full march needed
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType);
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.boundingSphereRadius, uniforms.stepMultiplier);
     }
     float2 ret = sceneResult.distGlow;
     OrbitCache hitCache = sceneResult.cache;

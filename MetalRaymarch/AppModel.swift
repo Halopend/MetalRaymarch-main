@@ -786,6 +786,12 @@ struct RenderSettingsSnapshot {
     // ═══════════════════════════════════════════════════════════════════════════
     let geometryState: GeometryState
     let isGeometryGestureActive: Bool
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GMT-FRACTALS OPTIMIZATIONS
+    // Step over-relaxation factor for raymarch convergence acceleration
+    // ═══════════════════════════════════════════════════════════════════════════
+    let stepMultiplier: Float
 }
 
 final class RenderSettings: @unchecked Sendable {
@@ -895,6 +901,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _stableGeometryEnabled: Bool = true          // Enable geometry stability tracking
     private var _geometryStableFrameCount: Int = 0           // Frames since geometry settled
     private let geometrySettleThreshold: Float = 0.001       // Threshold for considering parameters settled
+    
+    // === GMT-FRACTALS OPTIMIZATIONS ===
+    // Step over-relaxation: >1.0 takes larger steps for faster convergence.
+    // 1.0 = safe default, 1.2-1.5 during stable geometry, reduced during interaction.
+    private var _stepMultiplier: Float = 1.0
     
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
@@ -1566,7 +1577,8 @@ final class RenderSettings: @unchecked Sendable {
                 doppelgangerPlane: _doppelgangerPlane,
                 doppelgangerOffset: _doppelgangerOffset,
                 geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,
-                isGeometryGestureActive: _isGeometryGestureActive
+                isGeometryGestureActive: _isGeometryGestureActive,
+                stepMultiplier: _stepMultiplier
             )
         }
     }
@@ -1851,9 +1863,14 @@ final class RenderSettings: @unchecked Sendable {
             )
             
             // Clamp current values to sane ranges as a safety net
-            _minDistance = max(0.1, min(10.0, _minDistance))
-            _foldingLimit = max(0.1, min(20.0, _foldingLimit))
-            _sphereRadius = max(0.05, min(5.0, _sphereRadius))
+            // These MUST cover the full gesture/slider ranges (including negatives
+            // for inverted effects) otherwise gestures and UI appear to "stop working"
+            // at the clamp boundary.
+            // Standard ranges:  minDist -2…8, fold -5…20, sphere -3…4
+            // Extended ranges:  minDist -5…15, fold -10…30, sphere -5…8
+            _minDistance = max(-5.0, min(15.0, _minDistance))
+            _foldingLimit = max(-10.0, min(30.0, _foldingLimit))
+            _sphereRadius = max(-5.0, min(8.0, _sphereRadius))
             
             // Clamp position to prevent drifting to infinity
             let maxPos: Float = 100.0
@@ -1908,6 +1925,18 @@ final class RenderSettings: @unchecked Sendable {
                     _geometryStableFrameCount = 0
                 }
             }
+            
+            // ═══════════════════════════════════════════════════════════════════════════
+            // GMT-FRACTALS: ADAPTIVE STEP MULTIPLIER
+            // Over-relaxation factor adjusts based on geometry stability:
+            // - Parameters changing: 1.0 (safe, no over-stepping thin features)
+            // - Parameters settled: 1.2 (moderate convergence speedup)
+            // Uses allGeometrySettled directly instead of _isGeometryGestureActive,
+            // which may not be wired to all gesture sources.
+            // ═══════════════════════════════════════════════════════════════════════════
+            let targetStepMultiplier: Float = allGeometrySettled ? 1.2 : 1.0
+            // Smooth transition to avoid popping
+            _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
         }
     }
     

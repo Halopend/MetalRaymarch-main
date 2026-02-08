@@ -51,6 +51,7 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexEmissiveEnabled     = 7,  // bool: Eliminates emissive code path when false
     FCIndexNeonModeEnabled     = 8,  // bool: Eliminates neon orbit tracking when false
     FCIndexColorIterations     = 9,  // int: Color iteration count (enables loop unrolling)
+    FCIndexShadowsEnabled      = 11, // bool: Eliminates entire shadow code path when false
 };
 
 // Fractal type selection
@@ -205,6 +206,11 @@ typedef struct
     float maxViewDistance;   // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;     // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;    // Sentinel depth for "no hit" rays (e.g., 2.0)
+    // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
+    float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
+    float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
+    float blendFactor;       // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
+    float pad_gmt;           // Alignment padding
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
@@ -256,6 +262,11 @@ typedef struct
     float maxViewDistance;       // Max ray distance (meters) for raymarch + depth normalization
     float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))
     float depthMissValue;        // Sentinel depth for "no hit" rays (e.g., 2.0)
+    // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
+    float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
+    float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
+    float blendFactor;           // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
+    float pad_gmt;               // Alignment padding
     // === TEMPORAL REPROJECTION ===
     matrix_float4x4 currentViewProjMatrix;   // Current frame: modelView * projection (for depth write)
     matrix_float4x4 previousViewProjMatrix;  // Previous frame: modelView * projection (for reprojection)
