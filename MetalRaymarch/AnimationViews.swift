@@ -505,6 +505,67 @@ struct KeyframeEditorView: View {
                     parameterSlider("Y", value: $keyframe.positionY, range: -5...5)
                     parameterSlider("Z", value: $keyframe.positionZ, range: -5...5)
                 }
+                
+                // ═══════════════════════════════════════════════════════════════
+                // EASING / BEZIER CURVE
+                // ═══════════════════════════════════════════════════════════════
+                
+                Section {
+                    // Easing type picker
+                    Picker("Easing", selection: $keyframe.easingType) {
+                        ForEach(EasingFunction.allCases, id: \.self) { easing in
+                            Label(easing.displayName, systemImage: easing.icon)
+                                .tag(easing)
+                        }
+                    }
+                    
+                    if keyframe.easingType == .bezier {
+                        // Bezier preset picker
+                        HStack {
+                            Text("Preset")
+                            Spacer()
+                            Menu {
+                                Button("Linear") { keyframe.bezierHandle = .linear }
+                                Button("Ease In") { keyframe.bezierHandle = .easeIn }
+                                Button("Ease Out") { keyframe.bezierHandle = .easeOut }
+                                Button("Ease In/Out") { keyframe.bezierHandle = .easeInOut }
+                                Divider()
+                                Button("Overshoot") { keyframe.bezierHandle = .overshoot }
+                                Button("Anticipate") { keyframe.bezierHandle = .anticipate }
+                                Button("Snappy") { keyframe.bezierHandle = .snappy }
+                            } label: {
+                                Text("Apply Preset")
+                                    .font(.caption)
+                            }
+                        }
+                        
+                        // Bezier curve preview
+                        BezierCurvePreview(handle: keyframe.bezierHandle)
+                            .frame(height: 120)
+                            .padding(.vertical, 4)
+                        
+                        // Control point sliders
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Control Point 1").font(.caption).foregroundStyle(.secondary)
+                            parameterSlider("CP1 X (time)", value: $keyframe.bezierHandle.cp1x, range: 0...1)
+                            parameterSlider("CP1 Y (value)", value: $keyframe.bezierHandle.cp1y, range: -0.5...1.5)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Control Point 2").font(.caption).foregroundStyle(.secondary)
+                            parameterSlider("CP2 X (time)", value: $keyframe.bezierHandle.cp2x, range: 0...1)
+                            parameterSlider("CP2 Y (value)", value: $keyframe.bezierHandle.cp2y, range: -0.5...1.5)
+                        }
+                    }
+                } header: {
+                    Text("Easing Curve")
+                } footer: {
+                    if keyframe.easingType == .bezier {
+                        Text("Drag control points or use presets. Y values outside 0-1 create overshoot/anticipation effects.")
+                    } else {
+                        Text("Controls how the transition to this keyframe is timed.")
+                    }
+                }
             }
             .navigationTitle("Edit Keyframe")
             .toolbar {
@@ -664,6 +725,105 @@ struct AnimationPlaybackControls: View {
         let seconds = Int(time) % 60
         let tenths = Int((time - Double(Int(time))) * 10)
         return "\(seconds).\(tenths)"
+    }
+}
+
+// MARK: - Bezier Curve Preview
+
+/// Visual preview of a cubic Bezier easing curve.
+/// Shows the curve from (0,0) to (1,1) with control point indicators.
+struct BezierCurvePreview: View {
+    let handle: BezierHandle
+    
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let padding: CGFloat = 16
+            let plotW = w - padding * 2
+            let plotH = h - padding * 2
+            
+            Canvas { context, size in
+                // Background grid
+                let gridColor = Color.secondary.opacity(0.15)
+                for i in 0...4 {
+                    let frac = CGFloat(i) / 4.0
+                    // Vertical
+                    let x = padding + frac * plotW
+                    context.stroke(
+                        Path { p in p.move(to: CGPoint(x: x, y: padding)); p.addLine(to: CGPoint(x: x, y: padding + plotH)) },
+                        with: .color(gridColor), lineWidth: 0.5
+                    )
+                    // Horizontal
+                    let y = padding + frac * plotH
+                    context.stroke(
+                        Path { p in p.move(to: CGPoint(x: padding, y: y)); p.addLine(to: CGPoint(x: padding + plotW, y: y)) },
+                        with: .color(gridColor), lineWidth: 0.5
+                    )
+                }
+                
+                // Diagonal reference (linear)
+                context.stroke(
+                    Path { p in
+                        p.move(to: CGPoint(x: padding, y: padding + plotH))
+                        p.addLine(to: CGPoint(x: padding + plotW, y: padding))
+                    },
+                    with: .color(Color.secondary.opacity(0.25)), lineWidth: 1
+                )
+                
+                // Bezier curve
+                let curvePath = Path { p in
+                    let steps = 60
+                    for i in 0...steps {
+                        let t = Float(i) / Float(steps)
+                        let eased = CubicBezier.evaluate(t, handle: handle)
+                        let x = padding + CGFloat(t) * plotW
+                        let y = padding + plotH - CGFloat(eased) * plotH
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }
+                context.stroke(curvePath, with: .color(.blue), lineWidth: 2.5)
+                
+                // Control point 1 handle line
+                let cp1 = CGPoint(x: padding + CGFloat(handle.cp1x) * plotW,
+                                  y: padding + plotH - CGFloat(handle.cp1y) * plotH)
+                let start = CGPoint(x: padding, y: padding + plotH)
+                context.stroke(
+                    Path { p in p.move(to: start); p.addLine(to: cp1) },
+                    with: .color(.orange.opacity(0.6)), lineWidth: 1
+                )
+                context.fill(
+                    Path(ellipseIn: CGRect(x: cp1.x - 4, y: cp1.y - 4, width: 8, height: 8)),
+                    with: .color(.orange)
+                )
+                
+                // Control point 2 handle line
+                let cp2 = CGPoint(x: padding + CGFloat(handle.cp2x) * plotW,
+                                  y: padding + plotH - CGFloat(handle.cp2y) * plotH)
+                let end = CGPoint(x: padding + plotW, y: padding)
+                context.stroke(
+                    Path { p in p.move(to: end); p.addLine(to: cp2) },
+                    with: .color(.green.opacity(0.6)), lineWidth: 1
+                )
+                context.fill(
+                    Path(ellipseIn: CGRect(x: cp2.x - 4, y: cp2.y - 4, width: 8, height: 8)),
+                    with: .color(.green)
+                )
+                
+                // Start/end dots
+                context.fill(
+                    Path(ellipseIn: CGRect(x: start.x - 3, y: start.y - 3, width: 6, height: 6)),
+                    with: .color(.primary)
+                )
+                context.fill(
+                    Path(ellipseIn: CGRect(x: end.x - 3, y: end.y - 3, width: 6, height: 6)),
+                    with: .color(.primary)
+                )
+            }
+        }
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

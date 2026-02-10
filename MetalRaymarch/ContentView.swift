@@ -36,6 +36,15 @@ final class UISettingsCache {
     var colorSchemeShadows: Float = 0.0
     var colorSchemeHighlights: Float = 0.0
     
+    // === GRADIENT COLORING SYSTEM ===
+    var useGradientColoring: Bool = false
+    var gradientColorMap: GradientColorMap = GradientPreset.nebula.makeGradient()
+    var gradientPreset: GradientPreset? = .nebula
+    var colorMappingMode: ColorMappingMode = .orbitTrap
+    var gradientRepeat: Float = 1.0
+    var gradientOffset: Float = 0.0
+    var gradientSmoothing: Float = 1.0
+    
     // === MODULAR LIGHTING EFFECTS ===
     var lightingPreset: LightingPreset = .off
     var hueRotationEffect: HueRotationEffect = .off
@@ -119,6 +128,15 @@ final class UISettingsCache {
         colorSchemeShadows = settings.colorSchemeShadows
         colorSchemeHighlights = settings.colorSchemeHighlights
         
+        // Gradient system
+        useGradientColoring = settings.useGradientColoring
+        gradientColorMap = settings.gradientColorMap
+        gradientPreset = settings.gradientPreset
+        colorMappingMode = settings.colorMappingMode
+        gradientRepeat = settings.gradientRepeat
+        gradientOffset = settings.gradientOffset
+        gradientSmoothing = settings.gradientSmoothing
+        
         lightingPreset = settings.lightingPreset
         hueRotationEffect = settings.hueRotationEffect
         pulseEffect = settings.pulseEffect
@@ -170,6 +188,30 @@ final class UISettingsCache {
     func pushColorScheme(_ scheme: ColorScheme) {
         settings?.transitionToColorScheme(scheme)
         colorScheme = scheme
+    }
+    
+    /// Push gradient enabled state
+    func pushGradientEnabled(_ enabled: Bool) {
+        settings?.useGradientColoring = enabled
+    }
+    
+    /// Push full gradient map to settings
+    func pushGradientMap(_ map: GradientColorMap) {
+        settings?.gradientColorMap = map
+    }
+    
+    /// Apply a gradient preset and sync UI state
+    func applyGradientPreset(_ preset: GradientPreset) {
+        settings?.applyGradientPreset(preset)
+        gradientColorMap = preset.makeGradient()
+        gradientPreset = preset
+        useGradientColoring = true
+        
+        // Sync post-processing from preset
+        let pp = preset.postProcessing
+        colorSchemeSaturation = pp.saturation
+        colorSchemeContrast = pp.contrast
+        colorSchemeGamma = pp.gamma
     }
     
     /// Reload lighting effect values from settings (call after changing lighting preset)
@@ -613,6 +655,11 @@ struct ContentView: View {
                                         .tint(cache.colorScheme == scheme ? .pink : .purple)
                                     }
                                 }
+                                
+                                Divider()
+                                
+                                // === GRADIENT COLORING SYSTEM ===
+                                GradientEditorSection(cache: $cache)
                                 
                                 Divider()
                                 

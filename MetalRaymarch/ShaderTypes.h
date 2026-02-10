@@ -77,16 +77,19 @@ typedef NS_ENUM(EnumBackingType, ColorSchemeType)
     ColorSchemeCount             = 11, // Number of schemes (for bounds checking)
 };
 
+// Maximum gradient stops supported (matches GradientColorSystem.swift)
+#define MAX_GRADIENT_STOPS 8
+
 // Color scheme parameters passed to shader
 // Allows full customization of the fractal coloring
 typedef struct
 {
-    // Primary color palette (3 colors for gradient mixing)
+    // Primary color palette (3 colors for gradient mixing) - used in legacy mode
     vector_float3 color1;             // Primary color (trap-based)
     vector_float3 color2;             // Secondary color (trap-based)
     vector_float3 color3;             // Tertiary color (position-based)
     
-    // Alternative palette for colorMix blending
+    // Alternative palette for colorMix blending - used in legacy mode
     vector_float3 altColor1;          // Alternative palette base
     vector_float3 altMixFactors;      // Factors for alt color computation (x*c.x, y*c.y, z+w*c.y)
     
@@ -109,6 +112,18 @@ typedef struct
     float stripeStrength;             // Stripe intensity (default 0.4)
     float glowSharpness;              // How sharp the bright cores are (default 3.0)
     float saturationPower;            // Power for saturation curve, <1 flattens to 1.0 (default 0.4)
+    
+    // === GRADIENT COLORING SYSTEM ===
+    // Replaces fixed 3-color palettes with up to 8 user-defined gradient stops.
+    // Each stop packs color (xyz) + position (w) into a float4.
+    vector_float4 gradientStops[MAX_GRADIENT_STOPS]; // float4(r, g, b, position)
+    int gradientStopCount;            // Number of active stops (0 = use legacy palette)
+    int colorMappingMode;             // 0=orbitTrap, 1=iterations, 2=zDepth, 3=angle, 4=normal, 5=blended
+    float gradientRepeat;             // How many times gradient repeats (default 1.0)
+    float gradientOffset;             // Shifts gradient start (0-1)
+    int useGradientColoring;          // 0 = legacy palette, 1 = gradient system
+    float gradientSmoothing;          // 0 = sharp, 1 = smooth transitions (default 1.0)
+    float _gradPad[2];                // Alignment padding for gradient section
     
     // === MODULAR LIGHTING EFFECTS ===
     // Animation time (shared by all effects)

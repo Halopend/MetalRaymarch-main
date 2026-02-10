@@ -10,6 +10,106 @@
 import Foundation
 import simd
 
+// MARK: - Bezier Handle
+
+/// Control point for a cubic Bezier easing curve.
+/// The curve goes from (0,0) to (1,1), with two control points defining the shape.
+/// This is the same model as CSS cubic-bezier() — e.g. ease-in-out = (0.42, 0, 0.58, 1).
+struct BezierHandle: Codable, Equatable {
+    var cp1x: Float  // Control point 1 x (time axis, 0-1)
+    var cp1y: Float  // Control point 1 y (value axis, can overshoot)
+    var cp2x: Float  // Control point 2 x (time axis, 0-1)
+    var cp2y: Float  // Control point 2 y (value axis, can overshoot)
+    
+    /// Linear (no easing)
+    static let linear = BezierHandle(cp1x: 0.0, cp1y: 0.0, cp2x: 1.0, cp2y: 1.0)
+    
+    /// Ease in (slow start)
+    static let easeIn = BezierHandle(cp1x: 0.42, cp1y: 0.0, cp2x: 1.0, cp2y: 1.0)
+    
+    /// Ease out (slow end)
+    static let easeOut = BezierHandle(cp1x: 0.0, cp1y: 0.0, cp2x: 0.58, cp2y: 1.0)
+    
+    /// Ease in-out (slow start and end)
+    static let easeInOut = BezierHandle(cp1x: 0.42, cp1y: 0.0, cp2x: 0.58, cp2y: 1.0)
+    
+    /// Overshoot (bouncy feel)
+    static let overshoot = BezierHandle(cp1x: 0.34, cp1y: 1.56, cp2x: 0.64, cp2y: 1.0)
+    
+    /// Anticipate (pull back then go)
+    static let anticipate = BezierHandle(cp1x: 0.36, cp1y: -0.2, cp2x: 0.66, cp2y: 1.0)
+    
+    /// Snappy (fast start, slow end)
+    static let snappy = BezierHandle(cp1x: 0.1, cp1y: 0.9, cp2x: 0.2, cp2y: 1.0)
+}
+
+// MARK: - Cubic Bezier Evaluator
+
+/// Evaluates a cubic Bezier curve for animation easing.
+/// Uses Newton-Raphson iteration (same approach as GMT-fractals' BezierMath.ts)
+/// to solve for the y-value at a given t (time progress 0-1).
+struct CubicBezier {
+    
+    /// Evaluate the Bezier easing curve at time t (0-1).
+    /// Returns the eased value (0-1, can overshoot if control points allow).
+    /// - Parameters:
+    ///   - t: Linear time progress 0-1
+    ///   - handle: The Bezier control points
+    /// - Returns: Eased progress value
+    static func evaluate(_ t: Float, handle: BezierHandle) -> Float {
+        // Early out for endpoints and near-linear
+        if t <= 0.0 { return 0.0 }
+        if t >= 1.0 { return 1.0 }
+        
+        // Check if essentially linear
+        let isLinear = abs(handle.cp1x) < 0.001 && abs(handle.cp1y) < 0.001 &&
+                       abs(handle.cp2x - 1.0) < 0.001 && abs(handle.cp2y - 1.0) < 0.001
+        if isLinear { return t }
+        
+        // Newton-Raphson: solve for the Bezier parameter u where x(u) = t
+        let u = solveCurveX(t, cp1x: handle.cp1x, cp2x: handle.cp2x)
+        
+        // Evaluate y at that parameter
+        return bezierY(u, cp1y: handle.cp1y, cp2y: handle.cp2y)
+    }
+    
+    // Bezier x(u) = 3*(1-u)²*u*cp1x + 3*(1-u)*u²*cp2x + u³
+    private static func bezierX(_ u: Float, cp1x: Float, cp2x: Float) -> Float {
+        let u1 = 1.0 - u
+        return 3.0 * u1 * u1 * u * cp1x + 3.0 * u1 * u * u * cp2x + u * u * u
+    }
+    
+    // Bezier y(u) = 3*(1-u)²*u*cp1y + 3*(1-u)*u²*cp2y + u³
+    private static func bezierY(_ u: Float, cp1y: Float, cp2y: Float) -> Float {
+        let u1 = 1.0 - u
+        return 3.0 * u1 * u1 * u * cp1y + 3.0 * u1 * u * u * cp2y + u * u * u
+    }
+    
+    // Derivative dx/du for Newton-Raphson
+    private static func bezierDX(_ u: Float, cp1x: Float, cp2x: Float) -> Float {
+        let u1 = 1.0 - u
+        return 3.0 * u1 * u1 * cp1x + 6.0 * u1 * u * (cp2x - cp1x) + 3.0 * u * u * (1.0 - cp2x)
+    }
+    
+    /// Newton-Raphson iteration to find u where x(u) = t
+    private static func solveCurveX(_ t: Float, cp1x: Float, cp2x: Float) -> Float {
+        var u = t  // Initial guess
+        
+        // 8 iterations of Newton-Raphson (converges very fast)
+        for _ in 0..<8 {
+            let x = bezierX(u, cp1x: cp1x, cp2x: cp2x) - t
+            let dx = bezierDX(u, cp1x: cp1x, cp2x: cp2x)
+            
+            if abs(x) < 1e-7 { break }  // Converged
+            if abs(dx) < 1e-7 { break }  // Degenerate
+            
+            u -= x / dx
+        }
+        
+        return simd_clamp(u, 0.0, 1.0)
+    }
+}
+
 // MARK: - Animation Keyframe
 
 /// A single keyframe capturing shape parameters at a point in time.
@@ -18,6 +118,16 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
     var duration: TimeInterval  // Seconds to reach this keyframe from previous (0 for first keyframe)
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EASING - Per-keyframe Bezier curve control
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Per-keyframe easing function. Overrides the global easing when set.
+    var easingType: EasingFunction = .bezier
+    
+    /// Bezier control points for this keyframe's transition (used when easingType == .bezier)
+    var bezierHandle: BezierHandle = .easeInOut
     
     // ═══════════════════════════════════════════════════════════════════════════
     // SHAPE PARAMETERS - These affect the fractal geometry
@@ -80,7 +190,8 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     init(id: UUID = UUID(), name: String, duration: TimeInterval,
          minDistance: Float, foldingLimit: Float, sphereRadius: Float, fractalScale: Float,
          baseFractalIterations: Int = 9, baseMaxRaySteps: Int = 64,
-         position: SIMD3<Float>, colorScheme: Int? = nil) {
+         position: SIMD3<Float>, colorScheme: Int? = nil,
+         easingType: EasingFunction = .bezier, bezierHandle: BezierHandle = .easeInOut) {
         self.id = id
         self.name = name
         self.duration = duration
@@ -94,6 +205,8 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.positionY = position.y
         self.positionZ = position.z
         self.colorScheme = colorScheme
+        self.easingType = easingType
+        self.bezierHandle = bezierHandle
     }
     
     /// Interpolate between two keyframes
@@ -232,6 +345,7 @@ enum EasingFunction: String, Codable, CaseIterable {
     case easeOut
     case easeInOut
     case smooth  // Catmull-Rom spline - maintains velocity through keyframes
+    case bezier  // Cubic Bezier - per-keyframe custom curves
     
     var displayName: String {
         switch self {
@@ -240,6 +354,18 @@ enum EasingFunction: String, Codable, CaseIterable {
         case .easeOut: return "Ease Out"
         case .easeInOut: return "Ease In/Out"
         case .smooth: return "Smooth (Spline)"
+        case .bezier: return "Bezier Curve"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .linear: return "line.diagonal"
+        case .easeIn: return "arrow.right"
+        case .easeOut: return "arrow.down.right"
+        case .easeInOut: return "arrow.left.and.right"
+        case .smooth: return "waveform.path"
+        case .bezier: return "point.topleft.down.to.point.bottomright.curvepath"
         }
     }
     
@@ -248,6 +374,13 @@ enum EasingFunction: String, Codable, CaseIterable {
         self == .smooth
     }
     
+    /// Whether this easing uses per-keyframe Bezier handles
+    var usesBezierHandles: Bool {
+        self == .bezier
+    }
+    
+    /// Apply the easing function to a linear t (0-1).
+    /// For .bezier, use CubicBezier.evaluate() with the keyframe's handle instead.
     func apply(_ t: Float) -> Float {
         switch self {
         case .linear:
@@ -262,6 +395,19 @@ enum EasingFunction: String, Codable, CaseIterable {
             // For smooth mode, t is used directly in Catmull-Rom interpolation
             // This case shouldn't be called directly - see spline interpolation
             return t
+        case .bezier:
+            // Bezier needs a handle; fallback to easeInOut when called without one
+            return CubicBezier.evaluate(t, handle: .easeInOut)
+        }
+    }
+    
+    /// Apply easing with a Bezier handle (used for per-keyframe curves)
+    func apply(_ t: Float, bezierHandle: BezierHandle) -> Float {
+        switch self {
+        case .bezier:
+            return CubicBezier.evaluate(t, handle: bezierHandle)
+        default:
+            return apply(t)
         }
     }
 }

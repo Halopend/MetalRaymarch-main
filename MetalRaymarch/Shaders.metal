@@ -532,6 +532,89 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
 // COLOR SCHEME FUNCTIONS (must be before color functions that use them)
 // =============================================================================
 
+// =============================================================================
+// GRADIENT COLORING SYSTEM
+// Samples a user-defined gradient from up to MAX_GRADIENT_STOPS color stops.
+// Each stop packs color (xyz) + position (w) into a float4.
+// =============================================================================
+
+// Sample gradient at position t (0-1) using the stop array
+FORCE_INLINE half3 sampleGradient(float t, constant float4 *stops, int stopCount, float smoothing)
+{
+    if (stopCount <= 0) return half3(1.0h);
+    if (stopCount == 1) return half3(stops[0].xyz);
+    
+    // Clamp t to valid range
+    t = saturate(t);
+    
+    // Find surrounding stops
+    int lower = 0;
+    int upper = stopCount - 1;
+    
+    for (int i = 0; i < stopCount - 1; i++) {
+        if (t >= stops[i].w && t <= stops[i + 1].w) {
+            lower = i;
+            upper = i + 1;
+            break;
+        }
+    }
+    
+    // Handle edge cases
+    if (t <= stops[0].w) return half3(stops[0].xyz);
+    if (t >= stops[stopCount - 1].w) return half3(stops[stopCount - 1].xyz);
+    
+    // Interpolate between surrounding stops
+    float range = stops[upper].w - stops[lower].w;
+    float localT = (range > 0.0f) ? (t - stops[lower].w) / range : 0.0f;
+    
+    // Apply smoothstep for smooth transitions when smoothing > 0
+    float smoothT = mix(localT, localT * localT * (3.0f - 2.0f * localT), smoothing);
+    
+    return mix(half3(stops[lower].xyz), half3(stops[upper].xyz), half(smoothT));
+}
+
+// Compute the mapping value based on the selected color mapping mode
+// Returns a value in 0-1 that indexes into the gradient
+FORCE_INLINE float computeColorMapping(int mode, float trap, int trapIter, int totalIters,
+                                        float3 trapPos, float3 hitPos, float distance,
+                                        float3 normal, float gradientRepeat, float gradientOffset)
+{
+    float t = 0.0f;
+    
+    switch (mode) {
+        case 0: // Orbit Trap (default - same as legacy)
+            t = sqrt(saturate(trap));
+            break;
+        case 1: // Iterations - normalized iteration count
+            t = float(trapIter) / float(max(totalIters, 1));
+            break;
+        case 2: // Z-Depth - distance from camera
+            t = saturate(distance * 0.1f); // Normalize to reasonable range
+            break;
+        case 3: // Angle - polar angle of trap position
+            t = atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f; // Normalize to 0-1
+            break;
+        case 4: // Normal - surface normal direction
+            t = saturate(normal.y * 0.5f + 0.5f); // Map normal.y from [-1,1] to [0,1]
+            break;
+        case 5: // Blended - mix of orbit trap + iteration
+        {
+            float trapT = sqrt(saturate(trap));
+            float iterT = float(trapIter) / float(max(totalIters, 1));
+            t = trapT * 0.6f + iterT * 0.4f;
+            break;
+        }
+        default:
+            t = sqrt(saturate(trap));
+            break;
+    }
+    
+    // Apply repeat and offset
+    t = fract(t * gradientRepeat + gradientOffset);
+    
+    return t;
+}
+
 // Neon orbit trap coloring - uses scheme palette colors for distinct looks
 // trapMin: distance to orbit trap (0 = close, 1 = far)
 // trapIter: normalized iteration depth
@@ -728,6 +811,37 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
         }
     }
     
+    // === GRADIENT COLORING SYSTEM ===
+    // When useGradientColoring is enabled, use the gradient stop array
+    // instead of the legacy 3-color palette system.
+    if (scheme.useGradientColoring && scheme.gradientStopCount > 0) {
+        // Compute the gradient mapping value based on the selected mode
+        // Note: normal is approximated from trap position for this path
+        float3 approxNormal = normalize(trapPos);
+        float mappingT = computeColorMapping(
+            scheme.colorMappingMode,
+            trap, trapIter, steps,
+            trapPos, pos, 0.0f,
+            approxNormal,
+            scheme.gradientRepeat,
+            scheme.gradientOffset
+        );
+        
+        half3 gradColor = sampleGradient(mappingT, scheme.gradientStops, scheme.gradientStopCount, scheme.gradientSmoothing);
+        
+        // If neon mode is also active, blend gradient with neon
+        if (neonEnabled && scheme.neonIntensity > 0.01f) {
+            half trapMin = half(sqrt(trap));
+            half trapIterNorm = half(float(trapIter) / float(steps));
+            half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f);
+            half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
+            return mix(gradColor, neonColor, half(scheme.neonIntensity));
+        }
+        
+        return gradColor;
+    }
+    
+    // === LEGACY COLORING PATH ===
     // Check if neon mode is active
     // Use function constant when defined to eliminate neon code path entirely
     const bool neonEnabled = is_function_constant_defined(FC_NEON_MODE_ENABLED)

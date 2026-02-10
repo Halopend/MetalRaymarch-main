@@ -334,7 +334,10 @@ final class AnimationManager {
         // Interpolate using the appropriate method
         let interpolated: AnimationKeyframe
         
-        if easingFunction.usesSplineInterpolation {
+        // Determine effective easing: per-keyframe overrides global
+        let effectiveEasing = toKeyframe.easingType
+        
+        if effectiveEasing.usesSplineInterpolation || (easingFunction.usesSplineInterpolation && effectiveEasing == .bezier) {
             // Use Catmull-Rom spline for smooth continuous motion through keyframes
             interpolated = CatmullRomSpline.interpolateKeyframes(
                 scene.keyframes,
@@ -343,9 +346,13 @@ final class AnimationManager {
                 t: rawProgress,
                 isLooping: scene.isLooping
             )
+        } else if effectiveEasing.usesBezierHandles {
+            // Per-keyframe cubic Bezier easing
+            let easedProgress = CubicBezier.evaluate(rawProgress, handle: toKeyframe.bezierHandle)
+            interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
         } else {
             // Standard easing interpolation (slows to stop at each keyframe)
-            let easedProgress = easingFunction.apply(rawProgress)
+            let easedProgress = effectiveEasing.apply(rawProgress)
             interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
         }
         

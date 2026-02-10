@@ -711,6 +711,18 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             stripeStrength: neon.stripeStrength,
             glowSharpness: neon.glowSharpness,
             saturationPower: neon.satPower,
+            // === GRADIENT (legacy path — disabled) ===
+            gradientStops: (
+                SIMD4<Float>(0,0,0,0), SIMD4<Float>(0,0,0,0), SIMD4<Float>(0,0,0,0), SIMD4<Float>(0,0,0,0),
+                SIMD4<Float>(0,0,0,0), SIMD4<Float>(0,0,0,0), SIMD4<Float>(0,0,0,0), SIMD4<Float>(0,0,0,0)
+            ),
+            gradientStopCount: 0,
+            colorMappingMode: 0,
+            gradientRepeat: 1.0,
+            gradientOffset: 0.0,
+            useGradientColoring: 0,
+            gradientSmoothing: 1.0,
+            _gradPad: (0.0, 0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: animTime,
             hueRotationEnabled: hueRotation.enabled ? 1 : 0,
@@ -906,6 +918,10 @@ final class RenderSettings: @unchecked Sendable {
     // Step over-relaxation: >1.0 takes larger steps for faster convergence.
     // 1.0 = safe default, 1.2-1.5 during stable geometry, reduced during interaction.
     private var _stepMultiplier: Float = 1.0
+    
+    // === GRADIENT COLORING SYSTEM ===
+    // Replaces hardcoded palettes with user-editable gradient stops.
+    private var _gradientState: GradientState = GradientState()
     
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
@@ -1261,6 +1277,76 @@ final class RenderSettings: @unchecked Sendable {
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
+    // GRADIENT COLORING SYSTEM
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Whether gradient coloring is enabled (vs legacy 3-color palette)
+    var useGradientColoring: Bool {
+        get { withLock { _gradientState.useGradientColoring } }
+        set { withLock { _gradientState.useGradientColoring = newValue } }
+    }
+    
+    /// Current gradient color map
+    var gradientColorMap: GradientColorMap {
+        get { withLock { _gradientState.gradient } }
+        set { withLock { _gradientState.gradient = newValue; _gradientState.markAsCustom() } }
+    }
+    
+    /// Current gradient preset (nil if custom)
+    var gradientPreset: GradientPreset? {
+        get { withLock { _gradientState.gradientPreset } }
+    }
+    
+    /// Color mapping mode for gradient sampling
+    var colorMappingMode: ColorMappingMode {
+        get { withLock { _gradientState.gradient.mappingMode } }
+        set { withLock { _gradientState.gradient.mappingMode = newValue } }
+    }
+    
+    /// Gradient repeat count
+    var gradientRepeat: Float {
+        get { withLock { _gradientState.gradient.repeatCount } }
+        set { withLock { _gradientState.gradient.repeatCount = max(0.1, min(10.0, newValue)) } }
+    }
+    
+    /// Gradient offset
+    var gradientOffset: Float {
+        get { withLock { _gradientState.gradient.offset } }
+        set { withLock { _gradientState.gradient.offset = newValue } }
+    }
+    
+    /// Gradient smoothing
+    var gradientSmoothing: Float {
+        get { withLock { _gradientState.gradient.smoothing } }
+        set { withLock { _gradientState.gradient.smoothing = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    /// Apply a gradient preset (replaces current gradient and enables gradient mode)
+    func applyGradientPreset(_ preset: GradientPreset) {
+        withLock {
+            _gradientState.applyPreset(preset)
+            _gradientState.useGradientColoring = true
+            
+            // Also update post-processing to match preset suggestion
+            let pp = preset.postProcessing
+            _colorSchemeSaturation = pp.saturation
+            _colorSchemeContrast = pp.contrast
+            _colorSchemeGamma = pp.gamma
+            
+            // Update neon params if applicable
+            if preset.isNeonMode {
+                // Neon presets keep neon active through the gradient system
+            }
+        }
+    }
+    
+    /// Full gradient state (for serialization)
+    var gradientState: GradientState {
+        get { withLock { _gradientState } }
+        set { withLock { _gradientState = newValue } }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
     // MODULAR LIGHTING EFFECTS - Card-based system with presets
     // ═══════════════════════════════════════════════════════════════════════════
     
@@ -1492,6 +1578,15 @@ final class RenderSettings: @unchecked Sendable {
         let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
         let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
         
+        // === Build gradient stop data for shader ===
+        let gradState = _gradientState
+        let (gradStops, gradCount) = gradState.gradient.toShaderStops()
+        // C array becomes a tuple in Swift — fill all 8 slots
+        let gs = (
+            gradStops[0], gradStops[1], gradStops[2], gradStops[3],
+            gradStops[4], gradStops[5], gradStops[6], gradStops[7]
+        )
+        
         return ColorSchemeParams(
             color1: color1,
             color2: color2,
@@ -1514,6 +1609,15 @@ final class RenderSettings: @unchecked Sendable {
             stripeStrength: stripeStrength,
             glowSharpness: glowSharpness,
             saturationPower: satPower,
+            // === GRADIENT COLORING ===
+            gradientStops: gs,
+            gradientStopCount: Int32(gradCount),
+            colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
+            gradientRepeat: gradState.gradient.repeatCount,
+            gradientOffset: gradState.gradient.offset,
+            useGradientColoring: gradState.useGradientColoring ? 1 : 0,
+            gradientSmoothing: gradState.gradient.smoothing,
+            _gradPad: (0.0, 0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: _colorAnimTime,
             hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,
