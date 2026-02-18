@@ -19,21 +19,14 @@ struct GradientEditorSection: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Toggle between legacy and gradient mode
-            Toggle("Gradient Coloring", isOn: $cache.useGradientColoring)
-                .onChange(of: cache.useGradientColoring) { _, newValue in
-                    cache.pushGradientEnabled(newValue)
-                }
+            // Gradient preview bar
+            GradientPreviewBar(gradient: cache.gradientColorMap)
+                .frame(height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             
-            if cache.useGradientColoring {
-                // Gradient preview bar
-                GradientPreviewBar(gradient: cache.gradientColorMap)
-                    .frame(height: 24)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                
-                // Preset picker
-                Text("Presets").font(.subheadline).foregroundColor(.secondary)
-                LazyVGrid(columns: [
+            // Preset picker
+            Text("Presets").font(.subheadline).foregroundColor(.secondary)
+            LazyVGrid(columns: [
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                     GridItem(.flexible()),
@@ -131,7 +124,6 @@ struct GradientEditorSection: View {
                         canDelete: cache.gradientColorMap.stops.count > 2
                     )
                 }
-            }
         }
     }
     

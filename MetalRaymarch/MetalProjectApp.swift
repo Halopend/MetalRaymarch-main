@@ -75,6 +75,10 @@ struct MetalProjectTestApp: App {
                     appModel.openScenesWindowHandler = {
                         openWindow(id: appModel.scenesWindowID)
                     }
+                    // Set up handler for color window
+                    appModel.openColorWindowHandler = {
+                        openWindow(id: appModel.colorWindowID)
+                    }
                 }
         }
         .defaultSize(width: 600, height: 250)
@@ -96,6 +100,15 @@ struct MetalProjectTestApp: App {
                 .environment(appModel)
         }
         .defaultSize(width: 500, height: 600)
+        .windowStyle(.plain)
+        .windowResizability(.contentSize)
+        
+        // Color Options Window
+        Window("Color Options", id: appModel.colorWindowID) {
+            ColorOptionsWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 450, height: 600)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 

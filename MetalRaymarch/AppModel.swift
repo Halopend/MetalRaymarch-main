@@ -88,6 +88,7 @@ class AppModel {
     let menuWindowID = "MenuWindow"
     let developerWindowID = "DeveloperWindow"
     let scenesWindowID = "ScenesWindow"
+    let colorWindowID = "ColorWindow"
     
     enum ImmersiveSpaceState {
         case closed
@@ -226,6 +227,9 @@ class AppModel {
     /// Callback to open the scenes window (set by App scene)
     var openScenesWindowHandler: (() -> Void)?
     
+    /// Callback to open the color window (set by App scene)
+    var openColorWindowHandler: (() -> Void)?
+    
     /// Open the developer tools window
     func openDeveloperWindow() {
         openDeveloperWindowHandler?()
@@ -234,6 +238,11 @@ class AppModel {
     /// Open the scenes window
     func openScenesWindow() {
         openScenesWindowHandler?()
+    }
+    
+    /// Open the color options window
+    func openColorWindow() {
+        openColorWindowHandler?()
     }
     
     /// Toggle menu window visibility — dismisses or opens the window for real

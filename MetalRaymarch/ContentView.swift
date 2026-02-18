@@ -37,7 +37,7 @@ final class UISettingsCache {
     var colorSchemeHighlights: Float = 0.0
     
     // === GRADIENT COLORING SYSTEM ===
-    var useGradientColoring: Bool = false
+    var useGradientColoring: Bool = true
     var gradientColorMap: GradientColorMap = GradientPreset.nebula.makeGradient()
     var gradientPreset: GradientPreset? = .nebula
     var colorMappingMode: ColorMappingMode = .orbitTrap
@@ -499,6 +499,15 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .help("Animation Scenes")
                     
+                    // Color options button
+                    Button {
+                        appModel.openColorWindow()
+                    } label: {
+                        Image(systemName: "paintpalette.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Color Options")
+                    
                     Spacer()
                     
                     // FPS display + pipeline status
@@ -599,118 +608,9 @@ struct ContentView: View {
                             .padding(.leading, 10)
                         }
 
-                        // Color & Effects Group - simplified
-                        DisclosureGroup("Color & Effects") {
+                        // Effects Group (lighting, emissive, audio)
+                        DisclosureGroup("Effects") {
                             VStack(spacing: 8) {
-                                // Color scheme picker
-                                Text("Color Scheme").font(.headline)
-                                
-                                // Standard schemes
-                                Text("Standard").font(.subheadline).foregroundColor(.secondary)
-                                LazyVGrid(columns: [
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible())
-                                ], spacing: 8) {
-                                    ForEach(ColorScheme.allCases.filter { !$0.isNeonMode }, id: \.rawValue) { scheme in
-                                        Button {
-                                            cache.pushColorScheme(scheme)
-                                        } label: {
-                                            VStack(spacing: 4) {
-                                                Image(systemName: scheme.icon)
-                                                    .font(.title2)
-                                                Text(scheme.displayName)
-                                                    .font(.caption2)
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 8)
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .tint(cache.colorScheme == scheme ? .blue : .secondary)
-                                    }
-                                }
-                                
-                                // Neon schemes
-                                Text("Neon").font(.subheadline).foregroundColor(.pink)
-                                LazyVGrid(columns: [
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible())
-                                ], spacing: 8) {
-                                    ForEach(ColorScheme.allCases.filter { $0.isNeonMode }, id: \.rawValue) { scheme in
-                                        Button {
-                                            cache.pushColorScheme(scheme)
-                                        } label: {
-                                            VStack(spacing: 4) {
-                                                Image(systemName: scheme.icon)
-                                                    .font(.title2)
-                                                Text(scheme.displayName)
-                                                    .font(.caption2)
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 8)
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .tint(cache.colorScheme == scheme ? .pink : .purple)
-                                    }
-                                }
-                                
-                                Divider()
-                                
-                                // === GRADIENT COLORING SYSTEM ===
-                                GradientEditorSection(cache: $cache)
-                                
-                                Divider()
-                                
-                                // Auto-transition toggle
-                                Toggle("Auto-Cycle Schemes", isOn: $cache.colorSchemeAutoTransition)
-                                    .onChange(of: cache.colorSchemeAutoTransition) { _, newValue in
-                                        cache.push(\.colorSchemeAutoTransition, value: newValue)
-                                    }
-                                
-                                if cache.colorSchemeAutoTransition {
-                                    Text("Cycle Interval: \(cache.colorSchemeAutoInterval, specifier: "%.0f")s")
-                                    Slider(value: $cache.colorSchemeAutoInterval, in: 5...120, onEditingChanged: { editing in
-                                        if !editing { cache.push(\.colorSchemeAutoInterval, value: cache.colorSchemeAutoInterval) }
-                                    })
-                                }
-                                
-                                Divider()
-                                
-                                // Contrast control
-                                Text("Contrast: \(cache.colorSchemeContrast, specifier: "%.2f")")
-                                Slider(value: $cache.colorSchemeContrast, in: 0.95...1.15, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) }
-                                })
-                                
-                                Divider()
-                                
-                                // Color Grading Group
-                                Text("Color Grading Curves").font(.subheadline).foregroundColor(.secondary)
-                                
-                                Text("Vibrance: \(cache.colorSchemeVibrance, specifier: "%.2f")")
-                                Slider(value: $cache.colorSchemeVibrance, in: 0...1.0, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) }
-                                })
-                                
-                                Text("Midtone Curve: \(cache.colorSchemeCurve, specifier: "%.2f")")
-                                Slider(value: $cache.colorSchemeCurve, in: -1.0...1.0, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) }
-                                })
-                                
-                                Text("Shadows: \(cache.colorSchemeShadows, specifier: "%.3f")")
-                                Slider(value: $cache.colorSchemeShadows, in: -0.05...0.05, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) }
-                                })
-                                
-                                Text("Highlights: \(cache.colorSchemeHighlights, specifier: "%.2f")")
-                                Slider(value: $cache.colorSchemeHighlights, in: -0.5...1.0, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) }
-                                })
-                                
-                                Divider()
-                                
                                 // === MODULAR LIGHTING EFFECTS ===
                                 LightingEffectsSection(cache: $cache)
                                 
@@ -833,16 +733,6 @@ struct ContentView: View {
                                     }
                                     .padding(.vertical, 4)
                                 }
-
-                                Text("Color Mix")
-                                Slider(value: $cache.colorMix, in: 0...1.0, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.colorMix, value: cache.colorMix) }
-                                })
-
-                                Text("Color Iterations: \(cache.colorIterations, specifier: "%.0f")")
-                                Slider(value: $cache.colorIterations, in: 4...16, step: 1, onEditingChanged: { editing in
-                                    if !editing { cache.push(\.colorIterations, value: cache.colorIterations) }
-                                })
                             }
                             .padding(.leading, 10)
                         }

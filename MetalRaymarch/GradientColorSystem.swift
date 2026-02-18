@@ -392,7 +392,7 @@ struct GradientState: Codable, Equatable {
     
     init() {
         self.gradient = GradientPreset.nebula.makeGradient()
-        self.useGradientColoring = false  // Start with legacy mode for backward compat
+        self.useGradientColoring = true  // Gradient coloring is always on
         self.gradientPreset = .nebula
     }
     

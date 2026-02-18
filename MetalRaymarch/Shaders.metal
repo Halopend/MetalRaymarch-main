@@ -539,7 +539,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
 // =============================================================================
 
 // Sample gradient at position t (0-1) using the stop array
-FORCE_INLINE half3 sampleGradient(float t, constant float4 *stops, int stopCount, float smoothing)
+FORCE_INLINE half3 sampleGradient(float t, thread const float4 *stops, int stopCount, float smoothing)
 {
     if (stopCount <= 0) return half3(1.0h);
     if (stopCount == 1) return half3(stops[0].xyz);
@@ -811,6 +811,12 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
         }
     }
     
+    // === NEON MODE CHECK ===
+    // Use function constant when defined to eliminate neon code path entirely
+    const bool neonEnabled = is_function_constant_defined(FC_NEON_MODE_ENABLED)
+        ? FC_NEON_MODE_ENABLED
+        : (scheme.neonIntensity > 0.01f);
+    
     // === GRADIENT COLORING SYSTEM ===
     // When useGradientColoring is enabled, use the gradient stop array
     // instead of the legacy 3-color palette system.
@@ -842,11 +848,6 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
     }
     
     // === LEGACY COLORING PATH ===
-    // Check if neon mode is active
-    // Use function constant when defined to eliminate neon code path entirely
-    const bool neonEnabled = is_function_constant_defined(FC_NEON_MODE_ENABLED)
-        ? FC_NEON_MODE_ENABLED
-        : (scheme.neonIntensity > 0.01f);
     if (neonEnabled && scheme.neonIntensity > 0.01f) {
         // Compute neon orbit trap metrics
         half trapMin = half(sqrt(trap));
