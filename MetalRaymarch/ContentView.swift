@@ -72,7 +72,7 @@ final class UISettingsCache {
     var safetyBubbleShape: Float = 0.0
     var useRelativeGestures: Bool = true
     var extendedGestureRange: Bool = true
-    var gestureSensitivity: Float = 5.0
+    var gestureSensitivity: Float = 3.0
     
     // Dynamic quality
     var dynamicRenderQualityEnabled: Bool = true
@@ -467,7 +467,7 @@ struct ContentView: View {
                             appModel.gestureController?.syncWithSettings()
                         },
                         onOpenScenes: {
-                            appModel.openScenesWindow()
+                            appModel.toggleScenesWindow()
                         }
                     )
                     
@@ -484,30 +484,33 @@ struct ContentView: View {
                     
                     // Developer tools button
                     Button {
-                        appModel.openDeveloperWindow()
+                        appModel.toggleDeveloperWindow()
                     } label: {
                         Image(systemName: "hammer.fill")
                     }
                     .buttonStyle(.bordered)
-                    .help("Open Developer Tools")
+                    .tint(appModel.isDeveloperWindowVisible ? .blue : nil)
+                    .help(appModel.isDeveloperWindowVisible ? "Close Developer Tools" : "Open Developer Tools")
                     
                     // Color options button
                     Button {
-                        appModel.openColorWindow()
+                        appModel.toggleColorWindow()
                     } label: {
                         Image(systemName: "paintpalette.fill")
                     }
                     .buttonStyle(.bordered)
-                    .help("Color Options")
+                    .tint(appModel.isColorWindowVisible ? .blue : nil)
+                    .help(appModel.isColorWindowVisible ? "Close Color Options" : "Color Options")
                     
                     // Effects button
                     Button {
-                        appModel.openEffectsWindow()
+                        appModel.toggleEffectsWindow()
                     } label: {
                         Image(systemName: "wand.and.stars")
                     }
                     .buttonStyle(.bordered)
-                    .help("Effects")
+                    .tint(appModel.isEffectsWindowVisible ? .blue : nil)
+                    .help(appModel.isEffectsWindowVisible ? "Close Effects" : "Effects")
                     
                     Spacer()
                     

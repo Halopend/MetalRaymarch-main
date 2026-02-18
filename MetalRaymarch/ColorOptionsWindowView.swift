@@ -56,9 +56,11 @@ struct ColorOptionsWindowView: View {
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .onAppear {
             cache.startSync(with: appModel.renderSettings)
+            appModel.isColorWindowVisible = true
         }
         .onDisappear {
             cache.stopSync()
+            appModel.isColorWindowVisible = false
         }
     }
     

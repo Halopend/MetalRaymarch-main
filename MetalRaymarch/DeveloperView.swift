@@ -255,6 +255,12 @@ struct DeveloperView: View {
             .padding(20)
         }
         .frame(width: 380, height: 480)
+        .onAppear {
+            appModel.isDeveloperWindowVisible = true
+        }
+        .onDisappear {
+            appModel.isDeveloperWindowVisible = false
+        }
     }
     
     private var fpsColor: Color {

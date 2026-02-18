@@ -33,18 +33,13 @@ struct EffectsWindowView: View {
                     
                     Divider()
                     
-                    // === INDIVIDUAL EFFECTS (two-column) ===
+                    // === INDIVIDUAL EFFECTS ===
                     individualEffectsSection
                     
                     Divider()
                     
                     // === EMISSIVE GLOW ===
                     emissiveSection
-                    
-                    Divider()
-                    
-                    // === LIGHTING MODE & AUDIO ===
-                    lightingModeSection
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -55,9 +50,11 @@ struct EffectsWindowView: View {
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .onAppear {
             cache.startSync(with: appModel.renderSettings)
+            appModel.isEffectsWindowVisible = true
         }
         .onDisappear {
             cache.stopSync()
+            appModel.isEffectsWindowVisible = false
         }
     }
     
@@ -89,198 +86,127 @@ struct EffectsWindowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            
-            // Lighting softness
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Label("Lighting Style", systemImage: "sun.max.fill")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text(cache.lightingSoftness < 0.3 ? "Sharp" : cache.lightingSoftness > 0.7 ? "Classic" : "Blended")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                HStack {
-                    Image(systemName: "bolt.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Slider(value: Binding(
-                        get: { cache.lightingSoftness },
-                        set: { cache.lightingSoftness = $0 }
-                    ), in: 0...1, onEditingChanged: { editing in
-                        if !editing {
-                            cache.push(\.lightingSoftness, value: cache.lightingSoftness)
-                        }
-                    })
-                    Image(systemName: "cloud.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Text("Sharp = vibrance-driven contrast • Classic = soft original lighting")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.orange.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-            )
         }
     }
     
-    // MARK: - Individual Effects (Two-Column)
+    // MARK: - Individual Effects (Single Column)
     
     private var individualEffectsSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Text("Individual Effects")
                 .font(.headline)
             
-            // Two-column grid — Gradient Cycle first
-            HStack(alignment: .top, spacing: 10) {
-                // Left column
-                VStack(spacing: 10) {
-                    // Gradient Cycle (top priority)
-                    LightingEffectCard(
-                        title: "Gradient Cycle",
-                        icon: "arrow.trianglehead.2.clockwise.rotate.90",
-                        enabled: gradientCycleEnabledBinding,
-                        onToggle: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) }
-                    ) {
-                        HStack {
-                            Text("Speed")
-                            Spacer()
-                            Text("\(cache.gradientCycleEffect.speed, specifier: "%.2f")")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(value: gradientCycleSpeedBinding, in: 0...1, onEditingChanged: { editing in
-                            if !editing { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) }
-                        })
-                    }
-                    
-                    // Pulse
-                    LightingEffectCard(
-                        title: "Pulse",
-                        icon: "waveform.path.ecg",
-                        enabled: pulseEnabledBinding,
-                        onToggle: { cache.push(\.pulseEffect, value: cache.pulseEffect) }
-                    ) {
-                        VStack(spacing: 6) {
-                            HStack {
-                                Text("Speed")
-                                Spacer()
-                                Text("\(cache.pulseEffect.speed, specifier: "%.2f")")
-                                    .foregroundStyle(.secondary).monospacedDigit()
-                            }
-                            Slider(value: pulseSpeedBinding, in: 0...2, onEditingChanged: { editing in
-                                if !editing { cache.push(\.pulseEffect, value: cache.pulseEffect) }
-                            })
-                            HStack {
-                                Text("Amount")
-                                Spacer()
-                                Text("\(cache.pulseEffect.amount, specifier: "%.2f")")
-                                    .foregroundStyle(.secondary).monospacedDigit()
-                            }
-                            Slider(value: pulseAmountBinding, in: 0...1, onEditingChanged: { editing in
-                                if !editing { cache.push(\.pulseEffect, value: cache.pulseEffect) }
-                            })
-                        }
-                    }
-                    
-                    // Bloom
-                    LightingEffectCard(
-                        title: "Bloom",
-                        icon: "sun.max.fill",
-                        enabled: bloomEnabledBinding,
-                        onToggle: { cache.push(\.bloomEffect, value: cache.bloomEffect) }
-                    ) {
-                        HStack {
-                            Text("Strength")
-                            Spacer()
-                            Text("\(cache.bloomEffect.strength, specifier: "%.2f")")
-                                .foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        Slider(value: bloomStrengthBinding, in: 0...1, onEditingChanged: { editing in
-                            if !editing { cache.push(\.bloomEffect, value: cache.bloomEffect) }
-                        })
-                    }
+            // Gradient Cycle
+            LightingEffectCard(
+                title: "Gradient Cycle",
+                icon: "arrow.trianglehead.2.clockwise.rotate.90",
+                enabled: gradientCycleEnabledBinding,
+                onToggle: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) }
+            ) {
+                HStack {
+                    Text("Speed")
+                    Spacer()
+                    Text("\(cache.gradientCycleEffect.speed, specifier: "%.2f")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
-                .frame(maxWidth: .infinity)
-                
-                // Right column
-                VStack(spacing: 10) {
-                    // Hue Rotation
-                    LightingEffectCard(
-                        title: "Hue Rotation",
-                        icon: "paintpalette.fill",
-                        enabled: hueEnabledBinding,
-                        onToggle: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
-                    ) {
-                        VStack(spacing: 6) {
-                            HStack {
-                                Text("Speed")
-                                Spacer()
-                                Text("\(cache.hueRotationEffect.speed, specifier: "%.2f")")
-                                    .foregroundStyle(.secondary).monospacedDigit()
-                            }
-                            Slider(value: hueSpeedBinding, in: 0...0.5, onEditingChanged: { editing in
-                                if !editing { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
-                            })
-                            HStack {
-                                Text("Intensity")
-                                Spacer()
-                                Text("\(cache.hueRotationEffect.intensity, specifier: "%.2f")")
-                                    .foregroundStyle(.secondary).monospacedDigit()
-                            }
-                            Slider(value: hueIntensityBinding, in: 0...1, onEditingChanged: { editing in
-                                if !editing { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
-                            })
-                        }
+                Slider(value: gradientCycleSpeedBinding, in: 0...1, onEditingChanged: { editing in
+                    if !editing { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) }
+                })
+            }
+            
+            // Hue Rotation
+            LightingEffectCard(
+                title: "Hue Rotation",
+                icon: "paintpalette.fill",
+                enabled: hueEnabledBinding,
+                onToggle: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
+            ) {
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Speed")
+                        Spacer()
+                        Text("\(cache.hueRotationEffect.speed, specifier: "%.2f")")
+                            .foregroundStyle(.secondary).monospacedDigit()
                     }
-                    
-                    // Glow
-                    LightingEffectCard(
-                        title: "Glow",
-                        icon: "light.max",
-                        enabled: glowEnabledBinding,
-                        onToggle: { cache.push(\.glowEffect, value: cache.glowEffect) }
-                    ) {
-                        HStack {
-                            Text("Intensity")
-                            Spacer()
-                            Text("\(cache.glowEffect.intensity, specifier: "%.2f")")
-                                .foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        Slider(value: glowIntensityBinding, in: 0...1, onEditingChanged: { editing in
-                            if !editing { cache.push(\.glowEffect, value: cache.glowEffect) }
-                        })
+                    Slider(value: hueSpeedBinding, in: 0...0.5, onEditingChanged: { editing in
+                        if !editing { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
+                    })
+                    HStack {
+                        Text("Intensity")
+                        Spacer()
+                        Text("\(cache.hueRotationEffect.intensity, specifier: "%.2f")")
+                            .foregroundStyle(.secondary).monospacedDigit()
                     }
-                    
-                    // Fog
-                    LightingEffectCard(
-                        title: "Atmospheric Fog",
-                        icon: "cloud.fog.fill",
-                        enabled: fogEnabledBinding,
-                        onToggle: { cache.push(\.fogEffect, value: cache.fogEffect) }
-                    ) {
-                        HStack {
-                            Text("Density")
-                            Spacer()
-                            Text("\(cache.fogEffect.intensity, specifier: "%.2f")")
-                                .foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        Slider(value: fogIntensityBinding, in: 0...1, onEditingChanged: { editing in
-                            if !editing { cache.push(\.fogEffect, value: cache.fogEffect) }
-                        })
-                    }
+                    Slider(value: hueIntensityBinding, in: 0...1, onEditingChanged: { editing in
+                        if !editing { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
+                    })
                 }
-                .frame(maxWidth: .infinity)
+            }
+            
+            // Pulse
+            LightingEffectCard(
+                title: "Pulse",
+                icon: "waveform.path.ecg",
+                enabled: pulseEnabledBinding,
+                onToggle: { cache.push(\.pulseEffect, value: cache.pulseEffect) }
+            ) {
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Speed")
+                        Spacer()
+                        Text("\(cache.pulseEffect.speed, specifier: "%.2f")")
+                            .foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Slider(value: pulseSpeedBinding, in: 0...2, onEditingChanged: { editing in
+                        if !editing { cache.push(\.pulseEffect, value: cache.pulseEffect) }
+                    })
+                    HStack {
+                        Text("Amount")
+                        Spacer()
+                        Text("\(cache.pulseEffect.amount, specifier: "%.2f")")
+                            .foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Slider(value: pulseAmountBinding, in: 0...1, onEditingChanged: { editing in
+                        if !editing { cache.push(\.pulseEffect, value: cache.pulseEffect) }
+                    })
+                }
+            }
+            
+            // Bloom
+            LightingEffectCard(
+                title: "Bloom",
+                icon: "sun.max.fill",
+                enabled: bloomEnabledBinding,
+                onToggle: { cache.push(\.bloomEffect, value: cache.bloomEffect) }
+            ) {
+                HStack {
+                    Text("Strength")
+                    Spacer()
+                    Text("\(cache.bloomEffect.strength, specifier: "%.2f")")
+                        .foregroundStyle(.secondary).monospacedDigit()
+                }
+                Slider(value: bloomStrengthBinding, in: 0...1, onEditingChanged: { editing in
+                    if !editing { cache.push(\.bloomEffect, value: cache.bloomEffect) }
+                })
+            }
+            
+            // Fog
+            LightingEffectCard(
+                title: "Atmospheric Fog",
+                icon: "cloud.fog.fill",
+                enabled: fogEnabledBinding,
+                onToggle: { cache.push(\.fogEffect, value: cache.fogEffect) }
+            ) {
+                HStack {
+                    Text("Density")
+                    Spacer()
+                    Text("\(cache.fogEffect.intensity, specifier: "%.2f")")
+                        .foregroundStyle(.secondary).monospacedDigit()
+                }
+                Slider(value: fogIntensityBinding, in: 0...1, onEditingChanged: { editing in
+                    if !editing { cache.push(\.fogEffect, value: cache.fogEffect) }
+                })
             }
         }
     }

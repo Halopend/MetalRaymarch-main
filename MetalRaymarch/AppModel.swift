@@ -224,34 +224,74 @@ class AppModel {
     
     /// Callback to open the developer window (set by App scene)
     var openDeveloperWindowHandler: (() -> Void)?
+    /// Callback to dismiss the developer window (set by App scene)
+    var dismissDeveloperWindowHandler: (() -> Void)?
+    /// Whether the developer window is currently open
+    var isDeveloperWindowVisible = false
     
     /// Callback to open the scenes window (set by App scene)
     var openScenesWindowHandler: (() -> Void)?
+    /// Callback to dismiss the scenes window (set by App scene)
+    var dismissScenesWindowHandler: (() -> Void)?
+    /// Whether the scenes window is currently open
+    var isScenesWindowVisible = false
     
     /// Callback to open the color window (set by App scene)
     var openColorWindowHandler: (() -> Void)?
+    /// Callback to dismiss the color window (set by App scene)
+    var dismissColorWindowHandler: (() -> Void)?
+    /// Whether the color window is currently open
+    var isColorWindowVisible = false
     
     /// Callback to open the effects window (set by App scene)
     var openEffectsWindowHandler: (() -> Void)?
+    /// Callback to dismiss the effects window (set by App scene)
+    var dismissEffectsWindowHandler: (() -> Void)?
+    /// Whether the effects window is currently open
+    var isEffectsWindowVisible = false
     
-    /// Open the developer tools window
-    func openDeveloperWindow() {
-        openDeveloperWindowHandler?()
+    /// Toggle the developer tools window
+    func toggleDeveloperWindow() {
+        if isDeveloperWindowVisible {
+            isDeveloperWindowVisible = false
+            dismissDeveloperWindowHandler?()
+        } else {
+            isDeveloperWindowVisible = true
+            openDeveloperWindowHandler?()
+        }
     }
     
-    /// Open the scenes window
-    func openScenesWindow() {
-        openScenesWindowHandler?()
+    /// Toggle the scenes window
+    func toggleScenesWindow() {
+        if isScenesWindowVisible {
+            isScenesWindowVisible = false
+            dismissScenesWindowHandler?()
+        } else {
+            isScenesWindowVisible = true
+            openScenesWindowHandler?()
+        }
     }
     
-    /// Open the color options window
-    func openColorWindow() {
-        openColorWindowHandler?()
+    /// Toggle the color options window
+    func toggleColorWindow() {
+        if isColorWindowVisible {
+            isColorWindowVisible = false
+            dismissColorWindowHandler?()
+        } else {
+            isColorWindowVisible = true
+            openColorWindowHandler?()
+        }
     }
     
-    /// Open the effects window
-    func openEffectsWindow() {
-        openEffectsWindowHandler?()
+    /// Toggle the effects window
+    func toggleEffectsWindow() {
+        if isEffectsWindowVisible {
+            isEffectsWindowVisible = false
+            dismissEffectsWindowHandler?()
+        } else {
+            isEffectsWindowVisible = true
+            openEffectsWindowHandler?()
+        }
     }
     
     /// Toggle menu window visibility — dismisses or opens the window for real
@@ -892,7 +932,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _gestureSpread: Float = 0            // Normalized hand spread (0-1) for debug visualization
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
-    private var _gestureSensitivity: Float = 5.0     // Gesture sensitivity (1=10x slower, 10=normal speed)
+    private var _gestureSensitivity: Float = {
+        let stored = UserDefaults.standard.float(forKey: "gestureSensitivity")
+        return stored > 0 ? stored : 3.0  // Default 3.0 if never saved
+    }()
 
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
@@ -1188,7 +1231,11 @@ final class RenderSettings: @unchecked Sendable {
     /// Gesture sensitivity (1-10, where 1 = 10x slower, 10 = normal speed)
     var gestureSensitivity: Float {
         get { withLock { _gestureSensitivity } }
-        set { withLock { _gestureSensitivity = max(1.0, min(10.0, newValue)) } }
+        set {
+            let clamped = max(1.0, min(10.0, newValue))
+            withLock { _gestureSensitivity = clamped }
+            UserDefaults.standard.set(clamped, forKey: "gestureSensitivity")
+        }
     }
 
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry

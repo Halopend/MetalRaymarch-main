@@ -28,6 +28,12 @@ struct ScenesWindowView: View {
         }
         .frame(minWidth: 450, minHeight: 400)
         .glassBackgroundEffect()
+        .onAppear {
+            appModel.isScenesWindowVisible = true
+        }
+        .onDisappear {
+            appModel.isScenesWindowVisible = false
+        }
     }
 }
 

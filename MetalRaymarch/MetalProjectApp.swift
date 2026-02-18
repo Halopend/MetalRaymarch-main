@@ -67,21 +67,33 @@ struct MetalProjectTestApp: App {
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
                     }
-                    // Set up handler for developer window
+                    // Set up handlers for developer window
                     appModel.openDeveloperWindowHandler = {
                         openWindow(id: appModel.developerWindowID)
                     }
-                    // Set up handler for scenes window
+                    appModel.dismissDeveloperWindowHandler = { [dismissWindow] in
+                        dismissWindow(id: appModel.developerWindowID)
+                    }
+                    // Set up handlers for scenes window
                     appModel.openScenesWindowHandler = {
                         openWindow(id: appModel.scenesWindowID)
                     }
-                    // Set up handler for color window
+                    appModel.dismissScenesWindowHandler = { [dismissWindow] in
+                        dismissWindow(id: appModel.scenesWindowID)
+                    }
+                    // Set up handlers for color window
                     appModel.openColorWindowHandler = {
                         openWindow(id: appModel.colorWindowID)
                     }
-                    // Set up handler for effects window
+                    appModel.dismissColorWindowHandler = { [dismissWindow] in
+                        dismissWindow(id: appModel.colorWindowID)
+                    }
+                    // Set up handlers for effects window
                     appModel.openEffectsWindowHandler = {
                         openWindow(id: appModel.effectsWindowID)
+                    }
+                    appModel.dismissEffectsWindowHandler = { [dismissWindow] in
+                        dismissWindow(id: appModel.effectsWindowID)
                     }
                 }
         }
