@@ -460,23 +460,21 @@ struct ContentView: View {
                         settings: appModel.renderSettings,
                         captureScreenshot: { await appModel.captureScreenshot() },
                         onLoadPreset: { preset in
-                            // Ensure pipeline is ready before applying preset
-                            // This builds the specialized pipeline if not already cached
                             Task {
                                 await appModel.preparePipelineHandler?(preset)
                             }
                             preset.apply(to: appModel.renderSettings)
-                            // Sync gesture controller to prevent jumps when gestures resume
                             appModel.gestureController?.syncWithSettings()
+                        },
+                        onOpenScenes: {
+                            appModel.openScenesWindow()
                         }
                     )
                     
                     // Reset button
                     Button {
-                        // Reset position to origin
                         appModel.renderSettings.targetPosition = .zero
                         appModel.renderSettings.position = .zero
-                        // Apply default fractal parameters
                         appModel.gestureController?.applyFractalDefaults()
                     } label: {
                         Label("Reset", systemImage: "arrow.counterclockwise")
@@ -493,15 +491,6 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .help("Open Developer Tools")
                     
-                    // Scenes button
-                    Button {
-                        appModel.openScenesWindow()
-                    } label: {
-                        Image(systemName: "film.stack")
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Animation Scenes")
-                    
                     // Color options button
                     Button {
                         appModel.openColorWindow()
@@ -510,6 +499,15 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .help("Color Options")
+                    
+                    // Effects button
+                    Button {
+                        appModel.openEffectsWindow()
+                    } label: {
+                        Image(systemName: "wand.and.stars")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Effects")
                     
                     Spacer()
                     
@@ -607,135 +605,6 @@ struct ContentView: View {
                                         cache.push(\.targetSphereRadius, value: cache.targetSphereRadius)
                                     }
                                 })
-                            }
-                            .padding(.leading, 10)
-                        }
-
-                        // Effects Group (lighting, emissive, audio)
-                        DisclosureGroup("Effects") {
-                            VStack(spacing: 8) {
-                                // === MODULAR LIGHTING EFFECTS ===
-                                LightingEffectsSection(cache: $cache)
-                                
-                                Divider()
-                                
-                                // === EMISSIVE GLOW (Self-Illumination) ===
-                                Text("Emissive Glow").font(.headline)
-                                
-                                Toggle("Enable Emissive", isOn: $cache.emissiveEnabled)
-                                    .onChange(of: cache.emissiveEnabled) { _, newValue in
-                                        cache.push(\.emissiveEnabled, value: newValue)
-                                    }
-                                
-                                if cache.emissiveEnabled {
-                                    HStack {
-                                        Text("Pattern")
-                                        Spacer()
-                                        Picker("Pattern", selection: $cache.emissivePattern) {
-                                            Text("Folds").tag(0)
-                                            Text("Depth").tag(1)
-                                            Text("Veins").tag(2)
-                                            Text("Pulse").tag(3)
-                                            Text("Edges").tag(4)
-                                        }
-                                        .pickerStyle(.segmented)
-                                        .frame(maxWidth: 220)
-                                        .onChange(of: cache.emissivePattern) { _, newValue in
-                                            cache.push(\.emissivePattern, value: newValue)
-                                        }
-                                    }
-                                    
-                                    Text("Intensity: \(cache.emissiveIntensity, specifier: "%.2f")")
-                                    Slider(value: $cache.emissiveIntensity, in: 0...2, onEditingChanged: { editing in
-                                        if !editing { cache.push(\.emissiveIntensity, value: cache.emissiveIntensity) }
-                                    })
-                                    
-                                    Text("Threshold: \(cache.emissiveThreshold, specifier: "%.2f")")
-                                    Slider(value: $cache.emissiveThreshold, in: 0...1, onEditingChanged: { editing in
-                                        if !editing { cache.push(\.emissiveThreshold, value: cache.emissiveThreshold) }
-                                    })
-                                    
-                                    if cache.emissivePattern == 3 {
-                                        Text("Pulse Speed: \(cache.emissiveSpeed, specifier: "%.1f")")
-                                        Slider(value: $cache.emissiveSpeed, in: 0.1...5, onEditingChanged: { editing in
-                                            if !editing { cache.push(\.emissiveSpeed, value: cache.emissiveSpeed) }
-                                        })
-                                    }
-                                    
-                                    // Color wheel picker
-                                    EmissiveColorPicker(color: Binding(
-                                        get: { 
-                                            Color(red: Double(cache.emissiveColor.x), 
-                                                  green: Double(cache.emissiveColor.y), 
-                                                  blue: Double(cache.emissiveColor.z))
-                                        },
-                                        set: { newColor in
-                                            if let components = newColor.cgColor?.components, components.count >= 3 {
-                                                cache.emissiveColor = SIMD3<Float>(Float(components[0]), Float(components[1]), Float(components[2]))
-                                                cache.push(\.emissiveColor, value: cache.emissiveColor)
-                                            }
-                                        }
-                                    ))
-                                }
-                                
-                                Divider()
-                                
-                                // === LIGHTING MODE - Simplified ===
-                                HStack {
-                                    Text("Lighting")
-                                    Spacer()
-                                    Picker("Lighting", selection: $cache.lightingMode) {
-                                        ForEach(LightingMode.allCases, id: \.rawValue) { mode in
-                                            Text(mode.displayName).tag(mode)
-                                        }
-                                    }
-                                    .pickerStyle(.segmented)
-                                    .frame(maxWidth: 200)
-                                    .onChange(of: cache.lightingMode) { _, newValue in
-                                        cache.push(\.lightingMode, value: newValue)
-                                    }
-                                }
-                                
-                                // Audio controls only in audio reactive mode
-                                if cache.lightingMode == .audioReactive {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack {
-                                            Button {
-                                                if appModel.audioAnalyzer.isCapturing {
-                                                    appModel.audioAnalyzer.stopCapture()
-                                                } else {
-                                                    appModel.audioAnalyzer.startCapture()
-                                                }
-                                            } label: {
-                                                Label(
-                                                    appModel.audioAnalyzer.isCapturing ? "Stop Mic" : "Start Mic",
-                                                    systemImage: appModel.audioAnalyzer.isCapturing ? "mic.fill" : "mic"
-                                                )
-                                            }
-                                            .buttonStyle(.borderedProminent)
-                                            .tint(appModel.audioAnalyzer.isCapturing ? .red : .purple)
-                                            
-                                            Spacer()
-                                            
-                                            if appModel.audioAnalyzer.isCapturing {
-                                                HStack(spacing: 2) {
-                                                    ForEach(0..<10, id: \.self) { i in
-                                                        Rectangle()
-                                                            .fill(Float(i) / 10.0 < appModel.audioAnalyzer.level ? Color.green : Color.gray.opacity(0.3))
-                                                            .frame(width: 4, height: 16)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        
-                                        if let error = appModel.audioAnalyzer.errorMessage {
-                                            Text(error)
-                                                .font(.caption)
-                                                .foregroundStyle(.red)
-                                        }
-                                    }
-                                    .padding(.vertical, 4)
-                                }
                             }
                             .padding(.leading, 10)
                         }

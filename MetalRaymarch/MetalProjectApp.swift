@@ -79,6 +79,10 @@ struct MetalProjectTestApp: App {
                     appModel.openColorWindowHandler = {
                         openWindow(id: appModel.colorWindowID)
                     }
+                    // Set up handler for effects window
+                    appModel.openEffectsWindowHandler = {
+                        openWindow(id: appModel.effectsWindowID)
+                    }
                 }
         }
         .defaultSize(width: 600, height: 250)
@@ -109,6 +113,15 @@ struct MetalProjectTestApp: App {
                 .environment(appModel)
         }
         .defaultSize(width: 450, height: 600)
+        .windowStyle(.plain)
+        .windowResizability(.contentSize)
+        
+        // Effects Window
+        Window("Effects", id: appModel.effectsWindowID) {
+            EffectsWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 550, height: 650)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 

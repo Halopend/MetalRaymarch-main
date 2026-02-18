@@ -34,13 +34,18 @@ struct ColorOptionsWindowView: View {
                     
                     Divider()
                     
+                    // === MAPPING & GRADIENT CONTROLS ===
+                    mappingSection
+                    
+                    Divider()
+                    
                     // === COLOR GRADING ===
                     colorGradingSection
                     
                     Divider()
                     
-                    // === COLOR MIX & ITERATIONS ===
-                    colorMixSection
+                    // === COLOR BLEND ===
+                    colorBlendSection
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -108,50 +113,58 @@ struct ColorOptionsWindowView: View {
                 }
             }
             
-            Divider()
-            
-            // Mapping mode
-            HStack {
-                Text("Mapping")
-                Spacer()
-                Picker("Mapping", selection: $cache.colorMappingMode) {
-                    ForEach(ColorMappingMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.displayName).tag(mode)
+        }
+    }
+    
+    // MARK: - Mapping Section
+    
+    private var mappingSection: some View {
+        DisclosureGroup("Mapping & Gradient Controls") {
+            VStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    // Left column
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Mode")
+                            Spacer()
+                            Picker("Mapping", selection: $cache.colorMappingMode) {
+                                ForEach(ColorMappingMode.allCases, id: \.rawValue) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 120)
+                            .onChange(of: cache.colorMappingMode) { _, newValue in
+                                cache.push(\.colorMappingMode, value: newValue)
+                            }
+                        }
+                        
+                        Text("Repeat: \(cache.gradientRepeat, specifier: "%.1f")x")
+                            .font(.caption)
+                        Slider(value: $cache.gradientRepeat, in: 0.1...5.0, onEditingChanged: { editing in
+                            if !editing { cache.push(\.gradientRepeat, value: cache.gradientRepeat) }
+                        })
                     }
+                    .frame(maxWidth: .infinity)
+                    
+                    // Right column
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Offset: \(cache.gradientOffset, specifier: "%.2f")")
+                            .font(.caption)
+                        Slider(value: $cache.gradientOffset, in: 0...1, onEditingChanged: { editing in
+                            if !editing { cache.push(\.gradientOffset, value: cache.gradientOffset) }
+                        })
+                        
+                        Text("Smoothing: \(cache.gradientSmoothing, specifier: "%.2f")")
+                            .font(.caption)
+                        Slider(value: $cache.gradientSmoothing, in: 0...1, onEditingChanged: { editing in
+                            if !editing { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) }
+                        })
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: 140)
-                .onChange(of: cache.colorMappingMode) { _, newValue in
-                    cache.push(\.colorMappingMode, value: newValue)
-                }
             }
-            
-            // Repeat
-            HStack {
-                Text("Repeat: \(cache.gradientRepeat, specifier: "%.1f")x")
-                Spacer()
-            }
-            Slider(value: $cache.gradientRepeat, in: 0.1...5.0, onEditingChanged: { editing in
-                if !editing { cache.push(\.gradientRepeat, value: cache.gradientRepeat) }
-            })
-            
-            // Offset
-            HStack {
-                Text("Offset: \(cache.gradientOffset, specifier: "%.2f")")
-                Spacer()
-            }
-            Slider(value: $cache.gradientOffset, in: 0...1, onEditingChanged: { editing in
-                if !editing { cache.push(\.gradientOffset, value: cache.gradientOffset) }
-            })
-            
-            // Smoothing
-            HStack {
-                Text("Smoothing: \(cache.gradientSmoothing, specifier: "%.2f")")
-                Spacer()
-            }
-            Slider(value: $cache.gradientSmoothing, in: 0...1, onEditingChanged: { editing in
-                if !editing { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) }
-            })
+            .padding(.top, 4)
         }
     }
     
@@ -160,7 +173,6 @@ struct ColorOptionsWindowView: View {
     private var colorGradingSection: some View {
         DisclosureGroup("Color Grading") {
             VStack(spacing: 12) {
-                // Two-column layout
                 HStack(alignment: .top, spacing: 16) {
                     // Left column
                     VStack(alignment: .leading, spacing: 6) {
@@ -205,21 +217,34 @@ struct ColorOptionsWindowView: View {
         }
     }
     
-    // MARK: - Color Mix Section
+    // MARK: - Color Blend Section
     
-    private var colorMixSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Color Blend").font(.headline)
-            
-            Text("Color Mix")
-            Slider(value: $cache.colorMix, in: 0...1.0, onEditingChanged: { editing in
-                if !editing { cache.push(\.colorMix, value: cache.colorMix) }
-            })
-            
-            Text("Color Iterations: \(cache.colorIterations, specifier: "%.0f")")
-            Slider(value: $cache.colorIterations, in: 4...16, step: 1, onEditingChanged: { editing in
-                if !editing { cache.push(\.colorIterations, value: cache.colorIterations) }
-            })
+    private var colorBlendSection: some View {
+        DisclosureGroup("Color Blend") {
+            VStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    // Left column
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Color Mix: \(cache.colorMix, specifier: "%.2f")")
+                            .font(.caption)
+                        Slider(value: $cache.colorMix, in: 0...1.0, onEditingChanged: { editing in
+                            if !editing { cache.push(\.colorMix, value: cache.colorMix) }
+                        })
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    // Right column
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Color Iterations: \(cache.colorIterations, specifier: "%.0f")")
+                            .font(.caption)
+                        Slider(value: $cache.colorIterations, in: 4...16, step: 1, onEditingChanged: { editing in
+                            if !editing { cache.push(\.colorIterations, value: cache.colorIterations) }
+                        })
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.top, 4)
         }
     }
 }
