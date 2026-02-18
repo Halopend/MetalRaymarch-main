@@ -52,6 +52,7 @@ final class UISettingsCache {
     var glowEffect: GlowEffect = .off
     var bloomEffect: BloomEffect = .off
     var fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
+    var gradientCycleEffect: GradientCycleEffect = .off
     
     // Emissive
     var emissiveEnabled: Bool = false
@@ -143,6 +144,7 @@ final class UISettingsCache {
         glowEffect = settings.glowEffect
         bloomEffect = settings.bloomEffect
         fogEffect = settings.fogEffect
+        gradientCycleEffect = settings.gradientCycleEffect
         
         emissiveEnabled = settings.emissiveEnabled
         emissivePattern = settings.emissivePattern
@@ -222,6 +224,7 @@ final class UISettingsCache {
         glowEffect = settings.glowEffect
         bloomEffect = settings.bloomEffect
         fogEffect = settings.fogEffect
+        gradientCycleEffect = settings.gradientCycleEffect
     }
 }
 

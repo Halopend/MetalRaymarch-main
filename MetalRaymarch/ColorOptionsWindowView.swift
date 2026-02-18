@@ -11,6 +11,7 @@ import SwiftUI
 struct ColorOptionsWindowView: View {
     @Environment(AppModel.self) private var appModel
     @State private var cache = UISettingsCache()
+    @State private var showStopsPopover = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -63,10 +64,22 @@ struct ColorOptionsWindowView: View {
             Text("Gradient Coloring")
                 .font(.headline)
             
-            // Gradient preview bar
+            // Gradient preview bar — tap to edit stops
             GradientPreviewBar(gradient: cache.gradientColorMap)
                 .frame(height: 28)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .onTapGesture {
+                    showStopsPopover = true
+                }
+                .popover(isPresented: $showStopsPopover, arrowEdge: .bottom) {
+                    GradientStopsPopover(cache: $cache)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+                )
+                .help("Tap to edit color stops")
             
             // Preset picker
             Text("Presets").font(.subheadline).foregroundColor(.secondary)
@@ -139,73 +152,56 @@ struct ColorOptionsWindowView: View {
             Slider(value: $cache.gradientSmoothing, in: 0...1, onEditingChanged: { editing in
                 if !editing { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) }
             })
-            
-            Divider()
-            
-            // Color stops editor
-            HStack {
-                Text("Color Stops").font(.subheadline)
-                Spacer()
-                Button {
-                    addStop()
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.caption)
-                }
-                .disabled(cache.gradientColorMap.stops.count >= 8)
-            }
-            
-            ForEach(Array(cache.gradientColorMap.stops.enumerated()), id: \.element.id) { index, stop in
-                GradientStopRow(
-                    stop: stop,
-                    index: index,
-                    onUpdate: { updatedStop in
-                        updateStop(at: index, with: updatedStop)
-                    },
-                    onDelete: {
-                        deleteStop(at: index)
-                    },
-                    canDelete: cache.gradientColorMap.stops.count > 2
-                )
-            }
         }
     }
     
     // MARK: - Color Grading Section
     
     private var colorGradingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Color Grading").font(.headline)
-            
-            // Contrast
-            Text("Contrast: \(cache.colorSchemeContrast, specifier: "%.2f")")
-            Slider(value: $cache.colorSchemeContrast, in: 0.95...1.15, onEditingChanged: { editing in
-                if !editing { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) }
-            })
-            
-            Divider()
-            
-            Text("Color Grading Curves").font(.subheadline).foregroundColor(.secondary)
-            
-            Text("Vibrance: \(cache.colorSchemeVibrance, specifier: "%.2f")")
-            Slider(value: $cache.colorSchemeVibrance, in: 0...1.0, onEditingChanged: { editing in
-                if !editing { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) }
-            })
-            
-            Text("Midtone Curve: \(cache.colorSchemeCurve, specifier: "%.2f")")
-            Slider(value: $cache.colorSchemeCurve, in: -1.0...1.0, onEditingChanged: { editing in
-                if !editing { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) }
-            })
-            
-            Text("Shadows: \(cache.colorSchemeShadows, specifier: "%.3f")")
-            Slider(value: $cache.colorSchemeShadows, in: -0.05...0.05, onEditingChanged: { editing in
-                if !editing { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) }
-            })
-            
-            Text("Highlights: \(cache.colorSchemeHighlights, specifier: "%.2f")")
-            Slider(value: $cache.colorSchemeHighlights, in: -0.5...1.0, onEditingChanged: { editing in
-                if !editing { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) }
-            })
+        DisclosureGroup("Color Grading") {
+            VStack(spacing: 12) {
+                // Two-column layout
+                HStack(alignment: .top, spacing: 16) {
+                    // Left column
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Contrast: \(cache.colorSchemeContrast, specifier: "%.2f")")
+                            .font(.caption)
+                        Slider(value: $cache.colorSchemeContrast, in: 0.95...1.15, onEditingChanged: { editing in
+                            if !editing { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) }
+                        })
+                        
+                        Text("Vibrance: \(cache.colorSchemeVibrance, specifier: "%.2f")")
+                            .font(.caption)
+                        Slider(value: $cache.colorSchemeVibrance, in: 0...1.0, onEditingChanged: { editing in
+                            if !editing { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) }
+                        })
+                        
+                        Text("Midtone Curve: \(cache.colorSchemeCurve, specifier: "%.2f")")
+                            .font(.caption)
+                        Slider(value: $cache.colorSchemeCurve, in: -1.0...1.0, onEditingChanged: { editing in
+                            if !editing { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) }
+                        })
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    // Right column
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Shadows: \(cache.colorSchemeShadows, specifier: "%.3f")")
+                            .font(.caption)
+                        Slider(value: $cache.colorSchemeShadows, in: -0.05...0.05, onEditingChanged: { editing in
+                            if !editing { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) }
+                        })
+                        
+                        Text("Highlights: \(cache.colorSchemeHighlights, specifier: "%.2f")")
+                            .font(.caption)
+                        Slider(value: $cache.colorSchemeHighlights, in: -0.5...1.0, onEditingChanged: { editing in
+                            if !editing { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) }
+                        })
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.top, 4)
         }
     }
     
@@ -225,34 +221,5 @@ struct ColorOptionsWindowView: View {
                 if !editing { cache.push(\.colorIterations, value: cache.colorIterations) }
             })
         }
-    }
-    
-    // MARK: - Gradient Helpers
-    
-    private func addStop() {
-        var map = cache.gradientColorMap
-        let newPos: Float = 0.5
-        let newStop = GradientStop(position: newPos, r: 1.0, g: 1.0, b: 1.0)
-        map.stops.append(newStop)
-        map.sortStops()
-        cache.gradientColorMap = map
-        cache.pushGradientMap(map)
-    }
-    
-    private func updateStop(at index: Int, with stop: GradientStop) {
-        var map = cache.gradientColorMap
-        guard index < map.stops.count else { return }
-        map.stops[index] = stop
-        map.sortStops()
-        cache.gradientColorMap = map
-        cache.pushGradientMap(map)
-    }
-    
-    private func deleteStop(at index: Int) {
-        var map = cache.gradientColorMap
-        guard map.stops.count > 2, index < map.stops.count else { return }
-        map.stops.remove(at: index)
-        cache.gradientColorMap = map
-        cache.pushGradientMap(map)
     }
 }

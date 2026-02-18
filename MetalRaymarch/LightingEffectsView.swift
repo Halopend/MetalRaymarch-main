@@ -287,6 +287,29 @@ struct LightingEffectsSection: View {
                     }
                 })
             }
+            
+            // Gradient Cycle Effect
+            LightingEffectCard(
+                title: "Gradient Cycle",
+                icon: "arrow.trianglehead.2.clockwise.rotate.90",
+                enabled: gradientCycleEnabledBinding,
+                onToggle: {
+                    cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
+                }
+            ) {
+                HStack {
+                    Text("Speed")
+                    Spacer()
+                    Text("\(cache.gradientCycleEffect.speed, specifier: "%.2f")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: gradientCycleSpeedBinding, in: 0...1, onEditingChanged: { editing in
+                    if !editing {
+                        cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
+                    }
+                })
+            }
         }
     }
     
@@ -373,6 +396,20 @@ struct LightingEffectsSection: View {
         Binding(
             get: { cache.fogEffect.intensity },
             set: { cache.fogEffect.intensity = $0 }
+        )
+    }
+    
+    private var gradientCycleEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { cache.gradientCycleEffect.enabled },
+            set: { cache.gradientCycleEffect.enabled = $0 }
+        )
+    }
+    
+    private var gradientCycleSpeedBinding: Binding<Float> {
+        Binding(
+            get: { cache.gradientCycleEffect.speed },
+            set: { cache.gradientCycleEffect.speed = $0 }
         )
     }
 }

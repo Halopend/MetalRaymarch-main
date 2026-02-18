@@ -438,6 +438,28 @@ struct FogEffect: Codable {
     }
 }
 
+/// Gradient cycle effect - rotates the gradient offset over time so colors loop through the fractal
+struct GradientCycleEffect: Codable {
+    var enabled: Bool = false
+    var speed: Float = 0.1          // Cycle speed (0-1), how fast the gradient rotates
+    
+    static var off: GradientCycleEffect {
+        GradientCycleEffect(enabled: false, speed: 0.0)
+    }
+    
+    static var slow: GradientCycleEffect {
+        GradientCycleEffect(enabled: true, speed: 0.05)
+    }
+    
+    static var medium: GradientCycleEffect {
+        GradientCycleEffect(enabled: true, speed: 0.15)
+    }
+    
+    static var fast: GradientCycleEffect {
+        GradientCycleEffect(enabled: true, speed: 0.4)
+    }
+}
+
 /// Lighting preset packages - bundles of effects that work well together
 enum LightingPreset: String, CaseIterable, Codable {
     case off = "Off"
@@ -472,26 +494,26 @@ enum LightingPreset: String, CaseIterable, Codable {
     }
     
     /// Get the effect bundle for this preset
-    func effects() -> (hue: HueRotationEffect, pulse: PulseEffect, glow: GlowEffect, bloom: BloomEffect, fog: FogEffect) {
+    func effects() -> (hue: HueRotationEffect, pulse: PulseEffect, glow: GlowEffect, bloom: BloomEffect, fog: FogEffect, gradientCycle: GradientCycleEffect) {
         switch self {
         case .off:
-            return (.off, .off, .off, .off, .off)
+            return (.off, .off, .off, .off, .off, .off)
             
         case .subtle:
-            return (.subtle, .off, .subtle, .subtle, .subtle)
+            return (.subtle, .off, .subtle, .subtle, .subtle, .off)
             
         case .dynamic:
-            return (.medium, .medium, .medium, .medium, .medium)
+            return (.medium, .medium, .medium, .medium, .medium, .slow)
             
         case .psychedelic:
-            return (.intense, .intense, .intense, .intense, .medium)
+            return (.intense, .intense, .intense, .intense, .medium, .medium)
             
         case .atmospheric:
-            return (.off, .subtle, .medium, .subtle, .dense)
+            return (.off, .subtle, .medium, .subtle, .dense, .off)
             
         case .custom:
             // Return current settings unchanged
-            return (.off, .off, .off, .off, .off)
+            return (.off, .off, .off, .off, .off, .off)
         }
     }
 }
@@ -901,6 +923,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _glowEffect: GlowEffect = .off
     private var _bloomEffect: BloomEffect = .off
     private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
+    private var _gradientCycleEffect: GradientCycleEffect = .off
     
     // === EMISSIVE GLOW (Self-illuminating regions) ===
     private var _emissiveEnabled: Bool = false              // Enable emissive glow regions
@@ -1373,6 +1396,7 @@ final class RenderSettings: @unchecked Sendable {
                     _glowEffect = effects.glow
                     _bloomEffect = effects.bloom
                     _fogEffect = effects.fog
+                    _gradientCycleEffect = effects.gradientCycle
                 }
             }
         }
@@ -1428,6 +1452,17 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _fogEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
+    }
+    
+    /// Gradient cycle effect (animates the gradient offset to rotate colors)
+    var gradientCycleEffect: GradientCycleEffect {
+        get { withLock { _gradientCycleEffect } }
+        set {
+            withLock {
+                _gradientCycleEffect = newValue
                 _lightingPreset = .custom
             }
         }
@@ -1623,7 +1658,7 @@ final class RenderSettings: @unchecked Sendable {
             gradientStopCount: Int32(gradCount),
             colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
             gradientRepeat: gradState.gradient.repeatCount,
-            gradientOffset: gradState.gradient.offset,
+            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
             useGradientColoring: gradState.useGradientColoring ? 1 : 0,
             gradientSmoothing: gradState.gradient.smoothing,
             _gradPad: (0.0, 0.0),

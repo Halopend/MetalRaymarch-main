@@ -58,6 +58,7 @@ struct FractalPreset: Codable, Identifiable {
     var glowEffect: GlowEffect?
     var bloomEffect: BloomEffect?
     var fogEffect: FogEffect?
+    var gradientCycleEffect: GradientCycleEffect?
     
     // === EMISSIVE SETTINGS (new in v1.1) ===
     var emissiveEnabled: Bool?
@@ -75,7 +76,7 @@ struct FractalPreset: Codable, Identifiable {
         case minDistance, fractalScale, foldingLimit, sphereRadius
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius
         // v2.0 modular lighting effects
-        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect
+        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
         case emissiveEnabled, emissivePattern, emissiveIntensity, emissiveThreshold, emissiveColor, emissiveSpeed
     }
     
@@ -149,6 +150,7 @@ struct FractalPreset: Codable, Identifiable {
         glowEffect = try container.decodeIfPresent(GlowEffect.self, forKey: .glowEffect)
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
+        gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
         
         // v1.1 emissive settings
         emissiveEnabled = try container.decodeIfPresent(Bool.self, forKey: .emissiveEnabled)
@@ -198,6 +200,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(glowEffect, forKey: .glowEffect)
         try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
+        try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
         
         // v1.1 emissive settings
         try container.encodeIfPresent(emissiveEnabled, forKey: .emissiveEnabled)
@@ -305,6 +308,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.glowEffect = settings.glowEffect
         preset.bloomEffect = settings.bloomEffect
         preset.fogEffect = settings.fogEffect
+        preset.gradientCycleEffect = settings.gradientCycleEffect
         
         // v1.1 emissive settings
         preset.emissiveEnabled = settings.emissiveEnabled
@@ -387,6 +391,9 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let fogEffect = fogEffect {
             settings.fogEffect = fogEffect
+        }
+        if let gradientCycleEffect = gradientCycleEffect {
+            settings.gradientCycleEffect = gradientCycleEffect
         }
         
         // v1.1 emissive settings
@@ -662,6 +669,7 @@ class PresetManager {
         preset.glowEffect = settings.glowEffect
         preset.bloomEffect = settings.bloomEffect
         preset.fogEffect = settings.fogEffect
+        preset.gradientCycleEffect = settings.gradientCycleEffect
         
         // v1.1 emissive settings
         preset.emissiveEnabled = settings.emissiveEnabled
@@ -775,6 +783,7 @@ class PresetManager {
             newPreset.glowEffect = importedPreset.glowEffect
             newPreset.bloomEffect = importedPreset.bloomEffect
             newPreset.fogEffect = importedPreset.fogEffect
+            newPreset.gradientCycleEffect = importedPreset.gradientCycleEffect
             
             // v1.1 emissive settings
             newPreset.emissiveEnabled = importedPreset.emissiveEnabled

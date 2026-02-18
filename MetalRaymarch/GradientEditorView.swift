@@ -16,13 +16,26 @@ struct GradientEditorSection: View {
     
     @State private var showingStopEditor = false
     @State private var editingStopIndex: Int? = nil
+    @State private var showStopsPopover = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Gradient preview bar
+            // Gradient preview bar — tap to edit stops
             GradientPreviewBar(gradient: cache.gradientColorMap)
                 .frame(height: 24)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .onTapGesture {
+                    showStopsPopover = true
+                }
+                .popover(isPresented: $showStopsPopover, arrowEdge: .bottom) {
+                    GradientStopsPopover(cache: $cache)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+                )
+                .help("Tap to edit color stops")
             
             // Preset picker
             Text("Presets").font(.subheadline).foregroundColor(.secondary)
@@ -95,41 +108,58 @@ struct GradientEditorSection: View {
                 Slider(value: $cache.gradientSmoothing, in: 0...1, onEditingChanged: { editing in
                     if !editing { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) }
                 })
-                
-                Divider()
-                
-                // Color stops editor
-                HStack {
-                    Text("Color Stops").font(.subheadline)
-                    Spacer()
-                    Button {
-                        addStop()
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.caption)
-                    }
-                    .disabled(cache.gradientColorMap.stops.count >= 8)
-                }
-                
-                ForEach(Array(cache.gradientColorMap.stops.enumerated()), id: \.element.id) { index, stop in
-                    GradientStopRow(
-                        stop: stop,
-                        index: index,
-                        onUpdate: { updatedStop in
-                            updateStop(at: index, with: updatedStop)
-                        },
-                        onDelete: {
-                            deleteStop(at: index)
-                        },
-                        canDelete: cache.gradientColorMap.stops.count > 2
-                    )
-                }
         }
+    }
+}
+
+// MARK: - Gradient Stops Popover
+
+/// Popover shown when the gradient bar is tapped, allowing editing of individual color stops.
+struct GradientStopsPopover: View {
+    @Binding var cache: UISettingsCache
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Color Stops")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    addStop()
+                } label: {
+                    Label("Add", systemImage: "plus.circle.fill")
+                        .font(.caption)
+                }
+                .disabled(cache.gradientColorMap.stops.count >= 8)
+            }
+            
+            // Gradient preview at top of popover for reference
+            GradientPreviewBar(gradient: cache.gradientColorMap)
+                .frame(height: 20)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            
+            Divider()
+            
+            ForEach(Array(cache.gradientColorMap.stops.enumerated()), id: \.element.id) { index, stop in
+                GradientStopRow(
+                    stop: stop,
+                    index: index,
+                    onUpdate: { updatedStop in
+                        updateStop(at: index, with: updatedStop)
+                    },
+                    onDelete: {
+                        deleteStop(at: index)
+                    },
+                    canDelete: cache.gradientColorMap.stops.count > 2
+                )
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 300, idealWidth: 350)
     }
     
     private func addStop() {
         var map = cache.gradientColorMap
-        // Add at midpoint of existing range
         let newPos: Float = 0.5
         let newStop = GradientStop(position: newPos, r: 1.0, g: 1.0, b: 1.0)
         map.stops.append(newStop)
