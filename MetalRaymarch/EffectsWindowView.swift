@@ -288,70 +288,6 @@ struct EffectsWindowView: View {
         }
     }
     
-    // MARK: - Lighting Mode & Audio
-    
-    private var lightingModeSection: some View {
-        DisclosureGroup("Lighting Mode") {
-            VStack(spacing: 8) {
-                HStack {
-                    Text("Mode")
-                    Spacer()
-                    Picker("Lighting", selection: $cache.lightingMode) {
-                        ForEach(LightingMode.allCases, id: \.rawValue) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 200)
-                    .onChange(of: cache.lightingMode) { _, newValue in
-                        cache.push(\.lightingMode, value: newValue)
-                    }
-                }
-                
-                if cache.lightingMode == .audioReactive {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Button {
-                                if appModel.audioAnalyzer.isCapturing {
-                                    appModel.audioAnalyzer.stopCapture()
-                                } else {
-                                    appModel.audioAnalyzer.startCapture()
-                                }
-                            } label: {
-                                Label(
-                                    appModel.audioAnalyzer.isCapturing ? "Stop Mic" : "Start Mic",
-                                    systemImage: appModel.audioAnalyzer.isCapturing ? "mic.fill" : "mic"
-                                )
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(appModel.audioAnalyzer.isCapturing ? .red : .purple)
-                            
-                            Spacer()
-                            
-                            if appModel.audioAnalyzer.isCapturing {
-                                HStack(spacing: 2) {
-                                    ForEach(0..<10, id: \.self) { i in
-                                        Rectangle()
-                                            .fill(Float(i) / 10.0 < appModel.audioAnalyzer.level ? Color.green : Color.gray.opacity(0.3))
-                                            .frame(width: 4, height: 16)
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if let error = appModel.audioAnalyzer.errorMessage {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-            .padding(.top, 4)
-        }
-    }
-    
     // MARK: - Bindings
     
     private var gradientCycleEnabledBinding: Binding<Bool> {
@@ -377,12 +313,6 @@ struct EffectsWindowView: View {
     }
     private var pulseAmountBinding: Binding<Float> {
         Binding(get: { cache.pulseEffect.amount }, set: { cache.pulseEffect.amount = $0 })
-    }
-    private var glowEnabledBinding: Binding<Bool> {
-        Binding(get: { cache.glowEffect.enabled }, set: { cache.glowEffect.enabled = $0 })
-    }
-    private var glowIntensityBinding: Binding<Float> {
-        Binding(get: { cache.glowEffect.intensity }, set: { cache.glowEffect.intensity = $0 })
     }
     private var bloomEnabledBinding: Binding<Bool> {
         Binding(get: { cache.bloomEffect.enabled }, set: { cache.bloomEffect.enabled = $0 })

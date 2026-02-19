@@ -571,67 +571,76 @@ struct ContentView: View {
                             }
                         }
 
-                        // Quality Sliders - Fractal Iterations and Ray Steps
-                        QualitySlidersView(
-                            cache: $cache,
-                            preparePipeline: { iterations, raySteps in
-                                appModel.preparePipeline(iterations: iterations, raySteps: raySteps)
-                            }
-                        )
-
                         // Primary Parameter: Fractal Scale - push on editing end
                         Text("Fractal Scale (\(String(format: "%.2f", cache.fractalScale)))")
                         Slider(value: $cache.fractalScale, in: -3.0...5.0, onEditingChanged: { editing in
                             if !editing { cache.push(\.fractalScale, value: cache.fractalScale) }
                         })
 
-                        // Shape Parameters Group - use cache with push on editing end
-                        DisclosureGroup("Shape Parameters") {
-                            VStack(spacing: 8) {
-                                Text("Min Distance (\(String(format: "%.2f", cache.targetMinDistance)))")
-                                Slider(value: $cache.targetMinDistance, in: parameterRanges.minDistance, onEditingChanged: { editing in
-                                    if !editing {
-                                        cache.push(\.targetMinDistance, value: cache.targetMinDistance)
-                                    }
-                                })
+                        // Shape Parameters - always visible
+                        Text("Shape Parameters")
+                            .font(.headline)
+                        
+                        VStack(spacing: 8) {
+                            Text("Min Distance (\(String(format: "%.2f", cache.targetMinDistance)))")
+                            Slider(value: $cache.targetMinDistance, in: parameterRanges.minDistance, onEditingChanged: { editing in
+                                if !editing {
+                                    cache.push(\.targetMinDistance, value: cache.targetMinDistance)
+                                }
+                            })
 
-                                Text("Box Folding Limit (\(String(format: "%.2f", cache.targetFoldingLimit)))")
-                                Slider(value: $cache.targetFoldingLimit, in: parameterRanges.foldingLimit, onEditingChanged: { editing in
-                                    if !editing {
-                                        cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit)
-                                    }
-                                })
+                            Text("Box Folding Limit (\(String(format: "%.2f", cache.targetFoldingLimit)))")
+                            Slider(value: $cache.targetFoldingLimit, in: parameterRanges.foldingLimit, onEditingChanged: { editing in
+                                if !editing {
+                                    cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit)
+                                }
+                            })
 
-                                Text("Sphere Radius (\(String(format: "%.2f", cache.targetSphereRadius)))")
-                                Slider(value: $cache.targetSphereRadius, in: parameterRanges.sphereRadius, onEditingChanged: { editing in
-                                    if !editing {
-                                        cache.push(\.targetSphereRadius, value: cache.targetSphereRadius)
-                                    }
-                                })
-                            }
-                            .padding(.leading, 10)
+                            Text("Sphere Radius (\(String(format: "%.2f", cache.targetSphereRadius)))")
+                            Slider(value: $cache.targetSphereRadius, in: parameterRanges.sphereRadius, onEditingChanged: { editing in
+                                if !editing {
+                                    cache.push(\.targetSphereRadius, value: cache.targetSphereRadius)
+                                }
+                            })
                         }
 
-                        // Safety & Options Group
-                        DisclosureGroup("Safety & Options") {
+                        // Safety Bubble
+                        DisclosureGroup("Safety Bubble") {
                             VStack(spacing: 8) {
-                                Toggle("Show HUD", isOn: $cache.showHUD)
-                                    .onChange(of: cache.showHUD) { _, newValue in
-                                        cache.push(\.showHUD, value: newValue)
-                                    }
-
-                                Text("Safety Bubble Radius: \(cache.safetyBubbleRadius, specifier: "%.2f")m")
+                                Text("Radius: \(cache.safetyBubbleRadius, specifier: "%.2f")m")
                                 Slider(value: $cache.safetyBubbleRadius, in: 0.5...2.5, onEditingChanged: { editing in
                                     if !editing { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) }
                                 })
 
-                                Text("Bubble Shape: \(cache.safetyBubbleShape < 0.33 ? "Sphere" : (cache.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
+                                HStack {
+                                    Text("Shape")
+                                    Spacer()
+                                    Picker("Shape", selection: Binding<Int>(
+                                        get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
+                                        set: { newValue in
+                                            cache.safetyBubbleShape = newValue == 0 ? 0.0 : 1.0
+                                            cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape)
+                                        }
+                                    )) {
+                                        Text("Sphere").tag(0)
+                                        Text("Cube").tag(1)
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .frame(maxWidth: 160)
+                                }
+                                
+                                Text("Shape Blend: \(cache.safetyBubbleShape < 0.33 ? "Sphere" : (cache.safetyBubbleShape > 0.66 ? "Cube" : "Blend"))")
+                                    .font(.caption)
                                 Slider(value: $cache.safetyBubbleShape, in: 0...1, onEditingChanged: { editing in
                                     if !editing { cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
                                 })
-                                
-                                Divider()
-                                
+                            }
+                            .padding(.leading, 10)
+                        }
+                        
+                        // Gesture Controls
+                        DisclosureGroup("Gesture Controls") {
+                            VStack(spacing: 8) {
                                 Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
                                     .onChange(of: cache.useRelativeGestures) { _, newValue in
                                         cache.push(\.useRelativeGestures, value: newValue)
@@ -649,6 +658,17 @@ struct ContentView: View {
                                     if !editing { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) }
                                 })
                                 .help("1 = 10x slower, 10 = normal speed")
+                            }
+                            .padding(.leading, 10)
+                        }
+                        
+                        // Options
+                        DisclosureGroup("Options") {
+                            VStack(spacing: 8) {
+                                Toggle("Show HUD", isOn: $cache.showHUD)
+                                    .onChange(of: cache.showHUD) { _, newValue in
+                                        cache.push(\.showHUD, value: newValue)
+                                    }
                                 
                                 Divider()
                                 
@@ -722,6 +742,14 @@ struct ContentView: View {
                             }
                             .padding(.leading, 10)
                         }
+                        
+                        // Quality Sliders - Fractal Iterations and Ray Steps (at the bottom)
+                        QualitySlidersView(
+                            cache: $cache,
+                            preparePipeline: { iterations, raySteps in
+                                appModel.preparePipeline(iterations: iterations, raySteps: raySteps)
+                            }
+                        )
 
                         // Gesture hints
                         VStack(alignment: .leading, spacing: 4) {

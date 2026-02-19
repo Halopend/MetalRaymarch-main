@@ -957,9 +957,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes
     private var _colorSchemeAutoInterval: Float = 30.0      // Seconds between auto-transitions
     private var _colorSchemeAutoTimer: Float = 0.0          // Timer for auto-transitions
-    private var _colorSchemeSaturation: Float = 2.0         // Color saturation override (boosted)
-    private var _colorSchemeContrast: Float = 1.05          // Contrast override (default 1.05)
-    private var _colorSchemeGamma: Float = 0.5              // Gamma override (default 0.5)
+    private var _colorSchemeSaturation: Float = 1.5         // Color saturation override
+    private var _colorSchemeContrast: Float = 1.02          // Contrast override (subtle)
+    private var _colorSchemeGamma: Float = 0.75             // Gamma override (lower = brighter, 1.0 = linear)
     private var _colorSchemeVibrance: Float = 1.0           // Vibrance boost (0-1)
     private var _colorSchemeCurve: Float = 0.0              // Midtone curve adjustment (-1 to 1)
     private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.5 to 0.5)

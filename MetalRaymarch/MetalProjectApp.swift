@@ -133,7 +133,7 @@ struct MetalProjectTestApp: App {
             EffectsWindowView()
                 .environment(appModel)
         }
-        .defaultSize(width: 550, height: 650)
+        .defaultSize(width: 420, height: 600)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 

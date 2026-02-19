@@ -206,7 +206,7 @@ constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
 constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
 // === FOG COLOR ===
-constant half3 kFogColor = half3(0.02h, 0.03h, 0.04h);
+constant half3 kFogColor = half3(0.01h, 0.015h, 0.02h);
 constant half3 kGlowColor = half3(0.02h, 0.04h, 0.1h);
 
 // =============================================================================
