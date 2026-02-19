@@ -408,7 +408,6 @@ struct PresetButton: View {
     let settings: RenderSettings
     let captureScreenshot: () async -> Data?
     let onLoadPreset: (FractalPreset) -> Void
-    var onOpenScenes: (() -> Void)? = nil
     
     @State private var showPresetsList = false
     @State private var showQuickSave = false
@@ -441,16 +440,6 @@ struct PresetButton: View {
                 Image(systemName: "square.and.arrow.down")
             }
             .help("Quick save current settings")
-            
-            // Scenes button (merged into preset area)
-            if let onOpenScenes {
-                Button {
-                    onOpenScenes()
-                } label: {
-                    Image(systemName: "film.stack")
-                }
-                .help("Animation Scenes")
-            }
         }
         .sheet(isPresented: $showPresetsList) {
             PresetsListView(

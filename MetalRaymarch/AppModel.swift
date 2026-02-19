@@ -10,7 +10,7 @@ import ARKit
 import os  // For os_unfair_lock - fastest available lock primitive
 
 // Fractal type enum matching ShaderTypes.h
-enum FractalModelType: Int32, Codable {
+enum FractalModelType: Int32, Codable, CaseIterable {
     case mandelbox = 0
     case mandelbulb = 1
     case menger = 2
@@ -86,10 +86,6 @@ enum QualityPreset: String, CaseIterable {
 class AppModel {
     let immersiveSpaceID = "ImmersiveSpace"
     let menuWindowID = "MenuWindow"
-    let developerWindowID = "DeveloperWindow"
-    let scenesWindowID = "ScenesWindow"
-    let colorWindowID = "ColorWindow"
-    let effectsWindowID = "EffectsWindow"
     
     enum ImmersiveSpaceState {
         case closed
@@ -221,78 +217,6 @@ class AppModel {
     
     /// Callback to dismiss the menu window (set by App scene)
     var dismissMenuWindowHandler: (() -> Void)?
-    
-    /// Callback to open the developer window (set by App scene)
-    var openDeveloperWindowHandler: (() -> Void)?
-    /// Callback to dismiss the developer window (set by App scene)
-    var dismissDeveloperWindowHandler: (() -> Void)?
-    /// Whether the developer window is currently open
-    var isDeveloperWindowVisible = false
-    
-    /// Callback to open the scenes window (set by App scene)
-    var openScenesWindowHandler: (() -> Void)?
-    /// Callback to dismiss the scenes window (set by App scene)
-    var dismissScenesWindowHandler: (() -> Void)?
-    /// Whether the scenes window is currently open
-    var isScenesWindowVisible = false
-    
-    /// Callback to open the color window (set by App scene)
-    var openColorWindowHandler: (() -> Void)?
-    /// Callback to dismiss the color window (set by App scene)
-    var dismissColorWindowHandler: (() -> Void)?
-    /// Whether the color window is currently open
-    var isColorWindowVisible = false
-    
-    /// Callback to open the effects window (set by App scene)
-    var openEffectsWindowHandler: (() -> Void)?
-    /// Callback to dismiss the effects window (set by App scene)
-    var dismissEffectsWindowHandler: (() -> Void)?
-    /// Whether the effects window is currently open
-    var isEffectsWindowVisible = false
-    
-    /// Toggle the developer tools window
-    func toggleDeveloperWindow() {
-        if isDeveloperWindowVisible {
-            isDeveloperWindowVisible = false
-            dismissDeveloperWindowHandler?()
-        } else {
-            isDeveloperWindowVisible = true
-            openDeveloperWindowHandler?()
-        }
-    }
-    
-    /// Toggle the scenes window
-    func toggleScenesWindow() {
-        if isScenesWindowVisible {
-            isScenesWindowVisible = false
-            dismissScenesWindowHandler?()
-        } else {
-            isScenesWindowVisible = true
-            openScenesWindowHandler?()
-        }
-    }
-    
-    /// Toggle the color options window
-    func toggleColorWindow() {
-        if isColorWindowVisible {
-            isColorWindowVisible = false
-            dismissColorWindowHandler?()
-        } else {
-            isColorWindowVisible = true
-            openColorWindowHandler?()
-        }
-    }
-    
-    /// Toggle the effects window
-    func toggleEffectsWindow() {
-        if isEffectsWindowVisible {
-            isEffectsWindowVisible = false
-            dismissEffectsWindowHandler?()
-        } else {
-            isEffectsWindowVisible = true
-            openEffectsWindowHandler?()
-        }
-    }
     
     /// Toggle menu window visibility — dismisses or opens the window for real
     func toggleMenuWindow() {

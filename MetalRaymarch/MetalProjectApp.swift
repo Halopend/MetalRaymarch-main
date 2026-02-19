@@ -67,73 +67,9 @@ struct MetalProjectTestApp: App {
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
                     }
-                    // Set up handlers for developer window
-                    appModel.openDeveloperWindowHandler = {
-                        openWindow(id: appModel.developerWindowID)
-                    }
-                    appModel.dismissDeveloperWindowHandler = { [dismissWindow] in
-                        dismissWindow(id: appModel.developerWindowID)
-                    }
-                    // Set up handlers for scenes window
-                    appModel.openScenesWindowHandler = {
-                        openWindow(id: appModel.scenesWindowID)
-                    }
-                    appModel.dismissScenesWindowHandler = { [dismissWindow] in
-                        dismissWindow(id: appModel.scenesWindowID)
-                    }
-                    // Set up handlers for color window
-                    appModel.openColorWindowHandler = {
-                        openWindow(id: appModel.colorWindowID)
-                    }
-                    appModel.dismissColorWindowHandler = { [dismissWindow] in
-                        dismissWindow(id: appModel.colorWindowID)
-                    }
-                    // Set up handlers for effects window
-                    appModel.openEffectsWindowHandler = {
-                        openWindow(id: appModel.effectsWindowID)
-                    }
-                    appModel.dismissEffectsWindowHandler = { [dismissWindow] in
-                        dismissWindow(id: appModel.effectsWindowID)
-                    }
                 }
         }
-        .defaultSize(width: 600, height: 250)
-        .windowStyle(.plain)
-        .windowResizability(.contentSize)
-        
-        // Developer Tools Window
-        Window("Developer Tools", id: appModel.developerWindowID) {
-            DeveloperView()
-                .environment(appModel)
-        }
-        .defaultSize(width: 400, height: 500)
-        .windowStyle(.plain)
-        .windowResizability(.contentSize)
-        
-        // Scenes Window
-        Window("Animation Scenes", id: appModel.scenesWindowID) {
-            ScenesWindowView()
-                .environment(appModel)
-        }
-        .defaultSize(width: 500, height: 600)
-        .windowStyle(.plain)
-        .windowResizability(.contentSize)
-        
-        // Color Options Window
-        Window("Color Options", id: appModel.colorWindowID) {
-            ColorOptionsWindowView()
-                .environment(appModel)
-        }
-        .defaultSize(width: 450, height: 600)
-        .windowStyle(.plain)
-        .windowResizability(.contentSize)
-        
-        // Effects Window
-        Window("Effects", id: appModel.effectsWindowID) {
-            EffectsWindowView()
-                .environment(appModel)
-        }
-        .defaultSize(width: 420, height: 600)
+        .defaultSize(width: 750, height: 500)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 

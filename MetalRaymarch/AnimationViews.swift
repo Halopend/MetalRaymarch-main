@@ -28,12 +28,6 @@ struct ScenesWindowView: View {
         }
         .frame(minWidth: 450, minHeight: 400)
         .glassBackgroundEffect()
-        .onAppear {
-            appModel.isScenesWindowVisible = true
-        }
-        .onDisappear {
-            appModel.isScenesWindowVisible = false
-        }
     }
 }
 
@@ -309,7 +303,7 @@ struct SceneEditorView: View {
                         }
                     }
                 } footer: {
-                    Text("Tap row to load keyframe. ↓ overwrites with current settings. Swipe to delete.")
+                    Text("Keyframes capture shape, position & quality only. Colors and effects stay as currently set — save a Preset to remember everything.")
                 }
             }
             .navigationTitle("Edit Scene")
