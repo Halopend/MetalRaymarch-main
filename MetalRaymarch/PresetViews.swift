@@ -240,7 +240,9 @@ struct PresetsListView: View {
     let presetManager: PresetManager
     let settings: RenderSettings
     let onLoadPreset: (FractalPreset) -> Void
+    var animationManager: AnimationManager? = nil
     
+    @State private var presetMode = 0
     @State private var searchText = ""
     @State private var showSaveSheet = false
     @State private var currentThumbnailData: Data?
@@ -268,11 +270,27 @@ struct PresetsListView: View {
     
     var body: some View {
         NavigationStack {
-            Group {
-                if presetManager.presets.isEmpty {
-                    emptyStateView
+            VStack(spacing: 0) {
+                if animationManager != nil {
+                    Picker("Mode", selection: $presetMode) {
+                        Text("Static").tag(0)
+                        Text("Animated").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                }
+                
+                if presetMode == 0 {
+                    Group {
+                        if presetManager.presets.isEmpty {
+                            emptyStateView
+                        } else {
+                            presetsList
+                        }
+                    }
                 } else {
-                    presetsList
+                    animatedScenesList
                 }
             }
             .navigationTitle("Presets")
@@ -324,6 +342,41 @@ struct PresetsListView: View {
             } message: {
                 Text("Enter a new name for the preset")
             }
+        }
+    }
+    
+    @ViewBuilder
+    private var animatedScenesList: some View {
+        if let animationManager, !animationManager.scenes.isEmpty {
+            List {
+                ForEach(animationManager.scenes) { scene in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(scene.name).font(.headline)
+                            HStack(spacing: 12) {
+                                Label("\(scene.keyframes.count)", systemImage: "square.stack.3d.up")
+                                Label(String(format: "%.1fs", scene.totalDuration), systemImage: "clock")
+                                if scene.isLooping { Image(systemName: "repeat") }
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            animationManager.currentScene = scene
+                            animationManager.play()
+                            dismiss()
+                        } label: {
+                            Label("Play", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(scene.keyframes.count < 2)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        } else {
+            ContentUnavailableView("No Scenes", systemImage: "film.stack",
+                description: Text("Create animation scenes in the Animate tab"))
         }
     }
     
@@ -406,6 +459,7 @@ struct PresetsListView: View {
 struct PresetButton: View {
     let presetManager: PresetManager
     let settings: RenderSettings
+    var animationManager: AnimationManager? = nil
     let captureScreenshot: () async -> Data?
     let onLoadPreset: (FractalPreset) -> Void
     
@@ -445,7 +499,8 @@ struct PresetButton: View {
             PresetsListView(
                 presetManager: presetManager,
                 settings: settings,
-                onLoadPreset: onLoadPreset
+                onLoadPreset: onLoadPreset,
+                animationManager: animationManager
             )
         }
         .sheet(isPresented: $showQuickSave) {

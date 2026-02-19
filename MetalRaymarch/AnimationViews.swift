@@ -37,6 +37,8 @@ struct ScenesWindowView: View {
 struct SceneListView: View {
     @Bindable var animationManager: AnimationManager
     @Bindable var appModel: AppModel
+    var onEditScene: ((AnimationScene) -> Void)? = nil
+    var isInline: Bool = false
     @Environment(\.dismiss) private var dismiss
     
     @State private var showingCreateSheet = false
@@ -44,46 +46,44 @@ struct SceneListView: View {
     @State private var selectedSceneForEdit: AnimationScene?
     
     var body: some View {
-        NavigationStack {
-            List {
-                if animationManager.scenes.isEmpty {
-                    ContentUnavailableView(
-                        "No Scenes",
-                        systemImage: "film.stack",
-                        description: Text("Create a scene to animate between parameter states")
-                    )
-                } else {
-                    ForEach(animationManager.scenes) { scene in
-                        SceneRowView(
-                            scene: scene,
-                            isSelected: animationManager.currentScene?.id == scene.id,
-                            onSelect: {
-                                animationManager.currentScene = scene
-                            },
-                            onEdit: {
-                                selectedSceneForEdit = scene
-                            },
-                            onPlay: {
-                                animationManager.currentScene = scene
-                                animationManager.play()
-                            }
-                        )
-                    }
-                    .onDelete { indexSet in
-                        for index in indexSet {
-                            animationManager.deleteScene(animationManager.scenes[index])
-                        }
-                    }
+        if isInline {
+            inlineContent
+        } else {
+            standaloneContent
+        }
+    }
+    
+    // Inline variant: no NavigationStack, no toolbar – used when embedded in sidebar
+    private var inlineContent: some View {
+        VStack(spacing: 0) {
+            // Header with title and add button
+            HStack {
+                Text("Scenes").font(.headline)
+                Spacer()
+                Button {
+                    newSceneName = "Scene \(animationManager.scenes.count + 1)"
+                    showingCreateSheet = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
                 }
             }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            
+            sceneList
+        }
+        .sheet(isPresented: $showingCreateSheet) { createSheet }
+        .sheet(item: $selectedSceneForEdit) { scene in editorSheet(for: scene) }
+    }
+    
+    // Standalone variant: full NavigationStack with toolbar – used in its own window/sheet
+    private var standaloneContent: some View {
+        NavigationStack {
+            sceneList
             .navigationTitle("Scenes")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
+                    Button("Done") { dismiss() }
                 }
-                
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         newSceneName = "Scene \(animationManager.scenes.count + 1)"
@@ -93,32 +93,75 @@ struct SceneListView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingCreateSheet) {
-                CreateSceneSheet(
-                    sceneName: $newSceneName,
-                    onCreate: {
-                        let scene = animationManager.createScene(name: newSceneName)
-                        animationManager.currentScene = scene
-                        showingCreateSheet = false
-                        // Automatically open editor for new scene
-                        selectedSceneForEdit = scene
-                    },
-                    onCancel: {
-                        showingCreateSheet = false
-                    }
+            .sheet(isPresented: $showingCreateSheet) { createSheet }
+            .sheet(item: $selectedSceneForEdit) { scene in editorSheet(for: scene) }
+        }
+    }
+    
+    // Shared scene list content
+    private var sceneList: some View {
+        List {
+            if animationManager.scenes.isEmpty {
+                ContentUnavailableView(
+                    "No Scenes",
+                    systemImage: "film.stack",
+                    description: Text("Create a scene to animate between parameter states")
                 )
-            }
-            .sheet(item: $selectedSceneForEdit) { scene in
-                SceneEditorView(
-                    scene: scene,
-                    animationManager: animationManager,
-                    appModel: appModel,
-                    onDismiss: {
-                        selectedSceneForEdit = nil
+            } else {
+                ForEach(animationManager.scenes) { scene in
+                    SceneRowView(
+                        scene: scene,
+                        isSelected: animationManager.currentScene?.id == scene.id,
+                        onSelect: {
+                            animationManager.currentScene = scene
+                        },
+                        onEdit: {
+                            if let onEditScene {
+                                onEditScene(scene)
+                            } else {
+                                selectedSceneForEdit = scene
+                            }
+                        }
+                    )
+                }
+                .onDelete { indexSet in
+                    for index in indexSet {
+                        animationManager.deleteScene(animationManager.scenes[index])
                     }
-                )
+                }
             }
         }
+        .listStyle(.plain)
+    }
+    
+    private var createSheet: some View {
+        CreateSceneSheet(
+            sceneName: $newSceneName,
+            onCreate: {
+                let scene = animationManager.createScene(name: newSceneName)
+                animationManager.currentScene = scene
+                showingCreateSheet = false
+                if let onEditScene {
+                    onEditScene(scene)
+                } else {
+                    selectedSceneForEdit = scene
+                }
+            },
+            onCancel: {
+                showingCreateSheet = false
+            }
+        )
+    }
+    
+    private func editorSheet(for scene: AnimationScene) -> some View {
+        SceneEditorView(
+            scene: scene,
+            animationManager: animationManager,
+            appModel: appModel,
+            onDismiss: {
+                selectedSceneForEdit = nil
+            }
+        )
     }
 }
 
@@ -128,8 +171,8 @@ struct SceneRowView: View {
     let scene: AnimationScene
     let isSelected: Bool
     let onSelect: () -> Void
-    let onEdit: () -> Void
-    let onPlay: () -> Void
+    var onEdit: (() -> Void)? = nil
+    var onPlay: (() -> Void)? = nil
     
     var body: some View {
         HStack {
@@ -158,20 +201,19 @@ struct SceneRowView: View {
             Spacer()
             
             HStack(spacing: 8) {
-                Button {
-                    onPlay()
-                } label: {
-                    Image(systemName: "play.fill")
+                if let onPlay {
+                    Button { onPlay() } label: {
+                        Image(systemName: "play.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(scene.keyframes.count < 2)
                 }
-                .buttonStyle(.bordered)
-                .disabled(scene.keyframes.count < 2)
-                
-                Button {
-                    onEdit()
-                } label: {
-                    Image(systemName: "pencil")
+                if let onEdit {
+                    Button { onEdit() } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
             }
         }
         .contentShape(Rectangle())
@@ -229,83 +271,56 @@ struct SceneEditorView: View {
     @Bindable var animationManager: AnimationManager
     @Bindable var appModel: AppModel
     let onDismiss: () -> Void
+    var isInline: Bool = false
     
     @State private var selectedKeyframeForEdit: AnimationKeyframe?
     @State private var defaultDuration: Double = 2.0
+    @State private var isEditMode: EditMode = .inactive
     
     var body: some View {
-        NavigationStack {
-            List {
-                // Scene Settings Section
-                Section("Scene Settings") {
-                    TextField("Name", text: $scene.name)
-                    
-                    Toggle("Loop Animation", isOn: $scene.isLooping)
-                    
-                    HStack {
-                        Text("Total Duration")
-                        Spacer()
-                        Text(formatDuration(scene.totalDuration))
-                            .foregroundStyle(.secondary)
+        if isInline {
+            inlineContent
+        } else {
+            standaloneContent
+        }
+    }
+    
+    // Inline: simple VStack with header – renders correctly inside an HStack pane
+    private var inlineContent: some View {
+        VStack(spacing: 0) {
+            // Header bar
+            HStack {
+                Text("Edit Scene").font(.headline)
+                Spacer()
+                Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
+                    withAnimation {
+                        isEditMode = isEditMode == .active ? .inactive : .active
                     }
                 }
-                
-                // Default Duration for New Keyframes
-                Section("New Keyframe Duration") {
-                    HStack {
-                        Text("\(String(format: "%.1f", defaultDuration))s")
-                            .monospacedDigit()
-                        Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
-                    }
-                }
-                
-                // Keyframes Section
-                Section {
-                    if scene.keyframes.isEmpty {
-                        Text("No keyframes yet")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(Array(scene.keyframes.enumerated()), id: \.element.id) { index, keyframe in
-                            KeyframeRowView(
-                                keyframe: keyframe,
-                                index: index,
-                                onEdit: {
-                                    selectedKeyframeForEdit = keyframe
-                                },
-                                onJump: {
-                                    // Apply this keyframe's values immediately
-                                    applyKeyframe(keyframe)
-                                },
-                                onOverwrite: {
-                                    // Overwrite this keyframe with current settings
-                                    overwriteKeyframe(at: index)
-                                }
-                            )
-                        }
-                        .onDelete { indexSet in
-                            for index in indexSet {
-                                scene.removeKeyframe(at: index)
-                            }
-                        }
-                        .onMove { source, destination in
-                            scene.moveKeyframe(from: source, to: destination)
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text("Keyframes")
-                        Spacer()
-                        Button {
-                            addKeyframe()
-                        } label: {
-                            Label("Capture", systemImage: "plus.circle.fill")
-                                .font(.caption)
-                        }
-                    }
-                } footer: {
-                    Text("Keyframes capture shape, position & quality only. Colors and effects stay as currently set — save a Preset to remember everything.")
+                .font(.subheadline)
+                Button {
+                    animationManager.updateScene(scene)
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.title3)
                 }
             }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            
+            Divider()
+            
+            editorList
+                .environment(\.editMode, $isEditMode)
+        }
+        .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
+    }
+    
+    // Standalone: NavigationStack with toolbar – for sheet presentation
+    private var standaloneContent: some View {
+        NavigationStack {
+            editorList
             .navigationTitle("Edit Scene")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -314,26 +329,101 @@ struct SceneEditorView: View {
                         onDismiss()
                     }
                 }
-                
                 ToolbarItem(placement: .primaryAction) {
                     EditButton()
                 }
             }
-            .sheet(item: $selectedKeyframeForEdit) { keyframe in
-                KeyframeEditorView(
-                    keyframe: keyframe,
-                    onSave: { updatedKeyframe in
-                        if let index = scene.keyframes.firstIndex(where: { $0.id == keyframe.id }) {
-                            scene.keyframes[index] = updatedKeyframe
-                        }
-                        selectedKeyframeForEdit = nil
-                    },
-                    onCancel: {
-                        selectedKeyframeForEdit = nil
+            .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
+        }
+    }
+    
+    // Shared list content
+    private var editorList: some View {
+        List {
+            // Scene Settings Section
+            Section("Scene Settings") {
+                TextField("Name", text: $scene.name)
+                
+                Toggle("Loop Animation", isOn: $scene.isLooping)
+                
+                HStack {
+                    Text("Total Duration")
+                    Spacer()
+                    Text(formatDuration(scene.totalDuration))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            // Default Duration for New Keyframes
+            Section("New Keyframe Duration") {
+                HStack {
+                    Text("\(String(format: "%.1f", defaultDuration))s")
+                        .monospacedDigit()
+                    Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
+                }
+            }
+            
+            // Keyframes Section
+            Section {
+                if scene.keyframes.isEmpty {
+                    Text("No keyframes yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(scene.keyframes.enumerated()), id: \.element.id) { index, keyframe in
+                        KeyframeRowView(
+                            keyframe: keyframe,
+                            index: index,
+                            onEdit: {
+                                selectedKeyframeForEdit = keyframe
+                            },
+                            onJump: {
+                                applyKeyframe(keyframe)
+                            },
+                            onOverwrite: {
+                                overwriteKeyframe(at: index)
+                            }
+                        )
                     }
-                )
+                    .onDelete { indexSet in
+                        for index in indexSet {
+                            scene.removeKeyframe(at: index)
+                        }
+                    }
+                    .onMove { source, destination in
+                        scene.moveKeyframe(from: source, to: destination)
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Keyframes")
+                    Spacer()
+                    Button {
+                        addKeyframe()
+                    } label: {
+                        Label("Capture", systemImage: "plus.circle.fill")
+                            .font(.caption)
+                    }
+                }
+            } footer: {
+                Text("Keyframes capture shape, position & quality only. Colors and effects stay as currently set — save a Preset to remember everything.")
             }
         }
+        .listStyle(.plain)
+    }
+    
+    private func keyframeSheet(for keyframe: AnimationKeyframe) -> some View {
+        KeyframeEditorView(
+            keyframe: keyframe,
+            onSave: { updatedKeyframe in
+                if let index = scene.keyframes.firstIndex(where: { $0.id == keyframe.id }) {
+                    scene.keyframes[index] = updatedKeyframe
+                }
+                selectedKeyframeForEdit = nil
+            },
+            onCancel: {
+                selectedKeyframeForEdit = nil
+            }
+        )
     }
     
     private func addKeyframe() {

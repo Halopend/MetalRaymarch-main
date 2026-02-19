@@ -234,7 +234,7 @@ enum FractalSubTab: String, CaseIterable { case shape = "Shape", space = "Space"
 enum AnimateSubTab: String, CaseIterable { case play = "Play", edit = "Edit" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case lighting = "Lighting", emissive = "Emissive" }
-enum SettingsSubTab: String, CaseIterable { case general = "General", developer = "Developer" }
+enum SettingsSubTab: String, CaseIterable { case general = "General", advanced = "Advanced" }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - ContentView
@@ -251,10 +251,7 @@ struct ContentView: View {
     @State private var effectsSubTab: EffectsSubTab = .lighting
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
-    
-    // Gesture state
-    @State private var initialPosition: SIMD3<Float> = .zero
-    @State private var cameraMode: Bool = false
+    @State private var editingScene: AnimationScene?
     
     // Developer state
     @State private var isProfilerRunning = false
@@ -283,34 +280,6 @@ struct ContentView: View {
                 preImmersiveLayout
             }
         }
-        .gesture(TapGesture(count: 2).onEnded { cameraMode.toggle() })
-        .gesture(
-            DragGesture()
-                .onChanged { value in
-                    let sensitivityXY: Float = 0.002
-                    let sensitivityZ: Float = 0.004
-                    if cameraMode {
-                        let zDelta = -Float(value.translation.height) * sensitivityZ
-                        var newPos = initialPosition
-                        newPos.z += zDelta
-                        appModel.renderSettings.targetPosition = newPos
-                    } else {
-                        let delta = SIMD3<Float>(Float(value.translation.width) * sensitivityXY, -Float(value.translation.height) * sensitivityXY, 0)
-                        appModel.renderSettings.targetPosition = initialPosition + delta
-                    }
-                }
-                .onEnded { _ in initialPosition = appModel.renderSettings.targetPosition }
-        )
-        .gesture(
-            MagnifyGesture()
-                .onChanged { value in
-                    let zDelta = (Float(value.magnification) - 1.0) * 1.0
-                    var newPos = initialPosition
-                    newPos.z += zDelta
-                    appModel.renderSettings.targetPosition = newPos
-                }
-                .onEnded { _ in initialPosition = appModel.renderSettings.targetPosition }
-        )
         .opacity(0.7)
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
@@ -333,9 +302,6 @@ struct ContentView: View {
     
     private var immersiveLayout: some View {
         VStack(spacing: 0) {
-            // Recording / Playback indicators at top
-            recordingIndicators
-            
             HStack(spacing: 0) {
                 // ── LEFT: Sidebar ──
                 sidebarColumn
@@ -355,23 +321,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-    }
-    
-    // MARK: - Recording Indicators
-    
-    @ViewBuilder
-    private var recordingIndicators: some View {
-        if let recorder = appModel.parameterRecorder {
-            if recorder.isRecording {
-                RecordingIndicatorView(recorder: recorder)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .padding(.bottom, 6)
-            } else if recorder.isPlaying || recorder.isPaused {
-                PlaybackIndicatorView(recorder: recorder) { recorder.stopPlayback() }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .padding(.bottom, 6)
-            }
-        }
+        .frame(minWidth: 980, minHeight: 576)
     }
     
     // MARK: - Sidebar Column
@@ -440,6 +390,7 @@ struct ContentView: View {
             PresetButton(
                 presetManager: appModel.presetManager,
                 settings: appModel.renderSettings,
+                animationManager: appModel.animationManager,
                 captureScreenshot: { await appModel.captureScreenshot() },
                 onLoadPreset: { preset in
                     Task { await appModel.preparePipelineHandler?(preset) }
@@ -647,7 +598,6 @@ struct ContentView: View {
                                 scene: scene,
                                 isSelected: animationManager.currentScene?.id == scene.id,
                                 onSelect: { animationManager.currentScene = scene },
-                                onEdit: { animateSubTab = .edit },
                                 onPlay: { animationManager.currentScene = scene; animationManager.play() }
                             )
                         }
@@ -659,12 +609,44 @@ struct ContentView: View {
     }
     
     private var animateEditContent: some View {
-        Group {
-            if let animationManager = appModel.animationManager {
-                SceneListView(animationManager: animationManager, appModel: appModel)
-            } else {
-                ContentUnavailableView("Not Available", systemImage: "exclamationmark.triangle",
-                    description: Text("Animation manager not initialized"))
+        HStack(spacing: 0) {
+            // Scene list (left)
+            Group {
+                if let animationManager = appModel.animationManager {
+                    SceneListView(
+                        animationManager: animationManager,
+                        appModel: appModel,
+                        onEditScene: { scene in
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                editingScene = scene
+                            }
+                        },
+                        isInline: true
+                    )
+                } else {
+                    ContentUnavailableView("Not Available", systemImage: "exclamationmark.triangle",
+                        description: Text("Animation manager not initialized"))
+                }
+            }
+            .frame(maxWidth: editingScene != nil ? 260 : .infinity)
+            
+            // Scene editor side pane (right)
+            if let scene = editingScene, let animationManager = appModel.animationManager {
+                Divider()
+                SceneEditorView(
+                    scene: scene,
+                    animationManager: animationManager,
+                    appModel: appModel,
+                    onDismiss: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            editingScene = nil
+                        }
+                    },
+                    isInline: true
+                )
+                .id(scene.id)
+                .frame(minWidth: 360, maxWidth: .infinity)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
     }
@@ -716,6 +698,14 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered).tint(cache.gradientPreset == preset ? .blue : .secondary)
                 }
+                // "Add" button styled like a preset
+                Button { showStopsPopover = true } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: "plus").font(.caption)
+                        Text("Custom").font(.caption2).lineLimit(1)
+                    }.frame(maxWidth: .infinity).padding(.vertical, 4)
+                }
+                .buttonStyle(.bordered).tint(cache.gradientPreset == nil ? .blue : .secondary)
             }
         }
     }
@@ -784,100 +774,119 @@ struct ContentView: View {
         }
     }
     
+    @State private var showLightingPresets = false
+    
     private var effectsLightingContent: some View {
         VStack(spacing: 12) {
-            Text("Lighting Presets").font(.headline)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(LightingPreset.allCases, id: \.self) { preset in
-                        PresetCardButton(preset: preset, isSelected: cache.lightingPreset == preset) {
-                            cache.lightingPreset = preset
-                            cache.push(\.lightingPreset, value: preset)
-                            cache.reloadLightingEffects()
+            // ── Color Effects group ──
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
+                    value: Binding(get: { cache.gradientCycleEffect.speed }, set: { cache.gradientCycleEffect.speed = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.gradientCycleEffect.enabled }, set: { cache.gradientCycleEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) })
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
+                    value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }),
+                    range: 0...0.5,
+                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) })
+                EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
+                    value: Binding(get: { cache.hueRotationEffect.intensity }, set: { cache.hueRotationEffect.intensity = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
+            
+            // ── Animation Effects group ──
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "waveform.path.ecg", label: "Pulse Speed",
+                    value: Binding(get: { cache.pulseEffect.speed }, set: { cache.pulseEffect.speed = $0 }),
+                    range: 0...2,
+                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) })
+                EffectSliderRow(icon: "waveform.path", label: "Pulse Amount",
+                    value: Binding(get: { cache.pulseEffect.amount }, set: { cache.pulseEffect.amount = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+            
+            // ── Atmosphere group ──
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "light.max", label: "Glow",
+                    value: Binding(get: { cache.glowEffect.intensity }, set: { cache.glowEffect.intensity = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.glowEffect.enabled }, set: { cache.glowEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.glowEffect, value: cache.glowEffect) })
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
+                    value: Binding(get: { cache.bloomEffect.strength }, set: { cache.bloomEffect.strength = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.bloomEffect.enabled }, set: { cache.bloomEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.bloomEffect, value: cache.bloomEffect) })
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "cloud.fog.fill", label: "Fog",
+                    value: Binding(get: { cache.fogEffect.intensity }, set: { cache.fogEffect.intensity = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.fogEffect.enabled }, set: { cache.fogEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.fogEffect, value: cache.fogEffect) })
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+            
+            // ── Presets & Lighting Style (collapsible) ──
+            DisclosureGroup(isExpanded: $showLightingPresets) {
+                VStack(spacing: 10) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(LightingPreset.allCases, id: \.self) { preset in
+                                PresetCardButton(preset: preset, isSelected: cache.lightingPreset == preset) {
+                                    cache.lightingPreset = preset
+                                    cache.push(\.lightingPreset, value: preset)
+                                    cache.reloadLightingEffects()
+                                }
+                            }
+                        }.padding(.horizontal, 4)
+                    }
+                    if cache.lightingPreset != .custom {
+                        Text(cache.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Label("Lighting Style", systemImage: "sun.max.fill").font(.subheadline.weight(.medium))
+                            Spacer()
+                            Text(cache.lightingSoftness < 0.3 ? "Sharp" : cache.lightingSoftness > 0.7 ? "Classic" : "Blended")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Image(systemName: "bolt.fill").font(.caption2).foregroundStyle(.secondary)
+                            Slider(value: $cache.lightingSoftness, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.lightingSoftness, value: cache.lightingSoftness) } })
+                            Image(systemName: "cloud.fill").font(.caption2).foregroundStyle(.secondary)
                         }
                     }
-                }.padding(.horizontal, 4)
-            }
-            if cache.lightingPreset != .custom {
-                Text(cache.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
-            }
-            Divider()
-            // Lighting Style
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Label("Lighting Style", systemImage: "sun.max.fill").font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text(cache.lightingSoftness < 0.3 ? "Sharp" : cache.lightingSoftness > 0.7 ? "Classic" : "Blended")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
-                HStack {
-                    Image(systemName: "bolt.fill").font(.caption2).foregroundStyle(.secondary)
-                    Slider(value: $cache.lightingSoftness, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.lightingSoftness, value: cache.lightingSoftness) } })
-                    Image(systemName: "cloud.fill").font(.caption2).foregroundStyle(.secondary)
-                }
+                .padding(.top, 8)
+            } label: {
+                Label("Presets & Lighting Style", systemImage: "sparkles")
+                    .font(.subheadline.weight(.medium))
             }
-            .padding(12).background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.08)))
-            Divider()
-            Text("Individual Effects").font(.headline)
-            // Gradient Cycle
-            LightingEffectCard(title: "Gradient Cycle", icon: "arrow.trianglehead.2.clockwise.rotate.90",
-                enabled: Binding(get: { cache.gradientCycleEffect.enabled }, set: { cache.gradientCycleEffect.enabled = $0 }),
-                onToggle: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) }) {
-                HStack { Text("Speed"); Spacer(); Text("\(cache.gradientCycleEffect.speed, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                Slider(value: Binding(get: { cache.gradientCycleEffect.speed }, set: { cache.gradientCycleEffect.speed = $0 }), in: 0...1, onEditingChanged: { e in if !e { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) } })
-            }
-            // Hue Rotation
-            LightingEffectCard(title: "Hue Rotation", icon: "paintpalette.fill",
-                enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
-                onToggle: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }) {
-                VStack(spacing: 6) {
-                    HStack { Text("Speed"); Spacer(); Text("\(cache.hueRotationEffect.speed, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                    Slider(value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }), in: 0...0.5, onEditingChanged: { e in if !e { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) } })
-                    HStack { Text("Intensity"); Spacer(); Text("\(cache.hueRotationEffect.intensity, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                    Slider(value: Binding(get: { cache.hueRotationEffect.intensity }, set: { cache.hueRotationEffect.intensity = $0 }), in: 0...1, onEditingChanged: { e in if !e { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) } })
-                }
-            }
-            // Pulse
-            LightingEffectCard(title: "Pulse", icon: "waveform.path.ecg",
-                enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
-                onToggle: { cache.push(\.pulseEffect, value: cache.pulseEffect) }) {
-                VStack(spacing: 6) {
-                    HStack { Text("Speed"); Spacer(); Text("\(cache.pulseEffect.speed, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                    Slider(value: Binding(get: { cache.pulseEffect.speed }, set: { cache.pulseEffect.speed = $0 }), in: 0...2, onEditingChanged: { e in if !e { cache.push(\.pulseEffect, value: cache.pulseEffect) } })
-                    HStack { Text("Amount"); Spacer(); Text("\(cache.pulseEffect.amount, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                    Slider(value: Binding(get: { cache.pulseEffect.amount }, set: { cache.pulseEffect.amount = $0 }), in: 0...1, onEditingChanged: { e in if !e { cache.push(\.pulseEffect, value: cache.pulseEffect) } })
-                }
-            }
-            // Glow
-            LightingEffectCard(title: "Glow", icon: "light.max",
-                enabled: Binding(get: { cache.glowEffect.enabled }, set: { cache.glowEffect.enabled = $0 }),
-                onToggle: { cache.push(\.glowEffect, value: cache.glowEffect) }) {
-                HStack { Text("Intensity"); Spacer(); Text("\(cache.glowEffect.intensity, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                Slider(value: Binding(get: { cache.glowEffect.intensity }, set: { cache.glowEffect.intensity = $0 }), in: 0...1, onEditingChanged: { e in if !e { cache.push(\.glowEffect, value: cache.glowEffect) } })
-            }
-            // Bloom
-            LightingEffectCard(title: "Bloom", icon: "sun.max.fill",
-                enabled: Binding(get: { cache.bloomEffect.enabled }, set: { cache.bloomEffect.enabled = $0 }),
-                onToggle: { cache.push(\.bloomEffect, value: cache.bloomEffect) }) {
-                HStack { Text("Strength"); Spacer(); Text("\(cache.bloomEffect.strength, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                Slider(value: Binding(get: { cache.bloomEffect.strength }, set: { cache.bloomEffect.strength = $0 }), in: 0...1, onEditingChanged: { e in if !e { cache.push(\.bloomEffect, value: cache.bloomEffect) } })
-            }
-            // Fog
-            LightingEffectCard(title: "Atmospheric Fog", icon: "cloud.fog.fill",
-                enabled: Binding(get: { cache.fogEffect.enabled }, set: { cache.fogEffect.enabled = $0 }),
-                onToggle: { cache.push(\.fogEffect, value: cache.fogEffect) }) {
-                HStack { Text("Density"); Spacer(); Text("\(cache.fogEffect.intensity, specifier: "%.2f")").foregroundStyle(.secondary).monospacedDigit() }
-                Slider(value: Binding(get: { cache.fogEffect.intensity }, set: { cache.fogEffect.intensity = $0 }), in: 0...1, onEditingChanged: { e in if !e { cache.push(\.fogEffect, value: cache.fogEffect) } })
-            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
         }
     }
     
     private var effectsEmissiveContent: some View {
         VStack(spacing: 12) {
             Text("Emissive Glow").font(.headline)
-            Toggle("Enable Emissive", isOn: $cache.emissiveEnabled)
-                .onChange(of: cache.emissiveEnabled) { _, v in cache.push(\.emissiveEnabled, value: v) }
-            if cache.emissiveEnabled {
+            Group {
                 HStack {
                     Text("Pattern"); Spacer()
                     Picker("Pattern", selection: $cache.emissivePattern) {
@@ -902,6 +911,11 @@ struct ContentView: View {
                     }}
                 ))
             }
+            .opacity(cache.emissiveEnabled ? 1.0 : 0.4)
+            .disabled(!cache.emissiveEnabled)
+            Divider()
+            Toggle("Enable Emissive", isOn: $cache.emissiveEnabled)
+                .onChange(of: cache.emissiveEnabled) { _, v in cache.push(\.emissiveEnabled, value: v) }
         }
     }
     
@@ -921,7 +935,7 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     switch settingsSubTab {
                     case .general:   settingsGeneralContent
-                    case .developer: settingsDeveloperContent
+                    case .advanced:  settingsAdvancedContent
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -938,11 +952,6 @@ struct ContentView: View {
             if let shareSession = appModel.shareSession {
                 Text("SharePlay").font(.headline)
                 SharePlayControlsView(shareSession: shareSession, appModel: appModel)
-                Divider()
-            }
-            if let recorder = appModel.parameterRecorder {
-                Text("Recordings").font(.headline)
-                RecordingButton(recorder: recorder, onPlayRecording: { recording in recorder.startPlayback(recording) })
             }
         }
     }
@@ -967,7 +976,7 @@ struct ContentView: View {
         if appModel.fps >= 85 { return .green }; if appModel.fps >= 60 { return .yellow }; return .red
     }
     
-    private var settingsDeveloperContent: some View {
+    private var settingsAdvancedContent: some View {
         VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack { Image(systemName: "slider.horizontal.3").foregroundStyle(themeColor); Text("Quality Constraints").font(.headline) }
@@ -1022,7 +1031,7 @@ struct ContentView: View {
                 Button {
                     if isTestAnimationPlaying { appModel.animationManager?.stop(); isTestAnimationPlaying = false }
                     else if let mgr = appModel.animationManager {
-                        mgr.currentScene = DeveloperTestScene.create(startPosition: appModel.renderSettings.position)
+                        mgr.currentScene = AdvancedTestScene.create(startPosition: appModel.renderSettings.position)
                         mgr.play(); isTestAnimationPlaying = true
                     }
                 } label: {
@@ -1034,10 +1043,10 @@ struct ContentView: View {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MARK: - Developer Test Scene Helper
+// MARK: - Advanced Test Scene Helper
 // ═══════════════════════════════════════════════════════════════════════════════
 
-enum DeveloperTestScene {
+enum AdvancedTestScene {
     static func create(startPosition: SIMD3<Float>) -> AnimationScene {
         var scene = AnimationScene(name: "Dev Test")
         scene.isLooping = true
@@ -1094,6 +1103,47 @@ struct SharePlayControlsView: View {
     private var buttonTint: Color { switch shareSession.state { case .inactive: return .blue; default: return .red } }
 }
 
+// MARK: - Condensed Effect Slider Row
+
+/// Single-line effect row: icon + label | slider | on/off toggle
+struct EffectSliderRow: View {
+    let icon: String
+    let label: String
+    @Binding var value: Float
+    let range: ClosedRange<Float>
+    @Binding var enabled: Bool
+    let onChanged: () -> Void
+    var showToggle: Bool = true
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(enabled ? .primary : .secondary)
+                .frame(width: 16)
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(enabled ? .primary : .secondary)
+                .frame(width: 90, alignment: .leading)
+                .lineLimit(1)
+            Slider(value: $value, in: range, onEditingChanged: { editing in
+                if !editing { onChanged() }
+            })
+            .disabled(!enabled)
+            if showToggle {
+                Toggle("", isOn: $enabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .onChange(of: enabled) { _, _ in onChanged() }
+            } else {
+                Spacer().frame(width: 44)
+            }
+        }
+        .frame(height: 32)
+    }
+}
+
 // MARK: - Emissive Color Picker
 
 struct EmissiveColorPicker: View {
@@ -1124,7 +1174,7 @@ struct EmissiveColorPicker: View {
     }
 }
 
-// MARK: - StatBox (moved from DeveloperView)
+// MARK: - StatBox
 
 struct StatBox: View {
     let label: String

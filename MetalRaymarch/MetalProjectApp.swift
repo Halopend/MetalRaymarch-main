@@ -69,7 +69,7 @@ struct MetalProjectTestApp: App {
                     }
                 }
         }
-        .defaultSize(width: 750, height: 500)
+        .defaultSize(width: 1050, height: 600)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 
