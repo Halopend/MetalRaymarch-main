@@ -269,6 +269,16 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.modifiedAt = Date()
     }
     
+    /// Create a new empty scene with a specific ID (used for built-in defaults)
+    init(id: UUID, name: String) {
+        self.id = id
+        self.name = name
+        self.keyframes = []
+        self.isLooping = true
+        self.createdAt = Date()
+        self.modifiedAt = Date()
+    }
+    
     /// Create scene with initial keyframe from current settings
     init(name: String, initialKeyframe: AnimationKeyframe) {
         self.id = UUID()
@@ -530,5 +540,96 @@ struct CatmullRomSpline {
             position: 2 * anchor.position - away.position,
             colorScheme: anchor.colorScheme
         )
+    }
+}
+
+// MARK: - Default Scenes
+
+/// Built-in scenes that ship with the app.
+/// These can be hidden by the user but never truly deleted — only tucked away.
+/// If a user edits one, their edited copy overlays the original.
+enum DefaultScenes {
+    
+    /// Stable UUID so we can always identify the built-in scene across launches.
+    static let sceneOneID = UUID(uuidString: "00000000-0001-0000-0000-000000000001")!
+    
+    /// All default scene IDs for easy lookup
+    static let allIDs: Set<UUID> = [sceneOneID]
+    
+    /// Check whether a scene ID belongs to a built-in default
+    static func isDefault(_ id: UUID) -> Bool {
+        allIDs.contains(id)
+    }
+    
+    // ─── Scene One ───────────────────────────────────────────────────────
+    
+    /// A gentle introductory animation that showcases the fractal opening
+    /// and closing through several interesting parameter states.
+    static func sceneOne() -> AnimationScene {
+        var scene = AnimationScene(id: sceneOneID, name: "Scene One")
+        scene.isLooping = true
+        scene.keyframes = [
+            AnimationKeyframe(
+                name: "Origin",
+                duration: 0,
+                minDistance: 0.8,
+                foldingLimit: 1.0,
+                sphereRadius: 0.5,
+                fractalScale: 2.8,
+                position: .zero,
+                easingType: .bezier,
+                bezierHandle: .easeInOut
+            ),
+            AnimationKeyframe(
+                name: "Unfold",
+                duration: 4.0,
+                minDistance: 1.6,
+                foldingLimit: 2.5,
+                sphereRadius: 0.7,
+                fractalScale: 2.4,
+                position: SIMD3<Float>(0.05, 0.02, 0.0),
+                easingType: .bezier,
+                bezierHandle: .easeInOut
+            ),
+            AnimationKeyframe(
+                name: "Deep",
+                duration: 3.5,
+                minDistance: 0.5,
+                foldingLimit: 0.8,
+                sphereRadius: 0.35,
+                fractalScale: 3.0,
+                position: SIMD3<Float>(0.0, 0.04, 0.03),
+                easingType: .bezier,
+                bezierHandle: .easeOut
+            ),
+            AnimationKeyframe(
+                name: "Bloom",
+                duration: 4.0,
+                minDistance: 2.0,
+                foldingLimit: 4.0,
+                sphereRadius: 1.0,
+                fractalScale: 2.2,
+                position: SIMD3<Float>(-0.03, 0.0, 0.02),
+                easingType: .bezier,
+                bezierHandle: .easeInOut
+            ),
+            AnimationKeyframe(
+                name: "Return",
+                duration: 3.5,
+                minDistance: 0.8,
+                foldingLimit: 1.0,
+                sphereRadius: 0.5,
+                fractalScale: 2.8,
+                position: .zero,
+                easingType: .bezier,
+                bezierHandle: .easeIn
+            ),
+        ]
+        return scene
+    }
+    
+    /// All built-in scenes (add more here in the future)
+    static func all() -> [AnimationScene] {
+        [sceneOne()]
     }
 }

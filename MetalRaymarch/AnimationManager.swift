@@ -17,8 +17,56 @@ final class AnimationManager {
     // SCENE STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
     
-    /// All saved scenes
-    private(set) var scenes: [AnimationScene] = []
+    /// User-created scenes (persisted to disk)
+    private(set) var userScenes: [AnimationScene] = []
+    
+    /// Default scene IDs the user has hidden (persisted via UserDefaults)
+    private(set) var hiddenDefaultSceneIDs: Set<UUID> = [] {
+        didSet { saveHiddenDefaults() }
+    }
+    
+    /// User-edited copies of default scenes (persisted alongside user scenes).
+    /// Key = default scene ID → Value = the user's edited version.
+    /// When present, this overlay replaces the built-in original in the list.
+    private(set) var editedDefaultOverrides: [UUID: AnimationScene] = [:] {
+        didSet { saveOverrides() }
+    }
+    
+    /// The merged list exposed to the UI: visible defaults (possibly overridden) + user scenes.
+    var scenes: [AnimationScene] {
+        var result: [AnimationScene] = []
+        
+        // 1. Built-in defaults (in order), unless hidden
+        for defaultScene in DefaultScenes.all() {
+            guard !hiddenDefaultSceneIDs.contains(defaultScene.id) else { continue }
+            // Show the user's edited overlay if it exists, otherwise the original
+            if let override = editedDefaultOverrides[defaultScene.id] {
+                result.append(override)
+            } else {
+                result.append(defaultScene)
+            }
+        }
+        
+        // 2. User-created scenes
+        result.append(contentsOf: userScenes)
+        
+        return result
+    }
+    
+    /// Check whether a scene is a built-in default (original or edited overlay)
+    func isDefaultScene(_ scene: AnimationScene) -> Bool {
+        DefaultScenes.isDefault(scene.id)
+    }
+    
+    /// Check whether a default scene has been edited by the user
+    func isEditedDefault(_ scene: AnimationScene) -> Bool {
+        editedDefaultOverrides[scene.id] != nil
+    }
+    
+    /// Any default scenes that are currently hidden
+    var hiddenDefaultScenes: [AnimationScene] {
+        DefaultScenes.all().filter { hiddenDefaultSceneIDs.contains($0.id) }
+    }
     
     /// Currently selected scene for editing/playback
     var currentScene: AnimationScene? {
@@ -95,7 +143,7 @@ final class AnimationManager {
     func createScene(name: String) -> AnimationScene {
         guard let settings = renderSettings else {
             let scene = AnimationScene(name: name)
-            scenes.append(scene)
+            userScenes.append(scene)
             saveScenes()
             return scene
         }
@@ -104,83 +152,128 @@ final class AnimationManager {
         initialKeyframe.duration = 0  // First keyframe is the starting point
         
         let scene = AnimationScene(name: name, initialKeyframe: initialKeyframe)
-        scenes.append(scene)
+        userScenes.append(scene)
         saveScenes()
         
         print("🎬 Created scene '\(name)' with initial keyframe")
         return scene
     }
     
-    /// Delete a scene
+    /// Delete a scene.
+    /// Default scenes are hidden (not destroyed) — they can be restored.
+    /// User scenes are permanently removed.
     func deleteScene(_ scene: AnimationScene) {
-        scenes.removeAll { $0.id == scene.id }
+        if DefaultScenes.isDefault(scene.id) {
+            // Hide the default; also discard any edited overlay
+            hiddenDefaultSceneIDs.insert(scene.id)
+            editedDefaultOverrides.removeValue(forKey: scene.id)
+            print("👁️‍🗨️ Hid default scene '\(scene.name)'")
+        } else {
+            userScenes.removeAll { $0.id == scene.id }
+            saveScenes()
+            print("🗑️ Deleted scene '\(scene.name)'")
+        }
+        
         if currentScene?.id == scene.id {
             currentScene = nil
             stop()
         }
-        saveScenes()
-        print("🗑️ Deleted scene '\(scene.name)'")
     }
     
-    /// Update a scene (after editing keyframes)
+    /// Restore a previously hidden default scene
+    func restoreDefaultScene(_ id: UUID) {
+        hiddenDefaultSceneIDs.remove(id)
+        print("♻️ Restored default scene")
+    }
+    
+    /// Reset an edited default back to the built-in original
+    func resetDefaultScene(_ id: UUID) {
+        editedDefaultOverrides.removeValue(forKey: id)
+        // If this scene is currently selected, update it to the original
+        if currentScene?.id == id {
+            currentScene = DefaultScenes.all().first { $0.id == id }
+        }
+        print("🔄 Reset default scene to original")
+    }
+    
+    /// Update a scene (after editing keyframes).
+    /// For default scenes, saves an edited overlay that preserves the original underneath.
     func updateScene(_ scene: AnimationScene) {
-        if let index = scenes.firstIndex(where: { $0.id == scene.id }) {
-            var updated = scene
-            updated.modifiedAt = Date()
-            scenes[index] = updated
-            
-            // Also update currentScene if it's the same
-            if currentScene?.id == scene.id {
-                currentScene = updated
-            }
-            
+        var updated = scene
+        updated.modifiedAt = Date()
+        
+        if DefaultScenes.isDefault(scene.id) {
+            // Store as an edited overlay — the original stays intact
+            editedDefaultOverrides[scene.id] = updated
+            print("💾 Saved edited overlay for default scene '\(scene.name)'")
+        } else if let index = userScenes.firstIndex(where: { $0.id == scene.id }) {
+            userScenes[index] = updated
             saveScenes()
             print("💾 Updated scene '\(scene.name)'")
+        }
+        
+        // Also update currentScene if it's the same
+        if currentScene?.id == scene.id {
+            currentScene = updated
         }
     }
     
     /// Add current settings as a new keyframe to the specified scene
     func addKeyframeToScene(_ sceneID: UUID, duration: TimeInterval = 2.0) {
-        guard let settings = renderSettings,
-              let index = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
+        guard let settings = renderSettings else { return }
         
-        scenes[index].addKeyframe(from: settings, duration: duration)
-        
-        // Update currentScene if it's the same
-        if currentScene?.id == sceneID {
-            currentScene = scenes[index]
+        if DefaultScenes.isDefault(sceneID) {
+            // Edit the overlay (create one from the original if needed)
+            var overlay = editedDefaultOverrides[sceneID]
+                ?? DefaultScenes.all().first { $0.id == sceneID }
+                ?? AnimationScene(name: "Unknown")
+            overlay.addKeyframe(from: settings, duration: duration)
+            editedDefaultOverrides[sceneID] = overlay
+            if currentScene?.id == sceneID { currentScene = overlay }
+        } else if let index = userScenes.firstIndex(where: { $0.id == sceneID }) {
+            userScenes[index].addKeyframe(from: settings, duration: duration)
+            if currentScene?.id == sceneID { currentScene = userScenes[index] }
+            saveScenes()
         }
         
-        saveScenes()
-        print("➕ Added keyframe to scene '\(scenes[index].name)'")
+        print("➕ Added keyframe to scene")
     }
     
     /// Remove a keyframe from scene
     func removeKeyframe(at keyframeIndex: Int, from sceneID: UUID) {
-        guard let index = scenes.firstIndex(where: { $0.id == sceneID }) else { return }
-        
-        scenes[index].removeKeyframe(at: keyframeIndex)
-        
-        if currentScene?.id == sceneID {
-            currentScene = scenes[index]
+        if DefaultScenes.isDefault(sceneID) {
+            var overlay = editedDefaultOverrides[sceneID]
+                ?? DefaultScenes.all().first { $0.id == sceneID }
+                ?? AnimationScene(name: "Unknown")
+            overlay.removeKeyframe(at: keyframeIndex)
+            editedDefaultOverrides[sceneID] = overlay
+            if currentScene?.id == sceneID { currentScene = overlay }
+        } else if let index = userScenes.firstIndex(where: { $0.id == sceneID }) {
+            userScenes[index].removeKeyframe(at: keyframeIndex)
+            if currentScene?.id == sceneID { currentScene = userScenes[index] }
+            saveScenes()
         }
-        
-        saveScenes()
     }
     
     /// Update a specific keyframe in a scene
     func updateKeyframe(_ keyframe: AnimationKeyframe, in sceneID: UUID) {
-        guard let sceneIndex = scenes.firstIndex(where: { $0.id == sceneID }),
-              let keyframeIndex = scenes[sceneIndex].keyframes.firstIndex(where: { $0.id == keyframe.id }) else { return }
-        
-        scenes[sceneIndex].keyframes[keyframeIndex] = keyframe
-        scenes[sceneIndex].modifiedAt = Date()
-        
-        if currentScene?.id == sceneID {
-            currentScene = scenes[sceneIndex]
+        if DefaultScenes.isDefault(sceneID) {
+            var overlay = editedDefaultOverrides[sceneID]
+                ?? DefaultScenes.all().first { $0.id == sceneID }
+                ?? AnimationScene(name: "Unknown")
+            if let kfIdx = overlay.keyframes.firstIndex(where: { $0.id == keyframe.id }) {
+                overlay.keyframes[kfIdx] = keyframe
+                overlay.modifiedAt = Date()
+                editedDefaultOverrides[sceneID] = overlay
+                if currentScene?.id == sceneID { currentScene = overlay }
+            }
+        } else if let sceneIndex = userScenes.firstIndex(where: { $0.id == sceneID }),
+                  let kfIdx = userScenes[sceneIndex].keyframes.firstIndex(where: { $0.id == keyframe.id }) {
+            userScenes[sceneIndex].keyframes[kfIdx] = keyframe
+            userScenes[sceneIndex].modifiedAt = Date()
+            if currentScene?.id == sceneID { currentScene = userScenes[sceneIndex] }
+            saveScenes()
         }
-        
-        saveScenes()
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -400,20 +493,39 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     
     private func loadScenes() {
-        guard FileManager.default.fileExists(atPath: scenesFileURL.path) else {
-            print("📂 No saved scenes found")
-            return
+        // Load user scenes
+        if FileManager.default.fileExists(atPath: scenesFileURL.path) {
+            do {
+                let data = try Data(contentsOf: scenesFileURL)
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                userScenes = try decoder.decode([AnimationScene].self, from: data)
+                print("📂 Loaded \(userScenes.count) user scenes")
+            } catch {
+                print("❌ Failed to load scenes: \(error)")
+            }
+        } else {
+            print("📂 No saved user scenes found")
         }
         
-        do {
-            let data = try Data(contentsOf: scenesFileURL)
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            scenes = try decoder.decode([AnimationScene].self, from: data)
-            print("📂 Loaded \(scenes.count) scenes")
-        } catch {
-            print("❌ Failed to load scenes: \(error)")
+        // Load hidden default IDs
+        if let ids = UserDefaults.standard.array(forKey: "hiddenDefaultSceneIDs") as? [String] {
+            hiddenDefaultSceneIDs = Set(ids.compactMap { UUID(uuidString: $0) })
         }
+        
+        // Load edited default overrides
+        if let data = UserDefaults.standard.data(forKey: "editedDefaultOverrides") {
+            do {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                let overrides = try decoder.decode([AnimationScene].self, from: data)
+                editedDefaultOverrides = Dictionary(uniqueKeysWithValues: overrides.map { ($0.id, $0) })
+            } catch {
+                print("❌ Failed to load default overrides: \(error)")
+            }
+        }
+        
+        print("📂 Defaults: \(DefaultScenes.allIDs.count) built-in, \(hiddenDefaultSceneIDs.count) hidden, \(editedDefaultOverrides.count) edited")
     }
     
     private func saveScenes() {
@@ -421,11 +533,28 @@ final class AnimationManager {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(scenes)
+            let data = try encoder.encode(userScenes)
             try data.write(to: scenesFileURL)
-            print("💾 Saved \(scenes.count) scenes")
+            print("💾 Saved \(userScenes.count) user scenes")
         } catch {
             print("❌ Failed to save scenes: \(error)")
+        }
+    }
+    
+    private func saveHiddenDefaults() {
+        let ids = hiddenDefaultSceneIDs.map { $0.uuidString }
+        UserDefaults.standard.set(ids, forKey: "hiddenDefaultSceneIDs")
+    }
+    
+    private func saveOverrides() {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let overrides = Array(editedDefaultOverrides.values)
+            let data = try encoder.encode(overrides)
+            UserDefaults.standard.set(data, forKey: "editedDefaultOverrides")
+        } catch {
+            print("❌ Failed to save default overrides: \(error)")
         }
     }
     
@@ -474,7 +603,7 @@ final class AnimationManager {
                 scene.keyframes.append(contentsOf: originalKeyframes.dropFirst())
             }
             
-            scenes.append(scene)
+            userScenes.append(scene)
             saveScenes()
             return scene
         } catch {

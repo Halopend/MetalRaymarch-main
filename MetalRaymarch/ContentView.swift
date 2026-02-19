@@ -87,6 +87,26 @@ final class UISettingsCache {
         saveSavedGradients()
     }
     
+    func renameSavedGradient(at index: Int, to newName: String) {
+        guard index >= 0 && index < savedCustomGradients.count else { return }
+        savedCustomGradients[index].name = newName
+        saveSavedGradients()
+    }
+    
+    /// Overwrite a saved gradient's stops/settings with the current editor state
+    func updateSavedGradient(at index: Int) {
+        guard index >= 0 && index < savedCustomGradients.count else { return }
+        let name = savedCustomGradients[index].name
+        savedCustomGradients[index] = GradientColorMap(
+            name: name, stops: gradientColorMap.stops,
+            mappingMode: gradientColorMap.mappingMode,
+            repeatCount: gradientColorMap.repeatCount,
+            offset: gradientColorMap.offset,
+            smoothing: gradientColorMap.smoothing
+        )
+        saveSavedGradients()
+    }
+    
     func applySavedGradient(_ gradient: GradientColorMap) {
         gradientColorMap = gradient
         gradientPreset = nil  // Mark as custom
@@ -321,7 +341,6 @@ struct ContentView: View {
                 preImmersiveLayout
             }
         }
-        .opacity(0.7)
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
         .onHover { hovering in
@@ -400,6 +419,8 @@ struct ContentView: View {
                     .foregroundStyle(selectedTab == tab ? .primary : .secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(tab.rawValue)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }
             Spacer()
         }
@@ -425,11 +446,12 @@ struct ContentView: View {
     // MARK: - Bottom Bar
     
     private var bottomBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             ToggleImmersiveSpaceButton()
             
-            Spacer()
+            Divider().frame(height: 20)
             
+            // Performance indicator
             HStack(spacing: 6) {
                 Image(systemName: appModel.isUsingSpecializedPipeline ? "bolt.fill" : "bolt.slash")
                     .font(.caption2)
@@ -438,6 +460,9 @@ struct ContentView: View {
                 Text("\(appModel.fps, specifier: "%.0f") FPS")
                     .font(.caption.bold()).monospacedDigit()
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(.ultraThinMaterial))
             
             Spacer()
             
@@ -463,6 +488,7 @@ struct ContentView: View {
                 Label("Reset", systemImage: "arrow.counterclockwise")
             }
             .buttonStyle(.bordered)
+            .tint(.orange)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -496,7 +522,7 @@ struct ContentView: View {
     private var fractalShapeContent: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Fractal Type").font(.headline)
+                Label("Fractal Type", systemImage: "cube.fill").font(.headline)
                 Spacer()
                 Picker("Type", selection: $cache.fractalType) {
                     ForEach(FractalModelType.allCases, id: \.self) { Text($0.displayName).tag($0) }
@@ -506,53 +532,82 @@ struct ContentView: View {
                     cache.pushFractalType(newValue, gestureController: appModel.gestureController)
                 }
             }
+
             Divider()
-            Text("Fractal Scale (\(String(format: "%.2f", cache.fractalScale)))").font(.subheadline)
-            Slider(value: $cache.fractalScale, in: -3.0...5.0, onEditingChanged: { editing in
-                if !editing { cache.push(\.fractalScale, value: cache.fractalScale) }
-            })
+
+            // Scale slider with icon
+            EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Scale",
+                value: $cache.fractalScale, range: -3.0...5.0,
+                enabled: .constant(true),
+                onChanged: { cache.push(\.fractalScale, value: cache.fractalScale) },
+                showToggle: false)
+
             Divider()
-            Text("Shape Parameters").font(.headline)
-            Text("Min Distance (\(String(format: "%.2f", cache.targetMinDistance)))").font(.caption)
-            Slider(value: $cache.targetMinDistance, in: parameterRanges.minDistance, onEditingChanged: { editing in
-                if !editing { cache.push(\.targetMinDistance, value: cache.targetMinDistance) }
-            })
-            Text("Box Folding Limit (\(String(format: "%.2f", cache.targetFoldingLimit)))").font(.caption)
-            Slider(value: $cache.targetFoldingLimit, in: parameterRanges.foldingLimit, onEditingChanged: { editing in
-                if !editing { cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit) }
-            })
-            Text("Sphere Radius (\(String(format: "%.2f", cache.targetSphereRadius)))").font(.caption)
-            Slider(value: $cache.targetSphereRadius, in: parameterRanges.sphereRadius, onEditingChanged: { editing in
-                if !editing { cache.push(\.targetSphereRadius, value: cache.targetSphereRadius) }
-            })
+
+            // Shape parameters grouped
+            VStack(spacing: 4) {
+                HStack {
+                    Label("Shape Parameters", systemImage: "skew").font(.headline)
+                    Spacer()
+                }
+                .padding(.bottom, 4)
+
+                EffectSliderRow(icon: "arrow.down.right.and.arrow.up.left", label: "Min Distance",
+                    value: $cache.targetMinDistance, range: parameterRanges.minDistance,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.targetMinDistance, value: cache.targetMinDistance) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "arrow.triangle.branch", label: "Folding Limit",
+                    value: $cache.targetFoldingLimit, range: parameterRanges.foldingLimit,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "circle.dashed", label: "Sphere Radius",
+                    value: $cache.targetSphereRadius, range: parameterRanges.sphereRadius,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.targetSphereRadius, value: cache.targetSphereRadius) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
         }
     }
     
     private var fractalSpaceContent: some View {
         VStack(spacing: 12) {
-            HStack {
-                Text("Safety Bubble").font(.headline)
-                Spacer()
-                Toggle("", isOn: $cache.safetyBubbleEnabled)
-                    .labelsHidden()
-                    .onChange(of: cache.safetyBubbleEnabled) { _, val in
-                        cache.push(\.safetyBubbleEnabled, value: val)
-                    }
-            }
-            if cache.safetyBubbleEnabled {
-                Text("Radius: \(cache.safetyBubbleRadius, specifier: "%.2f")m").font(.caption)
-                Slider(value: $cache.safetyBubbleRadius, in: 0.5...2.5, onEditingChanged: { editing in
-                    if !editing { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) }
-                })
+            VStack(spacing: 8) {
                 HStack {
-                    Text("Shape"); Spacer()
-                    Picker("Shape", selection: Binding<Int>(
-                        get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
-                        set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
-                    )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
-                    .pickerStyle(.segmented).frame(maxWidth: 160)
+                    Label("Safety Bubble", systemImage: "shield.lefthalf.filled").font(.headline)
+                    Spacer()
+                    Toggle("", isOn: $cache.safetyBubbleEnabled)
+                        .labelsHidden()
+                        .onChange(of: cache.safetyBubbleEnabled) { _, val in
+                            cache.push(\.safetyBubbleEnabled, value: val)
+                        }
+                }
+                Text("Prevents the camera from entering the fractal geometry.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if cache.safetyBubbleEnabled {
+                    EffectSliderRow(icon: "circle.dashed", label: "Radius",
+                        value: $cache.safetyBubbleRadius, range: 0.5...2.5,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) },
+                        showToggle: false)
+                    HStack {
+                        Text("Shape"); Spacer()
+                        Picker("Shape", selection: Binding<Int>(
+                            get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
+                            set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
+                        )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
+                        .pickerStyle(.segmented).frame(maxWidth: 160)
+                    }
                 }
             }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
         }
     }
     
@@ -613,6 +668,9 @@ struct ContentView: View {
                 }
             }.frame(width: 60, height: 8)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Render quality")
+        .accessibilityValue("\(Int(cache.currentRenderQuality * 100)) percent")
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -646,6 +704,8 @@ struct ContentView: View {
                             SceneRowView(
                                 scene: scene,
                                 isSelected: animationManager.currentScene?.id == scene.id,
+                                isDefault: animationManager.isDefaultScene(scene),
+                                isEdited: animationManager.isEditedDefault(scene),
                                 onSelect: { animationManager.currentScene = scene },
                                 onPlay: { animationManager.currentScene = scene; animationManager.play() }
                             )
@@ -732,10 +792,12 @@ struct ContentView: View {
     
     @State private var savedGradientToDelete: Int? = nil
     @State private var showDeleteConfirm = false
+    @State private var renamingGradientIndex: Int? = nil
+    @State private var renamingGradientName: String = ""
     
     private var coloringGradientContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Gradient Coloring").font(.headline)
+            Label("Gradient Coloring", systemImage: "paintbrush.fill").font(.headline)
             GradientPreviewBar(gradient: cache.gradientColorMap)
                 .frame(height: 28).clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -759,14 +821,19 @@ struct ContentView: View {
             
             // ── Saved Custom Gradients ──
             if !cache.savedCustomGradients.isEmpty {
-                Text("Saved").font(.subheadline).foregroundColor(.secondary).padding(.top, 4)
+                HStack {
+                    Text("Saved").font(.subheadline).foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(cache.savedCustomGradients.count)").font(.caption2).foregroundStyle(.tertiary)
+                }
+                .padding(.top, 4)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                     ForEach(Array(cache.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
+                        let isActive = cache.gradientPreset == nil && cache.gradientColorMap.id == saved.id
                         Button {
                             cache.applySavedGradient(saved)
                         } label: {
                             VStack(spacing: 2) {
-                                // Mini gradient preview as icon
                                 GradientPreviewBar(gradient: saved)
                                     .frame(height: 10)
                                     .clipShape(RoundedRectangle(cornerRadius: 3))
@@ -774,15 +841,30 @@ struct ContentView: View {
                                 Text(saved.name).font(.caption2).lineLimit(1)
                             }.frame(maxWidth: .infinity).padding(.vertical, 4)
                         }
-                        .buttonStyle(.bordered).tint(
-                            cache.gradientPreset == nil && cache.gradientColorMap.id == saved.id ? .purple : .indigo
-                        )
+                        .buttonStyle(.bordered)
+                        .tint(isActive ? .purple : .indigo)
                         .contextMenu {
+                            Button {
+                                renamingGradientName = saved.name
+                                renamingGradientIndex = index
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            Button {
+                                cache.updateSavedGradient(at: index)
+                            } label: {
+                                Label("Overwrite with Current", systemImage: "arrow.down.circle")
+                            }
+                            Divider()
                             Button(role: .destructive) {
                                 cache.deleteSavedGradient(at: index)
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
+                        }
+                        .onLongPressGesture(minimumDuration: 0.5) {
+                            renamingGradientName = saved.name
+                            renamingGradientIndex = index
                         }
                     }
                 }
@@ -790,60 +872,129 @@ struct ContentView: View {
             
             // ── Save / Edit Buttons ──
             HStack(spacing: 8) {
-                Button {
-                    cache.saveCurrentGradientAsCustom()
-                } label: {
-                    Label("Save Gradient", systemImage: "square.and.arrow.down")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered).tint(.purple)
-                
                 Button { showStopsPopover = true } label: {
-                    Label("Edit Stops", systemImage: "slider.horizontal.3")
+                    Label("Edit Gradient", systemImage: "slider.horizontal.3")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered).tint(cache.gradientPreset == nil ? .blue : .secondary)
             }
+        }
+        .alert("Rename Gradient", isPresented: .init(
+            get: { renamingGradientIndex != nil },
+            set: { if !$0 { renamingGradientIndex = nil } }
+        )) {
+            TextField("Name", text: $renamingGradientName)
+            Button("Cancel", role: .cancel) { renamingGradientIndex = nil }
+            Button("Rename") {
+                if let idx = renamingGradientIndex {
+                    cache.renameSavedGradient(at: idx, to: renamingGradientName)
+                }
+                renamingGradientIndex = nil
+            }
+        } message: {
+            Text("Enter a new name for this gradient")
         }
     }
     
     private var coloringMappingContent: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Mapping Mode").font(.headline); Spacer()
+                Label("Mapping Mode", systemImage: "target").font(.headline)
+                Spacer()
                 Picker("Mapping", selection: $cache.colorMappingMode) {
                     ForEach(ColorMappingMode.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
                 }.pickerStyle(.menu).frame(maxWidth: 140)
                 .onChange(of: cache.colorMappingMode) { _, v in cache.push(\.colorMappingMode, value: v) }
             }
+
+            // Gradient transform controls
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "repeat", label: "Repeat",
+                    value: $cache.gradientRepeat, range: 0.1...5.0,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.gradientRepeat, value: cache.gradientRepeat) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "arrow.right", label: "Offset",
+                    value: $cache.gradientOffset, range: 0...1,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.gradientOffset, value: cache.gradientOffset) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "waveform.path", label: "Smoothing",
+                    value: $cache.gradientSmoothing, range: 0...1,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+
             Divider()
-            Text("Repeat: \(cache.gradientRepeat, specifier: "%.1f")x").font(.caption)
-            Slider(value: $cache.gradientRepeat, in: 0.1...5.0, onEditingChanged: { e in if !e { cache.push(\.gradientRepeat, value: cache.gradientRepeat) } })
-            Text("Offset: \(cache.gradientOffset, specifier: "%.2f")").font(.caption)
-            Slider(value: $cache.gradientOffset, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.gradientOffset, value: cache.gradientOffset) } })
-            Text("Smoothing: \(cache.gradientSmoothing, specifier: "%.2f")").font(.caption)
-            Slider(value: $cache.gradientSmoothing, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) } })
-            Divider()
-            Text("Color Mix: \(cache.colorMix, specifier: "%.2f")").font(.caption)
-            Slider(value: $cache.colorMix, in: 0...1.0, onEditingChanged: { e in if !e { cache.push(\.colorMix, value: cache.colorMix) } })
-            Text("Color Iterations: \(cache.colorIterations, specifier: "%.0f")").font(.caption)
-            Slider(value: $cache.colorIterations, in: 4...16, step: 1, onEditingChanged: { e in if !e { cache.push(\.colorIterations, value: cache.colorIterations) } })
+
+            // Color blend controls
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "circle.lefthalf.filled", label: "Color Mix",
+                    value: $cache.colorMix, range: 0...1.0,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorMix, value: cache.colorMix) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "number", label: "Iterations",
+                    value: $cache.colorIterations, range: 4...16,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorIterations, value: cache.colorIterations) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
         }
     }
     
     private var coloringGradingContent: some View {
         VStack(spacing: 12) {
-            Text("Color Grading").font(.headline)
-            Text("Contrast: \(cache.colorSchemeContrast, specifier: "%.2f")").font(.caption)
-            Slider(value: $cache.colorSchemeContrast, in: 0.95...1.15, onEditingChanged: { e in if !e { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) } })
-            Text("Vibrance: \(cache.colorSchemeVibrance, specifier: "%.2f")").font(.caption)
-            Slider(value: $cache.colorSchemeVibrance, in: 0...1.0, onEditingChanged: { e in if !e { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) } })
-            Text("Midtone Curve: \(cache.colorSchemeCurve, specifier: "%.2f")").font(.caption)
-            Slider(value: $cache.colorSchemeCurve, in: -1.0...1.0, onEditingChanged: { e in if !e { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) } })
-            Text("Shadows: \(cache.colorSchemeShadows, specifier: "%.3f")").font(.caption)
-            Slider(value: $cache.colorSchemeShadows, in: -0.05...0.05, onEditingChanged: { e in if !e { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) } })
-            Text("Highlights: \(cache.colorSchemeHighlights, specifier: "%.2f")").font(.caption)
-            Slider(value: $cache.colorSchemeHighlights, in: -0.5...1.0, onEditingChanged: { e in if !e { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) } })
+            Label("Color Grading", systemImage: "camera.filters").font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Tone controls
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "circle.lefthalf.filled", label: "Contrast",
+                    value: $cache.colorSchemeContrast, range: 0.95...1.15,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
+                    value: $cache.colorSchemeVibrance, range: 0...1.0,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "waveform.path", label: "Midtone Curve",
+                    value: $cache.colorSchemeCurve, range: -1.0...1.0,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+
+            // Shadows & Highlights
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "shadow", label: "Shadows",
+                    value: $cache.colorSchemeShadows, range: -0.05...0.05,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) },
+                    showToggle: false)
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "sun.max.fill", label: "Highlights",
+                    value: $cache.colorSchemeHighlights, range: -0.5...1.0,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.yellow.opacity(0.06)))
         }
     }
     
@@ -1074,23 +1225,53 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
-            Text("Display").font(.headline)
-            Toggle("Show HUD", isOn: $cache.showHUD)
-                .onChange(of: cache.showHUD) { _, v in cache.push(\.showHUD, value: v) }
-            Divider()
-            Text("Gesture Controls").font(.headline)
-            Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
-                .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
-            Toggle("Extended Range", isOn: $cache.extendedGestureRange)
-                .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
-            Text("Gesture Sensitivity: \(String(format: "%.1f", cache.gestureSensitivity))").font(.caption)
-            Slider(value: $cache.gestureSensitivity, in: 1...5, step: 0.5, onEditingChanged: { editing in
-                if !editing { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) }
-            })
-            Divider()
+            // Display section
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Display", systemImage: "eye").font(.headline)
+                    Spacer()
+                }
+                Toggle("Show HUD Overlay", isOn: $cache.showHUD)
+                    .onChange(of: cache.showHUD) { _, v in cache.push(\.showHUD, value: v) }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
+
+            // Gesture section
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Gesture Controls", systemImage: "hand.draw").font(.headline)
+                    Spacer()
+                }
+                Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
+                    .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
+                Toggle("Extended Range", isOn: $cache.extendedGestureRange)
+                    .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+
+                EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Sensitivity",
+                    value: $cache.gestureSensitivity, range: 1...5,
+                    enabled: .constant(true),
+                    onChanged: { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) },
+                    showToggle: false)
+
+                Text("Adjust how hand movements map to fractal parameter changes.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
+
+            // SharePlay section
             if let shareSession = appModel.shareSession {
-                Text("SharePlay").font(.headline)
-                SharePlayControlsView(shareSession: shareSession, appModel: appModel)
+                VStack(spacing: 8) {
+                    HStack {
+                        Label("SharePlay", systemImage: "shareplay").font(.headline)
+                        Spacer()
+                    }
+                    SharePlayControlsView(shareSession: shareSession, appModel: appModel)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
             }
         }
     }
@@ -1280,6 +1461,9 @@ struct EffectSliderRow: View {
             }
         }
         .frame(height: 32)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+        .accessibilityValue(String(format: "%.2f", value))
     }
 }
 
@@ -1305,6 +1489,8 @@ struct StatBox: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label): \(value)")
     }
 }
 

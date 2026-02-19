@@ -118,28 +118,60 @@ struct GradientEditorSection: View {
 struct GradientStopsPopover: View {
     @Binding var cache: UISettingsCache
     
+    @State private var gradientName: String = ""
+    @State private var showSavedConfirmation = false
+    @Environment(\.dismiss) private var dismiss
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // ── Header ──
             HStack {
-                Text("Color Stops")
+                Text("Gradient Editor")
                     .font(.headline)
                 Spacer()
                 Button {
-                    addStop()
+                    saveGradient()
                 } label: {
-                    Label("Add", systemImage: "plus.circle.fill")
+                    Label("Save", systemImage: "square.and.arrow.down")
                         .font(.caption)
                 }
-                .disabled(cache.gradientColorMap.stops.count >= 8)
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+                .disabled(gradientName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             
-            // Gradient preview at top of popover for reference
+            // ── Name field ──
+            HStack(spacing: 8) {
+                Image(systemName: "character.cursor.ibeam")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Gradient name", text: $gradientName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.subheadline)
+            }
+            
+            // ── Gradient live preview ──
             GradientPreviewBar(gradient: cache.gradientColorMap)
-                .frame(height: 20)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .frame(height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                )
             
             Divider()
             
+            // ── Color Stops header ──
+            HStack {
+                Text("Color Stops")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text("\(cache.gradientColorMap.stops.count)/8")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
+            // ── Stop rows ──
             ForEach(Array(cache.gradientColorMap.stops.enumerated()), id: \.element.id) { index, stop in
                 GradientStopRow(
                     stop: stop,
@@ -153,19 +185,100 @@ struct GradientStopsPopover: View {
                     canDelete: cache.gradientColorMap.stops.count > 2
                 )
             }
+            
+            // ── Add Color button ──
+            Button {
+                addStop()
+            } label: {
+                HStack {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add Color Stop")
+                }
+                .font(.subheadline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.bordered)
+            .tint(.blue)
+            .disabled(cache.gradientColorMap.stops.count >= 8)
+            
+            // ── Saved confirmation ──
+            if showSavedConfirmation {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Saved!")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.green)
+                }
+                .transition(.opacity.combined(with: .scale))
+            }
         }
         .padding(16)
-        .frame(minWidth: 300, idealWidth: 350)
+        .frame(minWidth: 320, idealWidth: 370)
+        .onAppear {
+            gradientName = cache.gradientColorMap.name
+        }
+        .animation(.easeInOut(duration: 0.25), value: showSavedConfirmation)
+    }
+    
+    private func saveGradient() {
+        let trimmed = gradientName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        
+        // Update the live gradient name first
+        var map = cache.gradientColorMap
+        map = GradientColorMap(name: trimmed, stops: map.stops,
+                                mappingMode: map.mappingMode, repeatCount: map.repeatCount,
+                                offset: map.offset, smoothing: map.smoothing)
+        cache.gradientColorMap = map
+        cache.pushGradientMap(map)
+        
+        // Save to custom list
+        cache.savedCustomGradients.append(map)
+        cache.saveSavedGradients()
+        
+        showSavedConfirmation = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            await MainActor.run { showSavedConfirmation = false }
+        }
     }
     
     private func addStop() {
         var map = cache.gradientColorMap
-        let newPos: Float = 0.5
-        let newStop = GradientStop(position: newPos, r: 1.0, g: 1.0, b: 1.0)
+        // Place new stop at the midpoint of the largest gap
+        let newPos = findLargestGap(in: map.stops)
+        let color = map.evaluate(at: newPos)  // Sample existing gradient for a sensible default
+        let newStop = GradientStop(position: newPos, color: color)
         map.stops.append(newStop)
         map.sortStops()
         cache.gradientColorMap = map
         cache.pushGradientMap(map)
+    }
+    
+    /// Find the midpoint of the largest gap between stops
+    private func findLargestGap(in stops: [GradientStop]) -> Float {
+        guard stops.count >= 2 else { return 0.5 }
+        let sorted = stops.sorted { $0.position < $1.position }
+        var bestGap: Float = 0
+        var bestMid: Float = 0.5
+        for i in 0..<(sorted.count - 1) {
+            let gap = sorted[i + 1].position - sorted[i].position
+            if gap > bestGap {
+                bestGap = gap
+                bestMid = (sorted[i].position + sorted[i + 1].position) / 2.0
+            }
+        }
+        // Also check edges (0 to first, last to 1)
+        if sorted[0].position > bestGap {
+            bestGap = sorted[0].position
+            bestMid = sorted[0].position / 2.0
+        }
+        if (1.0 - sorted[sorted.count - 1].position) > bestGap {
+            bestMid = (sorted[sorted.count - 1].position + 1.0) / 2.0
+        }
+        return bestMid
     }
     
     private func updateStop(at index: Int, with stop: GradientStop) {
@@ -251,9 +364,13 @@ struct GradientStopRow: View {
                         .foregroundStyle(.red)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Remove color stop \(index + 1)")
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Color stop \(index + 1)")
+        .accessibilityValue("Position \(String(format: "%.0f", localPosition * 100)) percent")
     }
 }
 
@@ -284,5 +401,7 @@ struct GradientPreviewBar: View {
                 }
             }
         }
+        .accessibilityLabel("Gradient preview: \(gradient.name)")
+        .accessibilityAddTraits(.isImage)
     }
 }

@@ -55,6 +55,8 @@ struct LightingEffectCard<Content: View>: View {
                 .stroke(enabled ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
         )
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: enabled)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(title) effect")
     }
 }
 
@@ -441,5 +443,7 @@ struct PresetCardButton: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(preset.displayName) preset")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

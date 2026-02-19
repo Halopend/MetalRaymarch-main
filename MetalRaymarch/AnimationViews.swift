@@ -115,6 +115,8 @@ struct SceneListView: View {
                     SceneRowView(
                         scene: scene,
                         isSelected: animationManager.currentScene?.id == scene.id,
+                        isDefault: animationManager.isDefaultScene(scene),
+                        isEdited: animationManager.isEditedDefault(scene),
                         onSelect: {
                             animationManager.currentScene = scene
                         },
@@ -124,13 +126,51 @@ struct SceneListView: View {
                             } else {
                                 selectedSceneForEdit = scene
                             }
-                        }
+                        },
+                        onResetDefault: animationManager.isEditedDefault(scene) ? {
+                            animationManager.resetDefaultScene(scene.id)
+                        } : nil
                     )
-                }
-                .onDelete { indexSet in
-                    for index in indexSet {
-                        animationManager.deleteScene(animationManager.scenes[index])
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            animationManager.deleteScene(scene)
+                        } label: {
+                            if animationManager.isDefaultScene(scene) {
+                                Label("Hide", systemImage: "eye.slash")
+                            } else {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
+                }
+            }
+            
+            // Show hidden defaults with a Restore option
+            if !animationManager.hiddenDefaultScenes.isEmpty {
+                Section {
+                    ForEach(animationManager.hiddenDefaultScenes) { scene in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(scene.name)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Text("Hidden")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Button {
+                                animationManager.restoreDefaultScene(scene.id)
+                            } label: {
+                                Label("Restore", systemImage: "arrow.uturn.backward")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.blue)
+                        }
+                    }
+                } header: {
+                    Text("Hidden Scenes")
                 }
             }
         }
@@ -173,16 +213,30 @@ struct SceneListView: View {
 struct SceneRowView: View {
     let scene: AnimationScene
     let isSelected: Bool
+    var isDefault: Bool = false
+    var isEdited: Bool = false
     let onSelect: () -> Void
     var onEdit: (() -> Void)? = nil
     var onPlay: (() -> Void)? = nil
+    var onResetDefault: (() -> Void)? = nil
     
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(scene.name)
                         .font(.headline)
+                    if isDefault {
+                        Text(isEdited ? "edited" : "default")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(isEdited ? .orange : .blue)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                Capsule()
+                                    .fill((isEdited ? Color.orange : Color.blue).opacity(0.15))
+                            )
+                    }
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
@@ -204,6 +258,15 @@ struct SceneRowView: View {
             Spacer()
             
             HStack(spacing: 8) {
+                // Reset edited default back to original
+                if let onResetDefault {
+                    Button { onResetDefault() } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                    .help("Reset to original")
+                }
                 if let onPlay {
                     Button { onPlay() } label: {
                         Image(systemName: "play.fill")
