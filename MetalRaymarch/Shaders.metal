@@ -539,7 +539,9 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
 // =============================================================================
 
 // Sample gradient at position t (0-1) using the stop array
-FORCE_INLINE half3 sampleGradient(float t, thread const float4 *stops, int stopCount, float smoothing)
+// When loopSmooth is true, the gradient wraps seamlessly: after the last stop it blends
+// back into the first stop, eliminating the hard cut when gradient cycles.
+FORCE_INLINE half3 sampleGradient(float t, thread const float4 *stops, int stopCount, float smoothing, bool loopSmooth = false)
 {
     if (stopCount <= 0) return half3(1.0h);
     if (stopCount == 1) return half3(stops[0].xyz);
@@ -547,6 +549,44 @@ FORCE_INLINE half3 sampleGradient(float t, thread const float4 *stops, int stopC
     // Clamp t to valid range
     t = saturate(t);
     
+    if (loopSmooth) {
+        // Smooth looping: treat the gradient as a ring.
+        // We remap stops so the virtual last stop (position=1.0) equals the first stop's color,
+        // creating a seamless wrap without modifying the user's stop array.
+        
+        // Map t into the ring: each stop occupies a segment, plus one extra
+        // wrap-around segment from the last stop back to the first.
+        float firstPos = stops[0].w;
+        float lastPos = stops[stopCount - 1].w;
+        
+        // Compute total span including wrap-around gap
+        // The wrap segment goes from lastPos to (1.0 + firstPos) in unwrapped space
+        float wrapGap = (1.0f - lastPos) + firstPos;
+        
+        // If t is in the wrap-around zone (after last stop or before first stop)
+        if (t >= lastPos || t < firstPos) {
+            // Distance into wrap zone from lastPos
+            float d = (t >= lastPos) ? (t - lastPos) : (t + 1.0f - lastPos);
+            float localT = (wrapGap > 0.0f) ? (d / wrapGap) : 0.0f;
+            float smoothT = mix(localT, localT * localT * (3.0f - 2.0f * localT), smoothing);
+            return mix(half3(stops[stopCount - 1].xyz), half3(stops[0].xyz), half(smoothT));
+        }
+        
+        // Otherwise, find surrounding stops normally (between first and last)
+        for (int i = 0; i < stopCount - 1; i++) {
+            if (t >= stops[i].w && t <= stops[i + 1].w) {
+                float range = stops[i + 1].w - stops[i].w;
+                float localT = (range > 0.0f) ? (t - stops[i].w) / range : 0.0f;
+                float smoothT = mix(localT, localT * localT * (3.0f - 2.0f * localT), smoothing);
+                return mix(half3(stops[i].xyz), half3(stops[i + 1].xyz), half(smoothT));
+            }
+        }
+        
+        // Fallback: return last stop
+        return half3(stops[stopCount - 1].xyz);
+    }
+    
+    // Non-looping: original behavior
     // Find surrounding stops
     int lower = 0;
     int upper = stopCount - 1;
@@ -833,7 +873,7 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
             scheme.gradientOffset
         );
         
-        half3 gradColor = sampleGradient(mappingT, scheme.gradientStops, scheme.gradientStopCount, scheme.gradientSmoothing);
+        half3 gradColor = sampleGradient(mappingT, scheme.gradientStops, scheme.gradientStopCount, scheme.gradientSmoothing, scheme.gradientLoopSmooth != 0);
         
         // If neon mode is also active, blend gradient with neon
         if (neonEnabled && scheme.neonIntensity > 0.01f) {

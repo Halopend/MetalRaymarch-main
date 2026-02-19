@@ -123,7 +123,8 @@ typedef struct
     float gradientOffset;             // Shifts gradient start (0-1)
     int useGradientColoring;          // 0 = legacy palette, 1 = gradient system
     float gradientSmoothing;          // 0 = sharp, 1 = smooth transitions (default 1.0)
-    float _gradPad[2];                // Alignment padding for gradient section
+    int gradientLoopSmooth;           // 0 = hard cut at edges, 1 = smooth wrap (last stop blends to first)
+    float _gradPad[1];                // Alignment padding for gradient section
     
     // === MODULAR LIGHTING EFFECTS ===
     // Animation time (shared by all effects)

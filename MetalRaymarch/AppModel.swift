@@ -415,21 +415,22 @@ struct FogEffect: Codable {
 struct GradientCycleEffect: Codable {
     var enabled: Bool = false
     var speed: Float = 0.1          // Cycle speed (0-1), how fast the gradient rotates
+    var smoothLoop: Bool = true     // When true, gradient wraps smoothly (last stop blends back to first)
     
     static var off: GradientCycleEffect {
-        GradientCycleEffect(enabled: false, speed: 0.0)
+        GradientCycleEffect(enabled: false, speed: 0.0, smoothLoop: true)
     }
     
     static var slow: GradientCycleEffect {
-        GradientCycleEffect(enabled: true, speed: 0.05)
+        GradientCycleEffect(enabled: true, speed: 0.05, smoothLoop: true)
     }
     
     static var medium: GradientCycleEffect {
-        GradientCycleEffect(enabled: true, speed: 0.15)
+        GradientCycleEffect(enabled: true, speed: 0.15, smoothLoop: true)
     }
     
     static var fast: GradientCycleEffect {
-        GradientCycleEffect(enabled: true, speed: 0.4)
+        GradientCycleEffect(enabled: true, speed: 0.4, smoothLoop: true)
     }
 }
 
@@ -726,7 +727,8 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             gradientOffset: 0.0,
             useGradientColoring: 0,
             gradientSmoothing: 1.0,
-            _gradPad: (0.0, 0.0),
+            gradientLoopSmooth: 0,
+            _gradPad: (0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: animTime,
             hueRotationEnabled: hueRotation.enabled ? 1 : 0,
@@ -862,7 +864,7 @@ final class RenderSettings: @unchecked Sendable {
     }()
 
     // Safety bubble controls
-    private var _safetyBubbleEnabled: Bool = true   // Cut out a small safe sphere (default on)
+    private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
     
@@ -1641,7 +1643,8 @@ final class RenderSettings: @unchecked Sendable {
             gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
             useGradientColoring: gradState.useGradientColoring ? 1 : 0,
             gradientSmoothing: gradState.gradient.smoothing,
-            _gradPad: (0.0, 0.0),
+            gradientLoopSmooth: _gradientCycleEffect.smoothLoop ? 1 : 0,
+            _gradPad: (0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: _colorAnimTime,
             hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,

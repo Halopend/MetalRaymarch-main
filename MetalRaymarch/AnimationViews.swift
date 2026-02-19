@@ -39,6 +39,7 @@ struct SceneListView: View {
     @Bindable var appModel: AppModel
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var isInline: Bool = false
+    var isEditing: Bool = false
     @Environment(\.dismiss) private var dismiss
     
     @State private var showingCreateSheet = false
@@ -60,11 +61,13 @@ struct SceneListView: View {
             HStack {
                 Text("Scenes").font(.headline)
                 Spacer()
-                Button {
-                    newSceneName = "Scene \(animationManager.scenes.count + 1)"
-                    showingCreateSheet = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
+                if !isEditing {
+                    Button {
+                        newSceneName = "Scene \(animationManager.scenes.count + 1)"
+                        showingCreateSheet = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -115,7 +118,7 @@ struct SceneListView: View {
                         onSelect: {
                             animationManager.currentScene = scene
                         },
-                        onEdit: {
+                        onEdit: isEditing ? nil : {
                             if let onEditScene {
                                 onEditScene(scene)
                             } else {
@@ -276,6 +279,7 @@ struct SceneEditorView: View {
     @State private var selectedKeyframeForEdit: AnimationKeyframe?
     @State private var defaultDuration: Double = 2.0
     @State private var isEditMode: EditMode = .inactive
+    @State private var showSceneSettings = false
     
     var body: some View {
         if isInline {
@@ -290,14 +294,6 @@ struct SceneEditorView: View {
         VStack(spacing: 0) {
             // Header bar
             HStack {
-                Text("Edit Scene").font(.headline)
-                Spacer()
-                Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
-                    withAnimation {
-                        isEditMode = isEditMode == .active ? .inactive : .active
-                    }
-                }
-                .font(.subheadline)
                 Button {
                     animationManager.updateScene(scene)
                     onDismiss()
@@ -306,8 +302,45 @@ struct SceneEditorView: View {
                         .foregroundStyle(.secondary)
                         .font(.title3)
                 }
+                Text(scene.name).font(.headline).lineLimit(1)
+                Spacer()
+                Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
+                    withAnimation {
+                        isEditMode = isEditMode == .active ? .inactive : .active
+                    }
+                }
+                .font(.subheadline)
+                Button {
+                    showSceneSettings.toggle()
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                        .font(.subheadline)
+                }
+                .popover(isPresented: $showSceneSettings, arrowEdge: .top) {
+                    sceneSettingsPopover
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
+            
+            Divider()
+            
+            // Compact default duration row
+            HStack(spacing: 8) {
+                Image(systemName: "timer")
+                    .font(.caption)
+                    .frame(width: 16)
+                Text("New KF")
+                    .font(.subheadline)
+                    .frame(width: 56, alignment: .leading)
+                    .lineLimit(1)
+                Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
+                Text("\(String(format: "%.1f", defaultDuration))s")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 34, alignment: .trailing)
+            }
+            .frame(height: 32)
+            .padding(.horizontal, 16).padding(.vertical, 4)
             
             Divider()
             
@@ -317,11 +350,29 @@ struct SceneEditorView: View {
         .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
     }
     
+    // Scene settings popover
+    private var sceneSettingsPopover: some View {
+        VStack(spacing: 12) {
+            Text("Scene Settings").font(.headline)
+            TextField("Name", text: $scene.name)
+                .textFieldStyle(.roundedBorder)
+            Toggle("Loop Animation", isOn: $scene.isLooping)
+            HStack {
+                Text("Total Duration")
+                Spacer()
+                Text(formatDuration(scene.totalDuration))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(width: 260)
+    }
+    
     // Standalone: NavigationStack with toolbar – for sheet presentation
     private var standaloneContent: some View {
         NavigationStack {
             editorList
-            .navigationTitle("Edit Scene")
+            .navigationTitle(scene.name)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
@@ -330,7 +381,17 @@ struct SceneEditorView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    EditButton()
+                    HStack(spacing: 12) {
+                        Button {
+                            showSceneSettings.toggle()
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .popover(isPresented: $showSceneSettings) {
+                            sceneSettingsPopover
+                        }
+                        EditButton()
+                    }
                 }
             }
             .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
@@ -340,29 +401,6 @@ struct SceneEditorView: View {
     // Shared list content
     private var editorList: some View {
         List {
-            // Scene Settings Section
-            Section("Scene Settings") {
-                TextField("Name", text: $scene.name)
-                
-                Toggle("Loop Animation", isOn: $scene.isLooping)
-                
-                HStack {
-                    Text("Total Duration")
-                    Spacer()
-                    Text(formatDuration(scene.totalDuration))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            // Default Duration for New Keyframes
-            Section("New Keyframe Duration") {
-                HStack {
-                    Text("\(String(format: "%.1f", defaultDuration))s")
-                        .monospacedDigit()
-                    Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
-                }
-            }
-            
             // Keyframes Section
             Section {
                 if scene.keyframes.isEmpty {
@@ -561,59 +599,90 @@ struct KeyframeEditorView: View {
     
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Basic") {
-                    TextField("Name", text: $keyframe.name)
-                    
-                    HStack {
-                        Text("Duration")
-                        Spacer()
-                        Text("\(String(format: "%.1f", keyframe.duration))s")
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $keyframe.duration, in: 0...20, step: 0.5)
-                }
-                
-                Section("Shape Parameters") {
-                    parameterSlider("Min Distance", value: $keyframe.minDistance, range: 0.1...10.0)
-                    parameterSlider("Folding Limit", value: $keyframe.foldingLimit, range: 0.1...20.0)
-                    parameterSlider("Sphere Radius", value: $keyframe.sphereRadius, range: 0.01...5.0)
-                    parameterSlider("Fractal Scale", value: $keyframe.fractalScale, range: 0.5...6.0)
-                }
-                
-                Section {
-                    Stepper("Iterations: \(keyframe.baseFractalIterations)", value: $keyframe.baseFractalIterations, in: 4...32)
-                    Stepper("Max Ray Steps: \(keyframe.baseMaxRaySteps)", value: $keyframe.baseMaxRaySteps, in: 32...1024, step: 16)
-                } header: {
-                    Text("Quality Settings")
-                } footer: {
-                    Text("Note: These snap between values and do not vary smoothly over time.")
-                }
-                
-                Section("Position") {
-                    parameterSlider("X", value: $keyframe.positionX, range: -5...5)
-                    parameterSlider("Y", value: $keyframe.positionY, range: -5...5)
-                    parameterSlider("Z", value: $keyframe.positionZ, range: -5...5)
-                }
-                
-                // ═══════════════════════════════════════════════════════════════
-                // EASING / BEZIER CURVE
-                // ═══════════════════════════════════════════════════════════════
-                
-                Section {
-                    // Easing type picker
-                    Picker("Easing", selection: $keyframe.easingType) {
-                        ForEach(EasingFunction.allCases, id: \.self) { easing in
-                            Label(easing.displayName, systemImage: easing.icon)
-                                .tag(easing)
-                        }
-                    }
-                    
-                    if keyframe.easingType == .bezier {
-                        // Bezier preset picker
+            HStack(spacing: 0) {
+                // ── LEFT COLUMN: Parameters ──
+                ScrollView {
+                    VStack(spacing: 16) {
+                        // Name
                         HStack {
-                            Text("Preset")
+                            Text("Name").font(.subheadline).foregroundStyle(.secondary)
                             Spacer()
+                            TextField("Keyframe Name", text: $keyframe.name)
+                                .multilineTextAlignment(.trailing)
+                                .textFieldStyle(.plain)
+                        }
+                        .padding(.horizontal, 16)
+                        
+                        Divider().padding(.horizontal, 16)
+                        
+                        // ── Duration ──
+                        compactSliderRow(icon: "timer", label: "Duration",
+                                         value: $keyframe.duration, range: 0...20, step: 0.5,
+                                         format: "%.1fs")
+                        
+                        Divider().padding(.horizontal, 16)
+                        
+                        // ── Shape Parameters ──
+                        VStack(spacing: 2) {
+                            sectionHeader("Shape Parameters")
+                            compactSliderRow(icon: "arrow.down.right.and.arrow.up.left", label: "Min Distance",
+                                             value: $keyframe.minDistance, range: 0.1...10.0, format: "%.3f")
+                            compactSliderRow(icon: "arrow.triangle.branch", label: "Folding Limit",
+                                             value: $keyframe.foldingLimit, range: 0.1...20.0, format: "%.3f")
+                            compactSliderRow(icon: "circle.dashed", label: "Sphere Radius",
+                                             value: $keyframe.sphereRadius, range: 0.01...5.0, format: "%.3f")
+                            compactSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Fractal Scale",
+                                             value: $keyframe.fractalScale, range: 0.5...6.0, format: "%.3f")
+                        }
+                        
+                        Divider().padding(.horizontal, 16)
+                        
+                        // ── Quality ──
+                        VStack(spacing: 2) {
+                            sectionHeader("Quality")
+                            compactStepperRow(icon: "square.stack.3d.up", label: "Iterations",
+                                              value: $keyframe.baseFractalIterations, range: 4...32)
+                            compactStepperRow(icon: "line.3.crossed.swirl.circle", label: "Ray Steps",
+                                              value: $keyframe.baseMaxRaySteps, range: 32...1024, step: 16)
+                        }
+                        
+                        Divider().padding(.horizontal, 16)
+                        
+                        // ── Position ──
+                        VStack(spacing: 2) {
+                            sectionHeader("Position")
+                            compactSliderRow(icon: "arrow.left.and.right", label: "X",
+                                             value: $keyframe.positionX, range: -5...5, format: "%.2f")
+                            compactSliderRow(icon: "arrow.up.and.down", label: "Y",
+                                             value: $keyframe.positionY, range: -5...5, format: "%.2f")
+                            compactSliderRow(icon: "arrow.forward", label: "Z",
+                                             value: $keyframe.positionZ, range: -5...5, format: "%.2f")
+                        }
+                        
+                        Spacer(minLength: 20)
+                    }
+                    .padding(.top, 8)
+                }
+                
+                Divider()
+                
+                // ── RIGHT COLUMN: Easing ──
+                ScrollView {
+                    VStack(spacing: 12) {
+                        sectionHeader("Easing Curve")
+                        
+                        Picker("Easing", selection: $keyframe.easingType) {
+                            ForEach(EasingFunction.allCases, id: \.self) { easing in
+                                Label(easing.displayName, systemImage: easing.icon)
+                                    .tag(easing)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        
+                        if keyframe.easingType == .bezier {
+                            // Bezier presets
                             Menu {
                                 Button("Linear") { keyframe.bezierHandle = .linear }
                                 Button("Ease In") { keyframe.bezierHandle = .easeIn }
@@ -624,40 +693,43 @@ struct KeyframeEditorView: View {
                                 Button("Anticipate") { keyframe.bezierHandle = .anticipate }
                                 Button("Snappy") { keyframe.bezierHandle = .snappy }
                             } label: {
-                                Text("Apply Preset")
-                                    .font(.caption)
+                                Label("Bezier Preset", systemImage: "curve.bezier")
+                                    .font(.subheadline)
                             }
+                            .padding(.horizontal, 16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            BezierCurvePreview(handle: keyframe.bezierHandle)
+                                .frame(height: 120)
+                                .padding(.horizontal, 16)
+                            
+                            compactSliderRow(icon: "1.circle", label: "CP1 X",
+                                             value: $keyframe.bezierHandle.cp1x, range: 0...1, format: "%.2f")
+                            compactSliderRow(icon: "1.circle", label: "CP1 Y",
+                                             value: $keyframe.bezierHandle.cp1y, range: -0.5...1.5, format: "%.2f")
+                            compactSliderRow(icon: "2.circle", label: "CP2 X",
+                                             value: $keyframe.bezierHandle.cp2x, range: 0...1, format: "%.2f")
+                            compactSliderRow(icon: "2.circle", label: "CP2 Y",
+                                             value: $keyframe.bezierHandle.cp2y, range: -0.5...1.5, format: "%.2f")
+                        } else {
+                            // Preview of the selected easing curve
+                            EasingCurvePreview(easing: keyframe.easingType)
+                                .frame(height: 120)
+                                .padding(.horizontal, 16)
+                            
+                            Text(keyframe.easingType.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         
-                        // Bezier curve preview
-                        BezierCurvePreview(handle: keyframe.bezierHandle)
-                            .frame(height: 120)
-                            .padding(.vertical, 4)
-                        
-                        // Control point sliders
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Control Point 1").font(.caption).foregroundStyle(.secondary)
-                            parameterSlider("CP1 X (time)", value: $keyframe.bezierHandle.cp1x, range: 0...1)
-                            parameterSlider("CP1 Y (value)", value: $keyframe.bezierHandle.cp1y, range: -0.5...1.5)
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Control Point 2").font(.caption).foregroundStyle(.secondary)
-                            parameterSlider("CP2 X (time)", value: $keyframe.bezierHandle.cp2x, range: 0...1)
-                            parameterSlider("CP2 Y (value)", value: $keyframe.bezierHandle.cp2y, range: -0.5...1.5)
-                        }
+                        Spacer(minLength: 20)
                     }
-                } header: {
-                    Text("Easing Curve")
-                } footer: {
-                    if keyframe.easingType == .bezier {
-                        Text("Drag control points or use presets. Y values outside 0-1 create overshoot/anticipation effects.")
-                    } else {
-                        Text("Controls how the transition to this keyframe is timed.")
-                    }
+                    .padding(.top, 8)
                 }
+                .frame(width: 260)
             }
             .navigationTitle("Edit Keyframe")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
@@ -669,20 +741,83 @@ struct KeyframeEditorView: View {
                 }
             }
         }
-        .presentationDetents([.large])
+        .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
     }
     
-    private func parameterSlider(_ label: String, value: Binding<Float>, range: ClosedRange<Float>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                Spacer()
-                Text(String(format: "%.3f", value.wrappedValue))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+    // ── Compact slider row matching EffectSliderRow style ──
+    private func compactSliderRow(icon: String, label: String, value: Binding<Float>,
+                                   range: ClosedRange<Float>, step: Float? = nil, format: String = "%.3f") -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .frame(width: 16)
+            Text(label)
+                .font(.subheadline)
+                .frame(width: 90, alignment: .leading)
+                .lineLimit(1)
+            if let step = step {
+                Slider(value: value, in: range, step: step)
+            } else {
+                Slider(value: value, in: range)
             }
-            Slider(value: value, in: range)
+            Text(String(format: format, value.wrappedValue))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .trailing)
         }
+        .frame(height: 32)
+        .padding(.horizontal, 16)
+    }
+    
+    // Duration-specific overload for TimeInterval binding
+    private func compactSliderRow(icon: String, label: String, value: Binding<TimeInterval>,
+                                   range: ClosedRange<TimeInterval>, step: Double = 0.5, format: String = "%.1fs") -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .frame(width: 16)
+            Text(label)
+                .font(.subheadline)
+                .frame(width: 90, alignment: .leading)
+                .lineLimit(1)
+            Slider(value: value, in: range, step: step)
+            Text(String(format: format, value.wrappedValue))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .trailing)
+        }
+        .frame(height: 32)
+        .padding(.horizontal, 16)
+    }
+    
+    private func compactStepperRow(icon: String, label: String, value: Binding<Int>,
+                                    range: ClosedRange<Int>, step: Int = 1) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .frame(width: 16)
+            Text(label)
+                .font(.subheadline)
+                .frame(width: 90, alignment: .leading)
+                .lineLimit(1)
+            Spacer()
+            Stepper("\(value.wrappedValue)", value: value, in: range, step: step)
+                .fixedSize()
+        }
+        .frame(height: 32)
+        .padding(.horizontal, 16)
+    }
+    
+    private func sectionHeader(_ title: String) -> some View {
+        HStack {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
     }
 }
 
@@ -910,6 +1045,66 @@ struct BezierCurvePreview: View {
                     Path(ellipseIn: CGRect(x: end.x - 3, y: end.y - 3, width: 6, height: 6)),
                     with: .color(.primary)
                 )
+            }
+        }
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: - Easing Curve Preview (non-Bezier)
+
+/// Simple curve preview that uses EasingFunction.apply() to draw the easing shape.
+struct EasingCurvePreview: View {
+    let easing: EasingFunction
+    
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let padding: CGFloat = 16
+            let plotW = w - padding * 2
+            let plotH = h - padding * 2
+            
+            Canvas { context, _ in
+                // Background grid
+                let gridColor = Color.secondary.opacity(0.15)
+                for i in 0...4 {
+                    let frac = CGFloat(i) / 4.0
+                    let x = padding + frac * plotW
+                    context.stroke(
+                        Path { p in p.move(to: CGPoint(x: x, y: padding)); p.addLine(to: CGPoint(x: x, y: padding + plotH)) },
+                        with: .color(gridColor), lineWidth: 0.5
+                    )
+                    let y = padding + frac * plotH
+                    context.stroke(
+                        Path { p in p.move(to: CGPoint(x: padding, y: y)); p.addLine(to: CGPoint(x: padding + plotW, y: y)) },
+                        with: .color(gridColor), lineWidth: 0.5
+                    )
+                }
+                
+                // Diagonal reference (linear)
+                context.stroke(
+                    Path { p in
+                        p.move(to: CGPoint(x: padding, y: padding + plotH))
+                        p.addLine(to: CGPoint(x: padding + plotW, y: padding))
+                    },
+                    with: .color(Color.secondary.opacity(0.25)), lineWidth: 1
+                )
+                
+                // Easing curve
+                let curvePath = Path { p in
+                    let steps = 60
+                    for i in 0...steps {
+                        let t = Float(i) / Float(steps)
+                        let eased = easing.apply(t)
+                        let x = padding + CGFloat(t) * plotW
+                        let y = padding + plotH - CGFloat(eased) * plotH
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }
+                context.stroke(curvePath, with: .color(.blue), lineWidth: 2.5)
             }
         }
         .background(Color.secondary.opacity(0.05))

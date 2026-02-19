@@ -69,6 +69,7 @@ final class UISettingsCache {
     
     // Safety & display
     var showHUD: Bool = true
+    var safetyBubbleEnabled: Bool = false
     var safetyBubbleRadius: Float = 1.8
     var safetyBubbleShape: Float = 0.0
     var useRelativeGestures: Bool = true
@@ -138,8 +139,7 @@ final class UISettingsCache {
         bloomEffect = settings.bloomEffect
         fogEffect = settings.fogEffect
         gradientCycleEffect = settings.gradientCycleEffect
-        emissiveEnabled = true  // always on
-        settings.emissiveEnabled = true
+        emissiveEnabled = settings.emissiveEnabled
         emissivePattern = settings.emissivePattern
         emissiveIntensity = settings.emissiveIntensity
         emissiveThreshold = settings.emissiveThreshold
@@ -148,6 +148,7 @@ final class UISettingsCache {
         lightingMode = settings.lightingMode
         lightingSoftness = settings.lightingSoftness
         showHUD = settings.showHUD
+        safetyBubbleEnabled = settings.safetyBubbleEnabled
         safetyBubbleRadius = settings.safetyBubbleRadius
         safetyBubbleShape = settings.safetyBubbleShape
         useRelativeGestures = settings.useRelativeGestures
@@ -234,7 +235,7 @@ enum SidebarTab: String, CaseIterable {
 enum FractalSubTab: String, CaseIterable { case shape = "Shape", space = "Space", quality = "Quality" }
 enum AnimateSubTab: String, CaseIterable { case play = "Play", edit = "Edit" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
-enum EffectsSubTab: String, CaseIterable { case `static` = "Static", dynamic = "Dynamic" }
+enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", advanced = "Advanced" }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -249,7 +250,7 @@ struct ContentView: View {
     @State private var fractalSubTab: FractalSubTab = .shape
     @State private var animateSubTab: AnimateSubTab = .play
     @State private var coloringSubTab: ColoringSubTab = .gradient
-    @State private var effectsSubTab: EffectsSubTab = .lighting
+    @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
     @State private var editingScene: AnimationScene?
@@ -284,6 +285,11 @@ struct ContentView: View {
         .opacity(0.7)
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
+        .onHover { hovering in
+            // Suppress fractal hand-tracking gestures while the user is
+            // looking at (and therefore interacting with) the menu window.
+            appModel.gestureController?.suppressParameterGestures = hovering
+        }
         .onAppear { cache.startSync(with: appModel.renderSettings) }
         .onDisappear { cache.stopSync() }
     }
@@ -312,6 +318,14 @@ struct ContentView: View {
                 // ── RIGHT: Content Panel ──
                 VStack(spacing: 0) {
                     contentPanel
+                    
+                    // ── PLAYER: Fixed playback bar (visible when a scene is loaded) ──
+                    if let animationManager = appModel.animationManager,
+                       animationManager.currentScene != nil {
+                        Divider()
+                        AnimationPlaybackControls(animationManager: animationManager)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                    }
                     
                     Divider()
                     
@@ -477,29 +491,29 @@ struct ContentView: View {
     
     private var fractalSpaceContent: some View {
         VStack(spacing: 12) {
-            Text("Safety Bubble").font(.headline)
-            Text("Radius: \(cache.safetyBubbleRadius, specifier: "%.2f")m").font(.caption)
-            Slider(value: $cache.safetyBubbleRadius, in: 0.5...2.5, onEditingChanged: { editing in
-                if !editing { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) }
-            })
             HStack {
-                Text("Shape"); Spacer()
-                Picker("Shape", selection: Binding<Int>(
-                    get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
-                    set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
-                )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
-                .pickerStyle(.segmented).frame(maxWidth: 160)
+                Text("Safety Bubble").font(.headline)
+                Spacer()
+                Toggle("", isOn: $cache.safetyBubbleEnabled)
+                    .labelsHidden()
+                    .onChange(of: cache.safetyBubbleEnabled) { _, val in
+                        cache.push(\.safetyBubbleEnabled, value: val)
+                    }
             }
-            Divider()
-            Text("Gesture Controls").font(.headline)
-            Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
-                .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
-            Toggle("Extended Range", isOn: $cache.extendedGestureRange)
-                .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
-            Text("Gesture Sensitivity: \(String(format: "%.1f", cache.gestureSensitivity))").font(.caption)
-            Slider(value: $cache.gestureSensitivity, in: 1...5, step: 0.5, onEditingChanged: { editing in
-                if !editing { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) }
-            })
+            if cache.safetyBubbleEnabled {
+                Text("Radius: \(cache.safetyBubbleRadius, specifier: "%.2f")m").font(.caption)
+                Slider(value: $cache.safetyBubbleRadius, in: 0.5...2.5, onEditingChanged: { editing in
+                    if !editing { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) }
+                })
+                HStack {
+                    Text("Shape"); Spacer()
+                    Picker("Shape", selection: Binding<Int>(
+                        get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
+                        set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
+                    )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
+                    .pickerStyle(.segmented).frame(maxWidth: 160)
+                }
+            }
         }
     }
     
@@ -583,11 +597,6 @@ struct ContentView: View {
     
     private var animatePlayContent: some View {
         VStack(spacing: 0) {
-            if let animationManager = appModel.animationManager,
-               animationManager.currentScene != nil {
-                AnimationPlaybackControls(animationManager: animationManager)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-            }
             if let animationManager = appModel.animationManager {
                 List {
                     if animationManager.scenes.isEmpty {
@@ -619,17 +628,22 @@ struct ContentView: View {
                         appModel: appModel,
                         onEditScene: { scene in
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                editingScene = scene
+                                if editingScene?.id == scene.id {
+                                    editingScene = nil
+                                } else {
+                                    editingScene = scene
+                                }
                             }
                         },
-                        isInline: true
+                        isInline: true,
+                        isEditing: editingScene != nil
                     )
                 } else {
                     ContentUnavailableView("Not Available", systemImage: "exclamationmark.triangle",
                         description: Text("Animation manager not initialized"))
                 }
             }
-            .frame(maxWidth: editingScene != nil ? 260 : .infinity)
+            .frame(maxWidth: editingScene != nil ? 220 : .infinity)
             
             // Scene editor side pane (right)
             if let scene = editingScene, let animationManager = appModel.animationManager {
@@ -646,7 +660,7 @@ struct ContentView: View {
                     isInline: true
                 )
                 .id(scene.id)
-                .frame(minWidth: 360, maxWidth: .infinity)
+                .frame(minWidth: 420, maxWidth: .infinity)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -807,21 +821,40 @@ struct ContentView: View {
                 HStack {
                     Label("Emissive Glow", systemImage: "sparkle").font(.subheadline.weight(.medium))
                     Spacer()
-                    Picker("Pattern", selection: $cache.emissivePattern) {
-                        Text("Folds").tag(0); Text("Depth").tag(1); Text("Veins").tag(2); Text("Pulse").tag(3); Text("Edges").tag(4)
+                    Picker("Pattern", selection: Binding<Int>(
+                        get: { cache.emissiveEnabled ? cache.emissivePattern + 1 : 0 },
+                        set: { v in
+                            if v == 0 {
+                                cache.emissiveEnabled = false
+                                cache.push(\.emissiveEnabled, value: false)
+                            } else {
+                                cache.emissiveEnabled = true
+                                cache.emissivePattern = v - 1
+                                cache.push(\.emissiveEnabled, value: true)
+                                cache.push(\.emissivePattern, value: v - 1)
+                            }
+                        }
+                    )) {
+                        Text("Off").tag(0)
+                        Text("Folds").tag(1); Text("Depth").tag(2); Text("Veins").tag(3); Text("Pulse").tag(4); Text("Edges").tag(5)
                     }.pickerStyle(.menu).frame(maxWidth: 120)
-                    .onChange(of: cache.emissivePattern) { _, v in cache.push(\.emissivePattern, value: v) }
                 }
-                HStack { Text("Intensity").font(.caption); Slider(value: $cache.emissiveIntensity, in: 0...2, onEditingChanged: { e in if !e { cache.push(\.emissiveIntensity, value: cache.emissiveIntensity) } }) }
-                HStack { Text("Threshold").font(.caption); Slider(value: $cache.emissiveThreshold, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.emissiveThreshold, value: cache.emissiveThreshold) } }) }
-                Divider()
-                EmissiveColorPicker(color: Binding(
-                    get: { Color(red: Double(cache.emissiveColor.x), green: Double(cache.emissiveColor.y), blue: Double(cache.emissiveColor.z)) },
-                    set: { c in if let comps = c.cgColor?.components, comps.count >= 3 {
-                        cache.emissiveColor = SIMD3<Float>(Float(comps[0]), Float(comps[1]), Float(comps[2]))
-                        cache.push(\.emissiveColor, value: cache.emissiveColor)
-                    }}
-                ))
+                if cache.emissiveEnabled {
+                    HStack { Text("Intensity").font(.caption); Slider(value: $cache.emissiveIntensity, in: 0...2, onEditingChanged: { e in if !e { cache.push(\.emissiveIntensity, value: cache.emissiveIntensity) } }) }
+                    HStack { Text("Threshold").font(.caption); Slider(value: $cache.emissiveThreshold, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.emissiveThreshold, value: cache.emissiveThreshold) } }) }
+                    Divider()
+                    HStack {
+                        Text("Emissive Color").font(.subheadline)
+                        Spacer()
+                        ColorPicker("", selection: Binding(
+                            get: { Color(red: Double(cache.emissiveColor.x), green: Double(cache.emissiveColor.y), blue: Double(cache.emissiveColor.z)) },
+                            set: { c in if let comps = c.cgColor?.components, comps.count >= 3 {
+                                cache.emissiveColor = SIMD3<Float>(Float(comps[0]), Float(comps[1]), Float(comps[2]))
+                                cache.push(\.emissiveColor, value: cache.emissiveColor)
+                            }}
+                        ), supportsOpacity: false).labelsHidden()
+                    }
+                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
@@ -877,6 +910,28 @@ struct ContentView: View {
                     range: 0...1,
                     enabled: Binding(get: { cache.gradientCycleEffect.enabled }, set: { cache.gradientCycleEffect.enabled = $0 }),
                     onChanged: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) })
+                if cache.gradientCycleEffect.enabled {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.caption)
+                            .frame(width: 16)
+                        Text("Smooth Loop")
+                            .font(.subheadline)
+                            .frame(width: 90, alignment: .leading)
+                            .lineLimit(1)
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { cache.gradientCycleEffect.smoothLoop },
+                            set: { newVal in
+                                cache.gradientCycleEffect.smoothLoop = newVal
+                                cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
+                            }))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                    }
+                    .frame(height: 32)
+                }
                 Divider().padding(.leading, 114)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
                     value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }),
@@ -954,6 +1009,16 @@ struct ContentView: View {
             Text("Display").font(.headline)
             Toggle("Show HUD", isOn: $cache.showHUD)
                 .onChange(of: cache.showHUD) { _, v in cache.push(\.showHUD, value: v) }
+            Divider()
+            Text("Gesture Controls").font(.headline)
+            Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
+                .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
+            Toggle("Extended Range", isOn: $cache.extendedGestureRange)
+                .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+            Text("Gesture Sensitivity: \(String(format: "%.1f", cache.gestureSensitivity))").font(.caption)
+            Slider(value: $cache.gestureSensitivity, in: 1...5, step: 0.5, onEditingChanged: { editing in
+                if !editing { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) }
+            })
             Divider()
             if let shareSession = appModel.shareSession {
                 Text("SharePlay").font(.headline)
@@ -1151,34 +1216,6 @@ struct EffectSliderRow: View {
 }
 
 // MARK: - Emissive Color Picker
-
-struct EmissiveColorPicker: View {
-    @Binding var color: Color
-    private let presets: [(name: String, color: Color)] = [
-        ("Cyan", Color(red: 0.3, green: 0.8, blue: 1.0)), ("Pink", Color(red: 1.0, green: 0.3, blue: 0.6)),
-        ("Green", Color(red: 0.3, green: 1.0, blue: 0.4)), ("Gold", Color(red: 1.0, green: 0.8, blue: 0.2)),
-        ("Purple", Color(red: 0.7, green: 0.3, blue: 1.0)), ("White", Color(red: 1.0, green: 1.0, blue: 1.0)),
-    ]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Emissive Color").font(.subheadline)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                ForEach(presets, id: \.name) { preset in
-                    Button { color = preset.color } label: {
-                        RoundedRectangle(cornerRadius: 6).fill(preset.color).frame(height: 32)
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(isSelected(preset.color) ? Color.white : Color.clear, lineWidth: 2))
-                            .overlay(Text(preset.name).font(.caption2).foregroundColor(.white).shadow(radius: 2))
-                    }.buttonStyle(.plain)
-                }
-            }
-            ColorPicker("Custom", selection: $color, supportsOpacity: false).labelsHidden()
-        }
-    }
-    private func isSelected(_ presetColor: Color) -> Bool {
-        guard let c1 = color.cgColor?.components, let c2 = presetColor.cgColor?.components, c1.count >= 3, c2.count >= 3 else { return false }
-        return abs(c1[0] - c2[0]) < 0.05 && abs(c1[1] - c2[1]) < 0.05 && abs(c1[2] - c2[2]) < 0.05
-    }
-}
 
 // MARK: - StatBox
 

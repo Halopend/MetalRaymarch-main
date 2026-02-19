@@ -231,6 +231,11 @@ final class GestureController {
     // Single-hand drag sensitivity
     private let translateSensitivity: Float = 1.0
     
+    /// When true, parameter-changing gestures (two-hand pinch, single-hand drag) are
+    /// suppressed so that pinching to interact with the SwiftUI menu window does not
+    /// also move through the fractal.  Menu toggle gesture is intentionally kept active.
+    var suppressParameterGestures: Bool = false
+    
     // Hand tracking state
     private var leftHand: HandData = .zero
     private var rightHand: HandData = .zero
@@ -460,6 +465,20 @@ final class GestureController {
     
     private func processGestures() {
         guard let settings = renderSettings else { return }
+        
+        // ── Suppress parameter gestures while the user is interacting with the menu window ──
+        // Eye-hover on the window sets this flag; we deactivate any in-flight gestures
+        // cleanly so releasing the suppression doesn't cause a jump.
+        if suppressParameterGestures {
+            if indexGestureState.isActive  { indexGestureState.isActive = false }
+            if middleGestureState.isActive { middleGestureState.isActive = false }
+            if ringGestureState.isActive   { ringGestureState.isActive = false }
+            if pinkyGestureState.isActive  { pinkyGestureState.isActive = false }
+            if rightIndexDragActive        { rightIndexDragActive = false }
+            settings.activeGestureIndex = 0
+            settings.gestureSpread = 0
+            return
+        }
         
         // Track active gesture for HUD display
         var activeDigit = 0

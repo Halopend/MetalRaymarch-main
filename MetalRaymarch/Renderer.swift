@@ -945,7 +945,7 @@ actor Renderer {
             return FunctionConstantConfig(
                 fractalIterations: 12,
                 shadowIterations: 10,
-                safetyBubbleEnabled: true,
+                safetyBubbleEnabled: nil,  // Runtime: respects user toggle
                 showHUD: true,
                 qualityMode: 0,  // High quality
                 debugHierarchical: false,
@@ -970,7 +970,7 @@ actor Renderer {
             return FunctionConstantConfig(
                 fractalIterations: Int32(preset.fractalIterations),
                 shadowIterations: Int32(max(preset.fractalIterations - 2, 2)),
-                safetyBubbleEnabled: true,
+                safetyBubbleEnabled: nil,    // Runtime: respects user toggle
                 showHUD: false,              // Compile out HUD for these fast pipelines
                 qualityMode: qualityMode,
                 debugHierarchical: false,
@@ -1061,7 +1061,7 @@ actor Renderer {
         let config = FunctionConstantConfig(
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
-            safetyBubbleEnabled: true,
+            safetyBubbleEnabled: nil,  // Runtime: respects user toggle
             showHUD: true,
             qualityMode: qualityMode,
             debugHierarchical: false,
@@ -1248,7 +1248,7 @@ actor Renderer {
         let config = FunctionConstantConfig(
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
-            safetyBubbleEnabled: true,
+            safetyBubbleEnabled: nil,  // Runtime: respects user toggle
             showHUD: false,
             qualityMode: Int32(qualityMode),
             debugHierarchical: false,

@@ -48,6 +48,7 @@ struct FractalPreset: Codable, Identifiable {
     // Safety bubble
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
+    var safetyBubbleShape: Float?
     
     // === MODULAR LIGHTING EFFECTS (v2.0) ===
     // Card-based lighting system with presets
@@ -59,6 +60,16 @@ struct FractalPreset: Codable, Identifiable {
     var bloomEffect: BloomEffect?
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
+    
+    // === DOPPELGANGER MODE ===
+    var doppelgangerEnabled: Bool?
+    var doppelgangerPlane: SIMD3<Float>?
+    var doppelgangerOffset: Float?
+    
+    // === COLOR SCHEME AUTO-TRANSITION ===
+    var colorSchemeAutoTransition: Bool?
+    var colorSchemeAutoInterval: Float?
+    var colorSchemeTransitionDuration: Float?
     
     // === GRADIENT COLORING SYSTEM (v2.1) ===
     var gradientState: GradientState?
@@ -78,10 +89,14 @@ struct FractalPreset: Codable, Identifiable {
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius
-        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius
+        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
         case emissiveEnabled, emissivePattern, emissiveIntensity, emissiveThreshold, emissiveColor, emissiveSpeed
+        // Doppelganger
+        case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
+        // Color scheme auto-transition
+        case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
         case gradientState, lightingSoftness
     }
@@ -147,6 +162,7 @@ struct FractalPreset: Codable, Identifiable {
         tileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
+        safetyBubbleShape = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
         
         // v2.0 modular lighting effects
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
@@ -165,6 +181,16 @@ struct FractalPreset: Codable, Identifiable {
         emissiveThreshold = try container.decodeIfPresent(Float.self, forKey: .emissiveThreshold)
         emissiveColor = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .emissiveColor)
         emissiveSpeed = try container.decodeIfPresent(Float.self, forKey: .emissiveSpeed)
+        
+        // Doppelganger
+        doppelgangerEnabled = try container.decodeIfPresent(Bool.self, forKey: .doppelgangerEnabled)
+        doppelgangerPlane = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .doppelgangerPlane)
+        doppelgangerOffset = try container.decodeIfPresent(Float.self, forKey: .doppelgangerOffset)
+        
+        // Color scheme auto-transition
+        colorSchemeAutoTransition = try container.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition)
+        colorSchemeAutoInterval = try container.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval)
+        colorSchemeTransitionDuration = try container.decodeIfPresent(Float.self, forKey: .colorSchemeTransitionDuration)
         
         // v2.1 gradient coloring system
         gradientState = try container.decodeIfPresent(GradientState.self, forKey: .gradientState)
@@ -201,6 +227,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(tileSize, forKey: .tileSize)
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
+        try container.encodeIfPresent(safetyBubbleShape, forKey: .safetyBubbleShape)
         
         // v2.0 modular lighting effects
         try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
@@ -219,6 +246,16 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(emissiveThreshold, forKey: .emissiveThreshold)
         try container.encodeIfPresent(emissiveColor, forKey: .emissiveColor)
         try container.encodeIfPresent(emissiveSpeed, forKey: .emissiveSpeed)
+        
+        // Doppelganger
+        try container.encodeIfPresent(doppelgangerEnabled, forKey: .doppelgangerEnabled)
+        try container.encodeIfPresent(doppelgangerPlane, forKey: .doppelgangerPlane)
+        try container.encodeIfPresent(doppelgangerOffset, forKey: .doppelgangerOffset)
+        
+        // Color scheme auto-transition
+        try container.encodeIfPresent(colorSchemeAutoTransition, forKey: .colorSchemeAutoTransition)
+        try container.encodeIfPresent(colorSchemeAutoInterval, forKey: .colorSchemeAutoInterval)
+        try container.encodeIfPresent(colorSchemeTransitionDuration, forKey: .colorSchemeTransitionDuration)
         
         // v2.1 gradient coloring system
         try container.encodeIfPresent(gradientState, forKey: .gradientState)
@@ -332,6 +369,16 @@ struct FractalPreset: Codable, Identifiable {
         preset.emissiveColor = settings.emissiveColor
         preset.emissiveSpeed = settings.emissiveSpeed
         
+        // Doppelganger
+        preset.doppelgangerEnabled = settings.doppelgangerEnabled
+        preset.doppelgangerPlane = settings.doppelgangerPlane
+        preset.doppelgangerOffset = settings.doppelgangerOffset
+        
+        // Color scheme auto-transition
+        preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
+        preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
+        preset.colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
+        
         // v2.1 gradient coloring system
         preset.gradientState = settings.gradientState
         preset.lightingSoftness = settings.lightingSoftness
@@ -387,6 +434,9 @@ struct FractalPreset: Codable, Identifiable {
         if let safetyBubbleRadius = safetyBubbleRadius {
             settings.safetyBubbleRadius = safetyBubbleRadius
         }
+        if let safetyBubbleShape = safetyBubbleShape {
+            settings.safetyBubbleShape = safetyBubbleShape
+        }
         
         // v2.0 modular lighting effects
         if let lightingMode = lightingMode {
@@ -432,6 +482,28 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let emissiveSpeed = emissiveSpeed {
             settings.emissiveSpeed = emissiveSpeed
+        }
+        
+        // Doppelganger
+        if let doppelgangerEnabled = doppelgangerEnabled {
+            settings.doppelgangerEnabled = doppelgangerEnabled
+        }
+        if let doppelgangerPlane = doppelgangerPlane {
+            settings.doppelgangerPlane = doppelgangerPlane
+        }
+        if let doppelgangerOffset = doppelgangerOffset {
+            settings.doppelgangerOffset = doppelgangerOffset
+        }
+        
+        // Color scheme auto-transition
+        if let colorSchemeAutoTransition = colorSchemeAutoTransition {
+            settings.colorSchemeAutoTransition = colorSchemeAutoTransition
+        }
+        if let colorSchemeAutoInterval = colorSchemeAutoInterval {
+            settings.colorSchemeAutoInterval = colorSchemeAutoInterval
+        }
+        if let colorSchemeTransitionDuration = colorSchemeTransitionDuration {
+            settings.colorSchemeTransitionDuration = colorSchemeTransitionDuration
         }
         
         // v2.1 gradient coloring system
@@ -686,6 +758,7 @@ class PresetManager {
         
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
+        preset.safetyBubbleShape = settings.safetyBubbleShape
         
         // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
@@ -704,6 +777,16 @@ class PresetManager {
         preset.emissiveThreshold = settings.emissiveThreshold
         preset.emissiveColor = settings.emissiveColor
         preset.emissiveSpeed = settings.emissiveSpeed
+        
+        // Doppelganger
+        preset.doppelgangerEnabled = settings.doppelgangerEnabled
+        preset.doppelgangerPlane = settings.doppelgangerPlane
+        preset.doppelgangerOffset = settings.doppelgangerOffset
+        
+        // Color scheme auto-transition
+        preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
+        preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
+        preset.colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
         
         // v2.1 gradient coloring system
         preset.gradientState = settings.gradientState
