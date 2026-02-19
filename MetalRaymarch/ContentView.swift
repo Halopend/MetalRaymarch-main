@@ -55,6 +55,45 @@ final class UISettingsCache {
     var fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     var gradientCycleEffect: GradientCycleEffect = .off
     
+    // === SAVED CUSTOM GRADIENTS (persisted via UserDefaults) ===
+    var savedCustomGradients: [GradientColorMap] = UISettingsCache.loadSavedGradients()
+    
+    static func loadSavedGradients() -> [GradientColorMap] {
+        guard let data = UserDefaults.standard.data(forKey: "savedCustomGradients"),
+              let gradients = try? JSONDecoder().decode([GradientColorMap].self, from: data) else { return [] }
+        return gradients
+    }
+    
+    func saveSavedGradients() {
+        if let data = try? JSONEncoder().encode(savedCustomGradients) {
+            UserDefaults.standard.set(data, forKey: "savedCustomGradients")
+        }
+    }
+    
+    func saveCurrentGradientAsCustom() {
+        var copy = gradientColorMap
+        // Give it a unique name
+        let existingCount = savedCustomGradients.count
+        copy = GradientColorMap(name: "Custom \(existingCount + 1)", stops: copy.stops,
+                                 mappingMode: copy.mappingMode, repeatCount: copy.repeatCount,
+                                 offset: copy.offset, smoothing: copy.smoothing)
+        savedCustomGradients.append(copy)
+        saveSavedGradients()
+    }
+    
+    func deleteSavedGradient(at index: Int) {
+        guard index >= 0 && index < savedCustomGradients.count else { return }
+        savedCustomGradients.remove(at: index)
+        saveSavedGradients()
+    }
+    
+    func applySavedGradient(_ gradient: GradientColorMap) {
+        gradientColorMap = gradient
+        gradientPreset = nil  // Mark as custom
+        settings?.gradientColorMap = gradient
+        settings?.useGradientColoring = true
+    }
+    
     // Emissive
     var emissiveEnabled: Bool = true
     var emissivePattern: Int = 0
@@ -691,6 +730,9 @@ struct ContentView: View {
         }
     }
     
+    @State private var savedGradientToDelete: Int? = nil
+    @State private var showDeleteConfirm = false
+    
     private var coloringGradientContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Gradient Coloring").font(.headline)
@@ -713,12 +755,52 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered).tint(cache.gradientPreset == preset ? .blue : .secondary)
                 }
-                // "Add" button styled like a preset
+            }
+            
+            // ── Saved Custom Gradients ──
+            if !cache.savedCustomGradients.isEmpty {
+                Text("Saved").font(.subheadline).foregroundColor(.secondary).padding(.top, 4)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                    ForEach(Array(cache.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
+                        Button {
+                            cache.applySavedGradient(saved)
+                        } label: {
+                            VStack(spacing: 2) {
+                                // Mini gradient preview as icon
+                                GradientPreviewBar(gradient: saved)
+                                    .frame(height: 10)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    .allowsHitTesting(false)
+                                Text(saved.name).font(.caption2).lineLimit(1)
+                            }.frame(maxWidth: .infinity).padding(.vertical, 4)
+                        }
+                        .buttonStyle(.bordered).tint(
+                            cache.gradientPreset == nil && cache.gradientColorMap.id == saved.id ? .purple : .indigo
+                        )
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                cache.deleteSavedGradient(at: index)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // ── Save / Edit Buttons ──
+            HStack(spacing: 8) {
+                Button {
+                    cache.saveCurrentGradientAsCustom()
+                } label: {
+                    Label("Save Gradient", systemImage: "square.and.arrow.down")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered).tint(.purple)
+                
                 Button { showStopsPopover = true } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: "plus").font(.caption)
-                        Text("Custom").font(.caption2).lineLimit(1)
-                    }.frame(maxWidth: .infinity).padding(.vertical, 4)
+                    Label("Edit Stops", systemImage: "slider.horizontal.3")
+                        .font(.caption)
                 }
                 .buttonStyle(.bordered).tint(cache.gradientPreset == nil ? .blue : .secondary)
             }
@@ -859,7 +941,7 @@ struct ContentView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
             
-            // ── Presets & Lighting Style (collapsible) ──
+            // ── Lighting Presets (collapsible) ──
             DisclosureGroup(isExpanded: $showLightingPresets) {
                 VStack(spacing: 10) {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -876,24 +958,10 @@ struct ContentView: View {
                     if cache.lightingPreset != .custom {
                         Text(cache.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
                     }
-                    Divider()
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Label("Lighting Style", systemImage: "sun.max.fill").font(.subheadline.weight(.medium))
-                            Spacer()
-                            Text(cache.lightingSoftness < 0.3 ? "Sharp" : cache.lightingSoftness > 0.7 ? "Classic" : "Blended")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        HStack {
-                            Image(systemName: "bolt.fill").font(.caption2).foregroundStyle(.secondary)
-                            Slider(value: $cache.lightingSoftness, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.lightingSoftness, value: cache.lightingSoftness) } })
-                            Image(systemName: "cloud.fill").font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
                 }
                 .padding(.top, 8)
             } label: {
-                Label("Presets & Lighting Style", systemImage: "sparkles")
+                Label("Lighting Presets", systemImage: "sparkles")
                     .font(.subheadline.weight(.medium))
             }
             .padding(10)
