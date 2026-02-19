@@ -2085,6 +2085,7 @@ final class RenderSettings: @unchecked Sendable {
     }
     
     /// When animation stops/pauses, bake manual offsets into targets and clear offsets.
+    /// Also zeroes spring velocities to prevent overshoot/ringing.
     func commitAnimationOffsetsToTargets() {
         withLock {
             _targetMinDistance = _minDistance
@@ -2096,6 +2097,11 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetSphereRadius = 0.0
             _manualOffsetFractalScale = 0.0
             _manualOffsetPosition = .zero
+            // Zero spring velocities so interpolation doesn't overshoot
+            _velocityMinDistance = 0.0
+            _velocityFoldingLimit = 0.0
+            _velocitySphereRadius = 0.0
+            _velocityPosition = .zero
         }
     }
     

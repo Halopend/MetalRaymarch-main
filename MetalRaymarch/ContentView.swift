@@ -56,7 +56,7 @@ final class UISettingsCache {
     var gradientCycleEffect: GradientCycleEffect = .off
     
     // Emissive
-    var emissiveEnabled: Bool = false
+    var emissiveEnabled: Bool = true
     var emissivePattern: Int = 0
     var emissiveIntensity: Float = 1.0
     var emissiveThreshold: Float = 0.5
@@ -138,7 +138,8 @@ final class UISettingsCache {
         bloomEffect = settings.bloomEffect
         fogEffect = settings.fogEffect
         gradientCycleEffect = settings.gradientCycleEffect
-        emissiveEnabled = settings.emissiveEnabled
+        emissiveEnabled = true  // always on
+        settings.emissiveEnabled = true
         emissivePattern = settings.emissivePattern
         emissiveIntensity = settings.emissiveIntensity
         emissiveThreshold = settings.emissiveThreshold
@@ -233,7 +234,7 @@ enum SidebarTab: String, CaseIterable {
 enum FractalSubTab: String, CaseIterable { case shape = "Shape", space = "Space", quality = "Quality" }
 enum AnimateSubTab: String, CaseIterable { case play = "Play", edit = "Edit" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
-enum EffectsSubTab: String, CaseIterable { case lighting = "Lighting", emissive = "Emissive" }
+enum EffectsSubTab: String, CaseIterable { case `static` = "Static", dynamic = "Dynamic" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", advanced = "Advanced" }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -495,8 +496,8 @@ struct ContentView: View {
                 .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
             Toggle("Extended Range", isOn: $cache.extendedGestureRange)
                 .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
-            Text("Gesture Sensitivity: \(Int(cache.gestureSensitivity))").font(.caption)
-            Slider(value: $cache.gestureSensitivity, in: 1...10, step: 1, onEditingChanged: { editing in
+            Text("Gesture Sensitivity: \(String(format: "%.1f", cache.gestureSensitivity))").font(.caption)
+            Slider(value: $cache.gestureSensitivity, in: 1...5, step: 0.5, onEditingChanged: { editing in
                 if !editing { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) }
             })
         }
@@ -765,8 +766,8 @@ struct ContentView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
                     switch effectsSubTab {
-                    case .lighting: effectsLightingContent
-                    case .emissive: effectsEmissiveContent
+                    case .static:  effectsStaticContent
+                    case .dynamic: effectsDynamicContent
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -776,49 +777,9 @@ struct ContentView: View {
     
     @State private var showLightingPresets = false
     
-    private var effectsLightingContent: some View {
+    private var effectsStaticContent: some View {
         VStack(spacing: 12) {
-            // ── Color Effects group ──
-            VStack(spacing: 4) {
-                EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
-                    value: Binding(get: { cache.gradientCycleEffect.speed }, set: { cache.gradientCycleEffect.speed = $0 }),
-                    range: 0...1,
-                    enabled: Binding(get: { cache.gradientCycleEffect.enabled }, set: { cache.gradientCycleEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) })
-                Divider().padding(.leading, 114)
-                EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
-                    value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }),
-                    range: 0...0.5,
-                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) })
-                EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
-                    value: Binding(get: { cache.hueRotationEffect.intensity }, set: { cache.hueRotationEffect.intensity = $0 }),
-                    range: 0...1,
-                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) },
-                    showToggle: false)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
-            
-            // ── Animation Effects group ──
-            VStack(spacing: 4) {
-                EffectSliderRow(icon: "waveform.path.ecg", label: "Pulse Speed",
-                    value: Binding(get: { cache.pulseEffect.speed }, set: { cache.pulseEffect.speed = $0 }),
-                    range: 0...2,
-                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) })
-                EffectSliderRow(icon: "waveform.path", label: "Pulse Amount",
-                    value: Binding(get: { cache.pulseEffect.amount }, set: { cache.pulseEffect.amount = $0 }),
-                    range: 0...1,
-                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) },
-                    showToggle: false)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
-            
-            // ── Atmosphere group ──
+            // ── Atmosphere ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "light.max", label: "Glow",
                     value: Binding(get: { cache.glowEffect.intensity }, set: { cache.glowEffect.intensity = $0 }),
@@ -840,6 +801,30 @@ struct ContentView: View {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+            
+            // ── Emissive ──
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Emissive Glow", systemImage: "sparkle").font(.subheadline.weight(.medium))
+                    Spacer()
+                    Picker("Pattern", selection: $cache.emissivePattern) {
+                        Text("Folds").tag(0); Text("Depth").tag(1); Text("Veins").tag(2); Text("Pulse").tag(3); Text("Edges").tag(4)
+                    }.pickerStyle(.menu).frame(maxWidth: 120)
+                    .onChange(of: cache.emissivePattern) { _, v in cache.push(\.emissivePattern, value: v) }
+                }
+                HStack { Text("Intensity").font(.caption); Slider(value: $cache.emissiveIntensity, in: 0...2, onEditingChanged: { e in if !e { cache.push(\.emissiveIntensity, value: cache.emissiveIntensity) } }) }
+                HStack { Text("Threshold").font(.caption); Slider(value: $cache.emissiveThreshold, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.emissiveThreshold, value: cache.emissiveThreshold) } }) }
+                Divider()
+                EmissiveColorPicker(color: Binding(
+                    get: { Color(red: Double(cache.emissiveColor.x), green: Double(cache.emissiveColor.y), blue: Double(cache.emissiveColor.z)) },
+                    set: { c in if let comps = c.cgColor?.components, comps.count >= 3 {
+                        cache.emissiveColor = SIMD3<Float>(Float(comps[0]), Float(comps[1]), Float(comps[2]))
+                        cache.push(\.emissiveColor, value: cache.emissiveColor)
+                    }}
+                ))
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
             
             // ── Presets & Lighting Style (collapsible) ──
             DisclosureGroup(isExpanded: $showLightingPresets) {
@@ -883,39 +868,60 @@ struct ContentView: View {
         }
     }
     
-    private var effectsEmissiveContent: some View {
+    private var effectsDynamicContent: some View {
         VStack(spacing: 12) {
-            Text("Emissive Glow").font(.headline)
-            Group {
-                HStack {
-                    Text("Pattern"); Spacer()
-                    Picker("Pattern", selection: $cache.emissivePattern) {
-                        Text("Folds").tag(0); Text("Depth").tag(1); Text("Veins").tag(2); Text("Pulse").tag(3); Text("Edges").tag(4)
-                    }.pickerStyle(.menu).frame(maxWidth: 120)
-                    .onChange(of: cache.emissivePattern) { _, v in cache.push(\.emissivePattern, value: v) }
-                }
-                Text("Intensity: \(cache.emissiveIntensity, specifier: "%.2f")").font(.caption)
-                Slider(value: $cache.emissiveIntensity, in: 0...2, onEditingChanged: { e in if !e { cache.push(\.emissiveIntensity, value: cache.emissiveIntensity) } })
-                Text("Threshold: \(cache.emissiveThreshold, specifier: "%.2f")").font(.caption)
-                Slider(value: $cache.emissiveThreshold, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.emissiveThreshold, value: cache.emissiveThreshold) } })
-                if cache.emissivePattern == 3 {
-                    Text("Pulse Speed: \(cache.emissiveSpeed, specifier: "%.1f")").font(.caption)
-                    Slider(value: $cache.emissiveSpeed, in: 0.1...5, onEditingChanged: { e in if !e { cache.push(\.emissiveSpeed, value: cache.emissiveSpeed) } })
-                }
-                Divider()
-                EmissiveColorPicker(color: Binding(
-                    get: { Color(red: Double(cache.emissiveColor.x), green: Double(cache.emissiveColor.y), blue: Double(cache.emissiveColor.z)) },
-                    set: { c in if let comps = c.cgColor?.components, comps.count >= 3 {
-                        cache.emissiveColor = SIMD3<Float>(Float(comps[0]), Float(comps[1]), Float(comps[2]))
-                        cache.push(\.emissiveColor, value: cache.emissiveColor)
-                    }}
-                ))
+            // ── Color Animation ──
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
+                    value: Binding(get: { cache.gradientCycleEffect.speed }, set: { cache.gradientCycleEffect.speed = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.gradientCycleEffect.enabled }, set: { cache.gradientCycleEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) })
+                Divider().padding(.leading, 114)
+                EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
+                    value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }),
+                    range: 0...0.5,
+                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) })
+                EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
+                    value: Binding(get: { cache.hueRotationEffect.intensity }, set: { cache.hueRotationEffect.intensity = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) },
+                    showToggle: false)
             }
-            .opacity(cache.emissiveEnabled ? 1.0 : 0.4)
-            .disabled(!cache.emissiveEnabled)
-            Divider()
-            Toggle("Enable Emissive", isOn: $cache.emissiveEnabled)
-                .onChange(of: cache.emissiveEnabled) { _, v in cache.push(\.emissiveEnabled, value: v) }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
+            
+            // ── Pulse ──
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "waveform.path.ecg", label: "Pulse Speed",
+                    value: Binding(get: { cache.pulseEffect.speed }, set: { cache.pulseEffect.speed = $0 }),
+                    range: 0...2,
+                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) })
+                EffectSliderRow(icon: "waveform.path", label: "Pulse Amount",
+                    value: Binding(get: { cache.pulseEffect.amount }, set: { cache.pulseEffect.amount = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+            
+            // ── Emissive Pulse (only when pulse pattern selected) ──
+            if cache.emissivePattern == 3 {
+                VStack(spacing: 4) {
+                    HStack {
+                        Label("Emissive Pulse", systemImage: "sparkle").font(.subheadline.weight(.medium))
+                        Spacer()
+                    }
+                    HStack { Text("Speed").font(.caption); Slider(value: $cache.emissiveSpeed, in: 0.1...5, onEditingChanged: { e in if !e { cache.push(\.emissiveSpeed, value: cache.emissiveSpeed) } }) }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
+            }
         }
     }
     

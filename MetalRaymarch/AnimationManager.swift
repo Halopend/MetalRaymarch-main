@@ -202,6 +202,7 @@ final class AnimationManager {
         precompilePipelinesForCurrentScene()
         
         playhead.state = .playing
+        UsageAnalytics.shared.trackAnimationUsed()
         print("▶️ Playing scene '\(currentScene?.name ?? "?")'")  
     }
     

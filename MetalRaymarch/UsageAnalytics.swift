@@ -19,6 +19,9 @@
 //       * sessionDuration (Double)
 //       * qualityDistribution (String)
 //       * colorSchemeDistribution (String)
+//       * fractalTypeDistribution (String)
+//       * gradientPresetDistribution (String)
+//       * lightingPresetDistribution (String)
 //       * avgFractalScale (Double)
 //       * avgFoldingLimit (Double)
 //       * avgSphereRadius (Double)
@@ -26,10 +29,16 @@
 //       * avgColorMix (Double)
 //       * avgGlowIntensity (Double)
 //       * avgSafetyBubbleRadius (Double)
+//       * avgBloomStrength (Double)
+//       * avgFogIntensity (Double)
+//       * avgEmissiveIntensity (Double)
 //       * usedAudioReactive (Int64)
 //       * usedHandGestures (Int64)
 //       * usedRecording (Int64)
 //       * usedSharePlay (Int64)
+//       * usedEmissive (Int64)
+//       * usedGradientColoring (Int64)
+//       * usedAnimation (Int64)
 //       * presetsLoaded (Int64)
 //       * presetsSaved (Int64)
 //       * favoritePresets (List of Strings)
@@ -94,6 +103,19 @@ struct UsageSnapshot: Codable {
     var usedHandGestures: Bool
     var usedRecording: Bool
     var usedSharePlay: Bool
+    var usedEmissive: Bool
+    var usedGradientColoring: Bool
+    var usedAnimation: Bool
+    
+    // Distributions
+    var fractalTypeDistribution: [String: Float]
+    var gradientPresetDistribution: [String: Float]
+    var lightingPresetDistribution: [String: Float]
+    
+    // Additional effect averages
+    var avgBloomStrength: Float
+    var avgFogIntensity: Float
+    var avgEmissiveIntensity: Float
     
     // Preset interactions
     var presetsLoaded: Int
@@ -144,6 +166,19 @@ class UsageAnalytics: ObservableObject {
     private var usedHandGestures = false
     private var usedRecording = false
     private var usedSharePlay = false
+    private var usedEmissive = false
+    private var usedGradientColoring = false
+    private var usedAnimation = false
+    
+    // Distribution accumulators
+    private var fractalTypeTimeAccum: [String: TimeInterval] = [:]
+    private var gradientPresetTimeAccum: [String: TimeInterval] = [:]
+    private var lightingPresetTimeAccum: [String: TimeInterval] = [:]
+    
+    // Additional effect accumulators
+    private var bloomStrengthAccum: Float = 0
+    private var fogIntensityAccum: Float = 0
+    private var emissiveIntensityAccum: Float = 0
     
     // Preset tracking
     private var presetsLoaded = 0
@@ -203,13 +238,32 @@ class UsageAnalytics: ObservableObject {
         colorMixAccum += settings.colorMix * dtf
         glowIntensityAccum += settings.glowEffect.intensity * dtf
         safetyBubbleRadiusAccum += settings.safetyBubbleRadius * dtf
+        bloomStrengthAccum += settings.bloomEffect.strength * dtf
+        fogIntensityAccum += settings.fogEffect.intensity * dtf
+        emissiveIntensityAccum += settings.emissiveIntensity * dtf
         fpsAccum += Float(fps) * dtf
         renderQualityAccum += settings.currentRenderQuality * dtf
         sampleCount += 1
         
+        // Accumulate fractal type distribution
+        fractalTypeTimeAccum[settings.fractalType.displayName, default: 0] += dt
+        
+        // Accumulate gradient preset distribution
+        if settings.useGradientColoring {
+            usedGradientColoring = true
+            let gradName = settings.gradientPreset?.rawValue ?? "Custom"
+            gradientPresetTimeAccum[gradName, default: 0] += dt
+        }
+        
+        // Accumulate lighting preset distribution
+        lightingPresetTimeAccum[settings.lightingPreset.displayName, default: 0] += dt
+        
         // Track feature usage
         if settings.lightingMode == .audioReactive {
             usedAudioReactive = true
+        }
+        if settings.emissiveEnabled {
+            usedEmissive = true
         }
         
         // Check if we should upload
@@ -234,6 +288,11 @@ class UsageAnalytics: ObservableObject {
     /// Mark that SharePlay was used
     func trackSharePlayUsed() {
         usedSharePlay = true
+    }
+    
+    /// Mark that animation playback was used
+    func trackAnimationUsed() {
+        usedAnimation = true
     }
     
     /// Track preset load
@@ -351,6 +410,21 @@ class UsageAnalytics: ObservableObject {
             schemeDist[key] = Float(time / max(duration, 1.0))
         }
         
+        var fractalTypeDist: [String: Float] = [:]
+        for (key, time) in fractalTypeTimeAccum {
+            fractalTypeDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        var gradientPresetDist: [String: Float] = [:]
+        for (key, time) in gradientPresetTimeAccum {
+            gradientPresetDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        var lightingPresetDist: [String: Float] = [:]
+        for (key, time) in lightingPresetTimeAccum {
+            lightingPresetDist[key] = Float(time / max(duration, 1.0))
+        }
+        
         // Top 3 presets
         let topPresets = presetLoadCounts.sorted { $0.value > $1.value }
             .prefix(3)
@@ -381,6 +455,15 @@ class UsageAnalytics: ObservableObject {
             usedHandGestures: usedHandGestures,
             usedRecording: usedRecording,
             usedSharePlay: usedSharePlay,
+            usedEmissive: usedEmissive,
+            usedGradientColoring: usedGradientColoring,
+            usedAnimation: usedAnimation,
+            fractalTypeDistribution: fractalTypeDist,
+            gradientPresetDistribution: gradientPresetDist,
+            lightingPresetDistribution: lightingPresetDist,
+            avgBloomStrength: bloomStrengthAccum / durationF,
+            avgFogIntensity: fogIntensityAccum / durationF,
+            avgEmissiveIntensity: emissiveIntensityAccum / durationF,
             presetsLoaded: presetsLoaded,
             presetsSaved: presetsSaved,
             favoritePresetNames: Array(topPresets),
@@ -422,6 +505,21 @@ class UsageAnalytics: ObservableObject {
             schemeDist[key] = Float(time / max(duration, 1.0))
         }
         
+        var fractalTypeDist: [String: Float] = [:]
+        for (key, time) in fractalTypeTimeAccum {
+            fractalTypeDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        var gradientPresetDist: [String: Float] = [:]
+        for (key, time) in gradientPresetTimeAccum {
+            gradientPresetDist[key] = Float(time / max(duration, 1.0))
+        }
+        
+        var lightingPresetDist: [String: Float] = [:]
+        for (key, time) in lightingPresetTimeAccum {
+            lightingPresetDist[key] = Float(time / max(duration, 1.0))
+        }
+        
         let topPresets = presetLoadCounts.sorted { $0.value > $1.value }
             .prefix(3)
             .map { $0.key }
@@ -450,6 +548,15 @@ class UsageAnalytics: ObservableObject {
             usedHandGestures: usedHandGestures,
             usedRecording: usedRecording,
             usedSharePlay: usedSharePlay,
+            usedEmissive: usedEmissive,
+            usedGradientColoring: usedGradientColoring,
+            usedAnimation: usedAnimation,
+            fractalTypeDistribution: fractalTypeDist,
+            gradientPresetDistribution: gradientPresetDist,
+            lightingPresetDistribution: lightingPresetDist,
+            avgBloomStrength: bloomStrengthAccum / durationF,
+            avgFogIntensity: fogIntensityAccum / durationF,
+            avgEmissiveIntensity: emissiveIntensityAccum / durationF,
             presetsLoaded: presetsLoaded,
             presetsSaved: presetsSaved,
             favoritePresetNames: Array(topPresets),
@@ -488,12 +595,32 @@ class UsageAnalytics: ObservableObject {
         record["avgColorMix"] = snapshot.avgColorMix as NSNumber
         record["avgGlowIntensity"] = snapshot.avgGlowIntensity as NSNumber
         record["avgSafetyBubbleRadius"] = snapshot.avgSafetyBubbleRadius as NSNumber
+        record["avgBloomStrength"] = snapshot.avgBloomStrength as NSNumber
+        record["avgFogIntensity"] = snapshot.avgFogIntensity as NSNumber
+        record["avgEmissiveIntensity"] = snapshot.avgEmissiveIntensity as NSNumber
         
         // Feature flags
         record["usedAudioReactive"] = snapshot.usedAudioReactive ? 1 : 0
         record["usedHandGestures"] = snapshot.usedHandGestures ? 1 : 0
         record["usedRecording"] = snapshot.usedRecording ? 1 : 0
         record["usedSharePlay"] = snapshot.usedSharePlay ? 1 : 0
+        record["usedEmissive"] = snapshot.usedEmissive ? 1 : 0
+        record["usedGradientColoring"] = snapshot.usedGradientColoring ? 1 : 0
+        record["usedAnimation"] = snapshot.usedAnimation ? 1 : 0
+        
+        // Distributions (encoded as JSON strings)
+        if let fractalTypeData = try? JSONEncoder().encode(snapshot.fractalTypeDistribution),
+           let fractalTypeString = String(data: fractalTypeData, encoding: .utf8) {
+            record["fractalTypeDistribution"] = fractalTypeString
+        }
+        if let gradientData = try? JSONEncoder().encode(snapshot.gradientPresetDistribution),
+           let gradientString = String(data: gradientData, encoding: .utf8) {
+            record["gradientPresetDistribution"] = gradientString
+        }
+        if let lightingData = try? JSONEncoder().encode(snapshot.lightingPresetDistribution),
+           let lightingString = String(data: lightingData, encoding: .utf8) {
+            record["lightingPresetDistribution"] = lightingString
+        }
         
         // Presets
         record["presetsLoaded"] = snapshot.presetsLoaded as NSNumber
@@ -571,6 +698,9 @@ class UsageAnalytics: ObservableObject {
         totalSessionTime = 0
         qualityTimeAccum = [:]
         colorSchemeTimeAccum = [:]
+        fractalTypeTimeAccum = [:]
+        gradientPresetTimeAccum = [:]
+        lightingPresetTimeAccum = [:]
         fractalScaleAccum = 0
         foldingLimitAccum = 0
         sphereRadiusAccum = 0
@@ -578,6 +708,9 @@ class UsageAnalytics: ObservableObject {
         colorMixAccum = 0
         glowIntensityAccum = 0
         safetyBubbleRadiusAccum = 0
+        bloomStrengthAccum = 0
+        fogIntensityAccum = 0
+        emissiveIntensityAccum = 0
         fpsAccum = 0
         renderQualityAccum = 0
         sampleCount = 0
@@ -585,6 +718,9 @@ class UsageAnalytics: ObservableObject {
         usedHandGestures = false
         usedRecording = false
         usedSharePlay = false
+        usedEmissive = false
+        usedGradientColoring = false
+        usedAnimation = false
         presetsLoaded = 0
         presetsSaved = 0
         presetLoadCounts = [:]

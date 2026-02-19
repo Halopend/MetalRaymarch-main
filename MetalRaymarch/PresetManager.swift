@@ -60,6 +60,10 @@ struct FractalPreset: Codable, Identifiable {
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
     
+    // === GRADIENT COLORING SYSTEM (v2.1) ===
+    var gradientState: GradientState?
+    var lightingSoftness: Float?
+    
     // === EMISSIVE SETTINGS (new in v1.1) ===
     var emissiveEnabled: Bool?
     var emissivePattern: Int?
@@ -78,6 +82,8 @@ struct FractalPreset: Codable, Identifiable {
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
         case emissiveEnabled, emissivePattern, emissiveIntensity, emissiveThreshold, emissiveColor, emissiveSpeed
+        // v2.1 gradient coloring system
+        case gradientState, lightingSoftness
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -159,6 +165,10 @@ struct FractalPreset: Codable, Identifiable {
         emissiveThreshold = try container.decodeIfPresent(Float.self, forKey: .emissiveThreshold)
         emissiveColor = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .emissiveColor)
         emissiveSpeed = try container.decodeIfPresent(Float.self, forKey: .emissiveSpeed)
+        
+        // v2.1 gradient coloring system
+        gradientState = try container.decodeIfPresent(GradientState.self, forKey: .gradientState)
+        lightingSoftness = try container.decodeIfPresent(Float.self, forKey: .lightingSoftness)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -209,6 +219,10 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(emissiveThreshold, forKey: .emissiveThreshold)
         try container.encodeIfPresent(emissiveColor, forKey: .emissiveColor)
         try container.encodeIfPresent(emissiveSpeed, forKey: .emissiveSpeed)
+        
+        // v2.1 gradient coloring system
+        try container.encodeIfPresent(gradientState, forKey: .gradientState)
+        try container.encodeIfPresent(lightingSoftness, forKey: .lightingSoftness)
     }
     
     // MARK: - Function Constant Derivation
@@ -318,6 +332,10 @@ struct FractalPreset: Codable, Identifiable {
         preset.emissiveColor = settings.emissiveColor
         preset.emissiveSpeed = settings.emissiveSpeed
         
+        // v2.1 gradient coloring system
+        preset.gradientState = settings.gradientState
+        preset.lightingSoftness = settings.lightingSoftness
+        
         return preset
     }
     
@@ -414,6 +432,14 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let emissiveSpeed = emissiveSpeed {
             settings.emissiveSpeed = emissiveSpeed
+        }
+        
+        // v2.1 gradient coloring system
+        if let gradientState = gradientState {
+            settings.gradientState = gradientState
+        }
+        if let lightingSoftness = lightingSoftness {
+            settings.lightingSoftness = lightingSoftness
         }
         
         // Log preset load for debugging
@@ -678,6 +704,10 @@ class PresetManager {
         preset.emissiveThreshold = settings.emissiveThreshold
         preset.emissiveColor = settings.emissiveColor
         preset.emissiveSpeed = settings.emissiveSpeed
+        
+        // v2.1 gradient coloring system
+        preset.gradientState = settings.gradientState
+        preset.lightingSoftness = settings.lightingSoftness
         
         return preset
     }
