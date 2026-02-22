@@ -506,7 +506,7 @@ struct SceneEditorView: View {
                     }
                 }
             } footer: {
-                Text("Keyframes capture shape, position & quality only. Colors and effects stay as currently set — save a Preset to remember everything.")
+                Text("Keyframes capture shape, position, quality, and color scheme. Other effects stay as currently set — save a Preset to remember everything.")
             }
         }
         .listStyle(.plain)

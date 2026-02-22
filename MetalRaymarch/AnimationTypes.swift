@@ -183,7 +183,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.positionY = settings.position.y
         self.positionZ = settings.position.z
         
-        self.colorScheme = nil
+        self.colorScheme = Int(settings.colorScheme.rawValue)
     }
     
     /// Create with explicit values

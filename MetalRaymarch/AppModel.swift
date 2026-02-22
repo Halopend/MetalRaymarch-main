@@ -1205,10 +1205,11 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _colorScheme } }
         set { 
             withLock { 
-                if _colorScheme != newValue {
+                if _targetColorScheme != newValue {
                     _targetColorScheme = newValue
                     _colorSchemeTransitionProgress = 0.0
                 }
+                syncGradientPresetForColorSchemeLocked(newValue)
             } 
         }
     }
@@ -1570,9 +1571,19 @@ final class RenderSettings: @unchecked Sendable {
                         _colorScheme = _targetColorScheme
                         _targetColorScheme = nextScheme
                         _colorSchemeTransitionProgress = 0.0
+                        syncGradientPresetForColorSchemeLocked(nextScheme)
                     }
                 }
             }
+        }
+    }
+
+    @inline(__always)
+    private func syncGradientPresetForColorSchemeLocked(_ scheme: ColorScheme) {
+        guard let preset = GradientPreset.fromColorScheme(scheme) else { return }
+        if _gradientState.gradientPreset != preset || !_gradientState.useGradientColoring {
+            _gradientState.applyPreset(preset)
+            _gradientState.useGradientColoring = true
         }
     }
     
@@ -1730,6 +1741,7 @@ final class RenderSettings: @unchecked Sendable {
                 _targetColorScheme = scheme
                 _colorSchemeTransitionProgress = 0.0
             }
+            syncGradientPresetForColorSchemeLocked(scheme)
         }
     }
     
@@ -1744,6 +1756,7 @@ final class RenderSettings: @unchecked Sendable {
             _colorScheme = _targetColorScheme
             _targetColorScheme = nextScheme
             _colorSchemeTransitionProgress = 0.0
+            syncGradientPresetForColorSchemeLocked(nextScheme)
         }
     }
     

@@ -479,6 +479,12 @@ final class AnimationManager {
         settings.baseFractalIterations = keyframe.baseFractalIterations
         settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
         settings.position = keyframe.position
+
+        // Apply optional color scheme from keyframe (also syncs gradient preset)
+        if let rawScheme = keyframe.colorScheme,
+           let scheme = ColorScheme(rawValue: Int32(rawScheme)) {
+            settings.transitionToColorScheme(scheme)
+        }
         
         // Also set TARGETS so they're in sync when animation stops
         // This allows hand gestures to blend in naturally

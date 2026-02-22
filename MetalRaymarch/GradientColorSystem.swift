@@ -209,6 +209,23 @@ enum GradientPreset: String, CaseIterable, Codable {
         case .twilight:   return "moon.stars"
         }
     }
+
+    /// Map legacy ColorScheme values to their equivalent gradient preset.
+    static func fromColorScheme(_ scheme: ColorScheme) -> GradientPreset? {
+        switch scheme {
+        case .classic: return .classic
+        case .ocean: return .ocean
+        case .fire: return .fire
+        case .forest: return .forest
+        case .nebula: return .nebula
+        case .mono: return .mono
+        case .aurora: return .aurora
+        case .volcanic: return .volcanic
+        case .neonCyber: return .neonCyber
+        case .neonSunset: return .neonSunset
+        case .neonMatrix: return .neonMatrix
+        }
+    }
     
     /// Whether this preset should enable neon mode in the shader
     var isNeonMode: Bool {
