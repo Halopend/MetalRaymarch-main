@@ -941,7 +941,7 @@ extension PresetManager {
         preset.colorMix = 0.45099074
         preset.scale = 1.0
         preset.position = SIMD3<Float>(0.09840668, 1.4379398, -3.6177335)
-        preset.safetyBubbleEnabled = true
+        preset.safetyBubbleEnabled = false
         preset.safetyBubbleRadius = 1.8
         // v2.0 modular lighting effects
         preset.lightingMode = .staticLight
@@ -982,7 +982,7 @@ extension PresetManager {
         preset.colorMix = 0.61749166
         preset.scale = 1.0
         preset.position = SIMD3<Float>(0.10157842, 1.3497616, -3.3686383)
-        preset.safetyBubbleEnabled = true
+        preset.safetyBubbleEnabled = false
         preset.safetyBubbleRadius = 1.8
         // v2.0 modular lighting effects
         preset.lightingMode = .staticLight

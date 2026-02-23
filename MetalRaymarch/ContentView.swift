@@ -126,6 +126,15 @@ final class UISettingsCache {
     var lightingMode: LightingMode = .animated
     var lightingSoftness: Float = 0.0
     
+    // === MUSIC / VISUALIZER ===
+    var visualizerMode: VisualizerMode = .off
+    var visualizerIntensity: Float = 0.5
+    var audioSource: AudioSource = .both
+    var bassSensitivity: Float = 1.0
+    var midSensitivity: Float = 1.0
+    var trebleSensitivity: Float = 1.0
+    var beatSensitivity: Float = 1.0
+    
     // Safety & display
     var showHUD: Bool = true
     var safetyBubbleEnabled: Bool = false
@@ -134,6 +143,21 @@ final class UISettingsCache {
     var useRelativeGestures: Bool = true
     var extendedGestureRange: Bool = true
     var gestureSensitivity: Float = 3.0
+    var menuToggleGestureEnabled: Bool = true
+    var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
+    var menuToggleHoldDuration: Float = 0.06
+    var menuToggleCooldown: Float = 0.35
+    var menuToggleActivateThreshold: Float = 0.48
+    var menuToggleReleaseThreshold: Float = 0.30
+    var twoHandPinchActivateThreshold: Float = 0.78
+    var twoHandPinchReleaseThreshold: Float = 0.56
+    var ringPinchActivateThreshold: Float = 0.46
+    var ringPinchReleaseThreshold: Float = 0.28
+    var gestureMinHandDistance: Float = 0.05
+    var gestureMaxHandDistance: Float = 0.60
+    var gestureMaxStartHandDistance: Float = 0.45
+    var gestureMaxActiveHandDistance: Float = 0.90
+    var translationSensitivity: Float = 1.0
     
     // Dynamic quality
     var dynamicRenderQualityEnabled: Bool = true
@@ -206,6 +230,13 @@ final class UISettingsCache {
         emissiveSpeed = settings.emissiveSpeed
         lightingMode = settings.lightingMode
         lightingSoftness = settings.lightingSoftness
+        visualizerMode = VisualizerMode(rawValue: settings.visualizerMode) ?? .off
+        visualizerIntensity = settings.visualizerIntensity
+        audioSource = AudioSource.fromInt32(settings.audioSource)
+        bassSensitivity = settings.bassSensitivity
+        midSensitivity = settings.midSensitivity
+        trebleSensitivity = settings.trebleSensitivity
+        beatSensitivity = settings.beatSensitivity
         showHUD = settings.showHUD
         safetyBubbleEnabled = settings.safetyBubbleEnabled
         safetyBubbleRadius = settings.safetyBubbleRadius
@@ -213,6 +244,21 @@ final class UISettingsCache {
         useRelativeGestures = settings.useRelativeGestures
         extendedGestureRange = settings.extendedGestureRange
         gestureSensitivity = settings.gestureSensitivity
+        menuToggleGestureEnabled = settings.menuToggleGestureEnabled
+        menuToggleGestureMode = settings.menuToggleGestureMode
+        menuToggleHoldDuration = settings.menuToggleHoldDuration
+        menuToggleCooldown = settings.menuToggleCooldown
+        menuToggleActivateThreshold = settings.menuToggleActivateThreshold
+        menuToggleReleaseThreshold = settings.menuToggleReleaseThreshold
+        twoHandPinchActivateThreshold = settings.twoHandPinchActivateThreshold
+        twoHandPinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
+        ringPinchActivateThreshold = settings.ringPinchActivateThreshold
+        ringPinchReleaseThreshold = settings.ringPinchReleaseThreshold
+        gestureMinHandDistance = settings.gestureMinHandDistance
+        gestureMaxHandDistance = settings.gestureMaxHandDistance
+        gestureMaxStartHandDistance = settings.gestureMaxStartHandDistance
+        gestureMaxActiveHandDistance = settings.gestureMaxActiveHandDistance
+        translationSensitivity = settings.translationSensitivity
         dynamicRenderQualityEnabled = settings.dynamicRenderQualityEnabled
         dynamicRenderQualityMin = settings.dynamicRenderQualityMin
         dynamicRenderQualityMax = settings.dynamicRenderQualityMax
@@ -278,6 +324,7 @@ enum SidebarTab: String, CaseIterable {
     case animate = "Animate"
     case coloring = "Coloring"
     case effects = "Effects"
+    case music = "Music"
     case settings = "Settings"
     
     var icon: String {
@@ -286,6 +333,7 @@ enum SidebarTab: String, CaseIterable {
         case .animate:  return "film.stack"
         case .coloring: return "paintpalette.fill"
         case .effects:  return "wand.and.stars"
+        case .music:    return "music.note"
         case .settings: return "gearshape.fill"
         }
     }
@@ -437,6 +485,7 @@ struct ContentView: View {
             case .animate:  animateTabContent
             case .coloring: coloringTabContent
             case .effects:  effectsTabContent
+            case .music:    MusicTabContent(cache: cache)
             case .settings: settingsTabContent
             }
         }
@@ -1243,20 +1292,148 @@ struct ContentView: View {
                     Label("Gesture Controls", systemImage: "hand.draw").font(.headline)
                     Spacer()
                 }
-                Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
-                    .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
-                Toggle("Extended Range", isOn: $cache.extendedGestureRange)
-                    .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+                Toggle("Enable Hand Gesture Controls", isOn: Binding(
+                    get: { appModel.handTrackingEnabled },
+                    set: { appModel.handTrackingEnabled = $0 }
+                ))
 
-                EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Sensitivity",
-                    value: $cache.gestureSensitivity, range: 1...5,
-                    enabled: .constant(true),
-                    onChanged: { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) },
-                    showToggle: false)
+                Group {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Core Behavior", systemImage: "slider.horizontal.3")
+                            .font(.subheadline.weight(.semibold))
 
-                Text("Adjust how hand movements map to fractal parameter changes.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
+                        .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
+                    Toggle("Extended Range", isOn: $cache.extendedGestureRange)
+                        .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+
+                    EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Global Sensitivity",
+                        value: $cache.gestureSensitivity, range: 1...10,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",
+                        value: $cache.translationSensitivity, range: 0.2...3.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.translationSensitivity, value: cache.translationSensitivity) },
+                        showToggle: false)
+                    }
+
+                    Divider().padding(.vertical, 2)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Menu Toggle", systemImage: "menucard")
+                            .font(.subheadline.weight(.semibold))
+
+                    Toggle("Menu Toggle Gesture", isOn: $cache.menuToggleGestureEnabled)
+                        .onChange(of: cache.menuToggleGestureEnabled) { _, v in
+                            cache.push(\.menuToggleGestureEnabled, value: v)
+                        }
+
+                    HStack {
+                        Label("Menu Gesture", systemImage: cache.menuToggleGestureMode.icon)
+                            .font(.subheadline)
+                        Spacer()
+                        Picker("Menu Gesture", selection: $cache.menuToggleGestureMode) {
+                            ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 220)
+                        .disabled(!cache.menuToggleGestureEnabled)
+                        .onChange(of: cache.menuToggleGestureMode) { _, v in
+                            cache.push(\.menuToggleGestureMode, value: v)
+                        }
+                    }
+
+                    EffectSliderRow(icon: "hand.tap", label: "Hold Time",
+                        value: $cache.menuToggleHoldDuration, range: 0.05...0.6,
+                        enabled: .constant(cache.menuToggleGestureEnabled),
+                        onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.menuToggleHoldDuration) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "timer", label: "Cooldown",
+                        value: $cache.menuToggleCooldown, range: 0.1...2.5,
+                        enabled: .constant(cache.menuToggleGestureEnabled),
+                        onChanged: { cache.push(\.menuToggleCooldown, value: cache.menuToggleCooldown) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "bolt.horizontal", label: "Activate Threshold",
+                        value: $cache.menuToggleActivateThreshold, range: 0.2...0.95,
+                        enabled: .constant(cache.menuToggleGestureEnabled),
+                        onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.menuToggleActivateThreshold) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "arrow.down.to.line", label: "Release Threshold",
+                        value: $cache.menuToggleReleaseThreshold, range: 0.1...0.9,
+                        enabled: .constant(cache.menuToggleGestureEnabled),
+                        onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.menuToggleReleaseThreshold) },
+                        showToggle: false)
+                    }
+
+                    Divider().padding(.vertical, 2)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Two-Hand Gesture Tuning", systemImage: "hands.sparkles")
+                            .font(.subheadline.weight(.semibold))
+
+                    EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Hand Distance",
+                        value: $cache.gestureMinHandDistance, range: 0.02...0.25,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gestureMinHandDistance) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "arrow.left.and.right", label: "Max Hand Distance",
+                        value: $cache.gestureMaxHandDistance, range: 0.2...1.2,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gestureMaxHandDistance) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "play.circle", label: "Start Distance Guard",
+                        value: $cache.gestureMaxStartHandDistance, range: 0.08...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gestureMaxStartHandDistance) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "checkmark.circle", label: "Active Distance Guard",
+                        value: $cache.gestureMaxActiveHandDistance, range: 0.1...1.5,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gestureMaxActiveHandDistance) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "hand.draw", label: "Pinch Activate",
+                        value: $cache.twoHandPinchActivateThreshold, range: 0.2...0.98,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.twoHandPinchActivateThreshold) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "hand.raised", label: "Pinch Release",
+                        value: $cache.twoHandPinchReleaseThreshold, range: 0.1...0.95,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.twoHandPinchReleaseThreshold) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "hand.point.up.left", label: "Ring Activate",
+                        value: $cache.ringPinchActivateThreshold, range: 0.1...0.95,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.ringPinchActivateThreshold) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "hand.point.up.braille", label: "Ring Release",
+                        value: $cache.ringPinchReleaseThreshold, range: 0.05...0.9,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.ringPinchReleaseThreshold) },
+                        showToggle: false)
+                    }
+
+                    Text("Gesture Lab: tune menu triggering, pinch hysteresis, and hand-distance mapping for your hands and room setup.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .disabled(!appModel.handTrackingEnabled)
+                .opacity(appModel.handTrackingEnabled ? 1.0 : 0.6)
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))

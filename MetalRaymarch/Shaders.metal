@@ -119,6 +119,9 @@ constant bool FC_SHARE_SHADOWS [[function_constant(10)]];
 // Shadow enable toggle - eliminates entire shadow computation when disabled
 constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
 
+// Visualizer overlay toggle - enables audio-reactive visual overlay
+constant bool FC_VISUALIZER_ENABLED [[function_constant(12)]];
+
 typedef struct
 {
     float3 position [[attribute(VertexAttributePosition)]];
@@ -212,6 +215,19 @@ constant half3 kGlowColor = half3(0.02h, 0.04h, 0.1h);
 // =============================================================================
 // SHARED HELPER FUNCTIONS - Eliminate duplicate code across shaders
 // =============================================================================
+
+// Forward declaration (definition is below, near shared fragment body)
+FORCE_INLINE half3 computeVisualizerOverlay(
+    half3 col,
+    float2 uv,
+    float time,
+    float bassLevel,
+    float midLevel,
+    float trebleLevel,
+    float beatIntensity,
+    int visualizerMode,
+    float visualizerIntensity
+);
 
 // Spotlight direction and attenuation calculation
 // Returns: .xyz = normalized direction to light, .w = attenuation factor
@@ -2028,6 +2044,21 @@ kernel void adaptiveHierarchical8x8(
     half2 texCoord = half2(pixelCenter / uniforms.resolution);
     col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash), glowH);
     
+    // === AUDIO VISUALIZER OVERLAY (compute path) ===
+    if (uniforms.visualizerMode > 0 && uniforms.visualizerIntensity > 0.01) {
+        col = computeVisualizerOverlay(
+            col,
+            float2(texCoord),
+            uniforms.time,
+            uniforms.bassLevel,
+            uniforms.midLevel,
+            uniforms.trebleLevel,
+            uniforms.beatIntensity,
+            uniforms.visualizerMode,
+            uniforms.visualizerIntensity
+        );
+    }
+    
     // Debug visualization
     // Use function constant to compile out debug code in release builds
     const bool debugHierarchical = is_function_constant_defined(FC_DEBUG_HIERARCHICAL) ? FC_DEBUG_HIERARCHICAL : (uniforms.debugHierarchical == 1);
@@ -2042,6 +2073,94 @@ kernel void adaptiveHierarchical8x8(
 }
 
 // Shared fragment body for Mandelbox rendering
+//
+// === AUDIO VISUALIZER OVERLAY ===
+// Composites audio-reactive effects on top of the fractal render.
+// Modes: 1=pulse (radial shockwaves), 2=waveform (frequency ribbon), 3=spectrum (band-colored halos)
+//
+FORCE_INLINE half3 computeVisualizerOverlay(
+    half3 col,
+    float2 uv,           // Normalized screen coordinates (0-1)
+    float time,
+    float bassLevel,
+    float midLevel,
+    float trebleLevel,
+    float beatIntensity,
+    int visualizerMode,
+    float visualizerIntensity
+) {
+    if (visualizerMode == 0 || visualizerIntensity < 0.01) return col;
+    
+    float2 centered = uv * 2.0 - 1.0;       // -1 to 1
+    float dist = length(centered);
+    float angle = atan2(centered.y, centered.x);
+    half intensity = half(visualizerIntensity);
+    
+    if (visualizerMode == 1) {
+        // === PULSE MODE: Radial shockwave rings emanating on beats ===
+        float ringSpeed = 3.0;
+        float ringWidth = 0.08 + beatIntensity * 0.12;
+        
+        // Multiple rings at different phases
+        for (int i = 0; i < 3; i++) {
+            float phase = float(i) * 0.33;
+            float ringPos = fract(time * ringSpeed * 0.3 + phase) * 2.0;
+            float ringDist = abs(dist - ringPos);
+            float ring = smoothstep(ringWidth, 0.0, ringDist);
+            
+            // Color each ring by frequency band
+            half3 ringColor;
+            if (i == 0) ringColor = half3(1.0h, 0.2h, 0.1h) * half(bassLevel);      // Bass = red
+            else if (i == 1) ringColor = half3(0.1h, 1.0h, 0.3h) * half(midLevel);   // Mid = green
+            else ringColor = half3(0.2h, 0.3h, 1.0h) * half(trebleLevel);             // Treble = blue
+            
+            col += ringColor * half(ring) * intensity * (0.3h + half(beatIntensity) * 0.7h);
+        }
+    }
+    else if (visualizerMode == 2) {
+        // === WAVEFORM MODE: Audio-frequency ribbon woven through fractal ===
+        float waveY = centered.y;
+        float waveAmp = bassLevel * 0.3 + midLevel * 0.2;
+        float waveFreq = 4.0 + trebleLevel * 8.0;
+        float wave = sin(centered.x * waveFreq + time * 2.0) * waveAmp;
+        float waveDist = abs(waveY - wave);
+        float ribbon = smoothstep(0.05 + beatIntensity * 0.03, 0.0, waveDist);
+        
+        half hue = half(fract(time * 0.1 + centered.x * 0.5));
+        // Simple HSV-like to RGB
+        half3 waveColor = half3(
+            abs(hue * 6.0h - 3.0h) - 1.0h,
+            2.0h - abs(hue * 6.0h - 2.0h),
+            2.0h - abs(hue * 6.0h - 4.0h)
+        );
+        waveColor = saturate(waveColor);
+        
+        col += waveColor * half(ribbon) * intensity * (0.5h + half(bassLevel) * 0.5h);
+    }
+    else if (visualizerMode == 3) {
+        // === SPECTRUM MODE: Frequency-band colored halos around fractal ===
+        // Concentric zones colored by frequency band
+        half bassGlow = half(smoothstep(0.8, 0.2, dist) * bassLevel);
+        half midGlow = half(smoothstep(0.6, 0.1, dist) * smoothstep(0.0, 0.3, dist) * midLevel);
+        half trebleGlow = half(smoothstep(0.4, 0.0, dist) * smoothstep(0.0, 0.15, dist) * trebleLevel);
+        
+        // Angular variation for visual interest
+        float angularVar = sin(angle * 6.0 + time * 1.5) * 0.5 + 0.5;
+        
+        half3 spectrumColor = half3(0.0h);
+        spectrumColor += half3(0.9h, 0.1h, 0.15h) * bassGlow;                              // Red bass
+        spectrumColor += half3(0.1h, 0.9h, 0.2h) * midGlow * half(angularVar);             // Green mids
+        spectrumColor += half3(0.15h, 0.2h, 0.95h) * trebleGlow;                            // Blue treble
+        
+        // Beat flash
+        spectrumColor *= (1.0h + half(beatIntensity) * 1.5h);
+        
+        col += spectrumColor * intensity * 0.4h;
+    }
+    
+    return col;
+}
+
 inline FragmentOutput fragmentMain(ColorInOut in,
                                    Uniforms uniforms,
                                    float2 fragCoord,
@@ -2199,6 +2318,22 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glow);
     } else {
         col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
+    }
+
+    // === AUDIO VISUALIZER OVERLAY ===
+    // Applies per-band audio-reactive effects when visualizer mode is active
+    if (uniforms.visualizerMode > 0 && uniforms.visualizerIntensity > 0.01) {
+        col = computeVisualizerOverlay(
+            col,
+            float2(in.texCoord),
+            uniforms.time,
+            uniforms.bassLevel,
+            uniforms.midLevel,
+            uniforms.trebleLevel,
+            uniforms.beatIntensity,
+            uniforms.visualizerMode,
+            uniforms.visualizerIntensity
+        );
     }
 
     // Render HUD overlay if enabled

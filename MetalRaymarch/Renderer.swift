@@ -1497,6 +1497,12 @@ actor Renderer {
         // GestureController writes to RenderSettings which is thread-safe
         if #available(visionOS 2.0, *) {
             Task { @MainActor in
+                guard appModel.handTrackingEnabled else {
+                    appModel.leftHandTracked = false
+                    appModel.rightHandTracked = false
+                    return
+                }
+
                 appModel.leftHandTracked = anchors.leftHand?.isTracked ?? false
                 appModel.rightHandTracked = anchors.rightHand?.isTracked ?? false
                 
@@ -1588,7 +1594,7 @@ actor Renderer {
     }
     
     /// Precompute lighting parameters on CPU (eliminates per-pixel CameraPath trig on GPU)
-    private static func makePrecomputedLighting(time: Float, lightingMode: LightingMode, audioLevel: Float) -> PrecomputedLighting {
+    private static func makePrecomputedLighting(time: Float, lightingMode: LightingMode, audioLevel: Float, bassLevel: Float = 0, midLevel: Float = 0, trebleLevel: Float = 0, beatIntensity: Float = 0) -> PrecomputedLighting {
         let gTime = time * 0.01 + 15.00
         
         let spotLightPosition: SIMD3<Float>
@@ -1599,15 +1605,28 @@ actor Renderer {
             spotLightPosition = SIMD3<Float>(2.0, 1.5, 2.0)
             lightIntensity = 1.0
         case .audioReactive:
+            // Enhanced: use per-band data for richer light animation
             let basePos = SIMD3<Float>(1.5, 1.0, 1.5)
-            let pulse = audioLevel * 2.0
+            let bassAmplitude = max(audioLevel, bassLevel) * 2.0
+            let trebleSpeed = 2.0 + trebleLevel * 4.0  // Treble drives orbit speed
             let audioOffset = SIMD3<Float>(
-                sin(gTime * 2.0) * pulse,
-                audioLevel * 1.5,
-                cos(gTime * 2.0) * pulse
+                sin(gTime * trebleSpeed) * bassAmplitude,
+                midLevel * 2.0,  // Mids drive vertical
+                cos(gTime * trebleSpeed) * bassAmplitude
             )
             spotLightPosition = basePos + audioOffset
-            lightIntensity = 0.5 + audioLevel * 1.5
+            lightIntensity = 0.5 + audioLevel * 1.0 + bassLevel * 0.5
+        case .visualizer:
+            // Dramatic: position jumps on beats, wide orbits, intensity pulses with bass
+            let beatJump = beatIntensity * 3.0
+            let orbitSpeed = 1.5 + midLevel * 3.0
+            let basePos = SIMD3<Float>(
+                sin(gTime * orbitSpeed) * (2.0 + bassLevel * 2.0) + beatJump * sin(gTime * 8.0),
+                1.0 + trebleLevel * 2.0 + beatIntensity * 1.5,
+                cos(gTime * orbitSpeed) * (2.0 + bassLevel * 2.0) + beatJump * cos(gTime * 8.0)
+            )
+            spotLightPosition = basePos
+            lightIntensity = 0.3 + bassLevel * 1.5 + beatIntensity * 0.5
         case .animated:
             let pathT = gTime + 0.03
             let path = SIMD3<Float>(
@@ -1673,7 +1692,11 @@ actor Renderer {
         let precomputedLighting = Self.makePrecomputedLighting(
             time: frameTime,
             lightingMode: settingsSnapshot.lightingMode,
-            audioLevel: settingsSnapshot.audioLevel
+            audioLevel: settingsSnapshot.audioLevel,
+            bassLevel: settingsSnapshot.bassLevel,
+            midLevel: settingsSnapshot.midLevel,
+            trebleLevel: settingsSnapshot.trebleLevel,
+            beatIntensity: settingsSnapshot.beatIntensity
         )
         
         // Hoist lightingWave out of per-eye loop — sin() is identical for both eyes
@@ -1729,6 +1752,12 @@ actor Renderer {
                             fractalType: settingsSnapshot.fractalType.rawValue,
                             lightingMode: settingsSnapshot.lightingMode.rawValue,
                             audioLevel: settingsSnapshot.audioLevel,
+                            bassLevel: settingsSnapshot.bassLevel,
+                            midLevel: settingsSnapshot.midLevel,
+                            trebleLevel: settingsSnapshot.trebleLevel,
+                            beatIntensity: settingsSnapshot.beatIntensity,
+                            visualizerMode: settingsSnapshot.visualizerMode,
+                            visualizerIntensity: settingsSnapshot.visualizerIntensity,
                             emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
                             emissivePattern: Int32(settingsSnapshot.emissivePattern),
                             emissiveIntensity: settingsSnapshot.emissiveIntensity,
@@ -1879,9 +1908,51 @@ actor Renderer {
         settings.interpolateToTargets(deltaTime: cachedDeltaTime)
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
-        if settings.lightingMode == .audioReactive && appModel.audioAnalyzer.isCapturing {
-            let combinedLevel = appModel.audioAnalyzer.level * 0.6 + appModel.audioAnalyzer.bassLevel * 0.4
-            settings.audioLevel = combinedLevel
+        
+        // === EXPANDED AUDIO PIPELINE ===
+        // Blends mic FFT (real-time) and Spotify beat sync (musical structure)
+        // based on the user-selected audio source and per-band sensitivity.
+        let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer
+        if isAudioMode {
+            let mic = appModel.audioAnalyzer
+            let spotifyManager = appModel.spotifyManager
+            let audioSource = settings.audioSource  // 0=micOnly, 1=spotifyOnly, 2=both
+            let micActive = mic.isCapturing && (audioSource == 0 || audioSource == 2)
+            let spotifyActive = spotifyManager.beatSyncActive && (audioSource == 1 || audioSource == 2)
+            
+            // Sensitivity multipliers from user settings
+            let bassSens = settings.bassSensitivity
+            let midSens = settings.midSensitivity
+            let trebleSens = settings.trebleSensitivity
+            let beatSens = settings.beatSensitivity
+            
+            // Update Spotify beat sync interpolation each frame
+            Task { @MainActor in
+                self.appModel.spotifyManager.updateFrame()
+            }
+            
+            if micActive && spotifyActive {
+                // Both sources: mic provides real-time FFT, Spotify adds beat structure
+                settings.bassLevel = min(1.0, (mic.bassLevel * 0.6 + spotifyManager.bassLevel * 0.4) * bassSens)
+                settings.midLevel = min(1.0, (mic.midLevel * 0.6 + spotifyManager.midLevel * 0.4) * midSens)
+                settings.trebleLevel = min(1.0, (mic.trebleLevel * 0.6 + spotifyManager.trebleLevel * 0.4) * trebleSens)
+                settings.beatIntensity = min(1.0, max(spotifyManager.beatIntensity, mic.peakLevel * 0.5) * beatSens)
+                settings.audioLevel = mic.level * 0.5 + spotifyManager.overallLevel * 0.5
+            } else if micActive {
+                // Mic only: full FFT bands
+                settings.bassLevel = min(1.0, mic.bassLevel * bassSens)
+                settings.midLevel = min(1.0, mic.midLevel * midSens)
+                settings.trebleLevel = min(1.0, mic.trebleLevel * trebleSens)
+                settings.beatIntensity = min(1.0, mic.peakLevel * 0.7 * beatSens)
+                settings.audioLevel = mic.level * 0.6 + mic.bassLevel * 0.4
+            } else if spotifyActive {
+                // Spotify only: API-analyzed features
+                settings.bassLevel = min(1.0, spotifyManager.bassLevel * bassSens)
+                settings.midLevel = min(1.0, spotifyManager.midLevel * midSens)
+                settings.trebleLevel = min(1.0, spotifyManager.trebleLevel * trebleSens)
+                settings.beatIntensity = min(1.0, spotifyManager.beatIntensity * beatSens)
+                settings.audioLevel = spotifyManager.overallLevel
+            }
         }
         let settingsSnapshot = settings.snapshot()
         
@@ -2329,6 +2400,12 @@ actor Renderer {
             fractalType: settingsSnapshot.fractalType.rawValue,
             lightingMode: settingsSnapshot.lightingMode.rawValue,
             audioLevel: settingsSnapshot.audioLevel,
+            bassLevel: settingsSnapshot.bassLevel,
+            midLevel: settingsSnapshot.midLevel,
+            trebleLevel: settingsSnapshot.trebleLevel,
+            beatIntensity: settingsSnapshot.beatIntensity,
+            visualizerMode: settingsSnapshot.visualizerMode,
+            visualizerIntensity: settingsSnapshot.visualizerIntensity,
             emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
             emissivePattern: Int32(settingsSnapshot.emissivePattern),
             emissiveIntensity: settingsSnapshot.emissiveIntensity,

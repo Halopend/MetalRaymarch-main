@@ -68,6 +68,12 @@ struct MetalProjectTestApp: App {
                         dismissWindow(id: appModel.menuWindowID)
                     }
                 }
+                .onOpenURL { url in
+                    // Handle Spotify OAuth callback
+                    Task {
+                        await appModel.spotifyManager.handleCallback(url)
+                    }
+                }
         }
         .defaultSize(width: 1050, height: 600)
         .windowStyle(.plain)

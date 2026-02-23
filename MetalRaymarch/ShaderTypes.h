@@ -51,6 +51,7 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexEmissiveEnabled     = 7,  // bool: Eliminates emissive code path when false
     FCIndexNeonModeEnabled     = 8,  // bool: Eliminates neon orbit tracking when false
     FCIndexColorIterations     = 9,  // int: Color iteration count (enables loop unrolling)
+    FCIndexVisualizerEnabled   = 12, // bool: Enables dedicated audio visualizer overlay
     FCIndexShadowsEnabled      = 11, // bool: Eliminates entire shadow code path when false
 };
 
@@ -207,8 +208,15 @@ typedef struct
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
     float gestureSpread;     // Normalized hand spread distance (0-1) for debug visualization
     int fractalType;         // 0=Mandelbox (only supported type)
-    int lightingMode;        // 0=static, 1=animated, 2=audio-reactive
+    int lightingMode;        // 0=static, 1=animated, 2=audio-reactive, 3=visualizer
     float audioLevel;        // Audio level for reactive lighting (0-1)
+    // === PER-BAND AUDIO (expanded for visualizer) ===
+    float bassLevel;         // Bass frequency energy (0-1)
+    float midLevel;          // Mid frequency energy (0-1)
+    float trebleLevel;       // Treble frequency energy (0-1)
+    float beatIntensity;     // Beat onset intensity (0-1, peaks on beats)
+    int visualizerMode;      // 0=off, 1=pulse, 2=waveform, 3=spectrum
+    float visualizerIntensity; // How much audio affects visuals (0-1)
     // Emissive glow parameters
     int emissiveEnabled;     // Enable emissive glow regions (0/1)
     int emissivePattern;     // Pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
@@ -263,8 +271,15 @@ typedef struct
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
     int fractalType;             // 0=Mandelbox (only supported type)
-    int lightingMode;            // 0=static, 1=animated, 2=audio-reactive
+    int lightingMode;            // 0=static, 1=animated, 2=audio-reactive, 3=visualizer
     float audioLevel;            // Audio level for reactive lighting (0-1)
+    // === PER-BAND AUDIO (expanded for visualizer) ===
+    float bassLevel;             // Bass frequency energy (0-1)
+    float midLevel;              // Mid frequency energy (0-1)
+    float trebleLevel;           // Treble frequency energy (0-1)
+    float beatIntensity;         // Beat onset intensity (0-1, peaks on beats)
+    int visualizerMode;          // 0=off, 1=pulse, 2=waveform, 3=spectrum
+    float visualizerIntensity;   // How much audio affects visuals (0-1)
     // Emissive glow parameters
     int emissiveEnabled;         // Enable emissive glow regions (0/1)
     int emissivePattern;         // Pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges

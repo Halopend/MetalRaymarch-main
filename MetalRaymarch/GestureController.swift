@@ -13,7 +13,7 @@
 //  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
 //    * Right hand index = translate position
 //  - LEFT HAND FIST: Start/stop parameter recording
-//  - RIGHT HAND MIDDLE FINGER TO PALM: Toggle menu visibility
+//  - RIGHT HAND MENU GESTURE (configurable): Toggle menu visibility
 //
 
 import Foundation
@@ -122,6 +122,21 @@ struct HandData {
         let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
         return simd_clamp(normalized, 0, 1)
     }
+
+    /// Check if ring finger is touching palm (secondary menu-toggle gesture option)
+    func ringFingerTouchingPalm() -> Float {
+        guard simd_length_squared(palmCenter) > 1e-6,
+              simd_length_squared(ringTip) > 1e-6 else { return 0 }
+
+        let distance = simd_length(ringTip - palmCenter)
+
+        // Ring finger sits slightly farther from palm center than middle finger.
+        let touchDist: Float = 0.045
+        let awayDist: Float = 0.11
+
+        let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
+        return simd_clamp(normalized, 0, 1)
+    }
     
     static var zero: HandData { HandData() }
 }
@@ -147,25 +162,9 @@ struct TwoHandGestureState {
 @MainActor
 final class GestureController {
     
-    // Pinch thresholds with hysteresis
-    private let pinchActivateThreshold: Float = 0.8   // Must exceed to start gesture
-    private let pinchReleaseThreshold: Float = 0.6    // Must fall below to end gesture
-    
-    // Ring finger needs lower thresholds (anatomically harder to pinch with thumb)
-    private let ringPinchActivateThreshold: Float = 0.50
-    private let ringPinchReleaseThreshold: Float = 0.30
-    
     // Smoothing speed for frame-rate independent animation (higher = faster convergence)
     // 12.0 = ~63% convergence in 83ms, feels responsive yet smooth
     private let valueSmoothingSpeed: Float = 12.0
-    
-    // Hand distance range for DIRECT MAPPING (in meters)
-    // Hands close together = min value, hands far apart = max value
-    private let minHandDistance: Float = 0.05  // 5cm
-    private let maxHandDistance: Float = 0.60  // 60cm
-    // Guardrails to prevent accidental activation when hands are wide apart
-    private let maxStartHandDistance: Float = 0.35  // Require hands within 35cm to start
-    private let maxActiveHandDistance: Float = 0.80 // Allow expansion up to 80cm
     
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES
@@ -228,9 +227,6 @@ final class GestureController {
         defaultFractalScale: 2.8
     )
     
-    // Single-hand drag sensitivity
-    private let translateSensitivity: Float = 1.0
-    
     /// When true, parameter-changing gestures (two-hand pinch, single-hand drag) are
     /// suppressed so that pinching to interact with the SwiftUI menu window does not
     /// also move through the fractal.  Menu toggle gesture is intentionally kept active.
@@ -255,12 +251,10 @@ final class GestureController {
     // Accumulated position from drag gestures (target position)
     private var accumulatedPosition: SIMD3<Float> = .zero
     
-    // === MENU TOGGLE GESTURE STATE (Right hand - middle finger to palm) ===
+    // === MENU TOGGLE GESTURE STATE (Right hand, configurable mode) ===
     private var menuToggleActive: Bool = false
+    private var menuToggleHoldTimer: Float = 0
     private var menuToggleCooldown: Float = 0  // Prevent rapid toggling
-    private let menuToggleActivateThreshold: Float = 0.5  // Lowered from 0.65 for easier activation
-    private let menuToggleReleaseThreshold: Float = 0.3    // Lowered from 0.4
-    private let menuToggleCooldownDuration: Float = 1.0  // 1 second cooldown
     
     // Gesture callbacks
     var onMenuToggle: (() -> Void)?
@@ -288,6 +282,8 @@ final class GestureController {
         pinkyGestureState = TwoHandGestureState()
         rightIndexDragActive = false
         menuToggleActive = false
+        menuToggleHoldTimer = 0
+        menuToggleCooldown = 0
         
         if HAND_TRACKING_DEBUG {
             print("🔄 GestureController synced with settings")
@@ -337,14 +333,14 @@ final class GestureController {
         
         // Update cooldown timer
         if menuToggleCooldown > 0 {
-            menuToggleCooldown -= deltaTime
+            menuToggleCooldown = max(0, menuToggleCooldown - deltaTime)
         }
         
         // Process all gesture mappings (sets targets on RenderSettings)
         processGestures()
         
         // Process special gestures
-        processMenuToggleGesture()
+        processMenuToggleGesture(deltaTime: deltaTime)
     }
     
     @available(visionOS 2.0, *)
@@ -419,45 +415,79 @@ final class GestureController {
     
     // MARK: - Special Gesture Processing
     
-    /// Process right hand middle finger to palm gesture for menu toggle
-    private func processMenuToggleGesture() {
+    private func menuToggleStrength(for mode: MenuToggleGestureMode) -> Float {
+        switch mode {
+        case .middleToPalm:
+            return rightHand.middleFingerTouchingPalm()
+        case .middleAndRingToPalm:
+            return min(rightHand.middleFingerTouchingPalm(), rightHand.ringFingerTouchingPalm())
+        case .fist:
+            return rightHand.fistStrength()
+        }
+    }
+
+    private func menuToggleThresholds(for mode: MenuToggleGestureMode, settings: RenderSettings) -> (activate: Float, release: Float) {
+        let baseActivate = settings.menuToggleActivateThreshold
+        let baseRelease = min(settings.menuToggleReleaseThreshold, baseActivate - 0.05)
+
+        switch mode {
+        case .middleToPalm:
+            return (activate: baseActivate + 0.02, release: baseRelease + 0.02)
+        case .middleAndRingToPalm:
+            return (activate: baseActivate, release: baseRelease)
+        case .fist:
+            return (activate: min(0.96, baseActivate + 0.18), release: min(0.92, baseRelease + 0.15))
+        }
+    }
+
+    /// Process right-hand menu toggle gesture with configurable mode and hold duration.
+    private func processMenuToggleGesture(deltaTime: Float) {
+        guard let settings = renderSettings else { return }
+
+        guard settings.menuToggleGestureEnabled else {
+            menuToggleActive = false
+            menuToggleHoldTimer = 0
+            return
+        }
+
         guard rightHand.isTracked else {
             if menuToggleActive {
                 menuToggleActive = false
                 if HAND_TRACKING_DEBUG { print("👆 Menu toggle: right hand tracking lost") }
             }
+            menuToggleHoldTimer = 0
             return
         }
-        
-        // Skip if on cooldown
-        guard menuToggleCooldown <= 0 else { return }
-        
-        let touchStrength = rightHand.middleFingerTouchingPalm()
-        
-        // Log touch strength for debugging
-        if HAND_TRACKING_DEBUG && touchStrength > 0.2 {
-            print("👆 Menu gesture - touchStrength: \(String(format: "%.2f", touchStrength)), threshold: \(menuToggleActivateThreshold), active: \(menuToggleActive), cooldown: \(String(format: "%.2f", menuToggleCooldown))")
+
+        let mode = settings.menuToggleGestureMode
+        let strength = menuToggleStrength(for: mode)
+        let thresholds = menuToggleThresholds(for: mode, settings: settings)
+
+        if HAND_TRACKING_DEBUG && strength > 0.2 {
+            print("👆 Menu gesture [\(mode)] strength: \(String(format: "%.2f", strength)), active: \(menuToggleActive), hold: \(String(format: "%.2f", menuToggleHoldTimer)), cooldown: \(String(format: "%.2f", menuToggleCooldown))")
         }
-        
-        // Check for touch with hysteresis
-        let shouldBeActive: Bool
-        if menuToggleActive {
-            shouldBeActive = touchStrength >= menuToggleReleaseThreshold
+
+        let shouldBeActive: Bool = menuToggleActive
+            ? (strength >= thresholds.release)
+            : (strength >= thresholds.activate)
+
+        if shouldBeActive {
+            if !menuToggleActive {
+                menuToggleHoldTimer += deltaTime
+                if menuToggleCooldown <= 0, menuToggleHoldTimer >= settings.menuToggleHoldDuration {
+                    menuToggleActive = true
+                    menuToggleHoldTimer = 0
+                    menuToggleCooldown = settings.menuToggleCooldown
+                    if HAND_TRACKING_DEBUG { print("👆 Menu toggle ACTIVATED - calling onMenuToggle callback") }
+                    onMenuToggle?()
+                }
+            }
         } else {
-            shouldBeActive = touchStrength >= menuToggleActivateThreshold
-        }
-        
-        // Gesture state changed
-        if shouldBeActive && !menuToggleActive {
-            // Touch just activated - trigger menu toggle
-            menuToggleActive = true
-            menuToggleCooldown = menuToggleCooldownDuration
-            if HAND_TRACKING_DEBUG { print("👆 Menu toggle ACTIVATED - calling onMenuToggle callback") }
-            onMenuToggle?()
-        } else if !shouldBeActive && menuToggleActive {
-            // Touch released
-            menuToggleActive = false
-            if HAND_TRACKING_DEBUG { print("👆 Menu toggle RELEASED") }
+            if menuToggleActive {
+                menuToggleActive = false
+                if HAND_TRACKING_DEBUG { print("👆 Menu toggle RELEASED") }
+            }
+            menuToggleHoldTimer = 0
         }
     }
     
@@ -562,6 +592,8 @@ final class GestureController {
             let leftPos = leftHand.pinchPosition(digit: activeDigit)
             let rightPos = rightHand.pinchPosition(digit: activeDigit)
             let currentDistance = simd_length(leftPos - rightPos)
+            let minHandDistance = settings.gestureMinHandDistance
+            let maxHandDistance = max(minHandDistance + 0.05, settings.gestureMaxHandDistance)
             // Normalize: minHandDistance (5cm) = 0, maxHandDistance (60cm) = 1
             let normalized = simd_clamp((currentDistance - minHandDistance) / (maxHandDistance - minHandDistance), 0.0, 1.0)
             settings.gestureSpread = normalized
@@ -594,8 +626,8 @@ final class GestureController {
         let rightPinch = rightHand.pinchStrength(digit: digit)
         
         // Use lower thresholds for ring finger (harder to pinch)
-        let activateThresh = (digit == 3 || digit == 4) ? ringPinchActivateThreshold : pinchActivateThreshold
-        let releaseThresh = (digit == 3 || digit == 4) ? ringPinchReleaseThreshold : pinchReleaseThreshold
+        let activateThresh = (digit == 3 || digit == 4) ? settings.ringPinchActivateThreshold : settings.twoHandPinchActivateThreshold
+        let releaseThresh = (digit == 3 || digit == 4) ? settings.ringPinchReleaseThreshold : settings.twoHandPinchReleaseThreshold
         
         // Measure hand separation (only meaningful if both tracked)
         let leftPos = leftHand.pinchPosition(digit: digit)
@@ -604,6 +636,11 @@ final class GestureController {
         // Guard against zero positions (tracking glitch)
         let leftPosValid = simd_length_squared(leftPos) > 1e-6
         let rightPosValid = simd_length_squared(rightPos) > 1e-6
+
+        let minHandDistance = settings.gestureMinHandDistance
+        let maxHandDistance = max(minHandDistance + 0.05, settings.gestureMaxHandDistance)
+        let maxStartHandDistance = settings.gestureMaxStartHandDistance
+        let maxActiveHandDistance = max(settings.gestureMaxActiveHandDistance, maxStartHandDistance)
         
         let currentDistance = simd_length(leftPos - rightPos)
 
@@ -665,7 +702,7 @@ final class GestureController {
                 let sensitivityMultiplier = baseSensitivityMultiplier * verticalScaleFactor
                 
                 let rangeSpan = range.upperBound - range.lowerBound
-                let distSpan = maxHandDistance - minHandDistance
+                let distSpan = max(maxHandDistance - minHandDistance, 0.001)
                 let sensitivity = (rangeSpan / distSpan) * sensitivityMultiplier
                 
                 let delta = currentDistance - state.startDistance
@@ -714,6 +751,8 @@ final class GestureController {
     /// Right-hand index pinch drag → position translate (XYZ)
     private func processRightIndexDrag() {
         guard let settings = renderSettings else { return }
+        let pinchActivateThreshold = settings.twoHandPinchActivateThreshold
+        let pinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
         
         // Only if NOT doing a two-hand gesture with index fingers
         guard !indexGestureState.isActive else {
@@ -798,7 +837,7 @@ final class GestureController {
             }
 
             // Apply translation (world space) to target
-            accumulatedPosition = accumulatedPosition + scaledDelta * translateSensitivity
+            accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition
             } else {
@@ -822,7 +861,7 @@ final class GestureController {
     /// Check if pinch is active with hysteresis
     /// OPTIMIZATION: Inlined for better branch prediction
     @inline(__always)
-    private func isPinchActive(value: Float, wasActive: Bool) -> Bool {
-        return wasActive ? value >= pinchReleaseThreshold : value >= pinchActivateThreshold
+    private func isPinchActive(value: Float, wasActive: Bool, activateThreshold: Float, releaseThreshold: Float) -> Bool {
+        return wasActive ? value >= releaseThreshold : value >= activateThreshold
     }
 }

@@ -32,6 +32,28 @@ enum FractalModelType: Int32, Codable, CaseIterable {
     }
 }
 
+enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
+    case middleToPalm = 0
+    case middleAndRingToPalm = 1
+    case fist = 2
+
+    var displayName: String {
+        switch self {
+        case .middleToPalm: return "Middle to Palm"
+        case .middleAndRingToPalm: return "Middle + Ring to Palm"
+        case .fist: return "Fist"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .middleToPalm: return "hand.point.up.left.fill"
+        case .middleAndRingToPalm: return "hand.raised.fingers.spread"
+        case .fist: return "hand.closed.fill"
+        }
+    }
+}
+
 /// Quality preset that bundles fractal iterations and ray steps.
 /// Reduced to 4 presets to minimize pipeline permutations (each preset compiles
 /// a specialized shader with baked loop counts).
@@ -109,8 +131,24 @@ class AppModel {
     // Audio analyzer for reactive lighting
     let audioAnalyzer = AudioAnalyzer()
     
+    // Spotify integration for music visualizer
+    let spotifyManager = SpotifyManager()
+    
     // Hand tracking state
-    var handTrackingEnabled: Bool = true
+    var handTrackingEnabled: Bool = {
+        let key = "handTrackingEnabled"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }() {
+        didSet {
+            UserDefaults.standard.set(handTrackingEnabled, forKey: "handTrackingEnabled")
+            if !handTrackingEnabled {
+                leftHandTracked = false
+                rightHandTracked = false
+                gestureController?.syncWithSettings()
+            }
+        }
+    }
     var leftHandTracked: Bool = false
     var rightHandTracked: Bool = false
     
@@ -281,12 +319,14 @@ enum LightingMode: Int32, CaseIterable, Codable {
     case staticLight = 0    // Lights stay fixed (no wobble, no animation)
     case animated = 1       // Original animated lighting (pulsing, moving spotlight)
     case audioReactive = 2  // Lights respond to audio/music input
+    case visualizer = 3     // Dedicated audio visualizer mode (dramatic, beat-synced)
     
     var displayName: String {
         switch self {
         case .staticLight: return "Static"
         case .animated: return "Animated"
         case .audioReactive: return "Audio Reactive"
+        case .visualizer: return "Visualizer"
         }
     }
 }
@@ -765,6 +805,17 @@ struct RenderSettingsSnapshot {
     let lightingPlay: Bool
     let lightingMode: LightingMode
     let audioLevel: Float
+    let bassLevel: Float
+    let midLevel: Float
+    let trebleLevel: Float
+    let beatIntensity: Float
+    let visualizerMode: Int32
+    let visualizerIntensity: Float
+    let audioSource: Int32
+    let bassSensitivity: Float
+    let midSensitivity: Float
+    let trebleSensitivity: Float
+    let beatSensitivity: Float
     let foldingLimit: Float
     let sphereRadius: Float
     let colorIterations: Float
@@ -840,6 +891,17 @@ final class RenderSettings: @unchecked Sendable {
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
+    private var _bassLevel: Float = 0.0             // Bass frequency energy (0-1)
+    private var _midLevel: Float = 0.0              // Mid frequency energy (0-1)
+    private var _trebleLevel: Float = 0.0           // Treble frequency energy (0-1)
+    private var _beatIntensity: Float = 0.0         // Beat onset intensity (0-1)
+    private var _visualizerMode: Int32 = 0          // 0=off, 1=pulse, 2=waveform, 3=spectrum
+    private var _visualizerIntensity: Float = 0.5   // How much audio affects visuals (0-1)
+    private var _audioSource: Int32 = 2              // 0=micOnly, 1=spotifyOnly, 2=both
+    private var _bassSensitivity: Float = 1.0        // Multiplier for bass band (0-2)
+    private var _midSensitivity: Float = 1.0         // Multiplier for mid band (0-2)
+    private var _trebleSensitivity: Float = 1.0      // Multiplier for treble band (0-2)
+    private var _beatSensitivity: Float = 1.0        // Multiplier for beat intensity (0-2)
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
@@ -861,6 +923,69 @@ final class RenderSettings: @unchecked Sendable {
     private var _gestureSensitivity: Float = {
         let stored = UserDefaults.standard.float(forKey: "gestureSensitivity")
         return stored > 0 ? stored : 3.0  // Default 3.0 if never saved
+    }()
+    private var _menuToggleGestureEnabled: Bool = {
+        let key = "menuToggleGestureEnabled"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _menuToggleGestureMode: MenuToggleGestureMode = {
+        let key = "menuToggleGestureMode"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return .middleAndRingToPalm }
+        let raw = UserDefaults.standard.integer(forKey: key)
+        return MenuToggleGestureMode(rawValue: Int32(raw)) ?? .middleAndRingToPalm
+    }()
+    private var _menuToggleHoldDuration: Float = {
+        let stored = UserDefaults.standard.float(forKey: "menuToggleHoldDuration")
+        return stored > 0 ? stored : 0.06
+    }()
+    private var _menuToggleCooldown: Float = {
+        let stored = UserDefaults.standard.float(forKey: "menuToggleCooldown")
+        return stored > 0 ? stored : 0.35
+    }()
+    private var _menuToggleActivateThreshold: Float = {
+        let stored = UserDefaults.standard.float(forKey: "menuToggleActivateThreshold")
+        return stored > 0 ? stored : 0.48
+    }()
+    private var _menuToggleReleaseThreshold: Float = {
+        let stored = UserDefaults.standard.float(forKey: "menuToggleReleaseThreshold")
+        return stored > 0 ? stored : 0.30
+    }()
+    private var _twoHandPinchActivateThreshold: Float = {
+        let stored = UserDefaults.standard.float(forKey: "twoHandPinchActivateThreshold")
+        return stored > 0 ? stored : 0.78
+    }()
+    private var _twoHandPinchReleaseThreshold: Float = {
+        let stored = UserDefaults.standard.float(forKey: "twoHandPinchReleaseThreshold")
+        return stored > 0 ? stored : 0.56
+    }()
+    private var _ringPinchActivateThreshold: Float = {
+        let stored = UserDefaults.standard.float(forKey: "ringPinchActivateThreshold")
+        return stored > 0 ? stored : 0.46
+    }()
+    private var _ringPinchReleaseThreshold: Float = {
+        let stored = UserDefaults.standard.float(forKey: "ringPinchReleaseThreshold")
+        return stored > 0 ? stored : 0.28
+    }()
+    private var _gestureMinHandDistance: Float = {
+        let stored = UserDefaults.standard.float(forKey: "gestureMinHandDistance")
+        return stored > 0 ? stored : 0.05
+    }()
+    private var _gestureMaxHandDistance: Float = {
+        let stored = UserDefaults.standard.float(forKey: "gestureMaxHandDistance")
+        return stored > 0 ? stored : 0.60
+    }()
+    private var _gestureMaxStartHandDistance: Float = {
+        let stored = UserDefaults.standard.float(forKey: "gestureMaxStartHandDistance")
+        return stored > 0 ? stored : 0.45
+    }()
+    private var _gestureMaxActiveHandDistance: Float = {
+        let stored = UserDefaults.standard.float(forKey: "gestureMaxActiveHandDistance")
+        return stored > 0 ? stored : 0.90
+    }()
+    private var _translationSensitivity: Float = {
+        let stored = UserDefaults.standard.float(forKey: "translationSensitivity")
+        return stored > 0 ? stored : 1.0
     }()
 
     // Safety bubble controls
@@ -1053,6 +1178,61 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _audioLevel = max(0.0, min(1.0, newValue)) } }
     }
     
+    var bassLevel: Float {
+        get { withLock { _bassLevel } }
+        set { withLock { _bassLevel = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    var midLevel: Float {
+        get { withLock { _midLevel } }
+        set { withLock { _midLevel = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    var trebleLevel: Float {
+        get { withLock { _trebleLevel } }
+        set { withLock { _trebleLevel = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    var beatIntensity: Float {
+        get { withLock { _beatIntensity } }
+        set { withLock { _beatIntensity = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    var visualizerMode: Int32 {
+        get { withLock { _visualizerMode } }
+        set { withLock { _visualizerMode = newValue } }
+    }
+    
+    var visualizerIntensity: Float {
+        get { withLock { _visualizerIntensity } }
+        set { withLock { _visualizerIntensity = max(0.0, min(1.0, newValue)) } }
+    }
+    
+    var audioSource: Int32 {
+        get { withLock { _audioSource } }
+        set { withLock { _audioSource = newValue } }
+    }
+    
+    var bassSensitivity: Float {
+        get { withLock { _bassSensitivity } }
+        set { withLock { _bassSensitivity = max(0.0, min(2.0, newValue)) } }
+    }
+    
+    var midSensitivity: Float {
+        get { withLock { _midSensitivity } }
+        set { withLock { _midSensitivity = max(0.0, min(2.0, newValue)) } }
+    }
+    
+    var trebleSensitivity: Float {
+        get { withLock { _trebleSensitivity } }
+        set { withLock { _trebleSensitivity = max(0.0, min(2.0, newValue)) } }
+    }
+    
+    var beatSensitivity: Float {
+        get { withLock { _beatSensitivity } }
+        set { withLock { _beatSensitivity = max(0.0, min(2.0, newValue)) } }
+    }
+    
     var foldingLimit: Float {
         get { withLock { _foldingLimit } }
         set { withLock { _foldingLimit = newValue } }
@@ -1161,6 +1341,143 @@ final class RenderSettings: @unchecked Sendable {
             let clamped = max(1.0, min(10.0, newValue))
             withLock { _gestureSensitivity = clamped }
             UserDefaults.standard.set(clamped, forKey: "gestureSensitivity")
+        }
+    }
+
+    /// Enable/disable the menu toggle gesture without disabling parameter gestures.
+    var menuToggleGestureEnabled: Bool {
+        get { withLock { _menuToggleGestureEnabled } }
+        set {
+            withLock { _menuToggleGestureEnabled = newValue }
+            UserDefaults.standard.set(newValue, forKey: "menuToggleGestureEnabled")
+        }
+    }
+
+    /// Which right-hand gesture toggles the floating menu window.
+    var menuToggleGestureMode: MenuToggleGestureMode {
+        get { withLock { _menuToggleGestureMode } }
+        set {
+            withLock { _menuToggleGestureMode = newValue }
+            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "menuToggleGestureMode")
+        }
+    }
+
+    /// How long the menu gesture must be held before toggling (seconds).
+    var menuToggleHoldDuration: Float {
+        get { withLock { _menuToggleHoldDuration } }
+        set {
+            let clamped = max(0.05, min(0.6, newValue))
+            withLock { _menuToggleHoldDuration = clamped }
+            UserDefaults.standard.set(clamped, forKey: "menuToggleHoldDuration")
+        }
+    }
+
+    /// Cooldown between menu toggle triggers (seconds).
+    var menuToggleCooldown: Float {
+        get { withLock { _menuToggleCooldown } }
+        set {
+            let clamped = max(0.1, min(2.5, newValue))
+            withLock { _menuToggleCooldown = clamped }
+            UserDefaults.standard.set(clamped, forKey: "menuToggleCooldown")
+        }
+    }
+
+    var menuToggleActivateThreshold: Float {
+        get { withLock { _menuToggleActivateThreshold } }
+        set {
+            let clamped = max(0.2, min(0.95, newValue))
+            withLock { _menuToggleActivateThreshold = clamped }
+            UserDefaults.standard.set(clamped, forKey: "menuToggleActivateThreshold")
+        }
+    }
+
+    var menuToggleReleaseThreshold: Float {
+        get { withLock { _menuToggleReleaseThreshold } }
+        set {
+            let clamped = max(0.1, min(0.9, newValue))
+            withLock { _menuToggleReleaseThreshold = clamped }
+            UserDefaults.standard.set(clamped, forKey: "menuToggleReleaseThreshold")
+        }
+    }
+
+    var twoHandPinchActivateThreshold: Float {
+        get { withLock { _twoHandPinchActivateThreshold } }
+        set {
+            let clamped = max(0.2, min(0.98, newValue))
+            withLock { _twoHandPinchActivateThreshold = clamped }
+            UserDefaults.standard.set(clamped, forKey: "twoHandPinchActivateThreshold")
+        }
+    }
+
+    var twoHandPinchReleaseThreshold: Float {
+        get { withLock { _twoHandPinchReleaseThreshold } }
+        set {
+            let clamped = max(0.1, min(0.95, newValue))
+            withLock { _twoHandPinchReleaseThreshold = clamped }
+            UserDefaults.standard.set(clamped, forKey: "twoHandPinchReleaseThreshold")
+        }
+    }
+
+    var ringPinchActivateThreshold: Float {
+        get { withLock { _ringPinchActivateThreshold } }
+        set {
+            let clamped = max(0.1, min(0.95, newValue))
+            withLock { _ringPinchActivateThreshold = clamped }
+            UserDefaults.standard.set(clamped, forKey: "ringPinchActivateThreshold")
+        }
+    }
+
+    var ringPinchReleaseThreshold: Float {
+        get { withLock { _ringPinchReleaseThreshold } }
+        set {
+            let clamped = max(0.05, min(0.9, newValue))
+            withLock { _ringPinchReleaseThreshold = clamped }
+            UserDefaults.standard.set(clamped, forKey: "ringPinchReleaseThreshold")
+        }
+    }
+
+    var gestureMinHandDistance: Float {
+        get { withLock { _gestureMinHandDistance } }
+        set {
+            let clamped = max(0.02, min(0.25, newValue))
+            withLock { _gestureMinHandDistance = clamped }
+            UserDefaults.standard.set(clamped, forKey: "gestureMinHandDistance")
+        }
+    }
+
+    var gestureMaxHandDistance: Float {
+        get { withLock { _gestureMaxHandDistance } }
+        set {
+            let clamped = max(0.2, min(1.2, newValue))
+            withLock { _gestureMaxHandDistance = max(clamped, _gestureMinHandDistance + 0.05) }
+            UserDefaults.standard.set(withLock { _gestureMaxHandDistance }, forKey: "gestureMaxHandDistance")
+        }
+    }
+
+    var gestureMaxStartHandDistance: Float {
+        get { withLock { _gestureMaxStartHandDistance } }
+        set {
+            let clamped = max(0.08, min(1.0, newValue))
+            withLock { _gestureMaxStartHandDistance = clamped }
+            UserDefaults.standard.set(clamped, forKey: "gestureMaxStartHandDistance")
+        }
+    }
+
+    var gestureMaxActiveHandDistance: Float {
+        get { withLock { _gestureMaxActiveHandDistance } }
+        set {
+            let clamped = max(0.1, min(1.5, newValue))
+            withLock { _gestureMaxActiveHandDistance = max(clamped, _gestureMaxStartHandDistance) }
+            UserDefaults.standard.set(withLock { _gestureMaxActiveHandDistance }, forKey: "gestureMaxActiveHandDistance")
+        }
+    }
+
+    var translationSensitivity: Float {
+        get { withLock { _translationSensitivity } }
+        set {
+            let clamped = max(0.2, min(3.0, newValue))
+            withLock { _translationSensitivity = clamped }
+            UserDefaults.standard.set(clamped, forKey: "translationSensitivity")
         }
     }
 
@@ -1691,6 +2008,17 @@ final class RenderSettings: @unchecked Sendable {
                 lightingPlay: _lightingPlay,
                 lightingMode: _lightingMode,
                 audioLevel: _audioLevel,
+                bassLevel: _bassLevel,
+                midLevel: _midLevel,
+                trebleLevel: _trebleLevel,
+                beatIntensity: _beatIntensity,
+                visualizerMode: _visualizerMode,
+                visualizerIntensity: _visualizerIntensity,
+                audioSource: _audioSource,
+                bassSensitivity: _bassSensitivity,
+                midSensitivity: _midSensitivity,
+                trebleSensitivity: _trebleSensitivity,
+                beatSensitivity: _beatSensitivity,
                 foldingLimit: _foldingLimit,
                 sphereRadius: _sphereRadius,
                 colorIterations: _colorIterations,
