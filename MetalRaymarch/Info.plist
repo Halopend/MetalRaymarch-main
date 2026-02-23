@@ -13,6 +13,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>MetalRaymarch uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>MetalRaymarch uses the microphone for real-time audio-reactive fractal visualization.</string>
 	<key>UIApplicationSceneManifest</key>

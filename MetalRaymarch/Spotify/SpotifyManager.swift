@@ -14,12 +14,16 @@ enum AudioSource: String, CaseIterable, Codable {
     case micOnly = "Mic Only"
     case spotifyOnly = "Spotify Only"
     case both = "Both"
+    case appleMusicOnly = "Apple Music"
+    case allSources = "All Sources"
     
     var icon: String {
         switch self {
         case .micOnly: return "mic.fill"
         case .spotifyOnly: return "music.note"
         case .both: return "waveform.circle.fill"
+        case .appleMusicOnly: return "apple.logo"
+        case .allSources: return "dot.radiowaves.left.and.right"
         }
     }
     
@@ -28,6 +32,8 @@ enum AudioSource: String, CaseIterable, Codable {
         case .micOnly: return 0
         case .spotifyOnly: return 1
         case .both: return 2
+        case .appleMusicOnly: return 3
+        case .allSources: return 4
         }
     }
     
@@ -35,6 +41,9 @@ enum AudioSource: String, CaseIterable, Codable {
         switch value {
         case 0: return .micOnly
         case 1: return .spotifyOnly
+        case 2: return .both // legacy mapping
+        case 3: return .appleMusicOnly
+        case 4: return .allSources
         default: return .both
         }
     }

@@ -257,6 +257,13 @@ actor Renderer {
     private let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS
     private var lastFPSConsoleLogTime: TimeInterval = 0  // For periodic FPS console logging
 
+    // Music-reactive fractal anchors (prevent parameter drift)
+    private var musicFractalAnchorValid: Bool = false
+    private var musicAnchorFractalScale: Float = 2.8
+    private var musicAnchorFoldingLimit: Float = 1.0
+    private var musicAnchorSphereRadius: Float = 0.5
+    private var musicAnchorColorMix: Float = 0.5
+
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
     
@@ -1916,9 +1923,11 @@ actor Renderer {
         if isAudioMode {
             let mic = appModel.audioAnalyzer
             let spotifyManager = appModel.spotifyManager
-            let audioSource = settings.audioSource  // 0=micOnly, 1=spotifyOnly, 2=both
-            let micActive = mic.isCapturing && (audioSource == 0 || audioSource == 2)
-            let spotifyActive = spotifyManager.beatSyncActive && (audioSource == 1 || audioSource == 2)
+            let appleMusicManager = appModel.appleMusicManager
+            let audioSource = settings.audioSource  // 0=micOnly, 1=spotifyOnly, 2=both, 3=appleMusicOnly, 4=allSources
+            let micActive = mic.isCapturing && (audioSource == 0 || audioSource == 2 || audioSource == 4)
+            let spotifyActive = spotifyManager.beatSyncActive && (audioSource == 1 || audioSource == 2 || audioSource == 4)
+            let appleMusicActive = appleMusicManager.isActive && (audioSource == 3 || audioSource == 4)
             
             // Sensitivity multipliers from user settings
             let bassSens = settings.bassSensitivity
@@ -1929,15 +1938,28 @@ actor Renderer {
             // Update Spotify beat sync interpolation each frame
             Task { @MainActor in
                 self.appModel.spotifyManager.updateFrame()
+                self.appModel.appleMusicManager.updateFrame()
             }
             
-            if micActive && spotifyActive {
+            if micActive && spotifyActive && appleMusicActive {
+                settings.bassLevel = min(1.0, (mic.bassLevel * 0.45 + spotifyManager.bassLevel * 0.30 + appleMusicManager.bassLevel * 0.25) * bassSens)
+                settings.midLevel = min(1.0, (mic.midLevel * 0.45 + spotifyManager.midLevel * 0.30 + appleMusicManager.midLevel * 0.25) * midSens)
+                settings.trebleLevel = min(1.0, (mic.trebleLevel * 0.45 + spotifyManager.trebleLevel * 0.30 + appleMusicManager.trebleLevel * 0.25) * trebleSens)
+                settings.beatIntensity = min(1.0, max(max(spotifyManager.beatIntensity, appleMusicManager.beatIntensity), mic.peakLevel * 0.5) * beatSens)
+                settings.audioLevel = mic.level * 0.4 + spotifyManager.overallLevel * 0.35 + appleMusicManager.overallLevel * 0.25
+            } else if micActive && spotifyActive {
                 // Both sources: mic provides real-time FFT, Spotify adds beat structure
                 settings.bassLevel = min(1.0, (mic.bassLevel * 0.6 + spotifyManager.bassLevel * 0.4) * bassSens)
                 settings.midLevel = min(1.0, (mic.midLevel * 0.6 + spotifyManager.midLevel * 0.4) * midSens)
                 settings.trebleLevel = min(1.0, (mic.trebleLevel * 0.6 + spotifyManager.trebleLevel * 0.4) * trebleSens)
                 settings.beatIntensity = min(1.0, max(spotifyManager.beatIntensity, mic.peakLevel * 0.5) * beatSens)
                 settings.audioLevel = mic.level * 0.5 + spotifyManager.overallLevel * 0.5
+            } else if micActive && appleMusicActive {
+                settings.bassLevel = min(1.0, (mic.bassLevel * 0.65 + appleMusicManager.bassLevel * 0.35) * bassSens)
+                settings.midLevel = min(1.0, (mic.midLevel * 0.65 + appleMusicManager.midLevel * 0.35) * midSens)
+                settings.trebleLevel = min(1.0, (mic.trebleLevel * 0.65 + appleMusicManager.trebleLevel * 0.35) * trebleSens)
+                settings.beatIntensity = min(1.0, max(appleMusicManager.beatIntensity, mic.peakLevel * 0.6) * beatSens)
+                settings.audioLevel = mic.level * 0.55 + appleMusicManager.overallLevel * 0.45
             } else if micActive {
                 // Mic only: full FFT bands
                 settings.bassLevel = min(1.0, mic.bassLevel * bassSens)
@@ -1952,7 +1974,47 @@ actor Renderer {
                 settings.trebleLevel = min(1.0, spotifyManager.trebleLevel * trebleSens)
                 settings.beatIntensity = min(1.0, spotifyManager.beatIntensity * beatSens)
                 settings.audioLevel = spotifyManager.overallLevel
+            } else if appleMusicActive {
+                settings.bassLevel = min(1.0, appleMusicManager.bassLevel * bassSens)
+                settings.midLevel = min(1.0, appleMusicManager.midLevel * midSens)
+                settings.trebleLevel = min(1.0, appleMusicManager.trebleLevel * trebleSens)
+                settings.beatIntensity = min(1.0, appleMusicManager.beatIntensity * beatSens)
+                settings.audioLevel = appleMusicManager.overallLevel
             }
+
+            // Music drives fractal geometry (not just lights)
+            if settings.fractalAudioReactiveEnabled {
+                if !musicFractalAnchorValid {
+                    musicAnchorFractalScale = settings.fractalScale
+                    musicAnchorFoldingLimit = settings.foldingLimit
+                    musicAnchorSphereRadius = settings.sphereRadius
+                    musicAnchorColorMix = settings.colorMix
+                    musicFractalAnchorValid = true
+                }
+
+                let bandDrive = settings.bassLevel * 0.55 + settings.midLevel * 0.30 + settings.trebleLevel * 0.15
+                let beat = settings.beatIntensity
+                let amount = settings.fractalAudioAmount
+                let beatPunch = settings.fractalBeatPunch
+                let drive = min(1.0, bandDrive * (0.9 * amount) + beat * (0.1 + 0.6 * beatPunch))
+
+                if settings.fractalAudioAffectsScale {
+                    settings.fractalScale = max(1.6, min(5.2, musicAnchorFractalScale + (drive - 0.35) * (0.15 + 0.8 * amount)))
+                }
+                if settings.fractalAudioAffectsFolding {
+                    settings.foldingLimit = max(0.7, min(1.7, musicAnchorFoldingLimit + (settings.bassLevel - 0.4) * (0.08 + 0.24 * amount) + beat * (0.03 + 0.12 * beatPunch)))
+                }
+                if settings.fractalAudioAffectsRadius {
+                    settings.sphereRadius = max(0.03, min(1.2, musicAnchorSphereRadius + settings.midLevel * (0.05 + 0.20 * amount) + beat * (0.01 + 0.08 * beatPunch)))
+                }
+                if settings.fractalAudioAffectsColorMix {
+                    settings.colorMix = max(0.0, min(1.0, musicAnchorColorMix * (1.0 - 0.4 * amount) + drive * (0.2 + 0.6 * amount)))
+                }
+            } else {
+                musicFractalAnchorValid = false
+            }
+        } else {
+            musicFractalAnchorValid = false
         }
         let settingsSnapshot = settings.snapshot()
         

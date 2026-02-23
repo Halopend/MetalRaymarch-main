@@ -134,6 +134,13 @@ final class UISettingsCache {
     var midSensitivity: Float = 1.0
     var trebleSensitivity: Float = 1.0
     var beatSensitivity: Float = 1.0
+    var fractalAudioReactiveEnabled: Bool = true
+    var fractalAudioAmount: Float = 0.6
+    var fractalBeatPunch: Float = 0.7
+    var fractalAudioAffectsScale: Bool = true
+    var fractalAudioAffectsFolding: Bool = true
+    var fractalAudioAffectsRadius: Bool = true
+    var fractalAudioAffectsColorMix: Bool = true
     
     // Safety & display
     var showHUD: Bool = true
@@ -237,6 +244,13 @@ final class UISettingsCache {
         midSensitivity = settings.midSensitivity
         trebleSensitivity = settings.trebleSensitivity
         beatSensitivity = settings.beatSensitivity
+        fractalAudioReactiveEnabled = settings.fractalAudioReactiveEnabled
+        fractalAudioAmount = settings.fractalAudioAmount
+        fractalBeatPunch = settings.fractalBeatPunch
+        fractalAudioAffectsScale = settings.fractalAudioAffectsScale
+        fractalAudioAffectsFolding = settings.fractalAudioAffectsFolding
+        fractalAudioAffectsRadius = settings.fractalAudioAffectsRadius
+        fractalAudioAffectsColorMix = settings.fractalAudioAffectsColorMix
         showHUD = settings.showHUD
         safetyBubbleEnabled = settings.safetyBubbleEnabled
         safetyBubbleRadius = settings.safetyBubbleRadius

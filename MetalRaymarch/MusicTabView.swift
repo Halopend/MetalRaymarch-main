@@ -18,12 +18,21 @@ enum MusicSubTab: String, CaseIterable {
     case settings = "Settings"
 }
 
+private enum AppleLibraryScope: String, CaseIterable {
+    case songs = "Songs"
+    case playlists = "Playlists"
+    case albums = "Albums"
+}
+
 // MARK: - Music Tab Content
 
 struct MusicTabContent: View {
     @Environment(AppModel.self) private var appModel
     @Bindable var cache: UISettingsCache
     @State private var musicSubTab: MusicSubTab = .nowPlaying
+    @State private var appleLibraryScope: AppleLibraryScope = .songs
+    @State private var appleLibrarySearchText: String = ""
+    @State private var appleLibraryShuffle: Bool = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -45,6 +54,354 @@ struct MusicTabContent: View {
             }
         }
     }
+
+    private var appleMusicStatusText: String {
+        if !appModel.appleMusicManager.isAuthorized {
+            return appModel.appleMusicManager.authorizationDescription
+        }
+        if appModel.appleMusicManager.isPlaying {
+            return "Playing"
+        }
+        if !appModel.appleMusicManager.nowPlayingTitle.isEmpty {
+            return "Paused"
+        }
+        return "No track detected"
+    }
+
+    private var normalizedAppleLibraryQuery: String {
+        appleLibrarySearchText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private var filteredAppleSongs: [AppleMusicManager.LibrarySong] {
+        let songs = appModel.appleMusicManager.librarySongs
+        guard !normalizedAppleLibraryQuery.isEmpty else { return songs }
+        return songs.filter {
+            $0.title.lowercased().contains(normalizedAppleLibraryQuery) ||
+            $0.artist.lowercased().contains(normalizedAppleLibraryQuery) ||
+            $0.album.lowercased().contains(normalizedAppleLibraryQuery)
+        }
+    }
+
+    private var filteredApplePlaylists: [AppleMusicManager.LibraryPlaylist] {
+        let playlists = appModel.appleMusicManager.libraryPlaylists
+        guard !normalizedAppleLibraryQuery.isEmpty else { return playlists }
+        return playlists.filter {
+            $0.name.lowercased().contains(normalizedAppleLibraryQuery)
+        }
+    }
+
+    private var filteredAppleAlbums: [AppleMusicManager.LibraryAlbum] {
+        let albums = appModel.appleMusicManager.libraryAlbums
+        guard !normalizedAppleLibraryQuery.isEmpty else { return albums }
+        return albums.filter {
+            $0.title.lowercased().contains(normalizedAppleLibraryQuery) ||
+            $0.artist.lowercased().contains(normalizedAppleLibraryQuery)
+        }
+    }
+
+    private var appleMusicConnectionSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "apple.logo")
+                    .font(.title3)
+                    .foregroundStyle(appModel.appleMusicManager.isAuthorized ? .green : .secondary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Apple Music")
+                        .font(.headline)
+                    Text(appleMusicStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    appModel.appleMusicManager.requestAuthorization()
+                    appModel.appleMusicManager.updateFrame()
+                } label: {
+                    Text(appModel.appleMusicManager.isAuthorized ? "Refresh" : "Authorize")
+                }
+                .buttonStyle(.bordered)
+                .tint(appModel.appleMusicManager.isAuthorized ? .green : .blue)
+            }
+
+            if !appModel.appleMusicManager.isAuthorized {
+                Text("Allow Music Library access so Apple Music playback can drive the visualizer.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
+
+    private var appleMusicLibrarySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Apple Music Library")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if appleLibraryScope != .songs {
+                    Toggle("Shuffle", isOn: $appleLibraryShuffle)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+
+                Button {
+                    appModel.appleMusicManager.refreshLibrary()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Picker("Library Scope", selection: $appleLibraryScope) {
+                ForEach(AppleLibraryScope.allCases, id: \.self) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            TextField("Search songs, playlists, albums", text: $appleLibrarySearchText)
+                .textFieldStyle(.roundedBorder)
+
+            if appModel.appleMusicManager.libraryLoading {
+                ProgressView("Loading Apple Music library…")
+                    .font(.caption)
+            } else {
+                if let err = appModel.appleMusicManager.libraryErrorMessage {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        switch appleLibraryScope {
+                        case .songs:
+                            if filteredAppleSongs.isEmpty {
+                                appleLibraryEmptyState("No songs found")
+                            } else {
+                                ForEach(Array(filteredAppleSongs.prefix(120)), id: \.id) { song in
+                                    appleSongRow(song)
+                                }
+                            }
+                        case .playlists:
+                            if filteredApplePlaylists.isEmpty {
+                                appleLibraryEmptyState("No playlists found")
+                            } else {
+                                ForEach(Array(filteredApplePlaylists.prefix(120)), id: \.id) { playlist in
+                                    applePlaylistRow(playlist)
+                                }
+                            }
+                        case .albums:
+                            if filteredAppleAlbums.isEmpty {
+                                appleLibraryEmptyState("No albums found")
+                            } else {
+                                ForEach(Array(filteredAppleAlbums.prefix(120)), id: \.id) { album in
+                                    appleAlbumRow(album)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+                .frame(maxHeight: 260)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        .onAppear {
+            if appModel.appleMusicManager.isAuthorized,
+               appModel.appleMusicManager.librarySongs.isEmpty,
+               appModel.appleMusicManager.libraryPlaylists.isEmpty,
+               appModel.appleMusicManager.libraryAlbums.isEmpty,
+               !appModel.appleMusicManager.libraryLoading {
+                appModel.appleMusicManager.refreshLibrary()
+            }
+        }
+    }
+
+    private func appleSongRow(_ song: AppleMusicManager.LibrarySong) -> some View {
+        Button {
+            appModel.appleMusicManager.playSong(id: song.id)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "music.note")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Text("\(song.artist) • \(song.album)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "play.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.45)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func applePlaylistRow(_ playlist: AppleMusicManager.LibraryPlaylist) -> some View {
+        Button {
+            appModel.appleMusicManager.playPlaylist(id: playlist.id, shuffle: appleLibraryShuffle)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "music.note.list")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.name)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Text("\(playlist.trackCount) tracks")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: appleLibraryShuffle ? "shuffle" : "play.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.45)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func appleAlbumRow(_ album: AppleMusicManager.LibraryAlbum) -> some View {
+        Button {
+            appModel.appleMusicManager.playAlbum(id: album.id, shuffle: appleLibraryShuffle)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "square.stack")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(album.title)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Text("\(album.artist) • \(album.trackCount) tracks")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: appleLibraryShuffle ? "shuffle" : "play.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.45)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func appleLibraryEmptyState(_ text: String) -> some View {
+        HStack {
+            Spacer()
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.vertical, 16)
+    }
+
+    private var appleMusicNowPlayingSection: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.quaternary)
+                    .overlay(Image(systemName: "apple.logo").foregroundStyle(.secondary))
+                    .frame(width: 60, height: 60)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(appModel.appleMusicManager.nowPlayingTitle.isEmpty ? "No Apple Music track" : appModel.appleMusicManager.nowPlayingTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(appModel.appleMusicManager.nowPlayingArtist.isEmpty ? "Play a song in Apple Music" : appModel.appleMusicManager.nowPlayingArtist)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                VStack(spacing: 4) {
+                    ProgressView(value: Double(appModel.appleMusicManager.progressFraction))
+                        .tint(.pink)
+
+                    HStack {
+                        Text(appModel.appleMusicManager.currentTimeString)
+                            .font(.caption2).monospacedDigit()
+                        Spacer()
+                        Text(appModel.appleMusicManager.totalTimeString)
+                            .font(.caption2).monospacedDigit()
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            appleMusicTransportControls
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
+
+    private var appleMusicTransportControls: some View {
+        HStack(spacing: 20) {
+            Spacer()
+
+            Button {
+                appModel.appleMusicManager.previousTrack()
+            } label: {
+                Image(systemName: "backward.fill")
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                appModel.appleMusicManager.togglePlayPause()
+            } label: {
+                Image(systemName: appModel.appleMusicManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 44))
+            }
+            .buttonStyle(.plain)
+            .tint(.pink)
+
+            Button {
+                appModel.appleMusicManager.nextTrack()
+            } label: {
+                Image(systemName: "forward.fill")
+                    .font(.title2)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+        }
+        .padding(.vertical, 8)
+    }
     
     // MARK: - Now Playing
     
@@ -52,6 +409,12 @@ struct MusicTabContent: View {
         VStack(spacing: 16) {
             // Connection status
             spotifyConnectionSection
+            appleMusicConnectionSection
+
+            if appModel.appleMusicManager.isAuthorized {
+                appleMusicNowPlayingSection
+                appleMusicLibrarySection
+            }
             
             if appModel.spotifyManager.isConnected {
                 // Track info
@@ -285,6 +648,9 @@ struct MusicTabContent: View {
             
             // Per-band sensitivity
             sensitivitySection
+
+            // Fractal geometry modulation
+            fractalAudioMotionSection
             
             // Real-time level meters
             levelMeters
@@ -347,13 +713,25 @@ struct MusicTabContent: View {
                         switch source {
                         case .micOnly:
                             appModel.audioAnalyzer.startCapture()
+                            appModel.appleMusicManager.stopMonitoring()
                         case .spotifyOnly:
                             appModel.audioAnalyzer.stopCapture()
+                            appModel.appleMusicManager.stopMonitoring()
                             if appModel.spotifyManager.isConnected {
                                 appModel.spotifyManager.startPolling()
                             }
+                        case .appleMusicOnly:
+                            appModel.audioAnalyzer.stopCapture()
+                            appModel.appleMusicManager.requestAuthorization()
                         case .both:
                             appModel.audioAnalyzer.startCapture()
+                            appModel.appleMusicManager.stopMonitoring()
+                            if appModel.spotifyManager.isConnected {
+                                appModel.spotifyManager.startPolling()
+                            }
+                        case .allSources:
+                            appModel.audioAnalyzer.startCapture()
+                            appModel.appleMusicManager.requestAuthorization()
                             if appModel.spotifyManager.isConnected {
                                 appModel.spotifyManager.startPolling()
                             }
@@ -452,20 +830,108 @@ struct MusicTabContent: View {
     private var levelMeters: some View {
         // TimelineView forces redraws since audio levels are @ObservationIgnored
         TimelineView(.animation) { timeline in
+            let renderSettings = appModel.renderSettings
             VStack(alignment: .leading, spacing: 8) {
                 Text("Real-Time Levels")
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                 
                 HStack(spacing: 12) {
-                    levelMeter(label: "Bass", level: appModel.audioAnalyzer.bassLevel, color: .red)
-                    levelMeter(label: "Mid", level: appModel.audioAnalyzer.midLevel, color: .green)
-                    levelMeter(label: "Treble", level: appModel.audioAnalyzer.trebleLevel, color: .blue)
-                    levelMeter(label: "Beat", level: appModel.spotifyManager.beatSync.beatIntensity, color: .purple)
+                    levelMeter(label: "Bass", level: renderSettings.bassLevel, color: .red)
+                    levelMeter(label: "Mid", level: renderSettings.midLevel, color: .green)
+                    levelMeter(label: "Treble", level: renderSettings.trebleLevel, color: .blue)
+                    levelMeter(label: "Beat", level: renderSettings.beatIntensity, color: .purple)
                 }
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        }
+    }
+
+    private var fractalAudioMotionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Fractal Audio Motion")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+
+            Toggle("Enable Fractal Motion", isOn: Binding(
+                get: { cache.fractalAudioReactiveEnabled },
+                set: { isOn in
+                    cache.fractalAudioReactiveEnabled = isOn
+                    cache.push(\.fractalAudioReactiveEnabled, value: isOn)
+                }
+            ))
+
+            audioAmountSlider(
+                label: "Geometry Amount",
+                value: Binding(
+                    get: { cache.fractalAudioAmount },
+                    set: { newValue in
+                        cache.fractalAudioAmount = newValue
+                        cache.push(\.fractalAudioAmount, value: newValue)
+                    }
+                )
+            )
+
+            audioAmountSlider(
+                label: "Beat Punch",
+                value: Binding(
+                    get: { cache.fractalBeatPunch },
+                    set: { newValue in
+                        cache.fractalBeatPunch = newValue
+                        cache.push(\.fractalBeatPunch, value: newValue)
+                    }
+                )
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Affects")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Scale", isOn: Binding(
+                    get: { cache.fractalAudioAffectsScale },
+                    set: { isOn in
+                        cache.fractalAudioAffectsScale = isOn
+                        cache.push(\.fractalAudioAffectsScale, value: isOn)
+                    }
+                ))
+                Toggle("Folding", isOn: Binding(
+                    get: { cache.fractalAudioAffectsFolding },
+                    set: { isOn in
+                        cache.fractalAudioAffectsFolding = isOn
+                        cache.push(\.fractalAudioAffectsFolding, value: isOn)
+                    }
+                ))
+                Toggle("Radius", isOn: Binding(
+                    get: { cache.fractalAudioAffectsRadius },
+                    set: { isOn in
+                        cache.fractalAudioAffectsRadius = isOn
+                        cache.push(\.fractalAudioAffectsRadius, value: isOn)
+                    }
+                ))
+                Toggle("Color Mix", isOn: Binding(
+                    get: { cache.fractalAudioAffectsColorMix },
+                    set: { isOn in
+                        cache.fractalAudioAffectsColorMix = isOn
+                        cache.push(\.fractalAudioAffectsColorMix, value: isOn)
+                    }
+                ))
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
+
+    private func audioAmountSlider(label: String, value: Binding<Float>) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .frame(width: 110, alignment: .leading)
+            Slider(value: value, in: 0...1)
+            Text("\(Int(value.wrappedValue * 100))%")
+                .font(.caption.monospacedDigit())
+                .frame(width: 40)
         }
     }
     
@@ -549,6 +1015,33 @@ struct MusicTabContent: View {
                         .buttonStyle(.bordered)
                         .tint(.red)
                     }
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+
+            // Apple Music authorization
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Apple Music Access")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Image(systemName: "apple.logo")
+                        .foregroundStyle(appModel.appleMusicManager.isAuthorized ? .green : .secondary)
+                    Text(appModel.appleMusicManager.authorizationDescription)
+                    Spacer()
+                    Button(appModel.appleMusicManager.isAuthorized ? "Refresh" : "Authorize") {
+                        appModel.appleMusicManager.requestAuthorization()
+                        appModel.appleMusicManager.updateFrame()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                if !appModel.appleMusicManager.isAuthorized {
+                    Text("Authorization is required for Apple Music reactive visualizer input.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(12)

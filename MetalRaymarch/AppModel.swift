@@ -133,6 +133,9 @@ class AppModel {
     
     // Spotify integration for music visualizer
     let spotifyManager = SpotifyManager()
+
+    // Apple Music integration for music visualizer
+    let appleMusicManager = AppleMusicManager()
     
     // Hand tracking state
     var handTrackingEnabled: Bool = {
@@ -816,6 +819,13 @@ struct RenderSettingsSnapshot {
     let midSensitivity: Float
     let trebleSensitivity: Float
     let beatSensitivity: Float
+    let fractalAudioReactiveEnabled: Bool
+    let fractalAudioAmount: Float
+    let fractalBeatPunch: Float
+    let fractalAudioAffectsScale: Bool
+    let fractalAudioAffectsFolding: Bool
+    let fractalAudioAffectsRadius: Bool
+    let fractalAudioAffectsColorMix: Bool
     let foldingLimit: Float
     let sphereRadius: Float
     let colorIterations: Float
@@ -902,6 +912,39 @@ final class RenderSettings: @unchecked Sendable {
     private var _midSensitivity: Float = 1.0         // Multiplier for mid band (0-2)
     private var _trebleSensitivity: Float = 1.0      // Multiplier for treble band (0-2)
     private var _beatSensitivity: Float = 1.0        // Multiplier for beat intensity (0-2)
+    private var _fractalAudioReactiveEnabled: Bool = {
+        let key = "fractalAudioReactiveEnabled"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAmount: Float = {
+        let stored = UserDefaults.standard.float(forKey: "fractalAudioAmount")
+        return stored > 0 ? stored : 0.6
+    }()
+    private var _fractalBeatPunch: Float = {
+        let stored = UserDefaults.standard.float(forKey: "fractalBeatPunch")
+        return stored > 0 ? stored : 0.7
+    }()
+    private var _fractalAudioAffectsScale: Bool = {
+        let key = "fractalAudioAffectsScale"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsFolding: Bool = {
+        let key = "fractalAudioAffectsFolding"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsRadius: Bool = {
+        let key = "fractalAudioAffectsRadius"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsColorMix: Bool = {
+        let key = "fractalAudioAffectsColorMix"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
@@ -1231,6 +1274,64 @@ final class RenderSettings: @unchecked Sendable {
     var beatSensitivity: Float {
         get { withLock { _beatSensitivity } }
         set { withLock { _beatSensitivity = max(0.0, min(2.0, newValue)) } }
+    }
+
+    var fractalAudioReactiveEnabled: Bool {
+        get { withLock { _fractalAudioReactiveEnabled } }
+        set {
+            withLock { _fractalAudioReactiveEnabled = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioReactiveEnabled")
+        }
+    }
+
+    var fractalAudioAmount: Float {
+        get { withLock { _fractalAudioAmount } }
+        set {
+            let clamped = max(0.0, min(1.0, newValue))
+            withLock { _fractalAudioAmount = clamped }
+            UserDefaults.standard.set(clamped, forKey: "fractalAudioAmount")
+        }
+    }
+
+    var fractalBeatPunch: Float {
+        get { withLock { _fractalBeatPunch } }
+        set {
+            let clamped = max(0.0, min(1.0, newValue))
+            withLock { _fractalBeatPunch = clamped }
+            UserDefaults.standard.set(clamped, forKey: "fractalBeatPunch")
+        }
+    }
+
+    var fractalAudioAffectsScale: Bool {
+        get { withLock { _fractalAudioAffectsScale } }
+        set {
+            withLock { _fractalAudioAffectsScale = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsScale")
+        }
+    }
+
+    var fractalAudioAffectsFolding: Bool {
+        get { withLock { _fractalAudioAffectsFolding } }
+        set {
+            withLock { _fractalAudioAffectsFolding = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFolding")
+        }
+    }
+
+    var fractalAudioAffectsRadius: Bool {
+        get { withLock { _fractalAudioAffectsRadius } }
+        set {
+            withLock { _fractalAudioAffectsRadius = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsRadius")
+        }
+    }
+
+    var fractalAudioAffectsColorMix: Bool {
+        get { withLock { _fractalAudioAffectsColorMix } }
+        set {
+            withLock { _fractalAudioAffectsColorMix = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsColorMix")
+        }
     }
     
     var foldingLimit: Float {
@@ -2019,6 +2120,13 @@ final class RenderSettings: @unchecked Sendable {
                 midSensitivity: _midSensitivity,
                 trebleSensitivity: _trebleSensitivity,
                 beatSensitivity: _beatSensitivity,
+                fractalAudioReactiveEnabled: _fractalAudioReactiveEnabled,
+                fractalAudioAmount: _fractalAudioAmount,
+                fractalBeatPunch: _fractalBeatPunch,
+                fractalAudioAffectsScale: _fractalAudioAffectsScale,
+                fractalAudioAffectsFolding: _fractalAudioAffectsFolding,
+                fractalAudioAffectsRadius: _fractalAudioAffectsRadius,
+                fractalAudioAffectsColorMix: _fractalAudioAffectsColorMix,
                 foldingLimit: _foldingLimit,
                 sphereRadius: _sphereRadius,
                 colorIterations: _colorIterations,
