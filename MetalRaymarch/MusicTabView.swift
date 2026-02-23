@@ -2,356 +2,141 @@
 //  MusicTabView.swift
 //  MetalRaymarch
 //
-//  Full music sidebar tab with three sub-tabs:
-//  - Now Playing: Spotify connection, track info, transport controls
-//  - Visualizer: Mode selection, intensity, sensitivity sliders
-//  - Settings: Account info, mic permissions, polling config
+//  Unified music sidebar tab.
+//  Shows a single "Now Playing" card (auto-selects Apple Music or Spotify),
+//  playback controls, and fractal audio-reactivity settings.
 //
 
 import SwiftUI
-
-// MARK: - Music Sub-Tab Enum
-
-enum MusicSubTab: String, CaseIterable {
-    case nowPlaying = "Now Playing"
-    case visualizer = "Visualizer"
-    case settings = "Settings"
-}
-
-private enum AppleLibraryScope: String, CaseIterable {
-    case songs = "Songs"
-    case playlists = "Playlists"
-    case albums = "Albums"
-}
 
 // MARK: - Music Tab Content
 
 struct MusicTabContent: View {
     @Environment(AppModel.self) private var appModel
     @Bindable var cache: UISettingsCache
-    @State private var musicSubTab: MusicSubTab = .nowPlaying
-    @State private var appleLibraryScope: AppleLibraryScope = .songs
-    @State private var appleLibrarySearchText: String = ""
-    @State private var appleLibraryShuffle: Bool = false
-    
+
+    // Apple Music library browsing state
+    @State private var showLibrary = false
+    @State private var libraryScope: LibraryScope = .songs
+    @State private var librarySearch = ""
+    @State private var libraryShuffle = false
+
+    private enum LibraryScope: String, CaseIterable {
+        case songs = "Songs"
+        case playlists = "Playlists"
+        case albums = "Albums"
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $musicSubTab) {
-                ForEach(MusicSubTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 12) {
-                    switch musicSubTab {
-                    case .nowPlaying: nowPlayingContent
-                    case .visualizer: visualizerContent
-                    case .settings:   musicSettingsContent
-                    }
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 14) {
+                // 1. Unified Now Playing
+                nowPlayingCard
+
+                // 2. Service connections (compact)
+                connectionsSection
+
+                // 3. Apple Music library browser (expandable)
+                if appModel.appleMusicManager.isAuthorized {
+                    librarySection
                 }
-                .padding(.horizontal, 16).padding(.vertical, 8)
+
+                // 4. Audio Reactivity (the main event)
+                reactivitySection
+
+                // 5. Level meters
+                levelMeters
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+    }
+
+    // MARK: - Unified Now Playing
+
+    /// Prefer Apple Music if it's playing; otherwise show Spotify.
+    private var activeSource: ActiveMusicSource {
+        if appModel.appleMusicManager.isPlaying || (!appModel.spotifyManager.isPlaying && !appModel.appleMusicManager.nowPlayingTitle.isEmpty) {
+            if appModel.appleMusicManager.isAuthorized && !appModel.appleMusicManager.nowPlayingTitle.isEmpty {
+                return .appleMusic
             }
         }
+        if appModel.spotifyManager.isConnected, appModel.spotifyManager.currentTrack != nil {
+            return .spotify
+        }
+        if appModel.appleMusicManager.isAuthorized, !appModel.appleMusicManager.nowPlayingTitle.isEmpty {
+            return .appleMusic
+        }
+        return .none
     }
 
-    private var appleMusicStatusText: String {
-        if !appModel.appleMusicManager.isAuthorized {
-            return appModel.appleMusicManager.authorizationDescription
+    private enum ActiveMusicSource { case appleMusic, spotify, none }
+
+    private var nowPlayingCard: some View {
+        VStack(spacing: 10) {
+            switch activeSource {
+            case .appleMusic:
+                appleMusicNowPlaying
+            case .spotify:
+                spotifyNowPlaying
+            case .none:
+                emptyNowPlaying
+            }
         }
-        if appModel.appleMusicManager.isPlaying {
-            return "Playing"
-        }
-        if !appModel.appleMusicManager.nowPlayingTitle.isEmpty {
-            return "Paused"
-        }
-        return "No track detected"
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
     }
 
-    private var normalizedAppleLibraryQuery: String {
-        appleLibrarySearchText
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-    }
-
-    private var filteredAppleSongs: [AppleMusicManager.LibrarySong] {
-        let songs = appModel.appleMusicManager.librarySongs
-        guard !normalizedAppleLibraryQuery.isEmpty else { return songs }
-        return songs.filter {
-            $0.title.lowercased().contains(normalizedAppleLibraryQuery) ||
-            $0.artist.lowercased().contains(normalizedAppleLibraryQuery) ||
-            $0.album.lowercased().contains(normalizedAppleLibraryQuery)
-        }
-    }
-
-    private var filteredApplePlaylists: [AppleMusicManager.LibraryPlaylist] {
-        let playlists = appModel.appleMusicManager.libraryPlaylists
-        guard !normalizedAppleLibraryQuery.isEmpty else { return playlists }
-        return playlists.filter {
-            $0.name.lowercased().contains(normalizedAppleLibraryQuery)
-        }
-    }
-
-    private var filteredAppleAlbums: [AppleMusicManager.LibraryAlbum] {
-        let albums = appModel.appleMusicManager.libraryAlbums
-        guard !normalizedAppleLibraryQuery.isEmpty else { return albums }
-        return albums.filter {
-            $0.title.lowercased().contains(normalizedAppleLibraryQuery) ||
-            $0.artist.lowercased().contains(normalizedAppleLibraryQuery)
-        }
-    }
-
-    private var appleMusicConnectionSection: some View {
+    private var emptyNowPlaying: some View {
         VStack(spacing: 8) {
-            HStack {
-                Image(systemName: "apple.logo")
-                    .font(.title3)
-                    .foregroundStyle(appModel.appleMusicManager.isAuthorized ? .green : .secondary)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Apple Music")
-                        .font(.headline)
-                    Text(appleMusicStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    appModel.appleMusicManager.requestAuthorization()
-                    appModel.appleMusicManager.updateFrame()
-                } label: {
-                    Text(appModel.appleMusicManager.isAuthorized ? "Refresh" : "Authorize")
-                }
-                .buttonStyle(.bordered)
-                .tint(appModel.appleMusicManager.isAuthorized ? .green : .blue)
-            }
-
-            if !appModel.appleMusicManager.isAuthorized {
-                Text("Allow Music Library access so Apple Music playback can drive the visualizer.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-
-    private var appleMusicLibrarySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Apple Music Library")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                if appleLibraryScope != .songs {
-                    Toggle("Shuffle", isOn: $appleLibraryShuffle)
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                }
-
-                Button {
-                    appModel.appleMusicManager.refreshLibrary()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Picker("Library Scope", selection: $appleLibraryScope) {
-                ForEach(AppleLibraryScope.allCases, id: \.self) { scope in
-                    Text(scope.rawValue).tag(scope)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            TextField("Search songs, playlists, albums", text: $appleLibrarySearchText)
-                .textFieldStyle(.roundedBorder)
-
-            if appModel.appleMusicManager.libraryLoading {
-                ProgressView("Loading Apple Music library…")
-                    .font(.caption)
-            } else {
-                if let err = appModel.appleMusicManager.libraryErrorMessage {
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        switch appleLibraryScope {
-                        case .songs:
-                            if filteredAppleSongs.isEmpty {
-                                appleLibraryEmptyState("No songs found")
-                            } else {
-                                ForEach(Array(filteredAppleSongs.prefix(120)), id: \.id) { song in
-                                    appleSongRow(song)
-                                }
-                            }
-                        case .playlists:
-                            if filteredApplePlaylists.isEmpty {
-                                appleLibraryEmptyState("No playlists found")
-                            } else {
-                                ForEach(Array(filteredApplePlaylists.prefix(120)), id: \.id) { playlist in
-                                    applePlaylistRow(playlist)
-                                }
-                            }
-                        case .albums:
-                            if filteredAppleAlbums.isEmpty {
-                                appleLibraryEmptyState("No albums found")
-                            } else {
-                                ForEach(Array(filteredAppleAlbums.prefix(120)), id: \.id) { album in
-                                    appleAlbumRow(album)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-                .frame(maxHeight: 260)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-        .onAppear {
-            if appModel.appleMusicManager.isAuthorized,
-               appModel.appleMusicManager.librarySongs.isEmpty,
-               appModel.appleMusicManager.libraryPlaylists.isEmpty,
-               appModel.appleMusicManager.libraryAlbums.isEmpty,
-               !appModel.appleMusicManager.libraryLoading {
-                appModel.appleMusicManager.refreshLibrary()
-            }
-        }
-    }
-
-    private func appleSongRow(_ song: AppleMusicManager.LibrarySong) -> some View {
-        Button {
-            appModel.appleMusicManager.playSong(id: song.id)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "music.note")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(song.title)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    Text("\(song.artist) • \(song.album)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "play.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.45)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func applePlaylistRow(_ playlist: AppleMusicManager.LibraryPlaylist) -> some View {
-        Button {
-            appModel.appleMusicManager.playPlaylist(id: playlist.id, shuffle: appleLibraryShuffle)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "music.note.list")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(playlist.name)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    Text("\(playlist.trackCount) tracks")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: appleLibraryShuffle ? "shuffle" : "play.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.45)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func appleAlbumRow(_ album: AppleMusicManager.LibraryAlbum) -> some View {
-        Button {
-            appModel.appleMusicManager.playAlbum(id: album.id, shuffle: appleLibraryShuffle)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "square.stack")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(album.title)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                    Text("\(album.artist) • \(album.trackCount) tracks")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: appleLibraryShuffle ? "shuffle" : "play.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.45)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func appleLibraryEmptyState(_ text: String) -> some View {
-        HStack {
-            Spacer()
-            Text(text)
-                .font(.caption)
+            Image(systemName: "music.note")
+                .font(.largeTitle)
                 .foregroundStyle(.secondary)
-            Spacer()
+            Text("Nothing Playing")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("Connect to Apple Music or Spotify below")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
+        .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
     }
 
-    private var appleMusicNowPlayingSection: some View {
+    // MARK: Apple Music Now Playing
+
+    private var appleMusicNowPlaying: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
+                // Album art placeholder
                 RoundedRectangle(cornerRadius: 8)
                     .fill(.quaternary)
-                    .overlay(Image(systemName: "apple.logo").foregroundStyle(.secondary))
-                    .frame(width: 60, height: 60)
+                    .overlay(
+                        Image(systemName: "apple.logo")
+                            .foregroundStyle(.pink.opacity(0.6))
+                    )
+                    .frame(width: 56, height: 56)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(appModel.appleMusicManager.nowPlayingTitle.isEmpty ? "No Apple Music track" : appModel.appleMusicManager.nowPlayingTitle)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(appModel.appleMusicManager.nowPlayingTitle)
                         .font(.headline)
                         .lineLimit(1)
-                    Text(appModel.appleMusicManager.nowPlayingArtist.isEmpty ? "Play a song in Apple Music" : appModel.appleMusicManager.nowPlayingArtist)
+                    Text(appModel.appleMusicManager.nowPlayingArtist)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-
                 Spacer()
+
+                Image(systemName: "apple.logo")
+                    .font(.caption)
+                    .foregroundStyle(.pink)
             }
 
             TimelineView(.periodic(from: .now, by: 0.5)) { _ in
                 VStack(spacing: 4) {
                     ProgressView(value: Double(appModel.appleMusicManager.progressFraction))
                         .tint(.pink)
-
                     HStack {
                         Text(appModel.appleMusicManager.currentTimeString)
                             .font(.caption2).monospacedDigit()
@@ -363,741 +148,525 @@ struct MusicTabContent: View {
                 }
             }
 
-            appleMusicTransportControls
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-
-    private var appleMusicTransportControls: some View {
-        HStack(spacing: 20) {
-            Spacer()
-
-            Button {
-                appModel.appleMusicManager.previousTrack()
-            } label: {
-                Image(systemName: "backward.fill")
-                    .font(.title2)
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                appModel.appleMusicManager.togglePlayPause()
-            } label: {
-                Image(systemName: appModel.appleMusicManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 44))
-            }
-            .buttonStyle(.plain)
-            .tint(.pink)
-
-            Button {
-                appModel.appleMusicManager.nextTrack()
-            } label: {
-                Image(systemName: "forward.fill")
-                    .font(.title2)
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-        }
-        .padding(.vertical, 8)
-    }
-    
-    // MARK: - Now Playing
-    
-    private var nowPlayingContent: some View {
-        VStack(spacing: 16) {
-            // Connection status
-            spotifyConnectionSection
-            appleMusicConnectionSection
-
-            if appModel.appleMusicManager.isAuthorized {
-                appleMusicNowPlayingSection
-                appleMusicLibrarySection
-            }
-            
-            if appModel.spotifyManager.isConnected {
-                // Track info
-                if let track = appModel.spotifyManager.currentTrack {
-                    trackInfoSection(track: track)
-                } else {
-                    noTrackPlaceholder
-                }
-                
-                // Transport controls
-                transportControls
-                
-                // Audio features badges
-                if let features = appModel.spotifyManager.audioFeatures {
-                    audioFeaturesBadges(features: features)
-                }
-            }
-        }
-    }
-    
-    private var spotifyConnectionSection: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Image(systemName: "music.note.tv")
-                    .font(.title3)
-                    .foregroundStyle(appModel.spotifyManager.isConnected ? .green : .secondary)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Spotify")
-                        .font(.headline)
-                    Text(appModel.spotifyManager.isConnected ? "Connected" : "Not connected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
+            // Transport
+            HStack(spacing: 24) {
                 Spacer()
-                
-                Button {
-                    if appModel.spotifyManager.isConnected {
-                        appModel.spotifyManager.disconnect()
-                    } else {
-                        appModel.spotifyManager.connect()
-                    }
-                } label: {
-                    Text(appModel.spotifyManager.isConnected ? "Disconnect" : "Connect")
+                Button { appModel.appleMusicManager.previousTrack() } label: {
+                    Image(systemName: "backward.fill").font(.title3)
                 }
-                .buttonStyle(.bordered)
-                .tint(appModel.spotifyManager.isConnected ? .red : .green)
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-            
-            if let error = appModel.spotifyManager.error {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+
+                Button { appModel.appleMusicManager.togglePlayPause() } label: {
+                    Image(systemName: appModel.appleMusicManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 40))
                 }
-                .padding(.horizontal, 12)
+                .buttonStyle(.plain)
+                .tint(.pink)
+
+                Button { appModel.appleMusicManager.nextTrack() } label: {
+                    Image(systemName: "forward.fill").font(.title3)
+                }
+                .buttonStyle(.plain)
+                Spacer()
             }
         }
     }
-    
-    private func trackInfoSection(track: SpotifyTrack) -> some View {
+
+    // MARK: Spotify Now Playing
+
+    private var spotifyNowPlaying: some View {
         VStack(spacing: 10) {
-            // Album art + track info
-            HStack(spacing: 12) {
-                // Album art placeholder (async image loading)
-                if let artURL = track.album.thumbnailURL {
-                    AsyncImage(url: artURL) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
+            if let track = appModel.spotifyManager.currentTrack {
+                HStack(spacing: 12) {
+                    // Album art
+                    if let artURL = track.album.thumbnailURL {
+                        AsyncImage(url: artURL) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(.quaternary)
+                                .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
+                        }
+                        .frame(width: 56, height: 56)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(.quaternary)
                             .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
+                            .frame(width: 56, height: 56)
                     }
-                    .frame(width: 60, height: 60)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(.quaternary)
-                        .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
-                        .frame(width: 60, height: 60)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(track.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(track.artistNames)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Text(track.album.name)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(track.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(track.artistNames)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+
+                    Image(systemName: "music.note.tv")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                        .foregroundStyle(.green)
                 }
-                
+
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    VStack(spacing: 4) {
+                        ProgressView(value: Double(appModel.spotifyManager.progressFraction))
+                            .tint(.green)
+                        HStack {
+                            Text(appModel.spotifyManager.currentTimeString)
+                                .font(.caption2).monospacedDigit()
+                            Spacer()
+                            Text(appModel.spotifyManager.totalTimeString)
+                                .font(.caption2).monospacedDigit()
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                // Transport
+                HStack(spacing: 24) {
+                    Spacer()
+                    Button { Task { await appModel.spotifyManager.previous() } } label: {
+                        Image(systemName: "backward.fill").font(.title3)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { Task { await appModel.spotifyManager.togglePlayPause() } } label: {
+                        Image(systemName: appModel.spotifyManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 40))
+                    }
+                    .buttonStyle(.plain)
+                    .tint(.green)
+
+                    Button { Task { await appModel.spotifyManager.next() } } label: {
+                        Image(systemName: "forward.fill").font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    // MARK: - Service Connections
+
+    private var connectionsSection: some View {
+        VStack(spacing: 6) {
+            // Apple Music row
+            HStack {
+                Image(systemName: "apple.logo")
+                    .font(.caption)
+                    .foregroundStyle(appModel.appleMusicManager.isAuthorized ? .green : .secondary)
+                Text("Apple Music")
+                    .font(.subheadline)
+                Spacer()
+                if appModel.appleMusicManager.isAuthorized {
+                    Text("Connected")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                } else {
+                    Button("Authorize") {
+                        appModel.appleMusicManager.requestAuthorization()
+                        appModel.appleMusicManager.updateFrame()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            Divider()
+
+            // Spotify row
+            HStack {
+                Image(systemName: "music.note.tv")
+                    .font(.caption)
+                    .foregroundStyle(appModel.spotifyManager.isConnected ? .green : .secondary)
+                Text("Spotify")
+                    .font(.subheadline)
+                Spacer()
+                if appModel.spotifyManager.isConnected {
+                    Button("Disconnect") {
+                        appModel.spotifyManager.disconnect()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
+                } else {
+                    Button("Connect") {
+                        appModel.spotifyManager.connect()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.green)
+                }
+            }
+
+            if let error = appModel.spotifyManager.error {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+
+            Divider()
+
+            // Microphone row
+            HStack {
+                Image(systemName: appModel.audioAnalyzer.isCapturing ? "mic.fill" : "mic.slash.fill")
+                    .font(.caption)
+                    .foregroundStyle(appModel.audioAnalyzer.isCapturing ? .green : .secondary)
+                Text("Microphone")
+                    .font(.subheadline)
+                Spacer()
+                Button(appModel.audioAnalyzer.isCapturing ? "Stop" : "Start") {
+                    if appModel.audioAnalyzer.isCapturing {
+                        appModel.audioAnalyzer.stopCapture()
+                    } else {
+                        appModel.audioAnalyzer.startCapture()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
+
+    // MARK: - Apple Music Library Browser
+
+    private var librarySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showLibrary.toggle() }
+            } label: {
+                HStack {
+                    Image(systemName: "music.note.list")
+                        .font(.caption)
+                    Text("Apple Music Library")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Image(systemName: showLibrary ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if showLibrary {
+                libraryBrowser
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
+
+    private var libraryBrowser: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Picker("", selection: $libraryScope) {
+                    ForEach(LibraryScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+
+                if libraryScope != .songs {
+                    Toggle("", isOn: $libraryShuffle)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+
+                Button {
+                    appModel.appleMusicManager.refreshLibrary()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            TextField("Search…", text: $librarySearch)
+                .textFieldStyle(.roundedBorder)
+
+            if appModel.appleMusicManager.libraryLoading {
+                ProgressView("Loading…")
+                    .font(.caption)
+            } else {
+                if let err = appModel.appleMusicManager.libraryErrorMessage {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        switch libraryScope {
+                        case .songs:
+                            ForEach(Array(filteredSongs.prefix(100)), id: \.id) { song in
+                                songRow(song)
+                            }
+                        case .playlists:
+                            ForEach(Array(filteredPlaylists.prefix(100)), id: \.id) { pl in
+                                playlistRow(pl)
+                            }
+                        case .albums:
+                            ForEach(Array(filteredAlbums.prefix(100)), id: \.id) { album in
+                                albumRow(album)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+        .onAppear {
+            if appModel.appleMusicManager.librarySongs.isEmpty,
+               !appModel.appleMusicManager.libraryLoading {
+                appModel.appleMusicManager.refreshLibrary()
+            }
+        }
+    }
+
+    // Filtered helpers
+    private var query: String { librarySearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+
+    private var filteredSongs: [AppleMusicManager.LibrarySong] {
+        let s = appModel.appleMusicManager.librarySongs
+        guard !query.isEmpty else { return s }
+        return s.filter { $0.title.lowercased().contains(query) || $0.artist.lowercased().contains(query) }
+    }
+    private var filteredPlaylists: [AppleMusicManager.LibraryPlaylist] {
+        let p = appModel.appleMusicManager.libraryPlaylists
+        guard !query.isEmpty else { return p }
+        return p.filter { $0.name.lowercased().contains(query) }
+    }
+    private var filteredAlbums: [AppleMusicManager.LibraryAlbum] {
+        let a = appModel.appleMusicManager.libraryAlbums
+        guard !query.isEmpty else { return a }
+        return a.filter { $0.title.lowercased().contains(query) || $0.artist.lowercased().contains(query) }
+    }
+
+    // Row views
+    private func songRow(_ song: AppleMusicManager.LibrarySong) -> some View {
+        Button { appModel.appleMusicManager.playSong(id: song.id) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "music.note").font(.caption2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(song.title).font(.caption).lineLimit(1)
+                    Text(song.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Spacer()
             }
-            
-            // Progress bar (TimelineView for smooth interpolation between polls)
-            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-                VStack(spacing: 4) {
-                    ProgressView(value: Double(appModel.spotifyManager.progressFraction))
-                        .tint(.green)
-                    
-                    HStack {
-                        Text(appModel.spotifyManager.currentTimeString)
-                            .font(.caption2).monospacedDigit()
-                        Spacer()
-                        Text(appModel.spotifyManager.totalTimeString)
-                            .font(.caption2).monospacedDigit()
-                    }
-                    .foregroundStyle(.secondary)
-                }
-            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.4)))
+            .contentShape(Rectangle())
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    private var noTrackPlaceholder: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "music.note")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("No track playing")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text("Play something on Spotify to get started")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(20)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    private var transportControls: some View {
-        HStack(spacing: 20) {
-            Spacer()
-            
-            Button {
-                Task { await appModel.spotifyManager.previous() }
-            } label: {
-                Image(systemName: "backward.fill")
-                    .font(.title2)
-            }
-            .buttonStyle(.plain)
-            
-            Button {
-                Task { await appModel.spotifyManager.togglePlayPause() }
-            } label: {
-                Image(systemName: appModel.spotifyManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 44))
-            }
-            .buttonStyle(.plain)
-            .tint(.green)
-            
-            Button {
-                Task { await appModel.spotifyManager.next() }
-            } label: {
-                Image(systemName: "forward.fill")
-                    .font(.title2)
-            }
-            .buttonStyle(.plain)
-            
-            Spacer()
-        }
-        .padding(.vertical, 8)
-    }
-    
-    private func audioFeaturesBadges(features: SpotifyAudioFeatures) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Audio Features")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-            
-            LazyVGrid(columns: [
-                GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())
-            ], spacing: 8) {
-                featureBadge(label: "Energy", value: features.energy, color: .orange)
-                featureBadge(label: "Tempo", value: features.normalizedTempo, color: .blue, detail: "\(Int(features.tempo)) BPM")
-                featureBadge(label: "Dance", value: features.danceability, color: .pink)
-                featureBadge(label: "Valence", value: features.valence, color: .yellow)
-                featureBadge(label: "Acoustic", value: features.acousticness, color: .green)
-                featureBadge(label: "Loud", value: features.normalizedLoudness, color: .red)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    private func featureBadge(label: String, value: Float, color: Color, detail: String? = nil) -> some View {
-        VStack(spacing: 4) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            
-            ZStack {
-                Circle()
-                    .stroke(color.opacity(0.2), lineWidth: 3)
-                Circle()
-                    .trim(from: 0, to: CGFloat(value))
-                    .stroke(color, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                
-                Text(detail ?? "\(Int(value * 100))%")
-                    .font(.system(size: 10, weight: .bold)).monospacedDigit()
-            }
-            .frame(width: 44, height: 44)
-        }
-    }
-    
-    // MARK: - Visualizer
-    
-    private var visualizerContent: some View {
-        VStack(spacing: 16) {
-            // Visualizer mode picker
-            visualizerModePicker
-            
-            // Audio source picker
-            audioSourcePicker
-            
-            // Intensity
-            intensitySection
-            
-            // Per-band sensitivity
-            sensitivitySection
-
-            // Fractal geometry modulation
-            fractalAudioMotionSection
-            
-            // Real-time level meters
-            levelMeters
-            
-            // Quick presets
-            presetButtons
-        }
-    }
-    
-    private var visualizerModePicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Visualizer Mode")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-            
-            HStack(spacing: 8) {
-                ForEach(VisualizerMode.allCases, id: \.self) { mode in
-                    Button {
-                        cache.visualizerMode = mode
-                        cache.push(\.visualizerMode, value: mode.rawValue)
-                        if mode != .off {
-                            // Auto-switch to visualizer lighting mode
-                            cache.lightingMode = .visualizer
-                            cache.push(\.lightingMode, value: .visualizer)
-                        }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: mode.icon)
-                                .font(.title3)
-                            Text(mode.displayName)
-                                .font(.caption2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(cache.visualizerMode == mode ? Color.blue.opacity(0.3) : Color.clear)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    private var audioSourcePicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Audio Source")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-            
-            HStack(spacing: 8) {
-                ForEach(AudioSource.allCases, id: \.self) { source in
-                    Button {
-                        cache.audioSource = source
-                        cache.push(\.audioSource, value: source.int32Value)
-                        // Start/stop audio sources accordingly
-                        switch source {
-                        case .micOnly:
-                            appModel.audioAnalyzer.startCapture()
-                            appModel.appleMusicManager.stopMonitoring()
-                        case .spotifyOnly:
-                            appModel.audioAnalyzer.stopCapture()
-                            appModel.appleMusicManager.stopMonitoring()
-                            if appModel.spotifyManager.isConnected {
-                                appModel.spotifyManager.startPolling()
-                            }
-                        case .appleMusicOnly:
-                            appModel.audioAnalyzer.stopCapture()
-                            appModel.appleMusicManager.requestAuthorization()
-                        case .both:
-                            appModel.audioAnalyzer.startCapture()
-                            appModel.appleMusicManager.stopMonitoring()
-                            if appModel.spotifyManager.isConnected {
-                                appModel.spotifyManager.startPolling()
-                            }
-                        case .allSources:
-                            appModel.audioAnalyzer.startCapture()
-                            appModel.appleMusicManager.requestAuthorization()
-                            if appModel.spotifyManager.isConnected {
-                                appModel.spotifyManager.startPolling()
-                            }
-                        }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: source.icon)
-                                .font(.title3)
-                            Text(source.rawValue)
-                                .font(.caption2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(cache.audioSource == source ? Color.green.opacity(0.3) : Color.clear)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    private var intensitySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Visualizer Intensity")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-            
-            HStack {
-                Image(systemName: "speaker.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                
-                Slider(value: Binding(
-                    get: { cache.visualizerIntensity },
-                    set: { newValue in
-                        cache.visualizerIntensity = newValue
-                        cache.push(\.visualizerIntensity, value: newValue)
-                    }
-                ), in: 0...1)
-                
-                Text("\(Int(cache.visualizerIntensity * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .frame(width: 40)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    private var sensitivitySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Band Sensitivity")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-            
-            sensitivitySlider(label: "Bass", cacheKeyPath: \.bassSensitivity, renderKeyPath: \.bassSensitivity, color: .red)
-            sensitivitySlider(label: "Mids", cacheKeyPath: \.midSensitivity, renderKeyPath: \.midSensitivity, color: .green)
-            sensitivitySlider(label: "Treble", cacheKeyPath: \.trebleSensitivity, renderKeyPath: \.trebleSensitivity, color: .blue)
-            sensitivitySlider(label: "Beat", cacheKeyPath: \.beatSensitivity, renderKeyPath: \.beatSensitivity, color: .purple)
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    private func sensitivitySlider(
-        label: String,
-        cacheKeyPath: ReferenceWritableKeyPath<UISettingsCache, Float>,
-        renderKeyPath: ReferenceWritableKeyPath<RenderSettings, Float>,
-        color: Color
-    ) -> some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .frame(width: 45, alignment: .leading)
-            
-            Slider(value: Binding(
-                get: { cache[keyPath: cacheKeyPath] },
-                set: { newValue in
-                    cache[keyPath: cacheKeyPath] = newValue
-                    cache.push(renderKeyPath, value: newValue)
-                }
-            ), in: 0...2)
-                .tint(color)
-            
-            Text(String(format: "%.1f×", cache[keyPath: cacheKeyPath]))
-                .font(.caption.monospacedDigit())
-                .frame(width: 40)
-        }
-    }
-    
-    private var levelMeters: some View {
-        // TimelineView forces redraws since audio levels are @ObservationIgnored
-        TimelineView(.animation) { timeline in
-            let renderSettings = appModel.renderSettings
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Real-Time Levels")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                
-                HStack(spacing: 12) {
-                    levelMeter(label: "Bass", level: renderSettings.bassLevel, color: .red)
-                    levelMeter(label: "Mid", level: renderSettings.midLevel, color: .green)
-                    levelMeter(label: "Treble", level: renderSettings.trebleLevel, color: .blue)
-                    levelMeter(label: "Beat", level: renderSettings.beatIntensity, color: .purple)
-                }
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-        }
+        .buttonStyle(.plain)
     }
 
-    private var fractalAudioMotionSection: some View {
+    private func playlistRow(_ pl: AppleMusicManager.LibraryPlaylist) -> some View {
+        Button { appModel.appleMusicManager.playPlaylist(id: pl.id, shuffle: libraryShuffle) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "music.note.list").font(.caption2).foregroundStyle(.secondary)
+                Text(pl.name).font(.caption).lineLimit(1)
+                Spacer()
+                Text("\(pl.trackCount)").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.4)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func albumRow(_ album: AppleMusicManager.LibraryAlbum) -> some View {
+        Button { appModel.appleMusicManager.playAlbum(id: album.id, shuffle: libraryShuffle) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.stack").font(.caption2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(album.title).font(.caption).lineLimit(1)
+                    Text(album.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Text("\(album.trackCount)").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.4)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Audio Reactivity
+
+    private var reactivitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Fractal Audio Motion")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
+            Text("Audio Reactivity")
+                .font(.subheadline.bold())
 
-            Toggle("Enable Fractal Motion", isOn: Binding(
+            // Master toggle
+            Toggle("React to Music", isOn: Binding(
                 get: { cache.fractalAudioReactiveEnabled },
                 set: { isOn in
                     cache.fractalAudioReactiveEnabled = isOn
                     cache.push(\.fractalAudioReactiveEnabled, value: isOn)
+                    if isOn {
+                        // Auto-enable audio-reactive lighting
+                        cache.lightingMode = .audioReactive
+                        cache.push(\.lightingMode, value: .audioReactive)
+                    }
                 }
             ))
 
-            audioAmountSlider(
-                label: "Geometry Amount",
-                value: Binding(
+            if cache.fractalAudioReactiveEnabled {
+                // Quick presets
+                HStack(spacing: 8) {
+                    ForEach(ReactivityPreset.allCases, id: \.self) { preset in
+                        Button {
+                            applyPreset(preset)
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: preset.icon).font(.caption)
+                                Text(preset.rawValue).font(.caption2)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                // Amount slider
+                sliderRow(label: "Amount", value: Binding(
                     get: { cache.fractalAudioAmount },
-                    set: { newValue in
-                        cache.fractalAudioAmount = newValue
-                        cache.push(\.fractalAudioAmount, value: newValue)
-                    }
-                )
-            )
+                    set: { v in cache.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
+                ), range: 0...1)
 
-            audioAmountSlider(
-                label: "Beat Punch",
-                value: Binding(
+                // Beat Punch slider
+                sliderRow(label: "Beat Punch", value: Binding(
                     get: { cache.fractalBeatPunch },
-                    set: { newValue in
-                        cache.fractalBeatPunch = newValue
-                        cache.push(\.fractalBeatPunch, value: newValue)
-                    }
-                )
-            )
+                    set: { v in cache.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
+                ), range: 0...1)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Affects")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                // What audio affects (compact toggles)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Affects")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
 
-                Toggle("Scale", isOn: Binding(
-                    get: { cache.fractalAudioAffectsScale },
-                    set: { isOn in
-                        cache.fractalAudioAffectsScale = isOn
-                        cache.push(\.fractalAudioAffectsScale, value: isOn)
+                    HStack(spacing: 12) {
+                        compactToggle("Scale",  isOn: Binding(
+                            get: { cache.fractalAudioAffectsScale },
+                            set: { v in cache.fractalAudioAffectsScale = v; cache.push(\.fractalAudioAffectsScale, value: v) }
+                        ))
+                        compactToggle("Fold",   isOn: Binding(
+                            get: { cache.fractalAudioAffectsFolding },
+                            set: { v in cache.fractalAudioAffectsFolding = v; cache.push(\.fractalAudioAffectsFolding, value: v) }
+                        ))
+                        compactToggle("Radius", isOn: Binding(
+                            get: { cache.fractalAudioAffectsRadius },
+                            set: { v in cache.fractalAudioAffectsRadius = v; cache.push(\.fractalAudioAffectsRadius, value: v) }
+                        ))
+                        compactToggle("Color",  isOn: Binding(
+                            get: { cache.fractalAudioAffectsColorMix },
+                            set: { v in cache.fractalAudioAffectsColorMix = v; cache.push(\.fractalAudioAffectsColorMix, value: v) }
+                        ))
                     }
-                ))
-                Toggle("Folding", isOn: Binding(
-                    get: { cache.fractalAudioAffectsFolding },
-                    set: { isOn in
-                        cache.fractalAudioAffectsFolding = isOn
-                        cache.push(\.fractalAudioAffectsFolding, value: isOn)
-                    }
-                ))
-                Toggle("Radius", isOn: Binding(
-                    get: { cache.fractalAudioAffectsRadius },
-                    set: { isOn in
-                        cache.fractalAudioAffectsRadius = isOn
-                        cache.push(\.fractalAudioAffectsRadius, value: isOn)
-                    }
-                ))
-                Toggle("Color Mix", isOn: Binding(
-                    get: { cache.fractalAudioAffectsColorMix },
-                    set: { isOn in
-                        cache.fractalAudioAffectsColorMix = isOn
-                        cache.push(\.fractalAudioAffectsColorMix, value: isOn)
-                    }
-                ))
+                }
             }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
     }
 
-    private func audioAmountSlider(label: String, value: Binding<Float>) -> some View {
+    private func applyPreset(_ preset: ReactivityPreset) {
+        let s = preset.settings
+        cache.fractalAudioAmount = s.audioAmount
+        cache.fractalBeatPunch = s.beatPunch
+        cache.bassSensitivity = s.bassSensitivity
+        cache.midSensitivity = s.midSensitivity
+        cache.trebleSensitivity = s.trebleSensitivity
+        cache.beatSensitivity = s.beatSensitivity
+        cache.push(\.fractalAudioAmount, value: s.audioAmount)
+        cache.push(\.fractalBeatPunch, value: s.beatPunch)
+        cache.push(\.bassSensitivity, value: s.bassSensitivity)
+        cache.push(\.midSensitivity, value: s.midSensitivity)
+        cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
+        cache.push(\.beatSensitivity, value: s.beatSensitivity)
+    }
+
+    // MARK: - Level Meters
+
+    private var levelMeters: some View {
+        TimelineView(.animation) { _ in
+            let rs = appModel.renderSettings
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Audio Levels")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    meterBar(label: "Bass",   level: rs.bassLevel,      color: .red)
+                    meterBar(label: "Mid",    level: rs.midLevel,       color: .green)
+                    meterBar(label: "Treble", level: rs.trebleLevel,    color: .blue)
+                    meterBar(label: "Beat",   level: rs.beatIntensity,  color: .purple)
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func sliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>) -> some View {
         HStack {
             Text(label)
                 .font(.caption)
-                .frame(width: 110, alignment: .leading)
-            Slider(value: value, in: 0...1)
+                .frame(width: 80, alignment: .leading)
+            Slider(value: value, in: range)
             Text("\(Int(value.wrappedValue * 100))%")
                 .font(.caption.monospacedDigit())
-                .frame(width: 40)
+                .frame(width: 36)
         }
     }
-    
-    private func levelMeter(label: String, level: Float, color: Color) -> some View {
-        VStack(spacing: 4) {
+
+    private func compactToggle(_ label: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            Text(label)
+                .font(.caption2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isOn.wrappedValue ? Color.blue.opacity(0.3) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isOn.wrappedValue ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func meterBar(label: String, level: Float, color: Color) -> some View {
+        VStack(spacing: 3) {
             GeometryReader { geo in
                 ZStack(alignment: .bottom) {
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(color.opacity(0.15))
+                        .fill(color.opacity(0.12))
                     RoundedRectangle(cornerRadius: 3)
                         .fill(color)
                         .frame(height: geo.size.height * CGFloat(min(1.0, level)))
                 }
             }
-            .frame(height: 60)
-            
+            .frame(height: 50)
             Text(label)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-    }
-    
-    private var presetButtons: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Quick Presets")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-            
-            HStack(spacing: 8) {
-                ForEach(VisualizerPreset.allCases, id: \.self) { preset in
-                    Button {
-                        let s = preset.settings
-                        cache.visualizerIntensity = s.intensity
-                        cache.bassSensitivity = s.bassSensitivity
-                        cache.midSensitivity = s.midSensitivity
-                        cache.trebleSensitivity = s.trebleSensitivity
-                        cache.beatSensitivity = s.beatSensitivity
-                        cache.push(\.visualizerIntensity, value: s.intensity)
-                        cache.push(\.bassSensitivity, value: s.bassSensitivity)
-                        cache.push(\.midSensitivity, value: s.midSensitivity)
-                        cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
-                        cache.push(\.beatSensitivity, value: s.beatSensitivity)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: preset.icon)
-                                .font(.title3)
-                            Text(preset.rawValue)
-                                .font(.caption2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-    
-    // MARK: - Music Settings
-    
-    private var musicSettingsContent: some View {
-        VStack(spacing: 16) {
-            // Spotify account
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Spotify Account")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                
-                HStack {
-                    Image(systemName: "person.circle.fill")
-                        .foregroundStyle(appModel.spotifyManager.isConnected ? .green : .secondary)
-                    Text(appModel.spotifyManager.isConnected ? "Connected" : "Not logged in")
-                    Spacer()
-                    if appModel.spotifyManager.isConnected {
-                        Button("Log Out") {
-                            appModel.spotifyManager.disconnect()
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
-                    }
-                }
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-
-            // Apple Music authorization
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Apple Music Access")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    Image(systemName: "apple.logo")
-                        .foregroundStyle(appModel.appleMusicManager.isAuthorized ? .green : .secondary)
-                    Text(appModel.appleMusicManager.authorizationDescription)
-                    Spacer()
-                    Button(appModel.appleMusicManager.isAuthorized ? "Refresh" : "Authorize") {
-                        appModel.appleMusicManager.requestAuthorization()
-                        appModel.appleMusicManager.updateFrame()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                if !appModel.appleMusicManager.isAuthorized {
-                    Text("Authorization is required for Apple Music reactive visualizer input.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-            
-            // Microphone permissions
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Microphone")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                
-                HStack {
-                    Image(systemName: appModel.audioAnalyzer.isCapturing ? "mic.fill" : "mic.slash.fill")
-                        .foregroundStyle(appModel.audioAnalyzer.isCapturing ? .green : .secondary)
-                    Text(appModel.audioAnalyzer.isCapturing ? "Active" : "Inactive")
-                    Spacer()
-                    Button(appModel.audioAnalyzer.isCapturing ? "Stop" : "Start") {
-                        if appModel.audioAnalyzer.isCapturing {
-                            appModel.audioAnalyzer.stopCapture()
-                        } else {
-                            appModel.audioAnalyzer.startCapture()
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                }
-                
-                if let err = appModel.audioAnalyzer.errorMessage {
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-            
-            // Lighting mode
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Lighting Mode")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                
-                Picker("Mode", selection: Binding(
-                    get: { cache.lightingMode },
-                    set: { newValue in
-                        cache.lightingMode = newValue
-                        cache.push(\.lightingMode, value: newValue)
-                    }
-                )) {
-                    ForEach(LightingMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-        }
     }
 }

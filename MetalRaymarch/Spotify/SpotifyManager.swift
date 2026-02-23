@@ -9,91 +9,26 @@
 
 import Foundation
 
-/// Audio source selection for the visualizer.
-enum AudioSource: String, CaseIterable, Codable {
-    case micOnly = "Mic Only"
-    case spotifyOnly = "Spotify Only"
-    case both = "Both"
-    case appleMusicOnly = "Apple Music"
-    case allSources = "All Sources"
-    
-    var icon: String {
-        switch self {
-        case .micOnly: return "mic.fill"
-        case .spotifyOnly: return "music.note"
-        case .both: return "waveform.circle.fill"
-        case .appleMusicOnly: return "apple.logo"
-        case .allSources: return "dot.radiowaves.left.and.right"
-        }
-    }
-    
-    var int32Value: Int32 {
-        switch self {
-        case .micOnly: return 0
-        case .spotifyOnly: return 1
-        case .both: return 2
-        case .appleMusicOnly: return 3
-        case .allSources: return 4
-        }
-    }
-    
-    static func fromInt32(_ value: Int32) -> AudioSource {
-        switch value {
-        case 0: return .micOnly
-        case 1: return .spotifyOnly
-        case 2: return .both // legacy mapping
-        case 3: return .appleMusicOnly
-        case 4: return .allSources
-        default: return .both
-        }
-    }
-}
+/// Reactivity preset — controls how intensely audio modulates the fractal.
+enum ReactivityPreset: String, CaseIterable {
+    case subtle  = "Subtle"
+    case medium  = "Medium"
+    case intense = "Intense"
 
-/// Visualizer sub-mode selection.
-enum VisualizerMode: Int32, CaseIterable, Codable {
-    case off = 0
-    case pulse = 1
-    case waveform = 2
-    case spectrum = 3
-    
-    var displayName: String {
-        switch self {
-        case .off: return "Off"
-        case .pulse: return "Pulse"
-        case .waveform: return "Waveform"
-        case .spectrum: return "Spectrum"
-        }
-    }
-    
     var icon: String {
         switch self {
-        case .off: return "circle.slash"
-        case .pulse: return "dot.radiowaves.right"
-        case .waveform: return "waveform.path"
-        case .spectrum: return "chart.bar.fill"
+        case .subtle:  return "leaf"
+        case .medium:  return "bolt.fill"
+        case .intense: return "sparkles"
         }
     }
-}
 
-/// Visualizer intensity preset.
-enum VisualizerPreset: String, CaseIterable {
-    case chill = "Chill"
-    case energetic = "Energetic"
-    case psychedelic = "Psychedelic"
-    
-    var icon: String {
+    /// (audioAmount, beatPunch, bassSens, midSens, trebleSens, beatSens)
+    var settings: (audioAmount: Float, beatPunch: Float, bassSensitivity: Float, midSensitivity: Float, trebleSensitivity: Float, beatSensitivity: Float) {
         switch self {
-        case .chill: return "leaf"
-        case .energetic: return "bolt.fill"
-        case .psychedelic: return "sparkles"
-        }
-    }
-    
-    var settings: (intensity: Float, bassSensitivity: Float, midSensitivity: Float, trebleSensitivity: Float, beatSensitivity: Float) {
-        switch self {
-        case .chill:       return (0.3, 0.5, 0.4, 0.3, 0.4)
-        case .energetic:   return (0.7, 0.9, 0.7, 0.6, 0.8)
-        case .psychedelic: return (1.0, 1.0, 1.0, 1.0, 1.0)
+        case .subtle:  return (0.25, 0.20, 0.5, 0.4, 0.3, 0.4)
+        case .medium:  return (0.55, 0.55, 0.8, 0.7, 0.6, 0.7)
+        case .intense: return (0.85, 0.85, 1.0, 1.0, 1.0, 1.0)
         }
     }
 }

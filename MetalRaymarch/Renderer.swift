@@ -1916,18 +1916,18 @@ actor Renderer {
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
         
-        // === EXPANDED AUDIO PIPELINE ===
-        // Blends mic FFT (real-time) and Spotify beat sync (musical structure)
-        // based on the user-selected audio source and per-band sensitivity.
-        let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer
+        // === AUDIO PIPELINE ===
+        // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
+        // Apple Music BPM-based synthesis — blend whatever is available.
+        let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
         if isAudioMode {
             let mic = appModel.audioAnalyzer
             let spotifyManager = appModel.spotifyManager
             let appleMusicManager = appModel.appleMusicManager
-            let audioSource = settings.audioSource  // 0=micOnly, 1=spotifyOnly, 2=both, 3=appleMusicOnly, 4=allSources
-            let micActive = mic.isCapturing && (audioSource == 0 || audioSource == 2 || audioSource == 4)
-            let spotifyActive = spotifyManager.beatSyncActive && (audioSource == 1 || audioSource == 2 || audioSource == 4)
-            let appleMusicActive = appleMusicManager.isActive && (audioSource == 3 || audioSource == 4)
+            // Auto-detect: use whatever sources are currently active
+            let micActive = mic.isCapturing
+            let spotifyActive = spotifyManager.beatSyncActive
+            let appleMusicActive = appleMusicManager.isActive
             
             // Sensitivity multipliers from user settings
             let bassSens = settings.bassSensitivity
@@ -1935,51 +1935,49 @@ actor Renderer {
             let trebleSens = settings.trebleSensitivity
             let beatSens = settings.beatSensitivity
             
-            // Update Spotify beat sync interpolation each frame
+            // Update beat sync interpolation each frame
             Task { @MainActor in
                 self.appModel.spotifyManager.updateFrame()
                 self.appModel.appleMusicManager.updateFrame()
             }
-            
-            if micActive && spotifyActive && appleMusicActive {
-                settings.bassLevel = min(1.0, (mic.bassLevel * 0.45 + spotifyManager.bassLevel * 0.30 + appleMusicManager.bassLevel * 0.25) * bassSens)
-                settings.midLevel = min(1.0, (mic.midLevel * 0.45 + spotifyManager.midLevel * 0.30 + appleMusicManager.midLevel * 0.25) * midSens)
-                settings.trebleLevel = min(1.0, (mic.trebleLevel * 0.45 + spotifyManager.trebleLevel * 0.30 + appleMusicManager.trebleLevel * 0.25) * trebleSens)
-                settings.beatIntensity = min(1.0, max(max(spotifyManager.beatIntensity, appleMusicManager.beatIntensity), mic.peakLevel * 0.5) * beatSens)
-                settings.audioLevel = mic.level * 0.4 + spotifyManager.overallLevel * 0.35 + appleMusicManager.overallLevel * 0.25
-            } else if micActive && spotifyActive {
-                // Both sources: mic provides real-time FFT, Spotify adds beat structure
-                settings.bassLevel = min(1.0, (mic.bassLevel * 0.6 + spotifyManager.bassLevel * 0.4) * bassSens)
-                settings.midLevel = min(1.0, (mic.midLevel * 0.6 + spotifyManager.midLevel * 0.4) * midSens)
-                settings.trebleLevel = min(1.0, (mic.trebleLevel * 0.6 + spotifyManager.trebleLevel * 0.4) * trebleSens)
-                settings.beatIntensity = min(1.0, max(spotifyManager.beatIntensity, mic.peakLevel * 0.5) * beatSens)
-                settings.audioLevel = mic.level * 0.5 + spotifyManager.overallLevel * 0.5
-            } else if micActive && appleMusicActive {
-                settings.bassLevel = min(1.0, (mic.bassLevel * 0.65 + appleMusicManager.bassLevel * 0.35) * bassSens)
-                settings.midLevel = min(1.0, (mic.midLevel * 0.65 + appleMusicManager.midLevel * 0.35) * midSens)
-                settings.trebleLevel = min(1.0, (mic.trebleLevel * 0.65 + appleMusicManager.trebleLevel * 0.35) * trebleSens)
-                settings.beatIntensity = min(1.0, max(appleMusicManager.beatIntensity, mic.peakLevel * 0.6) * beatSens)
-                settings.audioLevel = mic.level * 0.55 + appleMusicManager.overallLevel * 0.45
-            } else if micActive {
-                // Mic only: full FFT bands
-                settings.bassLevel = min(1.0, mic.bassLevel * bassSens)
-                settings.midLevel = min(1.0, mic.midLevel * midSens)
-                settings.trebleLevel = min(1.0, mic.trebleLevel * trebleSens)
-                settings.beatIntensity = min(1.0, mic.peakLevel * 0.7 * beatSens)
-                settings.audioLevel = mic.level * 0.6 + mic.bassLevel * 0.4
-            } else if spotifyActive {
-                // Spotify only: API-analyzed features
-                settings.bassLevel = min(1.0, spotifyManager.bassLevel * bassSens)
-                settings.midLevel = min(1.0, spotifyManager.midLevel * midSens)
-                settings.trebleLevel = min(1.0, spotifyManager.trebleLevel * trebleSens)
-                settings.beatIntensity = min(1.0, spotifyManager.beatIntensity * beatSens)
-                settings.audioLevel = spotifyManager.overallLevel
-            } else if appleMusicActive {
-                settings.bassLevel = min(1.0, appleMusicManager.bassLevel * bassSens)
-                settings.midLevel = min(1.0, appleMusicManager.midLevel * midSens)
-                settings.trebleLevel = min(1.0, appleMusicManager.trebleLevel * trebleSens)
-                settings.beatIntensity = min(1.0, appleMusicManager.beatIntensity * beatSens)
-                settings.audioLevel = appleMusicManager.overallLevel
+
+            // Collect active source levels, then blend proportionally
+            var totalBass: Float = 0, totalMid: Float = 0, totalTreble: Float = 0
+            var totalBeat: Float = 0, totalLevel: Float = 0
+            var sourceCount: Float = 0
+
+            if micActive {
+                totalBass += mic.bassLevel
+                totalMid += mic.midLevel
+                totalTreble += mic.trebleLevel
+                totalBeat = max(totalBeat, mic.peakLevel * 0.7)
+                totalLevel += mic.level
+                sourceCount += 1
+            }
+            if spotifyActive {
+                totalBass += spotifyManager.bassLevel
+                totalMid += spotifyManager.midLevel
+                totalTreble += spotifyManager.trebleLevel
+                totalBeat = max(totalBeat, spotifyManager.beatIntensity)
+                totalLevel += spotifyManager.overallLevel
+                sourceCount += 1
+            }
+            if appleMusicActive {
+                totalBass += appleMusicManager.bassLevel
+                totalMid += appleMusicManager.midLevel
+                totalTreble += appleMusicManager.trebleLevel
+                totalBeat = max(totalBeat, appleMusicManager.beatIntensity)
+                totalLevel += appleMusicManager.overallLevel
+                sourceCount += 1
+            }
+
+            if sourceCount > 0 {
+                let inv = 1.0 / sourceCount
+                settings.bassLevel = min(1.0, totalBass * inv * bassSens)
+                settings.midLevel = min(1.0, totalMid * inv * midSens)
+                settings.trebleLevel = min(1.0, totalTreble * inv * trebleSens)
+                settings.beatIntensity = min(1.0, totalBeat * beatSens)
+                settings.audioLevel = totalLevel * inv
             }
 
             // Music drives fractal geometry (not just lights)

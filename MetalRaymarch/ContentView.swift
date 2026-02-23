@@ -126,10 +126,7 @@ final class UISettingsCache {
     var lightingMode: LightingMode = .animated
     var lightingSoftness: Float = 0.0
     
-    // === MUSIC / VISUALIZER ===
-    var visualizerMode: VisualizerMode = .off
-    var visualizerIntensity: Float = 0.5
-    var audioSource: AudioSource = .both
+    // === MUSIC / AUDIO REACTIVITY ===
     var bassSensitivity: Float = 1.0
     var midSensitivity: Float = 1.0
     var trebleSensitivity: Float = 1.0
@@ -237,9 +234,6 @@ final class UISettingsCache {
         emissiveSpeed = settings.emissiveSpeed
         lightingMode = settings.lightingMode
         lightingSoftness = settings.lightingSoftness
-        visualizerMode = VisualizerMode(rawValue: settings.visualizerMode) ?? .off
-        visualizerIntensity = settings.visualizerIntensity
-        audioSource = AudioSource.fromInt32(settings.audioSource)
         bassSensitivity = settings.bassSensitivity
         midSensitivity = settings.midSensitivity
         trebleSensitivity = settings.trebleSensitivity
