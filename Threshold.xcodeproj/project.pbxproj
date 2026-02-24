@@ -7,26 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		D7D716912CEAC4B100CEEA51 /* MetalRaymarch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MetalRaymarch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7D716912CEAC4B100CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		D7D716AB2CEAC4B200CEEA51 /* Exceptions for "MetalRaymarch" folder in "MetalRaymarch" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = D7D716902CEAC4B100CEEA51 /* MetalRaymarch */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		D7D716932CEAC4B100CEEA51 /* MetalRaymarch */ = {
+		D7D716932CEAC4B100CEEA51 /* Threshold */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				D7D716AB2CEAC4B200CEEA51 /* Exceptions for "MetalRaymarch" folder in "MetalRaymarch" target */,
-			);
-			path = MetalRaymarch;
+			path = Threshold;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -45,7 +32,7 @@
 		D7D716882CEAC4B100CEEA51 = {
 			isa = PBXGroup;
 			children = (
-				D7D716932CEAC4B100CEEA51 /* MetalRaymarch */,
+				D7D716932CEAC4B100CEEA51 /* Threshold */,
 				D7D716922CEAC4B100CEEA51 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -53,7 +40,7 @@
 		D7D716922CEAC4B100CEEA51 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D7D716912CEAC4B100CEEA51 /* MetalRaymarch.app */,
+				D7D716912CEAC4B100CEEA51 /* Threshold.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		D7D716902CEAC4B100CEEA51 /* MetalRaymarch */ = {
+		D7D716902CEAC4B100CEEA51 /* Threshold */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D7D716AC2CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "MetalRaymarch" */;
+			buildConfigurationList = D7D716AC2CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "Threshold" */;
 			buildPhases = (
 				D7D7168D2CEAC4B100CEEA51 /* Sources */,
 				D7D7168E2CEAC4B100CEEA51 /* Frameworks */,
@@ -74,13 +61,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				D7D716932CEAC4B100CEEA51 /* MetalRaymarch */,
+				D7D716932CEAC4B100CEEA51 /* Threshold */,
 			);
-			name = MetalRaymarch;
+			name = Threshold;
 			packageProductDependencies = (
 			);
 			productName = MetalProject;
-			productReference = D7D716912CEAC4B100CEEA51 /* MetalRaymarch.app */;
+			productReference = D7D716912CEAC4B100CEEA51 /* Threshold.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -98,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = D7D7168C2CEAC4B100CEEA51 /* Build configuration list for PBXProject "MetalRaymarch" */;
+			buildConfigurationList = D7D7168C2CEAC4B100CEEA51 /* Build configuration list for PBXProject "Threshold" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -112,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				D7D716902CEAC4B100CEEA51 /* MetalRaymarch */,
+				D7D716902CEAC4B100CEEA51 /* Threshold */,
 			);
 		};
 /* End PBXProject section */
@@ -143,24 +130,26 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = MetalRaymarch/MetalRaymarch.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_ASSET_PATHS = "\"MetalRaymarch/Preview Content\"";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = MetalMandelboxDemo;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio-reactive lighting responds to music and sounds around you to create dynamic visual effects.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.MetalMandelbox;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "xros xrsimulator";
@@ -177,24 +166,26 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = MetalRaymarch/MetalRaymarch.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_ASSET_PATHS = "\"MetalRaymarch/Preview Content\"";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = MetalMandelboxDemo;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Audio-reactive lighting responds to music and sounds around you to create dynamic visual effects.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.MetalMandelbox;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "xros xrsimulator";
@@ -239,6 +230,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = "";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -307,6 +299,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = "";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -338,7 +331,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		D7D7168C2CEAC4B100CEEA51 /* Build configuration list for PBXProject "MetalRaymarch" */ = {
+		D7D7168C2CEAC4B100CEEA51 /* Build configuration list for PBXProject "Threshold" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D7D716AF2CEAC4B200CEEA51 /* Debug */,
@@ -347,7 +340,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D7D716AC2CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "MetalRaymarch" */ = {
+		D7D716AC2CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "Threshold" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D7D716AD2CEAC4B200CEEA51 /* Debug */,

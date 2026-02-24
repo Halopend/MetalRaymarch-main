@@ -13,10 +13,6 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSAppleMusicUsageDescription</key>
-	<string>Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Threshold uses the microphone for real-time audio-reactive fractal visualization.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationPreferredDefaultSceneSessionRole</key>

@@ -747,13 +747,11 @@ FORCE_INLINE half3 applyColorScheme(half2 c, float colorMix, ColorSchemeParams s
 //   2. Computing normals analytically from cached Jacobian approximation
 //   3. Computing colors directly from cached orbit trap values
 //
-// EXTENDED CACHE: Now also stores fold information to eliminate redundant
-// MapWithFoldInfo() calls in emissive pattern calculations.
 //
 // =============================================================================
 
 // Cached orbit state from Mandelbox iteration
-// Stores everything needed to compute normals, colors, AND emissive patterns
+// Stores everything needed to compute normals and colors
 // without re-iterating the fractal
 struct OrbitCache {
     // === BASIC ORBIT STATE ===
@@ -767,12 +765,6 @@ struct OrbitCache {
     // === EXTENDED: Trap iteration tracking for neon coloring ===
     int trapIteration;     // Which iteration had the minimum trap
     float3 trapPosition;   // Position at minimum trap (for angle-based coloring)
-    
-    // === EXTENDED: Fold info for emissive patterns ===
-    int boxFolds;          // Number of box folds applied
-    int sphereFolds;       // Number of sphere folds applied (inner/outer)
-    float minRadius;       // Minimum radius reached during iteration
-    float orbitTrapDist;   // Distance to nearest orbit trap point (axis distance)
     
     // === ANALYTIC JACOBIAN for normal computation ===
     // Accumulated derivative of the Mandelbox iteration w.r.t. input position.
@@ -789,10 +781,6 @@ FORCE_INLINE OrbitCache makeEmptyOrbitCache() {
     cache.distance = kRayMissThreshold;
     cache.trapIteration = 0;
     cache.trapPosition = float3(0.0f);
-    cache.boxFolds = 0;
-    cache.sphereFolds = 0;
-    cache.minRadius = 1e10f;
-    cache.orbitTrapDist = 1e10f;
     cache.jacobian = float3x3(1.0f);
     cache.hasJacobian = false;
     return cache;
@@ -911,19 +899,11 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
     return applyColorScheme(c, colorMix, scheme);
 }
 
-// === MapWithOrbitCache: Two variants for lean/full orbit tracking ===
+// === MapWithOrbitCache ===
 //
-// PERFORMANCE INSIGHT: The full cache tracks boxFolds, sphereFolds, minRadius,
-// and orbitTrapDist on every iteration (~6 extra ops/iter). These fields are ONLY
-// consumed by computeEmissive(), which is guarded by FC_EMISSIVE_ENABLED.
-// When emissive is disabled (the common case), we use the lean variant that
-// skips all fold tracking — saving ~72 ops per hit pixel at 12 iterations.
-//
-// Both variants compute: Jacobian (for analytic normals), trap values (for coloring).
-
-// LEAN variant: Jacobian + trap tracking only (normals + colors)
-// Used when emissive is disabled — the common path
-FORCE_INLINE float MapWithOrbitCacheLean(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
+// Lean orbit tracking: Jacobian + trap values (normals + colors).
+// (Fold tracking for emissive patterns has been removed.)
+FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
 {
     float4 p = float4(pos, 1.0);
     float4 p0 = p;
@@ -939,7 +919,7 @@ FORCE_INLINE float MapWithOrbitCacheLean(float3 pos, FractalParams params, float
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
     
     for (int i = 0; i < loopCount; i++) {
-        // --- Box fold with Jacobian (NO fold counting) ---
+        // --- Box fold with Jacobian ---
         float3 pOld = p.xyz;
         p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
         
@@ -949,7 +929,7 @@ FORCE_INLINE float MapWithOrbitCacheLean(float3 pos, FractalParams params, float
         J[1] *= boxDiag;
         J[2] *= boxDiag;
         
-        // --- Sphere fold with Jacobian (NO minRadius/orbitTrap tracking) ---
+        // --- Sphere fold with Jacobian ---
         float r2 = dot(p.xyz, p.xyz);
         if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; }
         
@@ -983,111 +963,10 @@ FORCE_INLINE float MapWithOrbitCacheLean(float3 pos, FractalParams params, float
     cache.valid = true;
     cache.trapIteration = trapIter;
     cache.trapPosition = trapPos;
-    // Zero out emissive fields (unused in lean path)
-    cache.boxFolds = 0;
-    cache.sphereFolds = 0;
-    cache.minRadius = 0.0f;
-    cache.orbitTrapDist = 0.0f;
     cache.jacobian = J;
     cache.hasJacobian = true;
     
     return d;
-}
-
-// FULL variant: Jacobian + trap + fold tracking (normals + colors + emissive)
-// Only used when emissive is enabled
-FORCE_INLINE float MapWithOrbitCacheFull(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
-{
-    float4 p = float4(pos, 1.0);
-    float4 p0 = p;
-    
-    float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
-    float trap = 1.0f;
-    
-    int trapIter = 0;
-    float3 trapPos = pos;
-    int boxFolds = 0;
-    int sphereFolds = 0;
-    float minRadius = 1e10f;
-    float orbitTrapDist = 1e10f;
-    
-    float3x3 J = float3x3(1.0f);
-    
-    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-    
-    for (int i = 0; i < loopCount; i++) {
-        // --- Box fold with Jacobian + fold counting ---
-        float3 pOld = p.xyz;
-        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-        if (any(p.xyz != pOld)) boxFolds++;
-        
-        float3 boxDiag = select(float3(-1.0f), float3(1.0f),
-                               abs(pOld.xyz) < float3(foldingLimit));
-        J[0] *= boxDiag;
-        J[1] *= boxDiag;
-        J[2] *= boxDiag;
-        
-        // --- Sphere fold with Jacobian + full tracking ---
-        float r2 = dot(p.xyz, p.xyz);
-        minRadius = min(minRadius, r2);
-        float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z));
-        orbitTrapDist = min(orbitTrapDist, axisTrap);
-        if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; }
-        
-        float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
-        if (t > 1.0f) sphereFolds++;
-        
-        J *= t;
-        p *= t;
-        
-        // --- Scale + translate with Jacobian ---
-        float s = params.scale.x;
-        p = fma(p, params.scale, p0);
-        J = s * J;
-        J[0][0] += 1.0f;
-        J[1][1] += 1.0f;
-        J[2][2] += 1.0f;
-    }
-    
-    float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
-    
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
-    
-    cache.p = p;
-    cache.p0 = pos;
-    cache.trap = trap;
-    cache.distance = d;
-    cache.iterationsUsed = loopCount;
-    cache.valid = true;
-    cache.trapIteration = trapIter;
-    cache.trapPosition = trapPos;
-    cache.boxFolds = boxFolds;
-    cache.sphereFolds = sphereFolds;
-    cache.minRadius = sqrt(minRadius);
-    cache.orbitTrapDist = orbitTrapDist;
-    cache.jacobian = J;
-    cache.hasJacobian = true;
-    
-    return d;
-}
-
-// Dispatch to lean or full variant based on emissive state.
-// When FC_EMISSIVE_ENABLED is defined as a function constant, the compiler
-// dead-code-eliminates the unused variant entirely — zero overhead.
-FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
-{
-    const bool emissiveEnabled = is_function_constant_defined(FC_EMISSIVE_ENABLED) 
-        ? FC_EMISSIVE_ENABLED : true;  // Default to full when FC not set
-    
-    if (emissiveEnabled) {
-        return MapWithOrbitCacheFull(pos, params, foldingLimit, iterations, cache);
-    } else {
-        return MapWithOrbitCacheLean(pos, params, foldingLimit, iterations, cache);
-    }
 }
 
 // Compute normal using cached orbit state

@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "D7D716902CEAC4B100CEEA51"
-               BuildableName = "MetalRaymarch.app"
-               BlueprintName = "MetalRaymarch"
-               ReferencedContainer = "container:MetalRaymarch.xcodeproj">
+               BuildableName = "Threshold.app"
+               BlueprintName = "Threshold"
+               ReferencedContainer = "container:Threshold.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,9 +45,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "D7D716902CEAC4B100CEEA51"
-            BuildableName = "MetalRaymarch.app"
-            BlueprintName = "MetalRaymarch"
-            ReferencedContainer = "container:MetalRaymarch.xcodeproj">
+            BuildableName = "Threshold.app"
+            BlueprintName = "Threshold"
+            ReferencedContainer = "container:Threshold.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -62,9 +62,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "D7D716902CEAC4B100CEEA51"
-            BuildableName = "MetalRaymarch.app"
-            BlueprintName = "MetalRaymarch"
-            ReferencedContainer = "container:MetalRaymarch.xcodeproj">
+            BuildableName = "Threshold.app"
+            BlueprintName = "Threshold"
+            ReferencedContainer = "container:Threshold.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
@@ -85,9 +85,9 @@
                   <BuildableReference
                      BuildableIdentifier = "primary"
                      BlueprintIdentifier = "D7D716902CEAC4B100CEEA51"
-                     BuildableName = "MetalRaymarch.app"
-                     BlueprintName = "MetalRaymarch"
-                     ReferencedContainer = "container:MetalRaymarch.xcodeproj">
+                     BuildableName = "Threshold.app"
+                     BlueprintName = "Threshold"
+                     ReferencedContainer = "container:Threshold.xcodeproj">
                   </BuildableReference>
                </EnvironmentBuildable>
             </ActionContent>
