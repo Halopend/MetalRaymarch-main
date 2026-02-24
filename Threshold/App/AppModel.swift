@@ -101,6 +101,9 @@ class AppModel {
     // Menu window visibility (toggled by gesture)
     // We hide content and glass to simulate window close while preserving position/size
     var isMenuWindowVisible: Bool = true
+
+    @ObservationIgnored private var isMenuHovering: Bool = false
+    @ObservationIgnored private var menuAdjustmentDepth: Int = 0
     
     // Screenshot capture (set by Renderer)
     var captureScreenshotHandler: (() async -> Data?)?
@@ -155,6 +158,8 @@ class AppModel {
             print("📋 onMenuToggle callback fired!")
             self?.toggleMenuWindow()
         }
+
+        refreshMenuInteractionState()
         
         // Add built-in presets if this is first launch
         presetManager.addBuiltInPresetsIfNeeded()
@@ -199,6 +204,7 @@ class AppModel {
             openMenuWindowHandler?()
             print("📋 Menu window opened")
         }
+        refreshMenuInteractionState()
     }
     
     /// Ensure window content is visible - call when exiting immersive mode or on app launch
@@ -209,6 +215,28 @@ class AppModel {
             openMenuWindowHandler?()
             print("📋 Menu window restored (re-opened)")
         }
+        refreshMenuInteractionState()
+    }
+
+    func setMenuHovering(_ hovering: Bool) {
+        isMenuHovering = hovering
+        refreshMenuInteractionState()
+    }
+
+    func beginMenuAdjustment() {
+        menuAdjustmentDepth += 1
+        refreshMenuInteractionState()
+    }
+
+    func endMenuAdjustment() {
+        menuAdjustmentDepth = max(0, menuAdjustmentDepth - 1)
+        refreshMenuInteractionState()
+    }
+
+    private func refreshMenuInteractionState() {
+        let interacting = isMenuWindowVisible && (isMenuHovering || menuAdjustmentDepth > 0)
+        renderSettings.isMenuInteractionActive = interacting
+        gestureController?.suppressParameterGestures = interacting
     }
     
     /// Capture a screenshot for preset thumbnails

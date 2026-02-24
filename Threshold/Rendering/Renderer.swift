@@ -700,17 +700,18 @@ actor Renderer {
         // Apple Music BPM-based synthesis — blend whatever is available.
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
         
-        // Single consolidated MainActor dispatch per frame for animation + audio updates.
-        // Previously this was 2-3 separate Task dispatches, each adding MainActor run loop overhead.
-        if isAudioMode {
+        // Single consolidated MainActor dispatch only when needed.
+        // Avoid scheduling a per-frame task when no animation or audio updates are active.
+        let shouldUpdateAnimation = settings.isAnimationPlaying
+        if shouldUpdateAnimation || isAudioMode {
             Task { @MainActor in
-                self.appModel.animationManager?.update(deltaTime: animDelta)
-                self.appModel.spotifyManager.updateFrame()
-                self.appModel.appleMusicManager.updateFrame()
-            }
-        } else {
-            Task { @MainActor in
-                self.appModel.animationManager?.update(deltaTime: animDelta)
+                if shouldUpdateAnimation {
+                    self.appModel.animationManager?.update(deltaTime: animDelta)
+                }
+                if isAudioMode {
+                    self.appModel.spotifyManager.updateFrame()
+                    self.appModel.appleMusicManager.updateFrame()
+                }
             }
         }
         

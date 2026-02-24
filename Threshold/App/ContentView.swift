@@ -419,9 +419,8 @@ struct ContentView: View {
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
         .onHover { hovering in
-            // Suppress fractal hand-tracking gestures while the user is
-            // looking at (and therefore interacting with) the menu window.
-            appModel.gestureController?.suppressParameterGestures = hovering
+            // Treat gaze-hover as active UI interaction for robust gesture suppression.
+            appModel.setMenuHovering(hovering)
         }
         .onAppear { cache.startSync(with: appModel.renderSettings, appModel: appModel) }
         .onDisappear { cache.stopSync() }
@@ -1588,6 +1587,7 @@ struct SharePlayControlsView: View {
 
 /// Single-line effect row: icon + label | slider | on/off toggle
 struct EffectSliderRow: View {
+    @Environment(AppModel.self) private var appModel
     let icon: String
     let label: String
     @Binding var value: Float
@@ -1608,7 +1608,12 @@ struct EffectSliderRow: View {
                 .frame(width: 135, alignment: .leading)
                 .lineLimit(1)
             Slider(value: $value, in: range, onEditingChanged: { editing in
-                if !editing { onChanged() }
+                if editing {
+                    appModel.beginMenuAdjustment()
+                } else {
+                    appModel.endMenuAdjustment()
+                    onChanged()
+                }
             })
             .disabled(!enabled)
             if showToggle {

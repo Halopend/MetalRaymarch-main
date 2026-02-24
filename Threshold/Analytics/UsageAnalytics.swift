@@ -602,7 +602,9 @@ class UsageAnalytics: ObservableObject {
         // Presets
         record["presetsLoaded"] = snapshot.presetsLoaded as NSNumber
         record["presetsSaved"] = snapshot.presetsSaved as NSNumber
-        record["favoritePresets"] = snapshot.favoritePresetNames
+        if !snapshot.favoritePresetNames.isEmpty {
+            record["favoritePresets"] = snapshot.favoritePresetNames
+        }
         
         // Performance
         record["avgFPS"] = snapshot.avgFPS as NSNumber

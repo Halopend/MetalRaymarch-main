@@ -17,6 +17,16 @@ extension Renderer {
 
             // Update the manager with current FPS - resolution scaling only applies if foveation is available
             let canUseResolutionScaling = layerRenderer.configuration.isFoveationEnabled
+
+            if settings.isMenuInteractionActive {
+                let interactionQuality = max(settings.dynamicRenderQualityMin, min(settings.dynamicRenderQualityMax, 0.65))
+                manager.setQuality(interactionQuality, layerRenderer: canUseResolutionScaling ? layerRenderer : nil)
+                settings.currentRenderQuality = manager.currentQuality
+                settings.fractalIterations = manager.effectiveIterations(base: settings.baseFractalIterations)
+                settings.maxRaySteps = manager.effectiveRaySteps(base: settings.baseMaxRaySteps)
+                return
+            }
+
             manager.update(fps: fps, deltaTime: deltaTime,
                            layerRenderer: layerRenderer,
                            applyResolutionScaling: canUseResolutionScaling)

@@ -121,6 +121,7 @@ final class RenderSettings: @unchecked Sendable {
     
     // HUD display
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
+    private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _gestureSpread: Float = 0            // Normalized hand spread (0-1) for debug visualization
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
@@ -667,6 +668,13 @@ final class RenderSettings: @unchecked Sendable {
     var showHUD: Bool {
         get { withLock { _showHUD } }
         set { withLock { _showHUD = newValue } }
+    }
+
+    /// Whether menu UI interaction is currently active.
+    /// Used to suppress gesture motion bleed-through and bias rendering for UI responsiveness.
+    var isMenuInteractionActive: Bool {
+        get { withLock { _isMenuInteractionActive } }
+        set { withLock { _isMenuInteractionActive = newValue } }
     }
     
     var activeGestureIndex: Int {
