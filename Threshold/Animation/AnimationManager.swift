@@ -12,6 +12,7 @@ import simd
 @MainActor
 @Observable
 final class AnimationManager {
+    private static let defaultSegmentDuration: TimeInterval = 2.0
     
     // ═══════════════════════════════════════════════════════════════════════════
     // SCENE STORAGE
@@ -106,6 +107,12 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     
     private weak var renderSettings: RenderSettings?
+
+    @inline(__always)
+    private func segmentDuration(for keyframes: [AnimationKeyframe], toIndex: Int) -> TimeInterval {
+        let duration = toIndex == 0 ? keyframes[0].duration : keyframes[toIndex].duration
+        return duration > 0 ? duration : Self.defaultSegmentDuration
+    }
     
     /// Callback to prepare shader pipeline for specific iteration/step values
     /// Set this from AppModel to enable precompilation for animation keyframes
@@ -372,6 +379,8 @@ final class AnimationManager {
         guard playhead.state == .playing,
               let scene = currentScene,
               scene.keyframes.count >= 2 else { return }
+        let keyframes = scene.keyframes
+        let keyframeCount = keyframes.count
         
         // Advance time
         playhead.elapsedInSegment += deltaTime * playbackSpeed
@@ -381,7 +390,7 @@ final class AnimationManager {
         var toIndex = fromIndex + 1
         
         // Handle end of scene
-        if toIndex >= scene.keyframes.count {
+        if toIndex >= keyframeCount {
             if scene.isLooping {
                 toIndex = 0  // Wrap to first keyframe
             } else {
@@ -390,10 +399,9 @@ final class AnimationManager {
             }
         }
         
-        var fromKeyframe = scene.keyframes[fromIndex]
-        var toKeyframe = scene.keyframes[toIndex]
-        var segmentDuration = toIndex == 0 ? scene.keyframes[0].duration : toKeyframe.duration
-        var actualDuration = segmentDuration > 0 ? segmentDuration : 2.0  // Default 2s if duration is 0
+        var fromKeyframe = keyframes[fromIndex]
+        var toKeyframe = keyframes[toIndex]
+        var actualDuration = segmentDuration(for: keyframes, toIndex: toIndex)
         
         // Check if current segment is complete - advance and carry over excess time
         while playhead.elapsedInSegment >= actualDuration {
@@ -406,7 +414,7 @@ final class AnimationManager {
             toIndex = fromIndex + 1
             
             // Handle wrap
-            if toIndex >= scene.keyframes.count {
+            if toIndex >= keyframeCount {
                 if scene.isLooping {
                     toIndex = 0
                 } else {
@@ -416,10 +424,9 @@ final class AnimationManager {
             }
             
             // Update keyframes for new segment
-            fromKeyframe = scene.keyframes[fromIndex]
-            toKeyframe = scene.keyframes[toIndex]
-            segmentDuration = toIndex == 0 ? scene.keyframes[0].duration : toKeyframe.duration
-            actualDuration = segmentDuration > 0 ? segmentDuration : 2.0
+            fromKeyframe = keyframes[fromIndex]
+            toKeyframe = keyframes[toIndex]
+            actualDuration = segmentDuration(for: keyframes, toIndex: toIndex)
         }
         
         // Calculate progress through current segment (0 to 1)
@@ -434,7 +441,7 @@ final class AnimationManager {
         if effectiveEasing.usesSplineInterpolation || (easingFunction.usesSplineInterpolation && effectiveEasing == .bezier) {
             // Use Catmull-Rom spline for smooth continuous motion through keyframes
             interpolated = CatmullRomSpline.interpolateKeyframes(
-                scene.keyframes,
+                keyframes,
                 fromIndex: fromIndex,
                 toIndex: toIndex,
                 t: rawProgress,
@@ -480,34 +487,43 @@ final class AnimationManager {
         settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
         settings.position = keyframe.position
 
-        // Apply optional color scheme from keyframe (also syncs gradient preset)
+          // Apply optional color scheme from keyframe (also syncs gradient preset)
         if let rawScheme = keyframe.colorScheme,
-           let scheme = ColorScheme(rawValue: Int32(rawScheme)) {
+              let scheme = ColorScheme(rawValue: Int32(rawScheme)),
+              settings.colorScheme != scheme {
             settings.transitionToColorScheme(scheme)
         }
 
-        if let lightingMode = keyframe.lightingMode {
+          if let lightingMode = keyframe.lightingMode,
+              settings.lightingMode != lightingMode {
             settings.lightingMode = lightingMode
         }
-        if let lightingPreset = keyframe.lightingPreset {
+          if let lightingPreset = keyframe.lightingPreset,
+              settings.lightingPreset != lightingPreset {
             settings.lightingPreset = lightingPreset
         }
-        if let hueRotationEffect = keyframe.hueRotationEffect {
+          if let hueRotationEffect = keyframe.hueRotationEffect,
+              settings.hueRotationEffect != hueRotationEffect {
             settings.hueRotationEffect = hueRotationEffect
         }
-        if let pulseEffect = keyframe.pulseEffect {
+          if let pulseEffect = keyframe.pulseEffect,
+              settings.pulseEffect != pulseEffect {
             settings.pulseEffect = pulseEffect
         }
-        if let glowEffect = keyframe.glowEffect {
+          if let glowEffect = keyframe.glowEffect,
+              settings.glowEffect != glowEffect {
             settings.glowEffect = glowEffect
         }
-        if let bloomEffect = keyframe.bloomEffect {
+          if let bloomEffect = keyframe.bloomEffect,
+              settings.bloomEffect != bloomEffect {
             settings.bloomEffect = bloomEffect
         }
-        if let fogEffect = keyframe.fogEffect {
+          if let fogEffect = keyframe.fogEffect,
+              settings.fogEffect != fogEffect {
             settings.fogEffect = fogEffect
         }
-        if let gradientCycleEffect = keyframe.gradientCycleEffect {
+          if let gradientCycleEffect = keyframe.gradientCycleEffect,
+              settings.gradientCycleEffect != gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
         }
         

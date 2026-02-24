@@ -476,14 +476,56 @@ struct FractalPreset: Codable, Identifiable {
     
     /// Get the thumbnail as a UIImage (visionOS/iOS) or NSImage (macOS)
     #if os(visionOS) || os(iOS)
+    private static let thumbnailCache = NSCache<NSString, UIImage>()
+
+    static func clearThumbnailCache(for id: UUID) {
+        thumbnailCache.removeObject(forKey: id.uuidString as NSString)
+    }
+
+    static func clearThumbnailCache() {
+        thumbnailCache.removeAllObjects()
+    }
+
     var thumbnailImage: UIImage? {
-        guard let data = thumbnailData else { return nil }
-        return UIImage(data: data)
+        let cacheKey = id.uuidString as NSString
+        guard let data = thumbnailData else {
+            Self.thumbnailCache.removeObject(forKey: cacheKey)
+            return nil
+        }
+        if let cached = Self.thumbnailCache.object(forKey: cacheKey) {
+            return cached
+        }
+        guard let decoded = UIImage(data: data) else {
+            return nil
+        }
+        Self.thumbnailCache.setObject(decoded, forKey: cacheKey)
+        return decoded
     }
     #elseif os(macOS)
+    private static let thumbnailCache = NSCache<NSString, NSImage>()
+
+    static func clearThumbnailCache(for id: UUID) {
+        thumbnailCache.removeObject(forKey: id.uuidString as NSString)
+    }
+
+    static func clearThumbnailCache() {
+        thumbnailCache.removeAllObjects()
+    }
+
     var thumbnailImage: NSImage? {
-        guard let data = thumbnailData else { return nil }
-        return NSImage(data: data)
+        let cacheKey = id.uuidString as NSString
+        guard let data = thumbnailData else {
+            Self.thumbnailCache.removeObject(forKey: cacheKey)
+            return nil
+        }
+        if let cached = Self.thumbnailCache.object(forKey: cacheKey) {
+            return cached
+        }
+        guard let decoded = NSImage(data: data) else {
+            return nil
+        }
+        Self.thumbnailCache.setObject(decoded, forKey: cacheKey)
+        return decoded
     }
     #endif
 }
@@ -495,6 +537,10 @@ class PresetManager {
     private(set) var presets: [FractalPreset] = []
     private let presetsKey = "FractalPresets"
     private let maxBackupCount: Int? = nil  // nil = unlimited retention
+    private var pendingSaveTask: Task<Void, Never>?
+    private let saveDebounceNanoseconds: UInt64 = 250_000_000
+    private var lastBackupAt: Date?
+    private let backupInterval: TimeInterval = 30
     
     /// URL for the presets directory in the app's documents
     private var presetsDirectory: URL {
@@ -541,6 +587,7 @@ class PresetManager {
             decoder.dateDecodingStrategy = .iso8601
             presets = try decoder.decode([FractalPreset].self, from: data)
             presets.sort { $0.createdAt > $1.createdAt }
+            FractalPreset.clearThumbnailCache()
         } catch {
             print("Failed to load presets: \(error). Trying latest backup…")
             loadLatestBackup()
@@ -551,11 +598,11 @@ class PresetManager {
     private func loadLatestBackup() {
         do {
             let backups = try FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
-            let latest = backups.sorted { (a, b) -> Bool in
+            let latest = backups.max { (a, b) -> Bool in
                 let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return da > db
-            }.first
+                return da < db
+            }
             guard let url = latest else {
                 presets = []
                 return
@@ -565,6 +612,7 @@ class PresetManager {
             decoder.dateDecodingStrategy = .iso8601
             presets = try decoder.decode([FractalPreset].self, from: data)
             presets.sort { $0.createdAt > $1.createdAt }
+            FractalPreset.clearThumbnailCache()
             print("✅ Loaded presets from backup: \(url.lastPathComponent)")
         } catch {
             print("Failed to load presets backup: \(error)")
@@ -579,20 +627,36 @@ class PresetManager {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = .prettyPrinted
             let data = try encoder.encode(presets)
-            try data.write(to: fileURL)
+            try data.write(to: fileURL, options: .atomic)
             writeBackup(data: data)
         } catch {
             print("Failed to save presets: \(error)")
         }
     }
 
+    /// Coalesce frequent save calls into one disk write.
+    private func scheduleSavePresets() {
+        pendingSaveTask?.cancel()
+        pendingSaveTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: self.saveDebounceNanoseconds)
+            guard !Task.isCancelled else { return }
+            self.savePresets()
+        }
+    }
+
     /// Write a timestamped backup and keep only the newest few
     private func writeBackup(data: Data) {
+        let now = Date()
+        if let lastBackupAt, now.timeIntervalSince(lastBackupAt) < backupInterval {
+            return
+        }
+        self.lastBackupAt = now
+
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let stamp = formatter.string(from: Date())
+        let stamp = formatter.string(from: now)
         let backupURL = backupsDirectory.appendingPathComponent("presets-\(stamp).json")
         do {
             try data.write(to: backupURL)
@@ -625,7 +689,7 @@ class PresetManager {
     func savePreset(name: String, settings: RenderSettings, thumbnailData: Data? = nil) {
         let preset = FractalPreset.fromSettings(settings, name: name, thumbnailData: thumbnailData)
         presets.insert(preset, at: 0) // Add to beginning (newest first)
-        savePresets()
+        scheduleSavePresets()
         
         // Track for analytics with full preset data
         UsageAnalytics.shared.trackPresetSaved(preset: preset)
@@ -660,8 +724,9 @@ class PresetManager {
         var updated = createPresetWithID(preset.id, name: preset.name, createdAt: preset.createdAt, settings: settings, thumbnailData: thumbnailData ?? preset.thumbnailData)
         updated.rating = presets[index].rating  // Preserve rating when updating settings
         presets[index] = updated
+        FractalPreset.clearThumbnailCache(for: preset.id)
         
-        savePresets()
+        scheduleSavePresets()
     }
 
     /// Update rating for a preset (0-5)
@@ -669,7 +734,7 @@ class PresetManager {
         guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
         let clamped = max(0, min(5, rating))
         presets[index].rating = clamped
-        savePresets()
+        scheduleSavePresets()
     }
     
     /// Helper to create preset with specific ID
@@ -736,19 +801,24 @@ class PresetManager {
     func renamePreset(_ preset: FractalPreset, to newName: String) {
         guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
         presets[index].name = newName
-        savePresets()
+        scheduleSavePresets()
     }
     
     /// Delete a preset
     func deletePreset(_ preset: FractalPreset) {
         presets.removeAll { $0.id == preset.id }
-        savePresets()
+        FractalPreset.clearThumbnailCache(for: preset.id)
+        scheduleSavePresets()
     }
     
     /// Delete preset at index
     func deletePreset(at offsets: IndexSet) {
+        let removedIDs = offsets.compactMap { index in
+            presets.indices.contains(index) ? presets[index].id : nil
+        }
         presets.remove(atOffsets: offsets)
-        savePresets()
+        removedIDs.forEach { FractalPreset.clearThumbnailCache(for: $0) }
+        scheduleSavePresets()
     }
     
     /// Load a preset's settings
@@ -771,7 +841,6 @@ class PresetManager {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = .prettyPrinted
             let data = try encoder.encode(preset)
             try data.write(to: tempURL)
             return tempURL
@@ -787,19 +856,17 @@ class PresetManager {
             let data = try Data(contentsOf: url)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            var preset = try decoder.decode(FractalPreset.self, from: data)
-            
-            // Generate new ID to avoid conflicts
-            preset = FractalPreset(
-                id: UUID(),
-                name: preset.name,
-                createdAt: Date(),
-                thumbnailData: preset.thumbnailData
-            )
-            
-            // Copy all the settings manually (since we changed the ID)
             let importedPreset = try decoder.decode(FractalPreset.self, from: data)
-            var newPreset = preset
+
+            // Generate new ID to avoid conflicts
+            var newPreset = FractalPreset(
+                id: UUID(),
+                name: importedPreset.name,
+                createdAt: Date(),
+                thumbnailData: importedPreset.thumbnailData
+            )
+
+            // Copy all settings from imported preset while keeping new id/date
             newPreset.fractalIterations = importedPreset.fractalIterations
             newPreset.maxRaySteps = importedPreset.maxRaySteps
             newPreset.colorMix = importedPreset.colorMix
@@ -851,7 +918,7 @@ class PresetManager {
             newPreset.lightingSoftness = importedPreset.lightingSoftness
             
             presets.insert(newPreset, at: 0)
-            savePresets()
+            scheduleSavePresets()
             
             return newPreset
         } catch {
@@ -972,7 +1039,7 @@ extension PresetManager {
             return orbit
         }
         
-        savePresets()
+        scheduleSavePresets()
     }
     
     // MARK: - Last State Auto-Save/Restore
@@ -990,7 +1057,7 @@ extension PresetManager {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(preset)
-            try data.write(to: lastStateFileURL)
+            try data.write(to: lastStateFileURL, options: .atomic)
             print("💾 Last state saved")
         } catch {
             print("Failed to save last state: \(error)")

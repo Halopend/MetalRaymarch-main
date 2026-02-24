@@ -712,7 +712,9 @@ enum DefaultScenes {
     }
     
     /// All built-in scenes (add more here in the future)
+    private static let cachedScenes: [AnimationScene] = [sceneOne()]
+
     static func all() -> [AnimationScene] {
-        [sceneOne()]
+        cachedScenes
     }
 }

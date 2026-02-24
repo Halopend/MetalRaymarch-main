@@ -13,7 +13,7 @@ extension Renderer {
             height: screenshotSize,
             mipmapped: false
         )
-        colorDescriptor.usage = [.renderTarget, .shaderRead]
+        colorDescriptor.usage = [.renderTarget]
         colorDescriptor.storageMode = .shared
         screenshotTexture = device.makeTexture(descriptor: colorDescriptor)
         screenshotTexture?.label = "Screenshot Color"
