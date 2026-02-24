@@ -11,6 +11,7 @@ import RealityKit
 
 // MARK: - Cached UI Settings
 // Local state that syncs with RenderSettings periodically to avoid lock contention
+@MainActor
 @Observable
 final class UISettingsCache {
     // Fractal parameters
@@ -169,14 +170,25 @@ final class UISettingsCache {
     var dynamicRenderQualityMax: Float = 1.0
     var currentRenderQuality: Float = 0.7
     
+    // === LIVE STATS (synced from render settings periodically) ===
+    // These eliminate direct appModel.renderSettings reads from SwiftUI views,
+    // preventing lock contention on the main thread during body evaluation.
+    var liveFractalIterations: Int = 9
+    var liveMaxRaySteps: Int = 64
+    var liveFractalScale: Float = 2.8
+    var livePosition: SIMD3<Float> = .zero
+    var liveFPS: Double = 0  // Mirrors appModel.fps without triggering @Observable invalidation
+    
+    private weak var _appModel: AppModel?
     private var syncTimer: Timer?
     private weak var settings: RenderSettings?
     
-    func startSync(with settings: RenderSettings) {
+    func startSync(with settings: RenderSettings, appModel: AppModel) {
         self.settings = settings
+        self._appModel = appModel
         loadFromSettings()
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            self?.syncQualityOnly()
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.syncLiveStats()
         }
     }
     
@@ -185,9 +197,16 @@ final class UISettingsCache {
         syncTimer = nil
     }
     
-    private func syncQualityOnly() {
+    private func syncLiveStats() {
         guard let settings else { return }
         currentRenderQuality = settings.currentRenderQuality
+        liveFractalIterations = settings.fractalIterations
+        liveMaxRaySteps = settings.maxRaySteps
+        liveFractalScale = settings.fractalScale
+        livePosition = settings.position
+        if let appModel = _appModel {
+            liveFPS = appModel.fps
+        }
     }
     
     func loadFromSettings() {
@@ -404,7 +423,7 @@ struct ContentView: View {
             // looking at (and therefore interacting with) the menu window.
             appModel.gestureController?.suppressParameterGestures = hovering
         }
-        .onAppear { cache.startSync(with: appModel.renderSettings) }
+        .onAppear { cache.startSync(with: appModel.renderSettings, appModel: appModel) }
         .onDisappear { cache.stopSync() }
     }
     
@@ -1406,7 +1425,8 @@ struct ContentView: View {
     }
     
     private var themeColor: Color {
-        switch appModel.renderSettings.colorScheme {
+        // Read from cache instead of appModel.renderSettings to avoid lock contention
+        switch cache.colorScheme {
         case .classic: return Color(red: 0.8, green: 0.5, blue: 0.2)
         case .ocean: return Color(red: 0.1, green: 0.5, blue: 0.9)
         case .fire: return Color(red: 1.0, green: 0.4, blue: 0.1)
@@ -1422,7 +1442,9 @@ struct ContentView: View {
     }
     
     private var fpsColor: Color {
-        if appModel.fps >= 85 { return .green }; if appModel.fps >= 60 { return .yellow }; return .red
+        // Use cache.liveFPS for the settings panel to avoid @Observable invalidation from appModel.fps
+        let fps = cache.liveFPS
+        if fps >= 85 { return .green }; if fps >= 60 { return .yellow }; return .red
     }
     
     private var settingsAdvancedContent: some View {
@@ -1431,21 +1453,31 @@ struct ContentView: View {
                 HStack { Image(systemName: "slider.horizontal.3").foregroundStyle(themeColor); Text("Quality Constraints").font(.headline) }
                 VStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(appModel.renderSettings.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
-                        Slider(value: Binding(get: { Float(appModel.renderSettings.baseFractalIterations) }, set: { appModel.renderSettings.baseFractalIterations = Int($0) }), in: 4...32, step: 1)
+                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
+                        Slider(value: Binding(
+                            get: { Float(cache.baseFractalIterations) },
+                            set: { cache.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
+                        ), in: 4...32, step: 1)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(appModel.renderSettings.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
-                        Slider(value: Binding(get: { Float(appModel.renderSettings.baseMaxRaySteps) }, set: { appModel.renderSettings.baseMaxRaySteps = Int($0) }), in: 32...1024, step: 16)
+                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
+                        Slider(value: Binding(
+                            get: { Float(cache.baseMaxRaySteps) },
+                            set: { cache.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
+                        ), in: 32...1024, step: 16)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", appModel.renderSettings.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
-                        Slider(value: Binding(get: { appModel.renderSettings.dynamicRenderQualityMin }, set: { appModel.renderSettings.dynamicRenderQualityMin = $0 }), in: 0.1...0.8, step: 0.05)
+                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", cache.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
+                        Slider(value: $cache.dynamicRenderQualityMin, in: 0.1...0.8, step: 0.05, onEditingChanged: { e in
+                            if !e { cache.push(\.dynamicRenderQualityMin, value: cache.dynamicRenderQualityMin) }
+                        })
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", appModel.renderSettings.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
-                        Slider(value: Binding(get: { appModel.renderSettings.dynamicRenderQualityMax }, set: { appModel.renderSettings.dynamicRenderQualityMax = $0 }), in: 0.8...1.0, step: 0.05)
+                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", cache.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
+                        Slider(value: $cache.dynamicRenderQualityMax, in: 0.8...1.0, step: 0.05, onEditingChanged: { e in
+                            if !e { cache.push(\.dynamicRenderQualityMax, value: cache.dynamicRenderQualityMax) }
+                        })
                     }
                 }
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
@@ -1468,10 +1500,10 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack { Image(systemName: "chart.bar.fill").foregroundStyle(themeColor); Text("Live Stats").font(.headline) }
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    StatBox(label: "FPS", value: String(format: "%.0f", appModel.fps), color: fpsColor)
-                    StatBox(label: "Iterations", value: "\(appModel.renderSettings.fractalIterations)", color: themeColor)
-                    StatBox(label: "Ray Steps", value: "\(appModel.renderSettings.maxRaySteps)", color: themeColor.opacity(0.8))
-                    StatBox(label: "Scale", value: String(format: "%.2f", appModel.renderSettings.fractalScale), color: themeColor.opacity(0.6))
+                    StatBox(label: "FPS", value: String(format: "%.0f", cache.liveFPS), color: fpsColor)
+                    StatBox(label: "Iterations", value: "\(cache.liveFractalIterations)", color: themeColor)
+                    StatBox(label: "Ray Steps", value: "\(cache.liveMaxRaySteps)", color: themeColor.opacity(0.8))
+                    StatBox(label: "Scale", value: String(format: "%.2f", cache.liveFractalScale), color: themeColor.opacity(0.6))
                 }
             }.padding().background(themeColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
             
@@ -1480,7 +1512,7 @@ struct ContentView: View {
                 Button {
                     if isTestAnimationPlaying { appModel.animationManager?.stop(); isTestAnimationPlaying = false }
                     else if let mgr = appModel.animationManager {
-                        mgr.currentScene = AdvancedTestScene.create(startPosition: appModel.renderSettings.position)
+                        mgr.currentScene = AdvancedTestScene.create(startPosition: cache.livePosition)
                         mgr.play(); isTestAnimationPlaying = true
                     }
                 } label: {

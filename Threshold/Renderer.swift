@@ -130,7 +130,7 @@ actor Renderer {
     
     // === UNIFIED PIPELINE CACHE ===
     // All specialized pipelines stored in a single cache with consistent key format.
-    // Key format: "FI{iterations}_RS{raySteps}_E{0|1}_N{0|1}_Q{0|1|2}[_QS]"
+    // Key format: "FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
     // This allows preset pipelines and quality preset pipelines to be looked up uniformly.
     //
     // Pipeline specialization strategy:
@@ -362,7 +362,7 @@ actor Renderer {
             
             // Build unified cache key (quality presets have E=0, N=0)
             let qualityMode: Int = iterCount <= 7 ? 2 : (iterCount <= 9 ? 1 : 0)
-            let unifiedKey = "FI\(iterCount)_RS\(raySteps)_E0_N0_Q\(qualityMode)"
+            let unifiedKey = "FI\(iterCount)_RS\(raySteps)_N0_Q\(qualityMode)"
             
             // Standard pipeline
             if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
@@ -848,6 +848,10 @@ actor Renderer {
         return mtlVertexDescriptor
     }
 
+    /// Cached Metal library to avoid redundant `makeDefaultLibrary()` calls during pipeline builds.
+    /// Thread-safe for our usage: all pipeline builds happen on the same thread (init) or are serialized.
+    nonisolated(unsafe) private static var _cachedLibrary: MTLLibrary?
+    
     static func buildRenderPipelineWithDevice(device: MTLDevice,
                                               layerRenderer: LayerRenderer,
                                               rasterSampleCount: Int,
@@ -859,7 +863,8 @@ actor Renderer {
                                               functionConstants: MTLFunctionConstantValues? = nil) throws -> MTLRenderPipelineState {
         /// Build a render state pipeline object
 
-        let library = device.makeDefaultLibrary()
+        let library = _cachedLibrary ?? device.makeDefaultLibrary()
+        if _cachedLibrary == nil { _cachedLibrary = library }
 
         let vertexFunction = library?.makeFunction(name: vertexFunctionName)
         
@@ -970,6 +975,7 @@ actor Renderer {
         
         /// Creates a config for each quality preset.
         /// These pipelines compile out neon code for maximum performance.
+        /// Low quality also compiles out shadows entirely (Shadow() returns ambient constant).
         /// For presets that need neon, use fromPreset() instead.
         static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
             let qualityMode: Int32
@@ -988,7 +994,8 @@ actor Renderer {
                 debugHierarchical: false,
                 maxRaySteps: Int32(preset.raySteps),
                 neonModeEnabled: false,      // Compile out neon orbit tracking
-                colorIterations: Int32(preset.fractalIterations)  // Match fractal iterations
+                colorIterations: Int32(preset.fractalIterations),  // Match fractal iterations
+                shadowsEnabled: preset == .low ? false : nil  // Low: compile out Shadow() entirely; others: runtime
             )
         }
         
@@ -1055,11 +1062,11 @@ actor Renderer {
     /// Call this when slider values change to pre-compile the needed pipeline.
     func getPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool = false) -> MTLRenderPipelineState {
         // Build cache key matching the preset format
-        let settingsSnapshot = appModel.renderSettings.snapshot()
+        let colorIters = appModel.renderSettings.colorIterations  // Direct read (own lock) — avoids full snapshot
         let colorScheme = appModel.renderSettings.colorScheme  // Read directly - not in snapshot
         let neon = colorScheme.rawValue >= 8 ? 1 : 0  // neonCyber, neonSunset, neonMatrix
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_E0_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
         
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -1076,7 +1083,7 @@ actor Renderer {
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
             neonModeEnabled: neon == 1,
-            colorIterations: Int32(settingsSnapshot.colorIterations)  // Use actual color iterations, not fractal iterations
+            colorIterations: Int32(colorIters)  // Use actual color iterations, not fractal iterations
         )
         
         print("🔧 [ShaderCompilation] Building pipeline for FI=\(iterations) RS=\(raySteps)...")
@@ -1192,7 +1199,7 @@ actor Renderer {
         
         // Build unified cache key (only on parameter change)
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_E0_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
         
         let result: MTLRenderPipelineState
         var isSpecialized = true
@@ -1207,7 +1214,7 @@ actor Renderer {
         }
         // 2. Try fallback to neon=off variant (quality preset)
         else {
-            let fallbackKey = "FI\(iterations)_RS\(raySteps)_E0_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+            let fallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
             if let pipeline = pipelineCache[fallbackKey] {
                 if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
                     print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
@@ -1243,7 +1250,7 @@ actor Renderer {
     func ensurePipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool) {
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_E0_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : ""))
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
         
         // Already cached
         if pipelineCache[cacheKey] != nil { return }
@@ -1492,26 +1499,34 @@ actor Renderer {
         
         // Calculate deltaTime for this update
         let gestureUpdateDelta = Float(time - lastHandTrackingUpdateTime)
-        
-        // Process gestures EVERY FRAME for responsive controls (no throttle)
         lastHandTrackingUpdateTime = time
         
         // Process gestures via async dispatch to MainActor
-        // GestureController writes to RenderSettings which is thread-safe
+        // GestureController is @MainActor so updateHands must run there.
+        // UI state updates (leftHandTracked, rightHandTracked) are throttled to ~15Hz
+        // since they trigger @Observable invalidation but are only visual indicators.
         if #available(visionOS 2.0, *) {
+            let leftAnchor = anchors.leftHand
+            let rightAnchor = anchors.rightHand
+            
             Task { @MainActor in
-                guard appModel.handTrackingEnabled else {
-                    appModel.leftHandTracked = false
-                    appModel.rightHandTracked = false
+                guard self.appModel.handTrackingEnabled else {
+                    self.appModel.leftHandTracked = false
+                    self.appModel.rightHandTracked = false
                     return
                 }
 
-                appModel.leftHandTracked = anchors.leftHand?.isTracked ?? false
-                appModel.rightHandTracked = anchors.rightHand?.isTracked ?? false
+                // Only update UI-facing tracking state at ~15Hz to reduce @Observable invalidation
+                // Checking gestureUpdateDelta here: if accumulated time > 66ms, update UI state
+                if gestureUpdateDelta > 0.066 {
+                    self.appModel.leftHandTracked = leftAnchor?.isTracked ?? false
+                    self.appModel.rightHandTracked = rightAnchor?.isTracked ?? false
+                }
                 
-                appModel.gestureController?.updateHands(
-                    leftAnchor: anchors.leftHand,
-                    rightAnchor: anchors.rightHand,
+                // Gesture processing always runs for responsive controls
+                self.appModel.gestureController?.updateHands(
+                    leftAnchor: leftAnchor,
+                    rightAnchor: rightAnchor,
                     deltaTime: gestureUpdateDelta
                 )
             }
@@ -1857,8 +1872,10 @@ actor Renderer {
             let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * fpsSmoothFactor
             smoothedFPS = updatedFPS
             
-            // Throttle UI updates to 4Hz (every 0.25s) to prevent SwiftUI layout thrashing
-            if time - lastFPSUpdateTime > 0.25 {
+            // Throttle UI updates to 2Hz (every 0.5s) to reduce SwiftUI observation invalidation.
+            // appModel.fps is @Observable and triggers layout re-evaluation of all views reading it.
+            // 2Hz is frequent enough for visual FPS display while halving MainActor layout work.
+            if time - lastFPSUpdateTime > 0.5 {
                 lastFPSUpdateTime = time
                 Task { @MainActor in
                     appModel.fps = updatedFPS
@@ -1896,11 +1913,9 @@ actor Renderer {
         // Update hand tracking and process gestures
         self.updateHandTracking(atTime: time)
 
-        // Update scene animation playback on MainActor (sets target values before interpolation)
+        // Update scene animation playback on MainActor
+        // Batched with audio frame updates into a single MainActor dispatch to reduce overhead
         let animDelta = TimeInterval(cachedDeltaTime)
-        Task { @MainActor in
-            self.appModel.animationManager?.update(deltaTime: animDelta)
-        }
         
         settings.interpolateToTargets(deltaTime: cachedDeltaTime)
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
@@ -1910,6 +1925,21 @@ actor Renderer {
         // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
         // Apple Music BPM-based synthesis — blend whatever is available.
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
+        
+        // Single consolidated MainActor dispatch per frame for animation + audio updates.
+        // Previously this was 2-3 separate Task dispatches, each adding MainActor run loop overhead.
+        if isAudioMode {
+            Task { @MainActor in
+                self.appModel.animationManager?.update(deltaTime: animDelta)
+                self.appModel.spotifyManager.updateFrame()
+                self.appModel.appleMusicManager.updateFrame()
+            }
+        } else {
+            Task { @MainActor in
+                self.appModel.animationManager?.update(deltaTime: animDelta)
+            }
+        }
+        
         if isAudioMode {
             let mic = appModel.audioAnalyzer
             let spotifyManager = appModel.spotifyManager
@@ -1924,12 +1954,6 @@ actor Renderer {
             let midSens = settings.midSensitivity
             let trebleSens = settings.trebleSensitivity
             let beatSens = settings.beatSensitivity
-            
-            // Update beat sync interpolation each frame
-            Task { @MainActor in
-                self.appModel.spotifyManager.updateFrame()
-                self.appModel.appleMusicManager.updateFrame()
-            }
 
             // Collect active source levels, then blend proportionally
             var totalBass: Float = 0, totalMid: Float = 0, totalTreble: Float = 0
