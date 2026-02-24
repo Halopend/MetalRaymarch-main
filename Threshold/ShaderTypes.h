@@ -48,7 +48,6 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexQualityMode         = 4,  // int: 0=high, 1=medium, 2=low - controls feature degradation
     FCIndexDebugHierarchical   = 5,  // bool: Debug visualization toggle
     FCIndexMaxRaySteps         = 6,  // int: Max raymarch steps (enables loop optimization)
-    FCIndexEmissiveEnabled     = 7,  // bool: Eliminates emissive code path when false
     FCIndexNeonModeEnabled     = 8,  // bool: Eliminates neon orbit tracking when false
     FCIndexColorIterations     = 9,  // int: Color iteration count (enables loop unrolling)
     FCIndexVisualizerEnabled   = 12, // bool: Enables dedicated audio visualizer overlay
@@ -217,13 +216,6 @@ typedef struct
     float beatIntensity;     // Beat onset intensity (0-1, peaks on beats)
     int visualizerMode;      // 0=off, 1=pulse, 2=waveform, 3=spectrum
     float visualizerIntensity; // How much audio affects visuals (0-1)
-    // Emissive glow parameters
-    int emissiveEnabled;     // Enable emissive glow regions (0/1)
-    int emissivePattern;     // Pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
-    float emissiveIntensity; // Glow brightness (0-2)
-    float emissiveThreshold; // Threshold for triggering glow (0-1)
-    vector_float3 emissiveColor;  // Emissive color tint
-    float emissiveSpeed;     // Animation speed for pulse mode
     float fogIntensity;      // Fog strength (0 = no fog, 1 = full fog)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     // Depth pipeline settings (shared across raymarch + upscaling)
@@ -280,13 +272,6 @@ typedef struct
     float beatIntensity;         // Beat onset intensity (0-1, peaks on beats)
     int visualizerMode;          // 0=off, 1=pulse, 2=waveform, 3=spectrum
     float visualizerIntensity;   // How much audio affects visuals (0-1)
-    // Emissive glow parameters
-    int emissiveEnabled;         // Enable emissive glow regions (0/1)
-    int emissivePattern;         // Pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
-    float emissiveIntensity;     // Glow brightness (0-2)
-    float emissiveThreshold;     // Threshold for triggering glow (0-1)
-    vector_float3 emissiveColor; // Emissive color tint
-    float emissiveSpeed;         // Animation speed for pulse mode
     float fogIntensity;          // Fog strength (0 = no fog, 1 = full fog)
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     // Depth pipeline settings (shared across raymarch + upscaling)

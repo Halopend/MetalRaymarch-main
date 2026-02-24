@@ -30,7 +30,6 @@ enum FunctionConstantIndex: Int {
     case qualityMode = 4
     case debugHierarchical = 5
     case maxRaySteps = 6  // Base max ray steps (actual count scaled by quality at runtime)
-    case emissiveEnabled = 7  // Eliminates emissive code path when false
     case neonModeEnabled = 8  // Eliminates neon orbit trap computation when false
     case colorIterations = 9  // Enables loop unrolling in ColourWithScheme
     // index 10 = FC_SHARE_SHADOWS (set in shader only)
@@ -135,7 +134,7 @@ actor Renderer {
     // This allows preset pipelines and quality preset pipelines to be looked up uniformly.
     //
     // Pipeline specialization strategy:
-    // - Quality presets (iter6-iter16): Compiled with emissive=false, neon=false for speed
+    // - Quality presets (iter6-iter16): Compiled with neon=false for speed
     // - Saved presets: Fully specialized with all known function constants
     // - On-demand: Built lazily when requested config not found in cache
     
@@ -273,8 +272,6 @@ actor Renderer {
     private var musicAnchorBloomWasEnabled: Bool = false
     private var musicAnchorHueSpeed: Float = 0.1
     private var musicAnchorHueWasEnabled: Bool = false
-    private var musicAnchorEmissiveIntensity: Float = 1.0
-    private var musicAnchorEmissiveWasEnabled: Bool = false
     private var musicAnchorSaturation: Float = 1.0
     private var musicAnchorIterations: Int = 9
 
@@ -349,8 +346,8 @@ actor Renderer {
         // when FC_FRACTAL_ITERATIONS is defined as a compile-time constant.
         // Note: The outer raymarch loop does NOT unroll due to runtime quality scaling.
         //
-        // Quality presets compile out emissive/neon for maximum performance.
-        // For features like emissive/neon, use saved presets which build fully-specialized pipelines.
+        // Quality presets compile out neon for maximum performance.
+        // For features like neon, use saved presets which build fully-specialized pipelines.
         
         let qualityPresets = QualityPreset.allCases
         
@@ -897,7 +894,6 @@ actor Renderer {
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
-        var emissiveEnabled: Bool?         // FC index 7 - eliminates emissive code path
         var neonModeEnabled: Bool?         // FC index 8 - eliminates neon orbit tracking
         var colorIterations: Int32?        // FC index 9 - enables loop unrolling in color
         var shadowsEnabled: Bool?          // FC index 11 - GMT-fractals: compile-out shadows entirely
@@ -927,9 +923,6 @@ actor Renderer {
             if var raySteps = maxRaySteps {
                 constants.setConstantValue(&raySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
             }
-            if var emissive = emissiveEnabled {
-                constants.setConstantValue(&emissive, type: .bool, index: FunctionConstantIndex.emissiveEnabled.rawValue)
-            }
             if var neon = neonModeEnabled {
                 constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
             }
@@ -954,7 +947,6 @@ actor Renderer {
                 qualityMode: 2,  // Low quality
                 debugHierarchical: false,
                 maxRaySteps: 32,
-                emissiveEnabled: false,  // Compile out emissive
                 neonModeEnabled: false,  // Compile out neon
                 colorIterations: 6       // Match fractal iterations
             )
@@ -971,15 +963,14 @@ actor Renderer {
                 qualityMode: 0,  // High quality
                 debugHierarchical: false,
                 maxRaySteps: 100,
-                emissiveEnabled: nil,    // Runtime (not specialized)
                 neonModeEnabled: nil,    // Runtime (not specialized)
                 colorIterations: 12      // Match fractal iterations
             )
         }
         
         /// Creates a config for each quality preset.
-        /// These pipelines compile out emissive/neon code for maximum performance.
-        /// For presets that need emissive/neon, use fromPreset() instead.
+        /// These pipelines compile out neon code for maximum performance.
+        /// For presets that need neon, use fromPreset() instead.
         static func forQualityPreset(_ preset: QualityPreset) -> FunctionConstantConfig {
             let qualityMode: Int32
             switch preset {
@@ -996,7 +987,6 @@ actor Renderer {
                 qualityMode: qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: Int32(preset.raySteps),
-                emissiveEnabled: false,      // Compile out emissive code path
                 neonModeEnabled: false,      // Compile out neon orbit tracking
                 colorIterations: Int32(preset.fractalIterations)  // Match fractal iterations
             )
@@ -1021,7 +1011,6 @@ actor Renderer {
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,
-                emissiveEnabled: fc.emissiveEnabled,
                 neonModeEnabled: fc.neonModeEnabled,
                 colorIterations: fc.colorIterations
             )
@@ -1068,10 +1057,9 @@ actor Renderer {
         // Build cache key matching the preset format
         let settingsSnapshot = appModel.renderSettings.snapshot()
         let colorScheme = appModel.renderSettings.colorScheme  // Read directly - not in snapshot
-        let emissive = settingsSnapshot.emissiveEnabled ? 1 : 0
         let neon = colorScheme.rawValue >= 8 ? 1 : 0  // neonCyber, neonSunset, neonMatrix
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_E\(emissive)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_E0_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
         
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -1087,7 +1075,6 @@ actor Renderer {
             qualityMode: qualityMode,
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
-            emissiveEnabled: settingsSnapshot.emissiveEnabled,
             neonModeEnabled: neon == 1,
             colorIterations: Int32(settingsSnapshot.colorIterations)  // Use actual color iterations, not fractal iterations
         )
@@ -1155,7 +1142,7 @@ actor Renderer {
                 print("  🔨 Compiling: \(preset.name)")
                 print("      Key: \(key)")
                 print("      FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Shadow=\(fc.shadowIterations)")
-                print("      Emissive=\(fc.emissiveEnabled), Neon=\(fc.neonModeEnabled), Quality=\(fc.qualityMode)")
+                print("      Neon=\(fc.neonModeEnabled), Quality=\(fc.qualityMode)")
             }
             
             // Build both standard and quad-shared variants
@@ -1179,7 +1166,6 @@ actor Renderer {
     private var lastSelectIter: Int = -1
     private var lastSelectRS: Int = -1
     private var lastSelectQS: Bool = false
-    private var lastSelectEmissive: Bool = false
     private var lastSelectNeon: Bool = false
     private var lastSelectedPipeline: MTLRenderPipelineState?
     private var lastSelectedIsSpecialized: Bool = false
@@ -1195,10 +1181,10 @@ actor Renderer {
     /// 2. Exact match in unified cache (includes both quality presets and saved presets)
     /// 3. Fallback to generic pipeline
     func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool, 
-                        emissiveEnabled: Bool = false, neonMode: Bool = false) -> MTLRenderPipelineState {
+                        neonMode: Bool = false) -> MTLRenderPipelineState {
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
-           useQuadShared == lastSelectQS && emissiveEnabled == lastSelectEmissive &&
+           useQuadShared == lastSelectQS &&
            neonMode == lastSelectNeon, let cached = lastSelectedPipeline {
             appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
             return cached
@@ -1206,7 +1192,7 @@ actor Renderer {
         
         // Build unified cache key (only on parameter change)
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_E\(emissiveEnabled ? 1 : 0)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_E0_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
         
         let result: MTLRenderPipelineState
         var isSpecialized = true
@@ -1219,12 +1205,12 @@ actor Renderer {
             }
             result = pipeline
         }
-        // 2. Try fallback to emissive=off/neon=off variant (quality preset)
+        // 2. Try fallback to neon=off variant (quality preset)
         else {
             let fallbackKey = "FI\(iterations)_RS\(raySteps)_E0_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
             if let pipeline = pipelineCache[fallbackKey] {
                 if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
-                    print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: E=\(emissiveEnabled ? 1 : 0) N=\(neonMode ? 1 : 0))")
+                    print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
                     lastLoggedPipelineKey = fallbackKey
                 }
                 result = pipeline
@@ -1244,7 +1230,6 @@ actor Renderer {
         lastSelectIter = iterations
         lastSelectRS = raySteps
         lastSelectQS = useQuadShared
-        lastSelectEmissive = emissiveEnabled
         lastSelectNeon = neonMode
         lastSelectedPipeline = result
         lastSelectedIsSpecialized = isSpecialized
@@ -1256,9 +1241,9 @@ actor Renderer {
     /// Builds on-demand if not found in cache. Call this when loading a preset
     /// to avoid frame hitches during rendering.
     func ensurePipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
-                        emissiveEnabled: Bool, neonMode: Bool) {
+                        neonMode: Bool) {
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_E\(emissiveEnabled ? 1 : 0)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_E0_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : ""))
         
         // Already cached
         if pipelineCache[cacheKey] != nil { return }
@@ -1274,7 +1259,6 @@ actor Renderer {
             qualityMode: Int32(qualityMode),
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
-            emissiveEnabled: emissiveEnabled,
             neonModeEnabled: neonMode,
             colorIterations: 8  // Color iterations are fixed for consistent coloring
         )
@@ -1332,7 +1316,6 @@ actor Renderer {
         var bubble: Bool = false
         var debug: Bool = false
         var hud: Bool = false
-        var emissive: Bool = false
         var neon: Bool = false
         
         constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
@@ -1341,7 +1324,6 @@ actor Renderer {
         constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
         constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
         constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
-        constants.setConstantValue(&emissive, type: .bool, index: FunctionConstantIndex.emissiveEnabled.rawValue)
         constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
         
         guard let function = try? library.makeFunction(name: kernelName, constantValues: constants) else {
@@ -1779,12 +1761,6 @@ actor Renderer {
                             beatIntensity: settingsSnapshot.beatIntensity,
                             visualizerMode: settingsSnapshot.visualizerMode,
                             visualizerIntensity: settingsSnapshot.visualizerIntensity,
-                            emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
-                            emissivePattern: Int32(settingsSnapshot.emissivePattern),
-                            emissiveIntensity: settingsSnapshot.emissiveIntensity,
-                            emissiveThreshold: settingsSnapshot.emissiveThreshold,
-                            emissiveColor: settingsSnapshot.emissiveColor,
-                            emissiveSpeed: settingsSnapshot.emissiveSpeed,
                             fogIntensity: settingsSnapshot.colorSchemeParams.fogIntensity,
                             lightingSoftness: settingsSnapshot.lightingSoftness,
                             maxViewDistance: RenderSettings.maxViewDistance,
@@ -2012,8 +1988,6 @@ actor Renderer {
                     musicAnchorBloomWasEnabled = settings.bloomEffect.enabled
                     musicAnchorHueSpeed = settings.hueRotationEffect.speed
                     musicAnchorHueWasEnabled = settings.hueRotationEffect.enabled
-                    musicAnchorEmissiveIntensity = settings.emissiveIntensity
-                    musicAnchorEmissiveWasEnabled = settings.emissiveEnabled
                     musicAnchorSaturation = settings.colorSchemeSaturation
                     musicAnchorIterations = settings.fractalIterations
                     
@@ -2082,14 +2056,6 @@ actor Renderer {
                     let baseHue = musicAnchorHueWasEnabled ? musicAnchorHueSpeed : 0.04
                     let hueVal = baseHue + hueDrive * (0.08 + 0.25 * amount)
                     settings.audioModulateHueSpeed(hueVal)
-                }
-                
-                // EMISSIVE ← beat intensity (glow regions pulse with kicks)
-                if settings.fractalAudioAffectsEmissive {
-                    let emDrive = beat * 0.7 + bass * 0.3
-                    let baseEm = musicAnchorEmissiveWasEnabled ? musicAnchorEmissiveIntensity : 0.6
-                    let emVal = baseEm + emDrive * (0.3 + 0.8 * amount * beatPunch)
-                    settings.audioModulateEmissiveIntensity(emVal)
                 }
                 
                 // SATURATION ← tonal/harmonic energy (richer colors on harmonic content)
@@ -2164,7 +2130,6 @@ actor Renderer {
         
         // Detect neon mode from colorSchemeParams.neonIntensity
         let isNeonMode = settingsSnapshot.colorSchemeParams.neonIntensity > 0
-        let isEmissive = settingsSnapshot.emissiveEnabled
         
         // Use specialized pipeline with fixed iteration count
         // This enables Map() loop auto-unrolling via function constants
@@ -2172,7 +2137,6 @@ actor Renderer {
             forIterations: currentIterations,
             raySteps: currentRaySteps,
             useQuadShared: useQuadShared,
-            emissiveEnabled: isEmissive,
             neonMode: isNeonMode
         )
         renderEncoder.setRenderPipelineState(selectedPipeline)
@@ -2566,12 +2530,6 @@ actor Renderer {
             beatIntensity: settingsSnapshot.beatIntensity,
             visualizerMode: settingsSnapshot.visualizerMode,
             visualizerIntensity: settingsSnapshot.visualizerIntensity,
-            emissiveEnabled: settingsSnapshot.emissiveEnabled ? 1 : 0,
-            emissivePattern: Int32(settingsSnapshot.emissivePattern),
-            emissiveIntensity: settingsSnapshot.emissiveIntensity,
-            emissiveThreshold: settingsSnapshot.emissiveThreshold,
-            emissiveColor: settingsSnapshot.emissiveColor,
-            emissiveSpeed: settingsSnapshot.emissiveSpeed,
             fogIntensity: settingsSnapshot.colorSchemeParams.fogIntensity,
             lightingSoftness: settingsSnapshot.lightingSoftness,
             maxViewDistance: RenderSettings.maxViewDistance,

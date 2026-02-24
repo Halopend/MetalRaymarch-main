@@ -31,12 +31,10 @@
 //       * avgSafetyBubbleRadius (Double)
 //       * avgBloomStrength (Double)
 //       * avgFogIntensity (Double)
-//       * avgEmissiveIntensity (Double)
 //       * usedAudioReactive (Int64)
 //       * usedHandGestures (Int64)
 //       * usedRecording (Int64)
 //       * usedSharePlay (Int64)
-//       * usedEmissive (Int64)
 //       * usedGradientColoring (Int64)
 //       * usedAnimation (Int64)
 //       * presetsLoaded (Int64)
@@ -66,7 +64,6 @@
 //       * glowIntensity (Double)
 //       * fogIntensity (Double)
 //       * colorSchemeVibrance (Double)
-//       * emissiveEnabled (Int64)
 //     - Deploy to Production environment before TestFlight
 //
 //  VIEW DATA:
@@ -103,7 +100,6 @@ struct UsageSnapshot: Codable {
     var usedHandGestures: Bool
     var usedRecording: Bool
     var usedSharePlay: Bool
-    var usedEmissive: Bool
     var usedGradientColoring: Bool
     var usedAnimation: Bool
     
@@ -115,7 +111,6 @@ struct UsageSnapshot: Codable {
     // Additional effect averages
     var avgBloomStrength: Float
     var avgFogIntensity: Float
-    var avgEmissiveIntensity: Float
     
     // Preset interactions
     var presetsLoaded: Int
@@ -166,7 +161,6 @@ class UsageAnalytics: ObservableObject {
     private var usedHandGestures = false
     private var usedRecording = false
     private var usedSharePlay = false
-    private var usedEmissive = false
     private var usedGradientColoring = false
     private var usedAnimation = false
     
@@ -178,7 +172,6 @@ class UsageAnalytics: ObservableObject {
     // Additional effect accumulators
     private var bloomStrengthAccum: Float = 0
     private var fogIntensityAccum: Float = 0
-    private var emissiveIntensityAccum: Float = 0
     
     // Preset tracking
     private var presetsLoaded = 0
@@ -240,7 +233,6 @@ class UsageAnalytics: ObservableObject {
         safetyBubbleRadiusAccum += settings.safetyBubbleRadius * dtf
         bloomStrengthAccum += settings.bloomEffect.strength * dtf
         fogIntensityAccum += settings.fogEffect.intensity * dtf
-        emissiveIntensityAccum += settings.emissiveIntensity * dtf
         fpsAccum += Float(fps) * dtf
         renderQualityAccum += settings.currentRenderQuality * dtf
         sampleCount += 1
@@ -262,10 +254,6 @@ class UsageAnalytics: ObservableObject {
         if settings.lightingMode == .audioReactive {
             usedAudioReactive = true
         }
-        if settings.emissiveEnabled {
-            usedEmissive = true
-        }
-        
         // Check if we should upload
         if now.timeIntervalSince(lastUploadTime) >= uploadInterval {
             Task {
@@ -369,11 +357,6 @@ class UsageAnalytics: ObservableObject {
         record["fogIntensity"] = (preset.fogEffect?.intensity ?? 0.5) as NSNumber
         record["bloomStrength"] = (preset.bloomEffect?.strength ?? 0.0) as NSNumber
         
-        // Emissive
-        record["emissiveEnabled"] = (preset.emissiveEnabled ?? false) ? 1 : 0
-        record["emissivePattern"] = (preset.emissivePattern ?? 0) as NSNumber
-        record["emissiveIntensity"] = (preset.emissiveIntensity ?? 1.0) as NSNumber
-        
         // Lighting
         record["lightingMode"] = preset.lightingMode?.displayName ?? "Animated"
         record["hueCycleSpeed"] = (preset.hueRotationEffect?.speed ?? 0.0) as NSNumber
@@ -455,7 +438,6 @@ class UsageAnalytics: ObservableObject {
             usedHandGestures: usedHandGestures,
             usedRecording: usedRecording,
             usedSharePlay: usedSharePlay,
-            usedEmissive: usedEmissive,
             usedGradientColoring: usedGradientColoring,
             usedAnimation: usedAnimation,
             fractalTypeDistribution: fractalTypeDist,
@@ -463,7 +445,6 @@ class UsageAnalytics: ObservableObject {
             lightingPresetDistribution: lightingPresetDist,
             avgBloomStrength: bloomStrengthAccum / durationF,
             avgFogIntensity: fogIntensityAccum / durationF,
-            avgEmissiveIntensity: emissiveIntensityAccum / durationF,
             presetsLoaded: presetsLoaded,
             presetsSaved: presetsSaved,
             favoritePresetNames: Array(topPresets),
@@ -548,7 +529,6 @@ class UsageAnalytics: ObservableObject {
             usedHandGestures: usedHandGestures,
             usedRecording: usedRecording,
             usedSharePlay: usedSharePlay,
-            usedEmissive: usedEmissive,
             usedGradientColoring: usedGradientColoring,
             usedAnimation: usedAnimation,
             fractalTypeDistribution: fractalTypeDist,
@@ -556,7 +536,6 @@ class UsageAnalytics: ObservableObject {
             lightingPresetDistribution: lightingPresetDist,
             avgBloomStrength: bloomStrengthAccum / durationF,
             avgFogIntensity: fogIntensityAccum / durationF,
-            avgEmissiveIntensity: emissiveIntensityAccum / durationF,
             presetsLoaded: presetsLoaded,
             presetsSaved: presetsSaved,
             favoritePresetNames: Array(topPresets),
@@ -597,14 +576,12 @@ class UsageAnalytics: ObservableObject {
         record["avgSafetyBubbleRadius"] = snapshot.avgSafetyBubbleRadius as NSNumber
         record["avgBloomStrength"] = snapshot.avgBloomStrength as NSNumber
         record["avgFogIntensity"] = snapshot.avgFogIntensity as NSNumber
-        record["avgEmissiveIntensity"] = snapshot.avgEmissiveIntensity as NSNumber
         
         // Feature flags
         record["usedAudioReactive"] = snapshot.usedAudioReactive ? 1 : 0
         record["usedHandGestures"] = snapshot.usedHandGestures ? 1 : 0
         record["usedRecording"] = snapshot.usedRecording ? 1 : 0
         record["usedSharePlay"] = snapshot.usedSharePlay ? 1 : 0
-        record["usedEmissive"] = snapshot.usedEmissive ? 1 : 0
         record["usedGradientColoring"] = snapshot.usedGradientColoring ? 1 : 0
         record["usedAnimation"] = snapshot.usedAnimation ? 1 : 0
         
@@ -710,7 +687,6 @@ class UsageAnalytics: ObservableObject {
         safetyBubbleRadiusAccum = 0
         bloomStrengthAccum = 0
         fogIntensityAccum = 0
-        emissiveIntensityAccum = 0
         fpsAccum = 0
         renderQualityAccum = 0
         sampleCount = 0
@@ -718,7 +694,6 @@ class UsageAnalytics: ObservableObject {
         usedHandGestures = false
         usedRecording = false
         usedSharePlay = false
-        usedEmissive = false
         usedGradientColoring = false
         usedAnimation = false
         presetsLoaded = 0

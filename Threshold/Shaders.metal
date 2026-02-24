@@ -39,22 +39,6 @@
       p *= t; } \
     p = fma(p, params.scale, p0)
 
-// Extended Map iteration with orbit cache tracking - used by MapWithOrbitCache()
-// OPTIMIZATION: Use rsqrt (hardware-accelerated) instead of sqrt for minRadius
-#define MAP_ITERATION_WITH_CACHE(p, p0, foldingLimit, params, invSphereRadiusSq, i, trap, trapIter, trapPos, boxFolds, sphereFolds, minRadius, orbitTrapDist) \
-    { float3 pOld = p.xyz; \
-      p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz); \
-      if (any(p.xyz != pOld)) boxFolds++; } \
-    { float r2 = dot(p.xyz, p.xyz); \
-      minRadius = min(minRadius, r2); /* Store r2, convert to r later with single sqrt */ \
-      float axisTrap = min(min(abs(p.x), abs(p.y)), abs(p.z)); \
-      orbitTrapDist = min(orbitTrapDist, axisTrap); \
-      if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; } \
-      float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq); \
-      if (t > 1.0f) sphereFolds++; \
-      p *= t; } \
-    p = fma(p, params.scale, p0)
-
 // Half-precision Map iteration - 2x throughput on Apple Silicon
 // Numerically stable for coarse marching and shadow rays where
 // the hit threshold is >0.02 (well within half's ~3 decimal digits)
@@ -102,8 +86,6 @@ constant bool FC_DEBUG_HIERARCHICAL [[function_constant(5)]];
 // Max ray marching steps - controls main raymarch loop unrolling
 // This is the second most critical loop after Map()
 constant int FC_MAX_RAY_STEPS [[function_constant(6)]];
-
-// (Function constant index 7 reserved — emissive was removed)
 
 // Neon color mode toggle - eliminates neon orbit trap computation when disabled
 // (neon mode requires extra orbit tracking in ColourWithScheme)
@@ -434,10 +416,9 @@ FORCE_INLINE float MapHalf(float3 pos, FractalParams params, float foldingLimit,
 // GEOMETRY-ONLY DISTANCE ESTIMATOR (Inspired by GMT-fractals DE_Dist())
 // =============================================================================
 // Stripped-down Map variant for shadows, AO, and normal fallback paths.
-// Removes ALL tracking: no trap, no trapIter, no trapPos, no boxFolds,
-// no sphereFolds, no minRadius, no orbitTrapDist, no Jacobian.
+// Removes ALL tracking: no trap, no trapIter, no trapPos, no Jacobian.
 // Just pure box fold → sphere fold → scale, returning distance.
-// This saves ~6 extra ops per iteration vs MAP_ITERATION_WITH_CACHE.
+// This saves ~6 extra ops per iteration vs the full tracking variant.
 FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLimit, int iterations)
 {
     float4 p = float4(pos, 1.0);
@@ -902,7 +883,6 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
 // === MapWithOrbitCache ===
 //
 // Lean orbit tracking: Jacobian + trap values (normals + colors).
-// (Fold tracking for emissive patterns has been removed.)
 FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float foldingLimit, int iterations, thread OrbitCache& cache)
 {
     float4 p = float4(pos, 1.0);
@@ -1438,136 +1418,6 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
 
 #define TILE_SIZE 4
 
-// =============================================================================
-// EMISSIVE GLOW CALCULATION
-// Computes self-illumination based on cached fold state and patterns
-// Falls back to live fold sampling when enabled for richer detail
-// =============================================================================
-
-// Track fold information during SDF evaluation for emissive calculation
-struct FoldInfo {
-    int boxFolds;
-    int sphereFolds;
-    float minRadius;
-    float orbitTrap;
-};
-
-// Evaluate SDF with fold tracking (reintroduces legacy emissive feel)
-FORCE_INLINE float MapWithFoldInfo(float3 pos, FractalParams params, float foldingLimit, int iterations, int fractalType, thread FoldInfo& foldInfo) {
-    foldInfo.boxFolds = 0;
-    foldInfo.sphereFolds = 0;
-    foldInfo.minRadius = 1e10;
-    foldInfo.orbitTrap = 1e10;
-    
-    float3 z = pos;
-    float dr = 1.0;
-    float scale = params.scale.x;
-    float minRad2 = params.minDistanceVal; // reuse existing minimum distance parameter
-    float fixedRad2 = params.sphereRadiusSq;
-    float invSphereRadiusSq = 1.0f / params.sphereRadiusSq;
-    
-    for (int i = 0; i < iterations; i++) {
-        float3 zOld = z;
-        z = clamp(z, -foldingLimit, foldingLimit) * 2.0 - z;
-        if (any(z != zOld)) foldInfo.boxFolds++;
-        
-        float r2 = dot(z, z);
-        foldInfo.minRadius = min(foldInfo.minRadius, sqrt(r2));
-        float trap = min(min(abs(z.x), abs(z.y)), abs(z.z));
-        foldInfo.orbitTrap = min(foldInfo.orbitTrap, trap);
-        
-        if (r2 < minRad2) {
-            float temp = fixedRad2 / max(minRad2, kPowEpsilon);
-            z *= temp;
-            dr *= temp;
-            foldInfo.sphereFolds++;
-        } else if (r2 < fixedRad2) {
-            float temp = clamp(1.0f / max(r2, kPowEpsilon), 1.0f, invSphereRadiusSq);
-            z *= temp;
-            dr *= temp;
-            foldInfo.sphereFolds++;
-        }
-        
-        z = scale * z + pos;
-        dr = dr * abs(scale) + 1.0;
-    }
-    
-    return length(z) / abs(dr) - 0.001;
-}
-
-// Compute emissive glow - prefers cache but refreshes fold data when needed
-FORCE_INLINE half3 computeEmissive(
-    float3 pos,
-    float3 normal,
-    float gTime,
-    int pattern,
-    float intensity,
-    float threshold,
-    float3 emissiveColor,
-    float speed,
-    int iterations,
-    float foldingLimit,
-    FractalParams params,
-    int fractalType,
-    OrbitCache cache
-) {
-    if (intensity <= 0.0) return half3(0.0h);
-    
-    // Start with cached fold info when available
-    int boxFolds = cache.valid ? cache.boxFolds : 0;
-    int sphereFolds = cache.valid ? cache.sphereFolds : 0;
-    float minRadius = cache.valid ? cache.minRadius : 1e10;
-    float orbitTrapDist = cache.valid ? cache.orbitTrapDist : 1e10;
-    
-    // When cache is missing or emissive patterns need richer detail, refresh via MapWithFoldInfo
-    // Only refresh when intensity is significant to avoid noise from unnecessary re-computation
-    bool refreshFoldInfo = !cache.valid || intensity > 0.5;
-    if (refreshFoldInfo) {
-        FoldInfo info;
-        MapWithFoldInfo(pos, params, foldingLimit, min(iterations, 8), fractalType, info);
-        boxFolds = info.boxFolds;
-        sphereFolds = info.sphereFolds;
-        minRadius = info.minRadius;
-        orbitTrapDist = info.orbitTrap;
-    }
-    
-    float emission = 0.0;
-    
-    if (pattern == 0) {
-        float foldRatio = float(boxFolds + sphereFolds) / float(iterations * 2);
-        emission = smoothstep(threshold, 1.0, foldRatio);
-    }
-    else if (pattern == 1) {
-        float depthFactor = 1.0 - saturate(minRadius / (foldingLimit * 2.0));
-        emission = smoothstep(threshold, 1.0, depthFactor);
-    }
-    else if (pattern == 2) {
-        float3 freq = float3(5.0, 7.0, 6.0);
-        float veins = sin(pos.x * freq.x) * sin(pos.y * freq.y) * sin(pos.z * freq.z);
-        veins = veins * 0.5 + 0.5;
-        float trap = 1.0 - saturate(orbitTrapDist * 2.0);
-        emission = smoothstep(threshold, 1.0, veins * 0.5 + trap * 0.5);
-    }
-    else if (pattern == 3) {
-        float cellId = float(boxFolds * 3 + sphereFolds * 7) + floor(orbitTrapDist * 4.0);
-        float phase = cellId * 0.7;
-        float pulse = sin(gTime * speed * 3.0 + phase);
-        pulse = pulse * 0.5 + 0.5;
-        float depthBoost = 1.0 - saturate(minRadius / (foldingLimit * 1.5));
-        float cellMask = step(threshold, fract(cellId * 0.1234));
-        emission = pulse * depthBoost * cellMask;
-    }
-    else if (pattern == 4) {
-        float3 tangent = normalize(cross(normal, float3(0, 1, 0) + float3(0.001)));
-        float3 bitangent = cross(normal, tangent);
-        float curvature = 1.0 - abs(dot(normal, normalize(normal + tangent * 0.1)));
-        curvature += 1.0 - abs(dot(normal, normalize(normal + bitangent * 0.1)));
-        float foldEdge = float(boxFolds) / float(iterations);
-        emission = smoothstep(threshold, 1.0, curvature * 0.5 + foldEdge * 0.5);
-    }
-    
-    return half3(emissiveColor) * half(emission * intensity);
-}
 
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
 // Three-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
@@ -2023,29 +1873,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 col += half3(specSun) * shaSun * briSun;
             }
             
-            // Emissive glow (self-illumination based on cached fold patterns)
-            // Use function constant when defined to eliminate this code path entirely
-            const bool emissiveEnabled = is_function_constant_defined(FC_EMISSIVE_ENABLED) 
-                ? FC_EMISSIVE_ENABLED 
-                : (uniforms.emissiveEnabled != 0);
-            if (emissiveEnabled) {
-                half3 emissive = computeEmissive(
-                    p,
-                    nor,
-                    gTime,
-                    uniforms.emissivePattern,
-                    uniforms.emissiveIntensity,
-                    uniforms.emissiveThreshold,
-                    uniforms.emissiveColor,
-                    uniforms.emissiveSpeed,
-                    lodIterations,
-                    uniforms.foldingLimit,
-                    fractalParams,
-                    fractalType,
-                    hitCache
-                );
-                col += emissive;
-            }
+
         } else {
             // Blended lighting for low-quality path
             LightingParams lp = computeBlendedLighting(
@@ -2236,29 +2064,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
         
-        // Emissive glow (self-illumination based on cached fold patterns)
-        // Use function constant when defined to eliminate this code path entirely
-        const bool emissiveEnabled = is_function_constant_defined(FC_EMISSIVE_ENABLED) 
-            ? FC_EMISSIVE_ENABLED 
-            : (uniforms.emissiveEnabled != 0);
-        if (emissiveEnabled) {
-            half3 emissive = computeEmissive(
-                p,
-                nor,
-                gTime,
-                uniforms.emissivePattern,
-                uniforms.emissiveIntensity,
-                uniforms.emissiveThreshold,
-                uniforms.emissiveColor,
-                uniforms.emissiveSpeed,
-                lodIterations,
-                uniforms.foldingLimit,
-                fractalParams,
-                fractalType,
-                hitCache
-            );
-            col += emissive;
-        }
+
 
         // Compute clip-space depth and write it out for async timewarp
         float4 clipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(p, 1.0);

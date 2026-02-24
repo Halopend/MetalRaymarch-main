@@ -74,14 +74,6 @@ struct FractalPreset: Codable, Identifiable {
     // === GRADIENT COLORING SYSTEM (v2.1) ===
     var gradientState: GradientState?
     var lightingSoftness: Float?
-    
-    // === EMISSIVE SETTINGS (new in v1.1) ===
-    var emissiveEnabled: Bool?
-    var emissivePattern: Int?
-    var emissiveIntensity: Float?
-    var emissiveThreshold: Float?
-    var emissiveColor: SIMD3<Float>?
-    var emissiveSpeed: Float?
 
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
@@ -92,7 +84,6 @@ struct FractalPreset: Codable, Identifiable {
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
-        case emissiveEnabled, emissivePattern, emissiveIntensity, emissiveThreshold, emissiveColor, emissiveSpeed
         // Doppelganger
         case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
         // Color scheme auto-transition
@@ -174,14 +165,6 @@ struct FractalPreset: Codable, Identifiable {
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
         
-        // v1.1 emissive settings
-        emissiveEnabled = try container.decodeIfPresent(Bool.self, forKey: .emissiveEnabled)
-        emissivePattern = try container.decodeIfPresent(Int.self, forKey: .emissivePattern)
-        emissiveIntensity = try container.decodeIfPresent(Float.self, forKey: .emissiveIntensity)
-        emissiveThreshold = try container.decodeIfPresent(Float.self, forKey: .emissiveThreshold)
-        emissiveColor = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .emissiveColor)
-        emissiveSpeed = try container.decodeIfPresent(Float.self, forKey: .emissiveSpeed)
-        
         // Doppelganger
         doppelgangerEnabled = try container.decodeIfPresent(Bool.self, forKey: .doppelgangerEnabled)
         doppelgangerPlane = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .doppelgangerPlane)
@@ -239,14 +222,6 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
         
-        // v1.1 emissive settings
-        try container.encodeIfPresent(emissiveEnabled, forKey: .emissiveEnabled)
-        try container.encodeIfPresent(emissivePattern, forKey: .emissivePattern)
-        try container.encodeIfPresent(emissiveIntensity, forKey: .emissiveIntensity)
-        try container.encodeIfPresent(emissiveThreshold, forKey: .emissiveThreshold)
-        try container.encodeIfPresent(emissiveColor, forKey: .emissiveColor)
-        try container.encodeIfPresent(emissiveSpeed, forKey: .emissiveSpeed)
-        
         // Doppelganger
         try container.encodeIfPresent(doppelgangerEnabled, forKey: .doppelgangerEnabled)
         try container.encodeIfPresent(doppelgangerPlane, forKey: .doppelgangerPlane)
@@ -272,7 +247,6 @@ struct FractalPreset: Codable, Identifiable {
     /// - `fractalIterations`: Enables Map() loop unrolling
     /// - `shadowIterations`: Typically fractalIterations - 2
     /// - `maxRaySteps`: Enables raymarch loop optimization
-    /// - `emissiveEnabled`: Eliminates emissive code when false
     /// - `neonModeEnabled`: Eliminates neon orbit tracking when false
     /// - `colorIterations`: Enables color loop unrolling
     /// - `safetyBubbleEnabled`: Eliminates bubble distance check when false
@@ -286,7 +260,6 @@ struct FractalPreset: Codable, Identifiable {
         fractalIterations: Int32,
         shadowIterations: Int32,
         maxRaySteps: Int32,
-        emissiveEnabled: Bool,
         neonModeEnabled: Bool,
         colorIterations: Int32,
         safetyBubbleEnabled: Bool,
@@ -304,7 +277,6 @@ struct FractalPreset: Codable, Identifiable {
             fractalIterations: Int32(fractalIterations),
             shadowIterations: Int32(max(fractalIterations - 2, 2)),
             maxRaySteps: Int32(maxRaySteps),
-            emissiveEnabled: emissiveEnabled ?? false,
             neonModeEnabled: colorScheme.isNeonMode,
             colorIterations: Int32(colorIterations),
             safetyBubbleEnabled: safetyBubbleEnabled ?? true,
@@ -316,7 +288,7 @@ struct FractalPreset: Codable, Identifiable {
     /// Presets with identical function constant values can share pipelines.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
-        return "FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_E\(fc.emissiveEnabled ? 1 : 0)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
+        return "FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
     }
     
     /// Create a preset from current render settings
@@ -360,14 +332,6 @@ struct FractalPreset: Codable, Identifiable {
         preset.bloomEffect = settings.bloomEffect
         preset.fogEffect = settings.fogEffect
         preset.gradientCycleEffect = settings.gradientCycleEffect
-        
-        // v1.1 emissive settings
-        preset.emissiveEnabled = settings.emissiveEnabled
-        preset.emissivePattern = settings.emissivePattern
-        preset.emissiveIntensity = settings.emissiveIntensity
-        preset.emissiveThreshold = settings.emissiveThreshold
-        preset.emissiveColor = settings.emissiveColor
-        preset.emissiveSpeed = settings.emissiveSpeed
         
         // Doppelganger
         preset.doppelgangerEnabled = settings.doppelgangerEnabled
@@ -462,26 +426,6 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let gradientCycleEffect = gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
-        }
-        
-        // v1.1 emissive settings
-        if let emissiveEnabled = emissiveEnabled {
-            settings.emissiveEnabled = emissiveEnabled
-        }
-        if let emissivePattern = emissivePattern {
-            settings.emissivePattern = emissivePattern
-        }
-        if let emissiveIntensity = emissiveIntensity {
-            settings.emissiveIntensity = emissiveIntensity
-        }
-        if let emissiveThreshold = emissiveThreshold {
-            settings.emissiveThreshold = emissiveThreshold
-        }
-        if let emissiveColor = emissiveColor {
-            settings.emissiveColor = emissiveColor
-        }
-        if let emissiveSpeed = emissiveSpeed {
-            settings.emissiveSpeed = emissiveSpeed
         }
         
         // Doppelganger
@@ -770,14 +714,6 @@ class PresetManager {
         preset.fogEffect = settings.fogEffect
         preset.gradientCycleEffect = settings.gradientCycleEffect
         
-        // v1.1 emissive settings
-        preset.emissiveEnabled = settings.emissiveEnabled
-        preset.emissivePattern = settings.emissivePattern
-        preset.emissiveIntensity = settings.emissiveIntensity
-        preset.emissiveThreshold = settings.emissiveThreshold
-        preset.emissiveColor = settings.emissiveColor
-        preset.emissiveSpeed = settings.emissiveSpeed
-        
         // Doppelganger
         preset.doppelgangerEnabled = settings.doppelgangerEnabled
         preset.doppelgangerPlane = settings.doppelgangerPlane
@@ -819,7 +755,7 @@ class PresetManager {
         let fc = preset.deriveFunctionConstants()
         print("📂 [PresetLoad] Loading preset: '\(preset.name)'")
         print("   Pipeline key: \(preset.pipelineCacheKey)")
-        print("   FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Emissive=\(fc.emissiveEnabled), Neon=\(fc.neonModeEnabled)")
+        print("   FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Neon=\(fc.neonModeEnabled)")
         
         preset.apply(to: settings, includePerformance: includePerformance)
         // Track for analytics
@@ -898,14 +834,6 @@ class PresetManager {
             newPreset.fogEffect = importedPreset.fogEffect
             newPreset.gradientCycleEffect = importedPreset.gradientCycleEffect
             
-            // v1.1 emissive settings
-            newPreset.emissiveEnabled = importedPreset.emissiveEnabled
-            newPreset.emissivePattern = importedPreset.emissivePattern
-            newPreset.emissiveIntensity = importedPreset.emissiveIntensity
-            newPreset.emissiveThreshold = importedPreset.emissiveThreshold
-            newPreset.emissiveColor = importedPreset.emissiveColor
-            newPreset.emissiveSpeed = importedPreset.emissiveSpeed
-            
             presets.insert(newPreset, at: 0)
             savePresets()
             
@@ -951,12 +879,6 @@ extension PresetManager {
         preset.glowEffect = GlowEffect(enabled: true, intensity: 0.18124515)
         preset.bloomEffect = BloomEffect(enabled: true, strength: 0.7048401)
         preset.fogEffect = FogEffect(enabled: true, intensity: 0.14822857)
-        preset.emissiveEnabled = true
-        preset.emissivePattern = 1
-        preset.emissiveIntensity = 0.04231105
-        preset.emissiveThreshold = 0.70703346
-        preset.emissiveColor = SIMD3<Float>(0.99658203, 0.11701965, 1.0)
-        preset.emissiveSpeed = 2.7824872
         return preset
     }
     
@@ -992,12 +914,6 @@ extension PresetManager {
         preset.glowEffect = GlowEffect(enabled: false, intensity: 0.0)
         preset.bloomEffect = BloomEffect(enabled: true, strength: 0.7048401)
         preset.fogEffect = FogEffect(enabled: true, intensity: 0.14822857)
-        preset.emissiveEnabled = true
-        preset.emissivePattern = 0
-        preset.emissiveIntensity = 0.04231105
-        preset.emissiveThreshold = 0.70703346
-        preset.emissiveColor = SIMD3<Float>(0.99658203, 0.11701965, 1.0)
-        preset.emissiveSpeed = 2.7824872
         return preset
     }
     

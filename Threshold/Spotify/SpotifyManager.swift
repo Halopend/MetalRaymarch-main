@@ -56,18 +56,18 @@ enum ReactivityPreset: String, CaseIterable {
     }
     
     /// Which effect parameters this preset enables (Fractal Forge–inspired)
-    var effectsProfile: (glow: Bool, fog: Bool, bloom: Bool, hueSpeed: Bool, emissive: Bool, saturation: Bool, iterations: Bool) {
+    var effectsProfile: (glow: Bool, fog: Bool, bloom: Bool, hueSpeed: Bool, saturation: Bool, iterations: Bool) {
         switch self {
         // EDM: Glow + bloom on beats, fog clears on drops, fast hue cycling
-        case .electronic: return (true,  true,  true,  true,  true,  false, false)
+        case .electronic: return (true,  true,  true,  true,  false, false)
         // Ambient: Gentle fog breathing, rich saturation, slow hue drift
-        case .ambient:    return (false, true,  false, true,  false, true,  false)
-        // Rock: Glow + bloom punches, emissive flashes
-        case .rock:       return (true,  false, true,  false, true,  false, false)
+        case .ambient:    return (false, true,  false, true,  true,  false)
+        // Rock: Glow + bloom punches
+        case .rock:       return (true,  false, true,  false, false, false)
         // Classical: Fog + saturation richness, gentle hue rotation
-        case .classical:  return (false, true,  false, true,  false, true,  false)
-        // Hip-Hop: Glow flashes, bloom on kicks, emissive pulses
-        case .hiphop:     return (true,  false, true,  false, true,  false, false)
+        case .classical:  return (false, true,  false, true,  true,  false)
+        // Hip-Hop: Glow flashes, bloom on kicks
+        case .hiphop:     return (true,  false, true,  false, false, false)
         }
     }
 }

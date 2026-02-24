@@ -842,12 +842,6 @@ struct RenderSettingsSnapshot {
     let safetyBubbleRadius: Float
     let safetyBubbleShape: Float
     let sphereProjectionMode: Int  // 0=off, 1=outward, 2=inward, 3=intersection, 4=animated, 5=octree, 6=layered, 7=spiral
-    let emissiveEnabled: Bool
-    let emissivePattern: Int
-    let emissiveIntensity: Float
-    let emissiveThreshold: Float
-    let emissiveColor: SIMD3<Float>
-    let emissiveSpeed: Float
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
     
@@ -965,11 +959,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioAffectsHueSpeed: Bool = {
         let key = "fractalAudioAffectsHueSpeed"
         guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsEmissive: Bool = {
-        let key = "fractalAudioAffectsEmissive"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return false }
         return UserDefaults.standard.bool(forKey: key)
     }()
     private var _fractalAudioAffectsSaturation: Bool = {
@@ -1108,14 +1097,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _bloomEffect: BloomEffect = .off
     private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     private var _gradientCycleEffect: GradientCycleEffect = .off
-    
-    // === EMISSIVE GLOW (Self-illuminating regions) ===
-    private var _emissiveEnabled: Bool = false              // Enable emissive glow regions
-    private var _emissivePattern: Int = 0                   // 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
-    private var _emissiveIntensity: Float = 1.0             // Glow brightness (0-2)
-    private var _emissiveThreshold: Float = 0.5             // Threshold for triggering glow (0-1)
-    private var _emissiveColor: SIMD3<Float> = SIMD3<Float>(0.3, 0.6, 1.0)  // Blue-white default
-    private var _emissiveSpeed: Float = 1.0                 // Animation speed for pulse mode
     
     // === DOPPELGANGER MODE ===
     private var _doppelgangerEnabled: Bool = false              // Pre-fold mirror creates structural twin
@@ -1410,15 +1391,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    /// Emissive glow regions pulse with beat intensity
-    var fractalAudioAffectsEmissive: Bool {
-        get { withLock { _fractalAudioAffectsEmissive } }
-        set {
-            withLock { _fractalAudioAffectsEmissive = newValue }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsEmissive")
-        }
-    }
-    
     /// Color saturation responds to tonal/harmonic energy
     var fractalAudioAffectsSaturation: Bool {
         get { withLock { _fractalAudioAffectsSaturation } }
@@ -1472,14 +1444,6 @@ final class RenderSettings: @unchecked Sendable {
         withLock {
             _hueRotationEffect.enabled = true
             _hueRotationEffect.speed = max(0.0, min(0.5, value))
-        }
-    }
-    
-    /// Modulate emissive intensity (auto-enables emissive if needed)
-    func audioModulateEmissiveIntensity(_ value: Float) {
-        withLock {
-            _emissiveEnabled = true
-            _emissiveIntensity = max(0.0, min(2.0, value))
         }
     }
     
@@ -2025,44 +1989,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    // === EMISSIVE GLOW ===
-    
-    /// Enable emissive glow regions
-    var emissiveEnabled: Bool {
-        get { withLock { _emissiveEnabled } }
-        set { withLock { _emissiveEnabled = newValue } }
-    }
-    
-    /// Emissive pattern type: 0=folds, 1=depth, 2=position, 3=pulse, 4=edges
-    var emissivePattern: Int {
-        get { withLock { _emissivePattern } }
-        set { withLock { _emissivePattern = max(0, min(4, newValue)) } }
-    }
-    
-    /// Emissive glow intensity (0-2)
-    var emissiveIntensity: Float {
-        get { withLock { _emissiveIntensity } }
-        set { withLock { _emissiveIntensity = max(0.0, min(2.0, newValue)) } }
-    }
-    
-    /// Threshold for triggering emissive glow (0-1)
-    var emissiveThreshold: Float {
-        get { withLock { _emissiveThreshold } }
-        set { withLock { _emissiveThreshold = max(0.0, min(1.0, newValue)) } }
-    }
-    
-    /// Emissive color tint
-    var emissiveColor: SIMD3<Float> {
-        get { withLock { _emissiveColor } }
-        set { withLock { _emissiveColor = newValue } }
-    }
-    
-    /// Emissive animation speed (for pulse mode)
-    var emissiveSpeed: Float {
-        get { withLock { _emissiveSpeed } }
-        set { withLock { _emissiveSpeed = max(0.1, min(5.0, newValue)) } }
-    }
-    
     // === DOPPELGANGER MODE ===
     
     /// Enable doppelganger pre-fold (creates structural twin)
@@ -2299,12 +2225,6 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
                 sphereProjectionMode: _sphereProjectionMode,
-                emissiveEnabled: _emissiveEnabled,
-                emissivePattern: _emissivePattern,
-                emissiveIntensity: _emissiveIntensity,
-                emissiveThreshold: _emissiveThreshold,
-                emissiveColor: _emissiveColor,
-                emissiveSpeed: _emissiveSpeed,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 doppelgangerEnabled: _doppelgangerEnabled,

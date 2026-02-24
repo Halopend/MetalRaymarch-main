@@ -606,10 +606,6 @@ struct MusicTabContent: View {
                         ))
                     }
                     HStack(spacing: 10) {
-                        compactToggle("Emissive",   isOn: Binding(
-                            get: { cache.fractalAudioAffectsEmissive },
-                            set: { v in cache.fractalAudioAffectsEmissive = v; cache.push(\.fractalAudioAffectsEmissive, value: v) }
-                        ))
                         compactToggle("Saturation", isOn: Binding(
                             get: { cache.fractalAudioAffectsSaturation },
                             set: { v in cache.fractalAudioAffectsSaturation = v; cache.push(\.fractalAudioAffectsSaturation, value: v) }
@@ -659,14 +655,12 @@ struct MusicTabContent: View {
         cache.fractalAudioAffectsFog = e.fog
         cache.fractalAudioAffectsBloom = e.bloom
         cache.fractalAudioAffectsHueSpeed = e.hueSpeed
-        cache.fractalAudioAffectsEmissive = e.emissive
         cache.fractalAudioAffectsSaturation = e.saturation
         cache.fractalAudioAffectsIterations = e.iterations
         cache.push(\.fractalAudioAffectsGlow, value: e.glow)
         cache.push(\.fractalAudioAffectsFog, value: e.fog)
         cache.push(\.fractalAudioAffectsBloom, value: e.bloom)
         cache.push(\.fractalAudioAffectsHueSpeed, value: e.hueSpeed)
-        cache.push(\.fractalAudioAffectsEmissive, value: e.emissive)
         cache.push(\.fractalAudioAffectsSaturation, value: e.saturation)
         cache.push(\.fractalAudioAffectsIterations, value: e.iterations)
     }

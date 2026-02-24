@@ -114,14 +114,6 @@ final class UISettingsCache {
         settings?.useGradientColoring = true
     }
     
-    // Emissive
-    var emissiveEnabled: Bool = true
-    var emissivePattern: Int = 0
-    var emissiveIntensity: Float = 1.0
-    var emissiveThreshold: Float = 0.5
-    var emissiveColor: SIMD3<Float> = SIMD3<Float>(0.3, 0.6, 1.0)
-    var emissiveSpeed: Float = 1.0
-    
     // Lighting - simplified
     var lightingMode: LightingMode = .animated
     var lightingSoftness: Float = 0.0
@@ -144,7 +136,6 @@ final class UISettingsCache {
     var fractalAudioAffectsFog: Bool = true
     var fractalAudioAffectsBloom: Bool = true
     var fractalAudioAffectsHueSpeed: Bool = true
-    var fractalAudioAffectsEmissive: Bool = false
     var fractalAudioAffectsSaturation: Bool = true
     var fractalAudioAffectsIterations: Bool = false
     
@@ -235,12 +226,6 @@ final class UISettingsCache {
         bloomEffect = settings.bloomEffect
         fogEffect = settings.fogEffect
         gradientCycleEffect = settings.gradientCycleEffect
-        emissiveEnabled = settings.emissiveEnabled
-        emissivePattern = settings.emissivePattern
-        emissiveIntensity = settings.emissiveIntensity
-        emissiveThreshold = settings.emissiveThreshold
-        emissiveColor = settings.emissiveColor
-        emissiveSpeed = settings.emissiveSpeed
         lightingMode = settings.lightingMode
         lightingSoftness = settings.lightingSoftness
         bassSensitivity = settings.bassSensitivity
@@ -258,7 +243,6 @@ final class UISettingsCache {
         fractalAudioAffectsFog = settings.fractalAudioAffectsFog
         fractalAudioAffectsBloom = settings.fractalAudioAffectsBloom
         fractalAudioAffectsHueSpeed = settings.fractalAudioAffectsHueSpeed
-        fractalAudioAffectsEmissive = settings.fractalAudioAffectsEmissive
         fractalAudioAffectsSaturation = settings.fractalAudioAffectsSaturation
         fractalAudioAffectsIterations = settings.fractalAudioAffectsIterations
         showHUD = settings.showHUD
@@ -1122,49 +1106,6 @@ struct ContentView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
             
-            // ── Emissive ──
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Emissive Glow", systemImage: "sparkle").font(.subheadline.weight(.medium))
-                    Spacer()
-                    Picker("Pattern", selection: Binding<Int>(
-                        get: { cache.emissiveEnabled ? cache.emissivePattern + 1 : 0 },
-                        set: { v in
-                            if v == 0 {
-                                cache.emissiveEnabled = false
-                                cache.push(\.emissiveEnabled, value: false)
-                            } else {
-                                cache.emissiveEnabled = true
-                                cache.emissivePattern = v - 1
-                                cache.push(\.emissiveEnabled, value: true)
-                                cache.push(\.emissivePattern, value: v - 1)
-                            }
-                        }
-                    )) {
-                        Text("Off").tag(0)
-                        Text("Folds").tag(1); Text("Depth").tag(2); Text("Veins").tag(3); Text("Pulse").tag(4); Text("Edges").tag(5)
-                    }.pickerStyle(.menu).frame(maxWidth: 120)
-                }
-                if cache.emissiveEnabled {
-                    HStack { Text("Intensity").font(.caption); Slider(value: $cache.emissiveIntensity, in: 0...2, onEditingChanged: { e in if !e { cache.push(\.emissiveIntensity, value: cache.emissiveIntensity) } }) }
-                    HStack { Text("Threshold").font(.caption); Slider(value: $cache.emissiveThreshold, in: 0...1, onEditingChanged: { e in if !e { cache.push(\.emissiveThreshold, value: cache.emissiveThreshold) } }) }
-                    Divider()
-                    HStack {
-                        Text("Emissive Color").font(.subheadline)
-                        Spacer()
-                        ColorPicker("", selection: Binding(
-                            get: { Color(red: Double(cache.emissiveColor.x), green: Double(cache.emissiveColor.y), blue: Double(cache.emissiveColor.z)) },
-                            set: { c in if let comps = c.cgColor?.components, comps.count >= 3 {
-                                cache.emissiveColor = SIMD3<Float>(Float(comps[0]), Float(comps[1]), Float(comps[2]))
-                                cache.push(\.emissiveColor, value: cache.emissiveColor)
-                            }}
-                        ), supportsOpacity: false).labelsHidden()
-                    }
-                }
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
-            
             // ── Lighting Presets (collapsible) ──
             DisclosureGroup(isExpanded: $showLightingPresets) {
                 VStack(spacing: 10) {
@@ -1256,19 +1197,6 @@ struct ContentView: View {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
-            
-            // ── Emissive Pulse (only when pulse pattern selected) ──
-            if cache.emissivePattern == 3 {
-                VStack(spacing: 4) {
-                    HStack {
-                        Label("Emissive Pulse", systemImage: "sparkle").font(.subheadline.weight(.medium))
-                        Spacer()
-                    }
-                    HStack { Text("Speed").font(.caption); Slider(value: $cache.emissiveSpeed, in: 0.1...5, onEditingChanged: { e in if !e { cache.push(\.emissiveSpeed, value: cache.emissiveSpeed) } }) }
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
-            }
         }
     }
     
@@ -1667,8 +1595,6 @@ struct EffectSliderRow: View {
         .accessibilityValue(String(format: "%.2f", value))
     }
 }
-
-// MARK: - Emissive Color Picker
 
 // MARK: - StatBox
 
