@@ -1,0 +1,380 @@
+import Metal
+
+extension Renderer {
+    // MARK: - Unified Pipeline Management
+
+    /// Gets or builds a specialized pipeline for a given preset.
+    /// Uses the unified pipelineCache to avoid redundant compilation.
+    func getPipeline(forPreset preset: FractalPreset, useQuadShared: Bool = false) -> MTLRenderPipelineState {
+        let cacheKey = preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
+
+        // Check unified cache first
+        if let cached = pipelineCache[cacheKey] {
+            return cached
+        }
+
+        // Build new specialized pipeline
+        let config = FunctionConstantConfig.fromPreset(preset)
+        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building NEW pipeline for: \(preset.name) [\(cacheKey)]") }
+
+        do {
+            let pipeline = try Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: config,
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+            )
+            pipelineCache[cacheKey] = pipeline  // Store in unified cache
+            if RENDERER_DEBUG { print("✅ [ShaderCompilation] SUCCESS: Built pipeline [\(cacheKey)]") }
+            return pipeline
+        } catch {
+            if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED to build preset pipeline [\(cacheKey)]: \(error)") }
+            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+        }
+    }
+
+    /// Gets or builds a specialized pipeline for specific iteration/ray step values.
+    /// Call this when slider values change to pre-compile the needed pipeline.
+    func getPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool = false) -> MTLRenderPipelineState {
+        // Build cache key matching the preset format
+        let colorIters = appModel.renderSettings.colorIterations  // Direct read (own lock) — avoids full snapshot
+        let colorScheme = appModel.renderSettings.colorScheme  // Read directly - not in snapshot
+        let neon = colorScheme.rawValue >= 8 ? 1 : 0  // neonCyber, neonSunset, neonMatrix
+        let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+
+        // Check unified cache first
+        if let cached = pipelineCache[cacheKey] {
+            return cached
+        }
+
+        // Build new specialized pipeline
+        let config = FunctionConstantConfig(
+            fractalIterations: Int32(iterations),
+            shadowIterations: Int32(max(iterations - 2, 2)),
+            safetyBubbleEnabled: nil,  // Runtime: respects user toggle
+            showHUD: true,
+            qualityMode: qualityMode,
+            debugHierarchical: false,
+            maxRaySteps: Int32(raySteps),
+            neonModeEnabled: neon == 1,
+            colorIterations: Int32(colorIters)  // Use actual color iterations, not fractal iterations
+        )
+
+        print("🔧 [ShaderCompilation] Building pipeline for FI=\(iterations) RS=\(raySteps)...")
+
+        do {
+            let pipeline = try Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: config,
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+            )
+            pipelineCache[cacheKey] = pipeline
+            print("✅ [ShaderCompilation] Ready: FI=\(iterations) RS=\(raySteps)")
+            return pipeline
+        } catch {
+            print("❌ [ShaderCompilation] FAILED for FI=\(iterations) RS=\(raySteps): \(error)")
+            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+        }
+    }
+
+    /// Precompiles pipelines for a list of presets (e.g., on app launch).
+    /// Call this during loading screen to avoid compilation hitches when switching presets.
+    func precompilePipelines(forPresets presets: [FractalPreset]) {
+        if RENDERER_DEBUG { print("Precompiling \(presets.count) preset pipelines...") }
+        for preset in presets {
+            _ = getPipeline(forPreset: preset, useQuadShared: false)
+            _ = getPipeline(forPreset: preset, useQuadShared: true)
+        }
+        if RENDERER_DEBUG { print("✓ Preset pipeline precompilation complete") }
+    }
+
+    /// Precompiles pipelines for all saved presets on app launch.
+    /// Runs asynchronously to avoid blocking the main thread.
+    func precompilePresetPipelines() async {
+        // Access presets from AppModel on main actor
+        let presets = await MainActor.run {
+            appModel.presetManager.presets
+        }
+
+        guard !presets.isEmpty else {
+            if RENDERER_DEBUG { print("🔧 [ShaderCompilation] No saved presets to precompile") }
+            return
+        }
+
+        // Build pipelines for unique configurations only
+        var compiledKeys = Set<String>()
+        var compiledCount = 0
+
+        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Starting preset pipeline precompilation for \(presets.count) presets...") }
+
+        for preset in presets {
+            let key = preset.pipelineCacheKey
+            guard !compiledKeys.contains(key) else {
+                if RENDERER_DEBUG { print("  ⏭️  Skipping \(preset.name) - duplicate config [\(key)]") }
+                continue  // Skip duplicate configurations
+            }
+            compiledKeys.insert(key)
+
+            if RENDERER_DEBUG {
+                let fc = preset.deriveFunctionConstants()
+                print("  🔨 Compiling: \(preset.name)")
+                print("      Key: \(key)")
+                print("      FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Shadow=\(fc.shadowIterations)")
+                print("      Neon=\(fc.neonModeEnabled), Quality=\(fc.qualityMode)")
+            }
+
+            // Build both standard and quad-shared variants
+            _ = getPipeline(forPreset: preset, useQuadShared: false)
+            _ = getPipeline(forPreset: preset, useQuadShared: true)
+            compiledCount += 1
+        }
+
+        if RENDERER_DEBUG {
+            print("✅ [ShaderCompilation] Precompiled \(compiledCount) unique preset pipelines (from \(presets.count) presets)")
+            print("   Unified cache now contains \(pipelineCache.count) pipelines")
+        }
+    }
+
+    /// Select the best specialized pipeline for the current render settings.
+    /// Uses the unified pipelineCache for all lookups - no separate cache tiers.
+    ///
+    /// OPTIMIZATION: Fast-path returns cached result when parameters haven't changed,
+    /// avoiding String interpolation + Dictionary lookup on every frame.
+    ///
+    /// Pipeline lookup order:
+    /// 1. Fast-path: same params as last frame → return cached result
+    /// 2. Exact match in unified cache (includes both quality presets and saved presets)
+    /// 3. Fallback to generic pipeline
+    func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
+                        neonMode: Bool = false) -> MTLRenderPipelineState {
+        // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
+        if iterations == lastSelectIter && raySteps == lastSelectRS &&
+           useQuadShared == lastSelectQS &&
+           neonMode == lastSelectNeon, let cached = lastSelectedPipeline {
+            appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
+            return cached
+        }
+
+        // Build unified cache key (only on parameter change)
+        let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+
+        let result: MTLRenderPipelineState
+        var isSpecialized = true
+
+        // 1. Check unified cache (includes both quality presets and saved presets)
+        if let pipeline = pipelineCache[cacheKey] {
+            if RENDERER_DEBUG && lastLoggedPipelineKey != cacheKey {
+                print("🎯 [Pipeline] Using cached pipeline: \(cacheKey)")
+                lastLoggedPipelineKey = cacheKey
+            }
+            result = pipeline
+        }
+        // 2. Try fallback to neon=off variant (quality preset)
+        else {
+            let fallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+            if let pipeline = pipelineCache[fallbackKey] {
+                if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
+                    print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
+                    lastLoggedPipelineKey = fallbackKey
+                }
+                result = pipeline
+            }
+            // 3. Ultimate fallback to generic pipeline
+            else {
+                if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
+                    print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FI=\(iterations) RS=\(raySteps))")
+                    lastLoggedPipelineKey = "fallback"
+                }
+                isSpecialized = false
+                result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+            }
+        }
+
+        // Cache for next frame's fast-path
+        lastSelectIter = iterations
+        lastSelectRS = raySteps
+        lastSelectQS = useQuadShared
+        lastSelectNeon = neonMode
+        lastSelectedPipeline = result
+        lastSelectedIsSpecialized = isSpecialized
+        appModel.isUsingSpecializedPipeline = isSpecialized
+        return result
+    }
+
+    /// Ensures a pipeline exists for the given configuration.
+    /// Builds on-demand if not found in cache. Call this when loading a preset
+    /// to avoid frame hitches during rendering.
+    func ensurePipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
+                        neonMode: Bool) {
+        let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
+        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+
+        // Already cached
+        if pipelineCache[cacheKey] != nil { return }
+
+        // Build on-demand
+        if RENDERER_DEBUG { print("🔧 [Pipeline] Building on-demand pipeline: \(cacheKey)") }
+
+        let config = FunctionConstantConfig(
+            fractalIterations: Int32(iterations),
+            shadowIterations: Int32(max(iterations - 2, 2)),
+            safetyBubbleEnabled: nil,  // Runtime: respects user toggle
+            showHUD: false,
+            qualityMode: Int32(qualityMode),
+            debugHierarchical: false,
+            maxRaySteps: Int32(raySteps),
+            neonModeEnabled: neonMode,
+            colorIterations: 8  // Color iterations are fixed for consistent coloring
+        )
+
+        do {
+            let pipeline = try Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: config,
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+            )
+            pipelineCache[cacheKey] = pipeline
+            if RENDERER_DEBUG { print("✅ [Pipeline] Built on-demand: \(cacheKey)") }
+        } catch {
+            if RENDERER_DEBUG { print("❌ [Pipeline] Failed to build on-demand: \(cacheKey): \(error)") }
+        }
+    }
+
+    // MARK: - Compute Pipeline Cache
+
+    /// Builds a specialized compute pipeline with function constants baked in.
+    /// The Metal compiler fully unrolls Map()/Shadow loops for the given iteration counts.
+    ///
+    /// - Parameters:
+    ///   - library: The default Metal library
+    ///   - kernelName: Compute kernel function name
+    ///   - fractalIterations: FC_FRACTAL_ITERATIONS value to bake in
+    ///   - shadowIterations: FC_SHADOW_ITERATIONS value to bake in
+    ///   - maxRaySteps: FC_MAX_RAY_STEPS value to bake in
+    /// - Returns: Specialized compute pipeline, or nil on failure
+    static func buildComputePipeline(device: MTLDevice, library: MTLLibrary, kernelName: String,
+                                     fractalIterations: Int32, shadowIterations: Int32, maxRaySteps: Int32) -> MTLComputePipelineState? {
+        let constants = MTLFunctionConstantValues()
+        var fi = fractalIterations
+        var si = shadowIterations
+        var rs = maxRaySteps
+        var debug: Bool = false
+        var hud: Bool = false
+        var neon: Bool = false
+
+        constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
+        constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
+        constants.setConstantValue(&rs, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
+        constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
+        constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
+        constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
+
+        guard let function = try? library.makeFunction(name: kernelName, constantValues: constants) else {
+            if RENDERER_DEBUG { print("⚠️ [ComputeCache] Failed to specialize \(kernelName) with FI=\(fi) RS=\(rs)") }
+            return nil
+        }
+
+        do {
+            return try device.makeComputePipelineState(function: function)
+        } catch {
+            if RENDERER_DEBUG { print("⚠️ [ComputeCache] Failed to build compute pipeline: \(error)") }
+            return nil
+        }
+    }
+
+    /// Selects the best compute pipeline for the given iteration/ray-step settings.
+    ///
+    /// OPTIMIZATION: Fast-path returns cached result when FI/RS haven't changed,
+    /// avoiding String interpolation + Dictionary lookup on every frame.
+    ///
+    /// CRITICAL: The selected pipeline's baked FC_FRACTAL_ITERATIONS MUST match the
+    /// iteration count used to precompute absScalePow on CPU. If there's a mismatch,
+    /// the distance estimator produces wrong values (p.w accumulates over FC iterations
+    /// but absScalePow was computed for settings.iterations), causing visual artifacts.
+    ///
+    /// Lookup order:
+    /// 1. Fast-path: same params as last frame → return cached result
+    /// 2. Exact match in computePipelineCache
+    /// 3. Builds on-demand for exact configuration (cached for future frames)
+    /// 4. Falls back to generic (no function constants) pipeline — shader uses runtime params
+    func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
+        // Fast-path: parameters unchanged since last call
+        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS,
+           let cached = lastSelectedComputePipeline {
+            return cached
+        }
+
+        let exactKey = "FI\(fractalIterations)_RS\(maxRaySteps)"
+
+        // 1. Exact match — FC values match precomputed absScalePow
+        if let pipeline = computePipelineCache[exactKey] {
+            if RENDERER_DEBUG && lastComputePipelineKey != exactKey {
+                print("🎯 [ComputeCache] Exact hit: \(exactKey)")
+                lastComputePipelineKey = exactKey
+            }
+            lastComputeFI = fractalIterations
+            lastComputeRS = maxRaySteps
+            lastSelectedComputePipeline = pipeline
+            return pipeline
+        }
+
+        // 2. Build on-demand for this exact configuration
+        //    DO NOT use "nearest preset" — a pipeline with wrong FC_FRACTAL_ITERATIONS
+        //    causes absScalePow mismatch and visual degradation (the caching bug).
+        let library = cachedDefaultLibrary ?? device.makeDefaultLibrary()
+        if cachedDefaultLibrary == nil { cachedDefaultLibrary = library }
+        if let library = library {
+            let fi = Int32(fractalIterations)
+            let si = Int32(max(fractalIterations - 2, 2))
+            let rs = Int32(maxRaySteps)
+            if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
+                                                            fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
+                computePipelineCache[exactKey] = pipeline
+                if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
+                lastComputePipelineKey = exactKey
+                lastComputeFI = fractalIterations
+                lastComputeRS = maxRaySteps
+                lastSelectedComputePipeline = pipeline
+                return pipeline
+            }
+        }
+
+        // 3. Ultimate fallback — generic pipeline with NO function constants.
+        //    Shader reads iterations from uniforms at runtime, matching absScalePow.
+        if RENDERER_DEBUG && lastComputePipelineKey != "fallback" {
+            print("⚠️ [ComputeCache] Using fallback generic compute pipeline")
+            lastComputePipelineKey = "fallback"
+        }
+        let fallback = adaptiveHierarchicalPipeline8x8
+        lastComputeFI = fractalIterations
+        lastComputeRS = maxRaySteps
+        lastSelectedComputePipeline = fallback
+        return fallback
+    }
+
+    /// Returns the number of pipelines currently in the unified cache.
+    var pipelineCacheCount: Int {
+        return pipelineCache.count
+    }
+
+    /// Returns all cache keys currently in the unified pipeline cache.
+    /// Useful for debugging which pipelines have been compiled.
+    var pipelineCacheKeys: [String] {
+        return Array(pipelineCache.keys).sorted()
+    }
+
+    /// Returns all cache keys currently in the compute pipeline cache.
+    var computePipelineCacheKeys: [String] {
+        return Array(computePipelineCache.keys).sorted()
+    }
+}
