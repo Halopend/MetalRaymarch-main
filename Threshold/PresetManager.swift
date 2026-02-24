@@ -836,14 +836,6 @@ class PresetManager {
             newPreset.fogEffect = importedPreset.fogEffect
             newPreset.gradientCycleEffect = importedPreset.gradientCycleEffect
 
-            // v1.1 emissive settings
-            newPreset.emissiveEnabled = importedPreset.emissiveEnabled
-            newPreset.emissivePattern = importedPreset.emissivePattern
-            newPreset.emissiveIntensity = importedPreset.emissiveIntensity
-            newPreset.emissiveThreshold = importedPreset.emissiveThreshold
-            newPreset.emissiveColor = importedPreset.emissiveColor
-            newPreset.emissiveSpeed = importedPreset.emissiveSpeed
-
             // Doppelganger
             newPreset.doppelgangerEnabled = importedPreset.doppelgangerEnabled
             newPreset.doppelgangerPlane = importedPreset.doppelgangerPlane
