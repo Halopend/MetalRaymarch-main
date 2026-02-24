@@ -103,8 +103,7 @@ constant bool FC_DEBUG_HIERARCHICAL [[function_constant(5)]];
 // This is the second most critical loop after Map()
 constant int FC_MAX_RAY_STEPS [[function_constant(6)]];
 
-// Emissive glow feature toggle - eliminates emissive code path when disabled
-constant bool FC_EMISSIVE_ENABLED [[function_constant(7)]];
+// (Function constant index 7 reserved — emissive was removed)
 
 // Neon color mode toggle - eliminates neon orbit trap computation when disabled
 // (neon mode requires extra orbit tracking in ColourWithScheme)

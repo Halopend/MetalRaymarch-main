@@ -139,6 +139,15 @@ final class UISettingsCache {
     var fractalAudioAffectsRadius: Bool = true
     var fractalAudioAffectsColorMix: Bool = true
     
+    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
+    var fractalAudioAffectsGlow: Bool = true
+    var fractalAudioAffectsFog: Bool = true
+    var fractalAudioAffectsBloom: Bool = true
+    var fractalAudioAffectsHueSpeed: Bool = true
+    var fractalAudioAffectsEmissive: Bool = false
+    var fractalAudioAffectsSaturation: Bool = true
+    var fractalAudioAffectsIterations: Bool = false
+    
     // Safety & display
     var showHUD: Bool = true
     var safetyBubbleEnabled: Bool = false
@@ -245,6 +254,13 @@ final class UISettingsCache {
         fractalAudioAffectsFolding = settings.fractalAudioAffectsFolding
         fractalAudioAffectsRadius = settings.fractalAudioAffectsRadius
         fractalAudioAffectsColorMix = settings.fractalAudioAffectsColorMix
+        fractalAudioAffectsGlow = settings.fractalAudioAffectsGlow
+        fractalAudioAffectsFog = settings.fractalAudioAffectsFog
+        fractalAudioAffectsBloom = settings.fractalAudioAffectsBloom
+        fractalAudioAffectsHueSpeed = settings.fractalAudioAffectsHueSpeed
+        fractalAudioAffectsEmissive = settings.fractalAudioAffectsEmissive
+        fractalAudioAffectsSaturation = settings.fractalAudioAffectsSaturation
+        fractalAudioAffectsIterations = settings.fractalAudioAffectsIterations
         showHUD = settings.showHUD
         safetyBubbleEnabled = settings.safetyBubbleEnabled
         safetyBubbleRadius = settings.safetyBubbleRadius
@@ -412,7 +428,7 @@ struct ContentView: View {
     
     private var preImmersiveLayout: some View {
         VStack(spacing: 16) {
-            Text("MetalRaymarch")
+            Text("Threshold")
                 .font(.title2.bold())
             ToggleImmersiveSpaceButton()
         }

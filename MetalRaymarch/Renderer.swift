@@ -263,6 +263,20 @@ actor Renderer {
     private var musicAnchorFoldingLimit: Float = 1.0
     private var musicAnchorSphereRadius: Float = 0.5
     private var musicAnchorColorMix: Float = 0.5
+    
+    // Fractal Forge-inspired extended anchors for effects
+    private var musicAnchorGlowIntensity: Float = 0.3
+    private var musicAnchorGlowWasEnabled: Bool = false
+    private var musicAnchorFogIntensity: Float = 0.32
+    private var musicAnchorFogWasEnabled: Bool = true
+    private var musicAnchorBloomStrength: Float = 0.2
+    private var musicAnchorBloomWasEnabled: Bool = false
+    private var musicAnchorHueSpeed: Float = 0.1
+    private var musicAnchorHueWasEnabled: Bool = false
+    private var musicAnchorEmissiveIntensity: Float = 1.0
+    private var musicAnchorEmissiveWasEnabled: Bool = false
+    private var musicAnchorSaturation: Float = 1.0
+    private var musicAnchorIterations: Int = 9
 
     var smoothedPosition: SIMD3<Float> = .zero
     var smoothedScale: Float = 1.0
@@ -1980,34 +1994,120 @@ actor Renderer {
                 settings.audioLevel = totalLevel * inv
             }
 
-            // Music drives fractal geometry (not just lights)
+            // Music drives fractal geometry AND effects (Fractal Forge-inspired)
             if settings.fractalAudioReactiveEnabled {
                 if !musicFractalAnchorValid {
+                    // Capture geometry anchors
                     musicAnchorFractalScale = settings.fractalScale
                     musicAnchorFoldingLimit = settings.foldingLimit
                     musicAnchorSphereRadius = settings.sphereRadius
                     musicAnchorColorMix = settings.colorMix
+                    
+                    // Capture effect anchors (save original values + enabled state)
+                    musicAnchorGlowIntensity = settings.glowEffect.intensity
+                    musicAnchorGlowWasEnabled = settings.glowEffect.enabled
+                    musicAnchorFogIntensity = settings.fogEffect.intensity
+                    musicAnchorFogWasEnabled = settings.fogEffect.enabled
+                    musicAnchorBloomStrength = settings.bloomEffect.strength
+                    musicAnchorBloomWasEnabled = settings.bloomEffect.enabled
+                    musicAnchorHueSpeed = settings.hueRotationEffect.speed
+                    musicAnchorHueWasEnabled = settings.hueRotationEffect.enabled
+                    musicAnchorEmissiveIntensity = settings.emissiveIntensity
+                    musicAnchorEmissiveWasEnabled = settings.emissiveEnabled
+                    musicAnchorSaturation = settings.colorSchemeSaturation
+                    musicAnchorIterations = settings.fractalIterations
+                    
                     musicFractalAnchorValid = true
                 }
 
-                let bandDrive = settings.bassLevel * 0.55 + settings.midLevel * 0.30 + settings.trebleLevel * 0.15
+                let bass = settings.bassLevel
+                let mid = settings.midLevel
+                let treble = settings.trebleLevel
                 let beat = settings.beatIntensity
                 let amount = settings.fractalAudioAmount
                 let beatPunch = settings.fractalBeatPunch
+                
+                // Composite drives for different modulation types
+                let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
                 let drive = min(1.0, bandDrive * (0.9 * amount) + beat * (0.1 + 0.6 * beatPunch))
 
+                // ── Geometry modulation (existing) ──────────────────────────
                 if settings.fractalAudioAffectsScale {
+                    // Bass + beat expand/contract fractal scale
                     settings.fractalScale = max(1.6, min(5.2, musicAnchorFractalScale + (drive - 0.35) * (0.15 + 0.8 * amount)))
                 }
                 if settings.fractalAudioAffectsFolding {
-                    settings.foldingLimit = max(0.7, min(1.7, musicAnchorFoldingLimit + (settings.bassLevel - 0.4) * (0.08 + 0.24 * amount) + beat * (0.03 + 0.12 * beatPunch)))
+                    // Bass drives box fold, beats punch it
+                    settings.foldingLimit = max(0.7, min(1.7, musicAnchorFoldingLimit + (bass - 0.4) * (0.08 + 0.24 * amount) + beat * (0.03 + 0.12 * beatPunch)))
                 }
                 if settings.fractalAudioAffectsRadius {
-                    settings.sphereRadius = max(0.03, min(1.2, musicAnchorSphereRadius + settings.midLevel * (0.05 + 0.20 * amount) + beat * (0.01 + 0.08 * beatPunch)))
+                    // Mids modulate sphere radius, beats add punch
+                    settings.sphereRadius = max(0.03, min(1.2, musicAnchorSphereRadius + mid * (0.05 + 0.20 * amount) + beat * (0.01 + 0.08 * beatPunch)))
                 }
                 if settings.fractalAudioAffectsColorMix {
+                    // Overall drive shifts color palette blend
                     settings.colorMix = max(0.0, min(1.0, musicAnchorColorMix * (1.0 - 0.4 * amount) + drive * (0.2 + 0.6 * amount)))
                 }
+                
+                // ── Effect modulation (Fractal Forge–inspired) ─────────────
+                
+                // GLOW ← RMS energy + kick pulses (additive brightness)
+                if settings.fractalAudioAffectsGlow {
+                    let glowDrive = bass * 0.5 + beat * 0.4 + mid * 0.1
+                    let baseGlow = musicAnchorGlowWasEnabled ? musicAnchorGlowIntensity : 0.25
+                    let glowVal = baseGlow + glowDrive * (0.2 + 0.5 * amount)
+                    settings.audioModulateGlowIntensity(glowVal)
+                }
+                
+                // FOG ← INVERSELY mapped to energy (quiet=fog, loud=clear)
+                if settings.fractalAudioAffectsFog {
+                    let energyLevel = bass * 0.4 + mid * 0.3 + beat * 0.3
+                    let baseFog = musicAnchorFogWasEnabled ? musicAnchorFogIntensity : 0.30
+                    // High energy → fog fades away; quiet → fog thickens
+                    let fogVal = baseFog * (1.0 - energyLevel * (0.4 + 0.5 * amount))
+                    settings.audioModulateFogIntensity(max(0.02, fogVal))
+                }
+                
+                // BLOOM ← beat bloom with fast attack (kick-triggered flash)
+                if settings.fractalAudioAffectsBloom {
+                    let bloomDrive = beat * 0.6 + bass * 0.4
+                    let baseBloom = musicAnchorBloomWasEnabled ? musicAnchorBloomStrength : 0.15
+                    let bloomVal = baseBloom + bloomDrive * (0.15 + 0.4 * amount * beatPunch)
+                    settings.audioModulateBloomStrength(bloomVal)
+                }
+                
+                // HUE SPEED ← treble + mid (high frequency accelerates color cycling)
+                if settings.fractalAudioAffectsHueSpeed {
+                    let hueDrive = treble * 0.6 + mid * 0.3 + beat * 0.1
+                    let baseHue = musicAnchorHueWasEnabled ? musicAnchorHueSpeed : 0.04
+                    let hueVal = baseHue + hueDrive * (0.08 + 0.25 * amount)
+                    settings.audioModulateHueSpeed(hueVal)
+                }
+                
+                // EMISSIVE ← beat intensity (glow regions pulse with kicks)
+                if settings.fractalAudioAffectsEmissive {
+                    let emDrive = beat * 0.7 + bass * 0.3
+                    let baseEm = musicAnchorEmissiveWasEnabled ? musicAnchorEmissiveIntensity : 0.6
+                    let emVal = baseEm + emDrive * (0.3 + 0.8 * amount * beatPunch)
+                    settings.audioModulateEmissiveIntensity(emVal)
+                }
+                
+                // SATURATION ← tonal/harmonic energy (richer colors on harmonic content)
+                if settings.fractalAudioAffectsSaturation {
+                    let satDrive = mid * 0.5 + treble * 0.3 + bass * 0.2
+                    let baseSat = musicAnchorSaturation
+                    // Gently boost saturation on strong tonal content
+                    let satVal = baseSat + satDrive * (0.2 + 0.6 * amount)
+                    settings.audioModulateSaturation(satVal)
+                }
+                
+                // ITERATIONS ← mid energy adds detail on transients (⚠️ performance)
+                if settings.fractalAudioAffectsIterations {
+                    let iterDrive = mid * 0.6 + treble * 0.4
+                    let extra = Int(iterDrive * amount * 3.0)  // +0 to +3 max
+                    settings.fractalIterations = min(musicAnchorIterations + 3, musicAnchorIterations + extra)
+                }
+                
             } else {
                 musicFractalAnchorValid = false
             }

@@ -1,6 +1,6 @@
 //
 //  GradientEditorView.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  SwiftUI gradient editor for the new gradient coloring system.
 //  Provides preset selection, custom stop editing, mapping mode picker,

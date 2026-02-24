@@ -1,6 +1,6 @@
 //
 //  SpotifyModels.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Codable models for Spotify Web API responses.
 //  Pure REST integration — no SDK dependency.

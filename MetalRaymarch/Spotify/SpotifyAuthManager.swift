@@ -1,6 +1,6 @@
 //
 //  SpotifyAuthManager.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  OAuth 2.0 PKCE authentication for Spotify Web API.
 //  No SDK dependency — uses ASWebAuthenticationSession + URLSession.
@@ -18,10 +18,10 @@ class SpotifyAuthManager {
     // MARK: - Configuration
     
     /// Register your app at https://developer.spotify.com/dashboard
-    /// Set the redirect URI to: metalraymarch://spotify-callback
+    /// Set the redirect URI to: Threshold://spotify-callback
     #warning("Replace YOUR_SPOTIFY_CLIENT_ID with your Spotify Developer Dashboard client ID")
     static let clientID = "YOUR_SPOTIFY_CLIENT_ID"
-    static let redirectURI = "metalraymarch://spotify-callback"
+    static let redirectURI = "Threshold://spotify-callback"
     static let scopes = [
         "user-read-playback-state",
         "user-modify-playback-state",
@@ -30,7 +30,7 @@ class SpotifyAuthManager {
     
     private static let authURL = "https://accounts.spotify.com/authorize"
     private static let tokenURL = "https://accounts.spotify.com/api/token"
-    private static let keychainService = "com.metalraymarch.spotify"
+    private static let keychainService = "com.Threshold.spotify"
     
     // MARK: - State
     
@@ -104,7 +104,7 @@ class SpotifyAuthManager {
         
         let session = ASWebAuthenticationSession(
             url: url,
-            callbackURLScheme: "metalraymarch"
+            callbackURLScheme: "Threshold"
         ) { [weak self] callbackURL, error in
             Task { @MainActor in
                 self?.authSession = nil  // Release after completion
@@ -130,7 +130,7 @@ class SpotifyAuthManager {
     
     /// Handle the OAuth callback URL (called from .onOpenURL)
     func handleCallback(_ url: URL) async {
-        guard url.scheme == "metalraymarch",
+        guard url.scheme == "Threshold",
               url.host == "spotify-callback" else { return }
         
         guard let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?

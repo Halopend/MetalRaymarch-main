@@ -1,6 +1,6 @@
 //
 //  ProgressiveShaders.metal
-//  MetalRaymarch
+//  Threshold
 //
 //  Diagnostic kernels to profile SPECIFIC parts of the rendering pipeline.
 //  Goal: Find exactly where time is being spent in YOUR code.

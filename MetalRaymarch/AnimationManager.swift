@@ -1,6 +1,6 @@
 //
 //  AnimationManager.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Manages scene playback, storage, and parameter interpolation.
 //  Handles saving/loading scenes to disk and driving real-time animation.

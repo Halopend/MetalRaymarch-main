@@ -1,6 +1,6 @@
 //
 //  SpotifyManager.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  High-level coordinator for Spotify integration.
 //  Owns auth, API client, and beat sync. Polls playback state and
@@ -9,26 +9,65 @@
 
 import Foundation
 
-/// Reactivity preset — controls how intensely audio modulates the fractal.
+/// Genre-optimized reactivity presets (Fractal Forge–inspired).
+/// Each preset tunes sensitivity curves and which parameters respond to audio.
 enum ReactivityPreset: String, CaseIterable {
-    case subtle  = "Subtle"
-    case medium  = "Medium"
-    case intense = "Intense"
+    case electronic = "EDM"
+    case ambient    = "Ambient"
+    case rock       = "Rock"
+    case classical  = "Classical"
+    case hiphop     = "Hip-Hop"
 
     var icon: String {
         switch self {
-        case .subtle:  return "leaf"
-        case .medium:  return "bolt.fill"
-        case .intense: return "sparkles"
+        case .electronic: return "bolt.fill"
+        case .ambient:    return "leaf.fill"
+        case .rock:       return "flame.fill"
+        case .classical:  return "music.note"
+        case .hiphop:     return "waveform"
         }
     }
 
-    /// (audioAmount, beatPunch, bassSens, midSens, trebleSens, beatSens)
+    /// Core sensitivity tuning: (audioAmount, beatPunch, bassSens, midSens, trebleSens, beatSens)
     var settings: (audioAmount: Float, beatPunch: Float, bassSensitivity: Float, midSensitivity: Float, trebleSensitivity: Float, beatSensitivity: Float) {
         switch self {
-        case .subtle:  return (0.25, 0.20, 0.5, 0.4, 0.3, 0.4)
-        case .medium:  return (0.55, 0.55, 0.8, 0.7, 0.6, 0.7)
-        case .intense: return (0.85, 0.85, 1.0, 1.0, 1.0, 1.0)
+        // EDM: Punchy kicks, big beat response, bright glow, fast color shifts
+        case .electronic: return (0.75, 0.85, 1.1, 0.8, 0.9, 1.2)
+        // Ambient: Ultra-smooth, gentle ripples, rich colors, fog modulation
+        case .ambient:    return (0.45, 0.15, 0.6, 0.8, 0.9, 0.3)
+        // Rock: Balanced, mid-emphasis on structure, moderate beats
+        case .rock:       return (0.65, 0.70, 0.9, 1.0, 0.7, 0.8)
+        // Classical: Refined, sustained tonal beauty, harmonic saturation
+        case .classical:  return (0.40, 0.20, 0.5, 0.9, 0.8, 0.3)
+        // Hip-Hop: Bass-heavy, punchy, scale/fold emphasis
+        case .hiphop:     return (0.80, 0.90, 1.2, 0.7, 0.5, 1.0)
+        }
+    }
+    
+    /// Which geometry parameters this preset enables
+    var geometryProfile: (scale: Bool, folding: Bool, radius: Bool, colorMix: Bool) {
+        switch self {
+        case .electronic: return (true,  true,  true,  true )
+        case .ambient:    return (true,  false, false, true )
+        case .rock:       return (true,  true,  true,  false)
+        case .classical:  return (false, false, true,  true )
+        case .hiphop:     return (true,  true,  true,  false)
+        }
+    }
+    
+    /// Which effect parameters this preset enables (Fractal Forge–inspired)
+    var effectsProfile: (glow: Bool, fog: Bool, bloom: Bool, hueSpeed: Bool, emissive: Bool, saturation: Bool, iterations: Bool) {
+        switch self {
+        // EDM: Glow + bloom on beats, fog clears on drops, fast hue cycling
+        case .electronic: return (true,  true,  true,  true,  true,  false, false)
+        // Ambient: Gentle fog breathing, rich saturation, slow hue drift
+        case .ambient:    return (false, true,  false, true,  false, true,  false)
+        // Rock: Glow + bloom punches, emissive flashes
+        case .rock:       return (true,  false, true,  false, true,  false, false)
+        // Classical: Fog + saturation richness, gentle hue rotation
+        case .classical:  return (false, true,  false, true,  false, true,  false)
+        // Hip-Hop: Glow flashes, bloom on kicks, emissive pulses
+        case .hiphop:     return (true,  false, true,  false, true,  false, false)
         }
     }
 }

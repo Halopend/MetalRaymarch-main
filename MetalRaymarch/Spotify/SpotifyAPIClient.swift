@@ -1,6 +1,6 @@
 //
 //  SpotifyAPIClient.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  REST client for Spotify Web API endpoints.
 //  Handles playback state, audio features, audio analysis, and transport controls.

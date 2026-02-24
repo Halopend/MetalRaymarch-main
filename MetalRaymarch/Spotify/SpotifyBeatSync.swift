@@ -1,6 +1,6 @@
 //
 //  SpotifyBeatSync.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Real-time beat synchronization engine.
 //  Consumes SpotifyAudioAnalysis + playback position to produce

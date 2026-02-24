@@ -1,6 +1,6 @@
 //
 //  AnimationViews.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  UI for scene management, keyframe editing, and playback controls.
 //

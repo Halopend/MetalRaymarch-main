@@ -1,6 +1,6 @@
 //
 //  AnimationTypes.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Data structures for scene-based parameter animation.
 //  Similar to CSS keyframe animations - keyframes represent parameter states,

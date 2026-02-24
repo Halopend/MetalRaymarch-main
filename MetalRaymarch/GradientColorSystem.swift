@@ -1,6 +1,6 @@
 //
 //  GradientColorSystem.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Replaces hardcoded palettes with a user-editable gradient system.
 //  Inspired by GMT-fractals' dual-layer gradient with multiple mapping modes.

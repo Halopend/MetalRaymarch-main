@@ -1,6 +1,6 @@
 //
 //  LightingEffectsView.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Card-based lighting effects UI with presets
 //

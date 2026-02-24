@@ -945,6 +945,44 @@ final class RenderSettings: @unchecked Sendable {
         guard UserDefaults.standard.object(forKey: key) != nil else { return true }
         return UserDefaults.standard.bool(forKey: key)
     }()
+    
+    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
+    private var _fractalAudioAffectsGlow: Bool = {
+        let key = "fractalAudioAffectsGlow"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsFog: Bool = {
+        let key = "fractalAudioAffectsFog"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsBloom: Bool = {
+        let key = "fractalAudioAffectsBloom"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsHueSpeed: Bool = {
+        let key = "fractalAudioAffectsHueSpeed"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsEmissive: Bool = {
+        let key = "fractalAudioAffectsEmissive"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return false }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsSaturation: Bool = {
+        let key = "fractalAudioAffectsSaturation"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    private var _fractalAudioAffectsIterations: Bool = {
+        let key = "fractalAudioAffectsIterations"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return false }
+        return UserDefaults.standard.bool(forKey: key)
+    }()
+    
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
@@ -1331,6 +1369,124 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock { _fractalAudioAffectsColorMix = newValue }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsColorMix")
+        }
+    }
+    
+    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
+    
+    /// Glow intensity responds to RMS energy + beat pulses (Fractal Forge: glow)
+    var fractalAudioAffectsGlow: Bool {
+        get { withLock { _fractalAudioAffectsGlow } }
+        set {
+            withLock { _fractalAudioAffectsGlow = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsGlow")
+        }
+    }
+    
+    /// Fog clears on loud passages, thickens on quiet (Fractal Forge: inverse energy)
+    var fractalAudioAffectsFog: Bool {
+        get { withLock { _fractalAudioAffectsFog } }
+        set {
+            withLock { _fractalAudioAffectsFog = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFog")
+        }
+    }
+    
+    /// Bloom strength pulses with beats (Fractal Forge: beat bloom)
+    var fractalAudioAffectsBloom: Bool {
+        get { withLock { _fractalAudioAffectsBloom } }
+        set {
+            withLock { _fractalAudioAffectsBloom = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsBloom")
+        }
+    }
+    
+    /// Hue rotation speed driven by treble (Fractal Forge: brilliance → color speed)
+    var fractalAudioAffectsHueSpeed: Bool {
+        get { withLock { _fractalAudioAffectsHueSpeed } }
+        set {
+            withLock { _fractalAudioAffectsHueSpeed = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsHueSpeed")
+        }
+    }
+    
+    /// Emissive glow regions pulse with beat intensity
+    var fractalAudioAffectsEmissive: Bool {
+        get { withLock { _fractalAudioAffectsEmissive } }
+        set {
+            withLock { _fractalAudioAffectsEmissive = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsEmissive")
+        }
+    }
+    
+    /// Color saturation responds to tonal/harmonic energy
+    var fractalAudioAffectsSaturation: Bool {
+        get { withLock { _fractalAudioAffectsSaturation } }
+        set {
+            withLock { _fractalAudioAffectsSaturation = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsSaturation")
+        }
+    }
+    
+    /// Fractal iterations increase with mid energy (detail on transients — caution: performance)
+    var fractalAudioAffectsIterations: Bool {
+        get { withLock { _fractalAudioAffectsIterations } }
+        set {
+            withLock { _fractalAudioAffectsIterations = newValue }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsIterations")
+        }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // AUDIO MODULATION SETTERS (bypass lighting preset tracking)
+    // Used by Renderer for per-frame audio-reactive modulation without
+    // triggering _lightingPreset = .custom every frame.
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Modulate glow intensity (auto-enables glow if needed)
+    func audioModulateGlowIntensity(_ value: Float) {
+        withLock {
+            _glowEffect.enabled = true
+            _glowEffect.intensity = max(0.0, min(1.0, value))
+        }
+    }
+    
+    /// Modulate fog intensity (auto-enables fog if needed)
+    func audioModulateFogIntensity(_ value: Float) {
+        withLock {
+            _fogEffect.enabled = true
+            _fogEffect.intensity = max(0.0, min(1.0, value))
+        }
+    }
+    
+    /// Modulate bloom strength (auto-enables bloom if needed)
+    func audioModulateBloomStrength(_ value: Float) {
+        withLock {
+            _bloomEffect.enabled = true
+            _bloomEffect.strength = max(0.0, min(1.0, value))
+        }
+    }
+    
+    /// Modulate hue rotation speed (auto-enables hue rotation if needed)
+    func audioModulateHueSpeed(_ value: Float) {
+        withLock {
+            _hueRotationEffect.enabled = true
+            _hueRotationEffect.speed = max(0.0, min(0.5, value))
+        }
+    }
+    
+    /// Modulate emissive intensity (auto-enables emissive if needed)
+    func audioModulateEmissiveIntensity(_ value: Float) {
+        withLock {
+            _emissiveEnabled = true
+            _emissiveIntensity = max(0.0, min(2.0, value))
+        }
+    }
+    
+    /// Modulate color scheme saturation
+    func audioModulateSaturation(_ value: Float) {
+        withLock {
+            _colorSchemeSaturation = max(0.0, min(3.0, value))
         }
     }
     

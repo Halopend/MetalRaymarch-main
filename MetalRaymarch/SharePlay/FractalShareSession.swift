@@ -1,6 +1,6 @@
 //
 //  FractalShareSession.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Manages SharePlay sessions for synchronized fractal exploration.
 //  Handles session lifecycle, role management, and state synchronization.
@@ -64,7 +64,7 @@ class FractalShareSession {
     private var lastSendTime: TimeInterval = 0
     private let minSendInterval: TimeInterval = 1.0 / 30.0
     
-    private let logger = Logger(subsystem: "com.puppypower.MetalRaymarch", category: "SharePlay")
+    private let logger = Logger(subsystem: "com.puppypower.Threshold", category: "SharePlay")
     
     // MARK: - Initialization
     

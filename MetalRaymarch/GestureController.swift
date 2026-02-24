@@ -1,6 +1,6 @@
 //
 //  GestureController.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Two-hand gesture controls for fractal parameters
 //

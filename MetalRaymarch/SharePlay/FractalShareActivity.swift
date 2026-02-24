@@ -1,6 +1,6 @@
 //
 //  FractalShareActivity.swift
-//  MetalRaymarch
+//  com.puppypower.Threshold
 //
 //  SharePlay GroupActivity for shared fractal exploration.
 //  Allows multiple users to view the same fractal space together.
@@ -13,7 +13,7 @@ import Foundation
 struct FractalShareActivity: GroupActivity {
     
     // Unique identifier for this activity type
-    static let activityIdentifier = "com.puppypower.MetalRaymarch.shareplay"
+    static let activityIdentifier = "com.puppypower.Threshold.shareplay"
     
     // Metadata shown in FaceTime UI
     var metadata: GroupActivityMetadata {

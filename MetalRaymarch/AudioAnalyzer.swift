@@ -1,6 +1,6 @@
 //
 //  AudioAnalyzer.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Captures microphone input and provides audio levels for reactive lighting.
 //  Uses FFT for proper frequency band separation (bass, mids, treble).

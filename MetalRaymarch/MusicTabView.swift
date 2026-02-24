@@ -1,6 +1,6 @@
 //
 //  MusicTabView.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Unified music sidebar tab.
 //  Shows a single "Now Playing" card (auto-selects Apple Music or Spotify),
@@ -520,20 +520,26 @@ struct MusicTabContent: View {
             ))
 
             if cache.fractalAudioReactiveEnabled {
-                // Quick presets
-                HStack(spacing: 8) {
-                    ForEach(ReactivityPreset.allCases, id: \.self) { preset in
-                        Button {
-                            applyPreset(preset)
-                        } label: {
-                            VStack(spacing: 3) {
-                                Image(systemName: preset.icon).font(.caption)
-                                Text(preset.rawValue).font(.caption2)
+                // Genre presets (Fractal Forge–inspired)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Genre Presets")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    HStack(spacing: 6) {
+                        ForEach(ReactivityPreset.allCases, id: \.self) { preset in
+                            Button {
+                                applyPreset(preset)
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Image(systemName: preset.icon).font(.caption2)
+                                    Text(preset.rawValue).font(.system(size: 9))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
                     }
                 }
 
@@ -549,13 +555,13 @@ struct MusicTabContent: View {
                     set: { v in cache.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
                 ), range: 0...1)
 
-                // What audio affects (compact toggles)
+                // ── Affects: Geometry ──────────────────────────────────────
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Affects")
+                    Text("Geometry")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         compactToggle("Scale",  isOn: Binding(
                             get: { cache.fractalAudioAffectsScale },
                             set: { v in cache.fractalAudioAffectsScale = v; cache.push(\.fractalAudioAffectsScale, value: v) }
@@ -574,6 +580,46 @@ struct MusicTabContent: View {
                         ))
                     }
                 }
+                
+                // ── Affects: Effects (Fractal Forge–inspired) ─────────────
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Effects")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        compactToggle("Glow",  isOn: Binding(
+                            get: { cache.fractalAudioAffectsGlow },
+                            set: { v in cache.fractalAudioAffectsGlow = v; cache.push(\.fractalAudioAffectsGlow, value: v) }
+                        ))
+                        compactToggle("Fog",   isOn: Binding(
+                            get: { cache.fractalAudioAffectsFog },
+                            set: { v in cache.fractalAudioAffectsFog = v; cache.push(\.fractalAudioAffectsFog, value: v) }
+                        ))
+                        compactToggle("Bloom", isOn: Binding(
+                            get: { cache.fractalAudioAffectsBloom },
+                            set: { v in cache.fractalAudioAffectsBloom = v; cache.push(\.fractalAudioAffectsBloom, value: v) }
+                        ))
+                        compactToggle("Hue",   isOn: Binding(
+                            get: { cache.fractalAudioAffectsHueSpeed },
+                            set: { v in cache.fractalAudioAffectsHueSpeed = v; cache.push(\.fractalAudioAffectsHueSpeed, value: v) }
+                        ))
+                    }
+                    HStack(spacing: 10) {
+                        compactToggle("Emissive",   isOn: Binding(
+                            get: { cache.fractalAudioAffectsEmissive },
+                            set: { v in cache.fractalAudioAffectsEmissive = v; cache.push(\.fractalAudioAffectsEmissive, value: v) }
+                        ))
+                        compactToggle("Saturation", isOn: Binding(
+                            get: { cache.fractalAudioAffectsSaturation },
+                            set: { v in cache.fractalAudioAffectsSaturation = v; cache.push(\.fractalAudioAffectsSaturation, value: v) }
+                        ))
+                        compactToggle("Detail",     isOn: Binding(
+                            get: { cache.fractalAudioAffectsIterations },
+                            set: { v in cache.fractalAudioAffectsIterations = v; cache.push(\.fractalAudioAffectsIterations, value: v) }
+                        ))
+                    }
+                }
             }
         }
         .padding(12)
@@ -581,6 +627,7 @@ struct MusicTabContent: View {
     }
 
     private func applyPreset(_ preset: ReactivityPreset) {
+        // Core sensitivity settings
         let s = preset.settings
         cache.fractalAudioAmount = s.audioAmount
         cache.fractalBeatPunch = s.beatPunch
@@ -594,6 +641,34 @@ struct MusicTabContent: View {
         cache.push(\.midSensitivity, value: s.midSensitivity)
         cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
         cache.push(\.beatSensitivity, value: s.beatSensitivity)
+        
+        // Geometry profile
+        let g = preset.geometryProfile
+        cache.fractalAudioAffectsScale = g.scale
+        cache.fractalAudioAffectsFolding = g.folding
+        cache.fractalAudioAffectsRadius = g.radius
+        cache.fractalAudioAffectsColorMix = g.colorMix
+        cache.push(\.fractalAudioAffectsScale, value: g.scale)
+        cache.push(\.fractalAudioAffectsFolding, value: g.folding)
+        cache.push(\.fractalAudioAffectsRadius, value: g.radius)
+        cache.push(\.fractalAudioAffectsColorMix, value: g.colorMix)
+        
+        // Effects profile (Fractal Forge–inspired)
+        let e = preset.effectsProfile
+        cache.fractalAudioAffectsGlow = e.glow
+        cache.fractalAudioAffectsFog = e.fog
+        cache.fractalAudioAffectsBloom = e.bloom
+        cache.fractalAudioAffectsHueSpeed = e.hueSpeed
+        cache.fractalAudioAffectsEmissive = e.emissive
+        cache.fractalAudioAffectsSaturation = e.saturation
+        cache.fractalAudioAffectsIterations = e.iterations
+        cache.push(\.fractalAudioAffectsGlow, value: e.glow)
+        cache.push(\.fractalAudioAffectsFog, value: e.fog)
+        cache.push(\.fractalAudioAffectsBloom, value: e.bloom)
+        cache.push(\.fractalAudioAffectsHueSpeed, value: e.hueSpeed)
+        cache.push(\.fractalAudioAffectsEmissive, value: e.emissive)
+        cache.push(\.fractalAudioAffectsSaturation, value: e.saturation)
+        cache.push(\.fractalAudioAffectsIterations, value: e.iterations)
     }
 
     // MARK: - Level Meters

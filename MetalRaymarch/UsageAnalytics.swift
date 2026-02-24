@@ -1,6 +1,6 @@
 //
 //  UsageAnalytics.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Created on January 31, 2026.
 //  Automatic anonymous usage analytics for TestFlight beta.

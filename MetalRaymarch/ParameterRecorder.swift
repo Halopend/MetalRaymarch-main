@@ -1,6 +1,6 @@
 //
 //  ParameterRecorder.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Created on January 18, 2026.
 //  Efficient parameter recording system for playback and preset animation.

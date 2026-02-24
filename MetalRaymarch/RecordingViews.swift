@@ -1,6 +1,6 @@
 //
 //  RecordingViews.swift
-//  MetalRaymarch
+//  Threshold
 //
 //  Created on January 18, 2026.
 //  Recording indicator and playback UI components.
