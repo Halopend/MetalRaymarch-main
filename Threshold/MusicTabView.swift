@@ -692,7 +692,7 @@ struct MusicTabContent: View {
         HStack {
             Text(label)
                 .font(.caption)
-                .frame(width: 80, alignment: .leading)
+                .frame(width: 120, alignment: .leading)
             Slider(value: value, in: range)
             Text("\(Int(value.wrappedValue * 100))%")
                 .font(.caption.monospacedDigit())

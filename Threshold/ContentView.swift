@@ -633,13 +633,13 @@ struct ContentView: View {
                     enabled: .constant(true),
                     onChanged: { cache.push(\.targetMinDistance, value: cache.targetMinDistance) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "arrow.triangle.branch", label: "Folding Limit",
                     value: $cache.targetFoldingLimit, range: parameterRanges.foldingLimit,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "circle.dashed", label: "Sphere Radius",
                     value: $cache.targetSphereRadius, range: parameterRanges.sphereRadius,
                     enabled: .constant(true),
@@ -990,13 +990,13 @@ struct ContentView: View {
                     enabled: .constant(true),
                     onChanged: { cache.push(\.gradientRepeat, value: cache.gradientRepeat) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "arrow.right", label: "Offset",
                     value: $cache.gradientOffset, range: 0...1,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.gradientOffset, value: cache.gradientOffset) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Smoothing",
                     value: $cache.gradientSmoothing, range: 0...1,
                     enabled: .constant(true),
@@ -1015,7 +1015,7 @@ struct ContentView: View {
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorMix, value: cache.colorMix) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "number", label: "Iterations",
                     value: $cache.colorIterations, range: 4...16,
                     enabled: .constant(true),
@@ -1039,13 +1039,13 @@ struct ContentView: View {
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
                     value: $cache.colorSchemeVibrance, range: 0...1.0,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Midtone Curve",
                     value: $cache.colorSchemeCurve, range: -1.0...1.0,
                     enabled: .constant(true),
@@ -1062,7 +1062,7 @@ struct ContentView: View {
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) },
                     showToggle: false)
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Highlights",
                     value: $cache.colorSchemeHighlights, range: -0.5...1.0,
                     enabled: .constant(true),
@@ -1109,7 +1109,7 @@ struct ContentView: View {
                     range: 0...1,
                     enabled: Binding(get: { cache.glowEffect.enabled }, set: { cache.glowEffect.enabled = $0 }),
                     onChanged: { cache.push(\.glowEffect, value: cache.glowEffect) })
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
                     value: Binding(get: { cache.bloomEffect.strength }, set: { cache.bloomEffect.strength = $0 }),
                     range: 0...1,
@@ -1169,7 +1169,7 @@ struct ContentView: View {
                             .frame(width: 16)
                         Text("Smooth Loop")
                             .font(.subheadline)
-                            .frame(width: 90, alignment: .leading)
+                            .frame(width: 135, alignment: .leading)
                             .lineLimit(1)
                         Spacer()
                         Toggle("", isOn: Binding(
@@ -1184,7 +1184,7 @@ struct ContentView: View {
                     }
                     .frame(height: 32)
                 }
-                Divider().padding(.leading, 114)
+                Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
                     value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }),
                     range: 0...0.5,
@@ -1605,7 +1605,7 @@ struct EffectSliderRow: View {
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(enabled ? .primary : .secondary)
-                .frame(width: 90, alignment: .leading)
+                .frame(width: 135, alignment: .leading)
                 .lineLimit(1)
             Slider(value: $value, in: range, onEditingChanged: { editing in
                 if !editing { onChanged() }

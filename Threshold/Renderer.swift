@@ -1013,7 +1013,7 @@ actor Renderer {
             return FunctionConstantConfig(
                 fractalIterations: fc.fractalIterations,
                 shadowIterations: fc.shadowIterations,
-                safetyBubbleEnabled: fc.safetyBubbleEnabled,
+                safetyBubbleEnabled: nil,  // Runtime: respects live safety bubble toggle/radius changes
                 showHUD: true,
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
@@ -1320,7 +1320,6 @@ actor Renderer {
         var fi = fractalIterations
         var si = shadowIterations
         var rs = maxRaySteps
-        var bubble: Bool = false
         var debug: Bool = false
         var hud: Bool = false
         var neon: Bool = false
@@ -1328,7 +1327,6 @@ actor Renderer {
         constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
         constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
         constants.setConstantValue(&rs, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
-        constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
         constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
         constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
         constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)

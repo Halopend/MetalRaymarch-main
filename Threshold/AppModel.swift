@@ -343,7 +343,7 @@ enum LightingMode: Int32, CaseIterable, Codable {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Hue rotation effect - rotates colors through YIQ color space
-struct HueRotationEffect: Codable {
+struct HueRotationEffect: Codable, Equatable {
     var enabled: Bool = false
     var speed: Float = 0.1          // Rotation speed (0-0.5)
     var intensity: Float = 0.5      // Blend amount (0-1), prevents overpowering
@@ -366,7 +366,7 @@ struct HueRotationEffect: Codable {
 }
 
 /// Pulse effect - rhythmic brightness and saturation variation
-struct PulseEffect: Codable {
+struct PulseEffect: Codable, Equatable {
     var enabled: Bool = false
     var speed: Float = 0.5          // Pulse frequency (0-2)
     var amount: Float = 0.3         // Pulse intensity (0-1)
@@ -389,7 +389,7 @@ struct PulseEffect: Codable {
 }
 
 /// Glow effect - ray-step based inner glow
-struct GlowEffect: Codable {
+struct GlowEffect: Codable, Equatable {
     var enabled: Bool = false
     var intensity: Float = 0.3      // Glow brightness (0-1)
     
@@ -411,7 +411,7 @@ struct GlowEffect: Codable {
 }
 
 /// Bloom effect - bright areas bleed
-struct BloomEffect: Codable {
+struct BloomEffect: Codable, Equatable {
     var enabled: Bool = false
     var strength: Float = 0.2       // Bloom intensity (0-1)
     
@@ -433,7 +433,7 @@ struct BloomEffect: Codable {
 }
 
 /// Fog effect - distance-based atmospheric fog
-struct FogEffect: Codable {
+struct FogEffect: Codable, Equatable {
     var enabled: Bool = true
     var intensity: Float = 0.32     // Fog density (0-1)
     
@@ -455,7 +455,7 @@ struct FogEffect: Codable {
 }
 
 /// Gradient cycle effect - rotates the gradient offset over time so colors loop through the fractal
-struct GradientCycleEffect: Codable {
+struct GradientCycleEffect: Codable, Equatable {
     var enabled: Bool = false
     var speed: Float = 0.1          // Cycle speed (0-1), how fast the gradient rotates
     var smoothLoop: Bool = true     // When true, gradient wraps smoothly (last stop blends back to first)

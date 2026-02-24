@@ -322,6 +322,7 @@ struct FractalPreset: Codable, Identifiable {
         
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
+        preset.safetyBubbleShape = settings.safetyBubbleShape
         
         // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
@@ -813,6 +814,7 @@ class PresetManager {
             newPreset.tileSize = importedPreset.tileSize
             newPreset.safetyBubbleEnabled = importedPreset.safetyBubbleEnabled
             newPreset.safetyBubbleRadius = importedPreset.safetyBubbleRadius
+            newPreset.safetyBubbleShape = importedPreset.safetyBubbleShape
             newPreset.fractalType = importedPreset.fractalType
             newPreset.colorScheme = importedPreset.colorScheme
             newPreset.colorSchemeSaturation = importedPreset.colorSchemeSaturation
@@ -833,6 +835,28 @@ class PresetManager {
             newPreset.bloomEffect = importedPreset.bloomEffect
             newPreset.fogEffect = importedPreset.fogEffect
             newPreset.gradientCycleEffect = importedPreset.gradientCycleEffect
+
+            // v1.1 emissive settings
+            newPreset.emissiveEnabled = importedPreset.emissiveEnabled
+            newPreset.emissivePattern = importedPreset.emissivePattern
+            newPreset.emissiveIntensity = importedPreset.emissiveIntensity
+            newPreset.emissiveThreshold = importedPreset.emissiveThreshold
+            newPreset.emissiveColor = importedPreset.emissiveColor
+            newPreset.emissiveSpeed = importedPreset.emissiveSpeed
+
+            // Doppelganger
+            newPreset.doppelgangerEnabled = importedPreset.doppelgangerEnabled
+            newPreset.doppelgangerPlane = importedPreset.doppelgangerPlane
+            newPreset.doppelgangerOffset = importedPreset.doppelgangerOffset
+
+            // Color scheme auto-transition
+            newPreset.colorSchemeAutoTransition = importedPreset.colorSchemeAutoTransition
+            newPreset.colorSchemeAutoInterval = importedPreset.colorSchemeAutoInterval
+            newPreset.colorSchemeTransitionDuration = importedPreset.colorSchemeTransitionDuration
+
+            // v2.1 gradient coloring system
+            newPreset.gradientState = importedPreset.gradientState
+            newPreset.lightingSoftness = importedPreset.lightingSoftness
             
             presets.insert(newPreset, at: 0)
             savePresets()

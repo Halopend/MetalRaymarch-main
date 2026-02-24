@@ -161,6 +161,14 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     // ═══════════════════════════════════════════════════════════════════════════
     
     var colorScheme: Int?  // nil = don't change color scheme during animation
+    var lightingMode: LightingMode?
+    var lightingPreset: LightingPreset?
+    var hueRotationEffect: HueRotationEffect?
+    var pulseEffect: PulseEffect?
+    var glowEffect: GlowEffect?
+    var bloomEffect: BloomEffect?
+    var fogEffect: FogEffect?
+    var gradientCycleEffect: GradientCycleEffect?
     
     /// Create a keyframe from current render settings
     init(from settings: RenderSettings, name: String = "Keyframe", duration: TimeInterval = 2.0) {
@@ -184,6 +192,14 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.positionZ = settings.position.z
         
         self.colorScheme = Int(settings.colorScheme.rawValue)
+        self.lightingMode = settings.lightingMode
+        self.lightingPreset = settings.lightingPreset
+        self.hueRotationEffect = settings.hueRotationEffect
+        self.pulseEffect = settings.pulseEffect
+        self.glowEffect = settings.glowEffect
+        self.bloomEffect = settings.bloomEffect
+        self.fogEffect = settings.fogEffect
+        self.gradientCycleEffect = settings.gradientCycleEffect
     }
     
     /// Create with explicit values
@@ -191,6 +207,14 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
          minDistance: Float, foldingLimit: Float, sphereRadius: Float, fractalScale: Float,
          baseFractalIterations: Int = 9, baseMaxRaySteps: Int = 64,
          position: SIMD3<Float>, colorScheme: Int? = nil,
+            lightingMode: LightingMode? = nil,
+            lightingPreset: LightingPreset? = nil,
+            hueRotationEffect: HueRotationEffect? = nil,
+            pulseEffect: PulseEffect? = nil,
+            glowEffect: GlowEffect? = nil,
+            bloomEffect: BloomEffect? = nil,
+            fogEffect: FogEffect? = nil,
+            gradientCycleEffect: GradientCycleEffect? = nil,
          easingType: EasingFunction = .bezier, bezierHandle: BezierHandle = .easeInOut) {
         self.id = id
         self.name = name
@@ -205,6 +229,14 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.positionY = position.y
         self.positionZ = position.z
         self.colorScheme = colorScheme
+        self.lightingMode = lightingMode
+        self.lightingPreset = lightingPreset
+        self.hueRotationEffect = hueRotationEffect
+        self.pulseEffect = pulseEffect
+        self.glowEffect = glowEffect
+        self.bloomEffect = bloomEffect
+        self.fogEffect = fogEffect
+        self.gradientCycleEffect = gradientCycleEffect
         self.easingType = easingType
         self.bezierHandle = bezierHandle
     }
@@ -225,6 +257,49 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         func lerp3(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> SIMD3<Float> {
             return a + (b - a) * clampedT
         }
+
+        func pickDiscrete<T>(_ a: T?, _ b: T?) -> T? {
+            clampedT < 0.5 ? a : b
+        }
+
+        func lerpHue(_ a: HueRotationEffect?, _ b: HueRotationEffect?) -> HueRotationEffect? {
+            guard let a, let b else { return pickDiscrete(a, b) }
+            return HueRotationEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
+                                     speed: lerp(a.speed, b.speed),
+                                     intensity: lerp(a.intensity, b.intensity))
+        }
+
+        func lerpPulse(_ a: PulseEffect?, _ b: PulseEffect?) -> PulseEffect? {
+            guard let a, let b else { return pickDiscrete(a, b) }
+            return PulseEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
+                               speed: lerp(a.speed, b.speed),
+                               amount: lerp(a.amount, b.amount))
+        }
+
+        func lerpGlow(_ a: GlowEffect?, _ b: GlowEffect?) -> GlowEffect? {
+            guard let a, let b else { return pickDiscrete(a, b) }
+            return GlowEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
+                              intensity: lerp(a.intensity, b.intensity))
+        }
+
+        func lerpBloom(_ a: BloomEffect?, _ b: BloomEffect?) -> BloomEffect? {
+            guard let a, let b else { return pickDiscrete(a, b) }
+            return BloomEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
+                               strength: lerp(a.strength, b.strength))
+        }
+
+        func lerpFog(_ a: FogEffect?, _ b: FogEffect?) -> FogEffect? {
+            guard let a, let b else { return pickDiscrete(a, b) }
+            return FogEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
+                             intensity: lerp(a.intensity, b.intensity))
+        }
+
+        func lerpGradientCycle(_ a: GradientCycleEffect?, _ b: GradientCycleEffect?) -> GradientCycleEffect? {
+            guard let a, let b else { return pickDiscrete(a, b) }
+            return GradientCycleEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
+                                       speed: lerp(a.speed, b.speed),
+                                       smoothLoop: clampedT < 0.5 ? a.smoothLoop : b.smoothLoop)
+        }
         
         return AnimationKeyframe(
             id: self.id,
@@ -237,7 +312,15 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             baseFractalIterations: clampedT < 0.5 ? self.baseFractalIterations : other.baseFractalIterations,
             baseMaxRaySteps: clampedT < 0.5 ? self.baseMaxRaySteps : other.baseMaxRaySteps,
             position: lerp3(self.position, other.position),
-            colorScheme: clampedT < 0.5 ? self.colorScheme : other.colorScheme
+            colorScheme: clampedT < 0.5 ? self.colorScheme : other.colorScheme,
+            lightingMode: clampedT < 0.5 ? self.lightingMode : other.lightingMode,
+            lightingPreset: clampedT < 0.5 ? self.lightingPreset : other.lightingPreset,
+            hueRotationEffect: lerpHue(self.hueRotationEffect, other.hueRotationEffect),
+            pulseEffect: lerpPulse(self.pulseEffect, other.pulseEffect),
+            glowEffect: lerpGlow(self.glowEffect, other.glowEffect),
+            bloomEffect: lerpBloom(self.bloomEffect, other.bloomEffect),
+            fogEffect: lerpFog(self.fogEffect, other.fogEffect),
+            gradientCycleEffect: lerpGradientCycle(self.gradientCycleEffect, other.gradientCycleEffect)
         )
     }
 }

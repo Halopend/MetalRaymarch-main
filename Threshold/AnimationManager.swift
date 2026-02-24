@@ -485,6 +485,31 @@ final class AnimationManager {
            let scheme = ColorScheme(rawValue: Int32(rawScheme)) {
             settings.transitionToColorScheme(scheme)
         }
+
+        if let lightingMode = keyframe.lightingMode {
+            settings.lightingMode = lightingMode
+        }
+        if let lightingPreset = keyframe.lightingPreset {
+            settings.lightingPreset = lightingPreset
+        }
+        if let hueRotationEffect = keyframe.hueRotationEffect {
+            settings.hueRotationEffect = hueRotationEffect
+        }
+        if let pulseEffect = keyframe.pulseEffect {
+            settings.pulseEffect = pulseEffect
+        }
+        if let glowEffect = keyframe.glowEffect {
+            settings.glowEffect = glowEffect
+        }
+        if let bloomEffect = keyframe.bloomEffect {
+            settings.bloomEffect = bloomEffect
+        }
+        if let fogEffect = keyframe.fogEffect {
+            settings.fogEffect = fogEffect
+        }
+        if let gradientCycleEffect = keyframe.gradientCycleEffect {
+            settings.gradientCycleEffect = gradientCycleEffect
+        }
         
         // Also set TARGETS so they're in sync when animation stops
         // This allows hand gestures to blend in naturally
@@ -577,6 +602,25 @@ final class AnimationManager {
             return nil
         }
     }
+
+    /// Export a scene to a shareable file URL
+    func exportSceneToFile(_ scene: AnimationScene) -> URL? {
+        let sanitizedName = scene.name.replacingOccurrences(of: " ", with: "_")
+        let fileName = "\(sanitizedName).animscene"
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(scene)
+            try data.write(to: tempURL)
+            return tempURL
+        } catch {
+            print("❌ Failed to export scene file: \(error)")
+            return nil
+        }
+    }
     
     /// Import a scene from JSON string
     func importScene(from json: String) -> AnimationScene? {
@@ -614,6 +658,21 @@ final class AnimationManager {
             return scene
         } catch {
             print("❌ Failed to import scene: \(error)")
+            return nil
+        }
+    }
+
+    /// Import a scene from a previously exported .animscene file URL
+    func importScene(from url: URL) -> AnimationScene? {
+        do {
+            let data = try Data(contentsOf: url)
+            guard let json = String(data: data, encoding: .utf8) else {
+                print("❌ Failed to decode scene file text")
+                return nil
+            }
+            return importScene(from: json)
+        } catch {
+            print("❌ Failed to import scene file: \(error)")
             return nil
         }
     }

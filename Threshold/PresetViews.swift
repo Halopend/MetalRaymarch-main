@@ -362,6 +362,14 @@ struct PresetsListView: View {
                         }
                         Spacer()
                         Button {
+                            if let url = animationManager.exportSceneToFile(scene) {
+                                shareItem = ShareItem(url: url)
+                            }
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                        Button {
                             animationManager.currentScene = scene
                             animationManager.play()
                             dismiss()
