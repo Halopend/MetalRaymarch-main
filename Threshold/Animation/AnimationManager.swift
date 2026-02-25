@@ -13,6 +13,22 @@ import simd
 @Observable
 final class AnimationManager {
     private static let defaultSegmentDuration: TimeInterval = 2.0
+    @ObservationIgnored private let sceneDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+    @ObservationIgnored private let sceneEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+    @ObservationIgnored private let prettySceneEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }()
     
     // ═══════════════════════════════════════════════════════════════════════════
     // SCENE STORAGE
@@ -544,9 +560,7 @@ final class AnimationManager {
         if FileManager.default.fileExists(atPath: scenesFileURL.path) {
             do {
                 let data = try Data(contentsOf: scenesFileURL)
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                userScenes = try decoder.decode([AnimationScene].self, from: data)
+                userScenes = try sceneDecoder.decode([AnimationScene].self, from: data)
                 print("📂 Loaded \(userScenes.count) user scenes")
             } catch {
                 print("❌ Failed to load scenes: \(error)")
@@ -563,9 +577,7 @@ final class AnimationManager {
         // Load edited default overrides
         if let data = UserDefaults.standard.data(forKey: "editedDefaultOverrides") {
             do {
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                let overrides = try decoder.decode([AnimationScene].self, from: data)
+                let overrides = try sceneDecoder.decode([AnimationScene].self, from: data)
                 editedDefaultOverrides = Dictionary(uniqueKeysWithValues: overrides.map { ($0.id, $0) })
             } catch {
                 print("❌ Failed to load default overrides: \(error)")
@@ -577,10 +589,7 @@ final class AnimationManager {
     
     private func saveScenes() {
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(userScenes)
+            let data = try prettySceneEncoder.encode(userScenes)
             try data.write(to: scenesFileURL)
             print("💾 Saved \(userScenes.count) user scenes")
         } catch {
@@ -595,10 +604,8 @@ final class AnimationManager {
     
     private func saveOverrides() {
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
             let overrides = Array(editedDefaultOverrides.values)
-            let data = try encoder.encode(overrides)
+            let data = try sceneEncoder.encode(overrides)
             UserDefaults.standard.set(data, forKey: "editedDefaultOverrides")
         } catch {
             print("❌ Failed to save default overrides: \(error)")
@@ -608,10 +615,7 @@ final class AnimationManager {
     /// Export a scene to JSON string (for manual editing)
     func exportScene(_ scene: AnimationScene) -> String? {
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(scene)
+            let data = try prettySceneEncoder.encode(scene)
             return String(data: data, encoding: .utf8)
         } catch {
             print("❌ Failed to export scene: \(error)")
@@ -626,10 +630,7 @@ final class AnimationManager {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(scene)
+            let data = try prettySceneEncoder.encode(scene)
             try data.write(to: tempURL)
             return tempURL
         } catch {
@@ -643,9 +644,7 @@ final class AnimationManager {
         guard let data = json.data(using: .utf8) else { return nil }
         
         do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            var scene = try decoder.decode(AnimationScene.self, from: data)
+            var scene = try sceneDecoder.decode(AnimationScene.self, from: data)
             
             // Capture all keyframes before re-creating with new ID
             let originalKeyframes = scene.keyframes

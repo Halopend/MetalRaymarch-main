@@ -200,6 +200,83 @@ class UsageAnalytics: ObservableObject {
             await uploadPendingSnapshots()
         }
     }
+
+    private func distributionPercentages(_ source: [String: TimeInterval], duration: TimeInterval) -> [String: Float] {
+        let safeDuration = max(duration, 1.0)
+        var distribution: [String: Float] = [:]
+        distribution.reserveCapacity(source.count)
+        for (key, time) in source {
+            distribution[key] = Float(time / safeDuration)
+        }
+        return distribution
+    }
+
+    private func topFavoritePresets(limit: Int = 3) -> [String] {
+        presetLoadCounts
+            .sorted { $0.value > $1.value }
+            .prefix(limit)
+            .map { $0.key }
+    }
+
+    private func currentDeviceModel() -> String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        return withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(cString: $0)
+            }
+        }
+    }
+
+    private func jsonString<T: Encodable>(from value: T) -> String? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func buildSnapshot(dynamicQualityEnabled: Bool) -> UsageSnapshot {
+        let duration = totalSessionTime
+        let durationF = Float(max(duration, 1.0))
+
+        let qualityDist = distributionPercentages(qualityTimeAccum, duration: duration)
+        let schemeDist = distributionPercentages(colorSchemeTimeAccum, duration: duration)
+        let fractalTypeDist = distributionPercentages(fractalTypeTimeAccum, duration: duration)
+        let gradientPresetDist = distributionPercentages(gradientPresetTimeAccum, duration: duration)
+        let lightingPresetDist = distributionPercentages(lightingPresetTimeAccum, duration: duration)
+
+        return UsageSnapshot(
+            timestamp: Date(),
+            sessionDuration: duration,
+            qualityDistribution: qualityDist,
+            colorSchemeDistribution: schemeDist,
+            avgFractalScale: fractalScaleAccum / durationF,
+            avgFoldingLimit: foldingLimitAccum / durationF,
+            avgSphereRadius: sphereRadiusAccum / durationF,
+            avgMinDistance: minDistanceAccum / durationF,
+            avgColorMix: colorMixAccum / durationF,
+            avgGlowIntensity: glowIntensityAccum / durationF,
+            avgSafetyBubbleRadius: safetyBubbleRadiusAccum / durationF,
+            usedAudioReactive: usedAudioReactive,
+            usedHandGestures: usedHandGestures,
+            usedRecording: usedRecording,
+            usedSharePlay: usedSharePlay,
+            usedGradientColoring: usedGradientColoring,
+            usedAnimation: usedAnimation,
+            fractalTypeDistribution: fractalTypeDist,
+            gradientPresetDistribution: gradientPresetDist,
+            lightingPresetDistribution: lightingPresetDist,
+            avgBloomStrength: bloomStrengthAccum / durationF,
+            avgFogIntensity: fogIntensityAccum / durationF,
+            presetsLoaded: presetsLoaded,
+            presetsSaved: presetsSaved,
+            favoritePresetNames: topFavoritePresets(),
+            avgFPS: fpsAccum / durationF,
+            dynamicQualityEnabled: dynamicQualityEnabled,
+            avgRenderQuality: renderQualityAccum / durationF,
+            deviceModel: currentDeviceModel(),
+            osVersion: UIDevice.current.systemVersion,
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        )
+    }
     
     // MARK: - Sampling (call from render loop ~1Hz)
     
@@ -379,82 +456,7 @@ class UsageAnalytics: ObservableObject {
     // MARK: - Snapshot Creation
     
     private func createSnapshot(settings: RenderSettings) -> UsageSnapshot {
-        let duration = totalSessionTime
-        let durationF = Float(max(duration, 1.0))
-        
-        // Convert time accumulators to percentages
-        var qualityDist: [String: Float] = [:]
-        for (key, time) in qualityTimeAccum {
-            qualityDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var schemeDist: [String: Float] = [:]
-        for (key, time) in colorSchemeTimeAccum {
-            schemeDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var fractalTypeDist: [String: Float] = [:]
-        for (key, time) in fractalTypeTimeAccum {
-            fractalTypeDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var gradientPresetDist: [String: Float] = [:]
-        for (key, time) in gradientPresetTimeAccum {
-            gradientPresetDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var lightingPresetDist: [String: Float] = [:]
-        for (key, time) in lightingPresetTimeAccum {
-            lightingPresetDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        // Top 3 presets
-        let topPresets = presetLoadCounts.sorted { $0.value > $1.value }
-            .prefix(3)
-            .map { $0.key }
-        
-        // Device info
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        let deviceModel = withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(cString: $0)
-            }
-        }
-        
-        return UsageSnapshot(
-            timestamp: Date(),
-            sessionDuration: duration,
-            qualityDistribution: qualityDist,
-            colorSchemeDistribution: schemeDist,
-            avgFractalScale: fractalScaleAccum / durationF,
-            avgFoldingLimit: foldingLimitAccum / durationF,
-            avgSphereRadius: sphereRadiusAccum / durationF,
-            avgMinDistance: minDistanceAccum / durationF,
-            avgColorMix: colorMixAccum / durationF,
-            avgGlowIntensity: glowIntensityAccum / durationF,
-            avgSafetyBubbleRadius: safetyBubbleRadiusAccum / durationF,
-            usedAudioReactive: usedAudioReactive,
-            usedHandGestures: usedHandGestures,
-            usedRecording: usedRecording,
-            usedSharePlay: usedSharePlay,
-            usedGradientColoring: usedGradientColoring,
-            usedAnimation: usedAnimation,
-            fractalTypeDistribution: fractalTypeDist,
-            gradientPresetDistribution: gradientPresetDist,
-            lightingPresetDistribution: lightingPresetDist,
-            avgBloomStrength: bloomStrengthAccum / durationF,
-            avgFogIntensity: fogIntensityAccum / durationF,
-            presetsLoaded: presetsLoaded,
-            presetsSaved: presetsSaved,
-            favoritePresetNames: Array(topPresets),
-            avgFPS: fpsAccum / durationF,
-            dynamicQualityEnabled: settings.dynamicRenderQualityEnabled,
-            avgRenderQuality: renderQualityAccum / durationF,
-            deviceModel: deviceModel,
-            osVersion: UIDevice.current.systemVersion,
-            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        )
+        buildSnapshot(dynamicQualityEnabled: settings.dynamicRenderQualityEnabled)
     }
     
     // MARK: - CloudKit Upload
@@ -473,79 +475,7 @@ class UsageAnalytics: ObservableObject {
     
     /// Create snapshot with current accumulated data
     private func createMinimalSnapshot() -> UsageSnapshot {
-        let duration = totalSessionTime
-        let durationF = Float(max(duration, 1.0))
-        
-        var qualityDist: [String: Float] = [:]
-        for (key, time) in qualityTimeAccum {
-            qualityDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var schemeDist: [String: Float] = [:]
-        for (key, time) in colorSchemeTimeAccum {
-            schemeDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var fractalTypeDist: [String: Float] = [:]
-        for (key, time) in fractalTypeTimeAccum {
-            fractalTypeDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var gradientPresetDist: [String: Float] = [:]
-        for (key, time) in gradientPresetTimeAccum {
-            gradientPresetDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        var lightingPresetDist: [String: Float] = [:]
-        for (key, time) in lightingPresetTimeAccum {
-            lightingPresetDist[key] = Float(time / max(duration, 1.0))
-        }
-        
-        let topPresets = presetLoadCounts.sorted { $0.value > $1.value }
-            .prefix(3)
-            .map { $0.key }
-        
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        let deviceModel = withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(cString: $0)
-            }
-        }
-        
-        return UsageSnapshot(
-            timestamp: Date(),
-            sessionDuration: duration,
-            qualityDistribution: qualityDist,
-            colorSchemeDistribution: schemeDist,
-            avgFractalScale: fractalScaleAccum / durationF,
-            avgFoldingLimit: foldingLimitAccum / durationF,
-            avgSphereRadius: sphereRadiusAccum / durationF,
-            avgMinDistance: minDistanceAccum / durationF,
-            avgColorMix: colorMixAccum / durationF,
-            avgGlowIntensity: glowIntensityAccum / durationF,
-            avgSafetyBubbleRadius: safetyBubbleRadiusAccum / durationF,
-            usedAudioReactive: usedAudioReactive,
-            usedHandGestures: usedHandGestures,
-            usedRecording: usedRecording,
-            usedSharePlay: usedSharePlay,
-            usedGradientColoring: usedGradientColoring,
-            usedAnimation: usedAnimation,
-            fractalTypeDistribution: fractalTypeDist,
-            gradientPresetDistribution: gradientPresetDist,
-            lightingPresetDistribution: lightingPresetDist,
-            avgBloomStrength: bloomStrengthAccum / durationF,
-            avgFogIntensity: fogIntensityAccum / durationF,
-            presetsLoaded: presetsLoaded,
-            presetsSaved: presetsSaved,
-            favoritePresetNames: Array(topPresets),
-            avgFPS: fpsAccum / durationF,
-            dynamicQualityEnabled: true,
-            avgRenderQuality: renderQualityAccum / durationF,
-            deviceModel: deviceModel,
-            osVersion: UIDevice.current.systemVersion,
-            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        )
+        buildSnapshot(dynamicQualityEnabled: true)
     }
     
     private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
@@ -556,13 +486,11 @@ class UsageAnalytics: ObservableObject {
         record["sessionDuration"] = snapshot.sessionDuration as NSNumber
         
         // Encode distributions as JSON strings (CloudKit doesn't support nested dicts)
-        if let qualityData = try? JSONEncoder().encode(snapshot.qualityDistribution),
-           let qualityString = String(data: qualityData, encoding: .utf8) {
+        if let qualityString = jsonString(from: snapshot.qualityDistribution) {
             record["qualityDistribution"] = qualityString
         }
         
-        if let schemeData = try? JSONEncoder().encode(snapshot.colorSchemeDistribution),
-           let schemeString = String(data: schemeData, encoding: .utf8) {
+        if let schemeString = jsonString(from: snapshot.colorSchemeDistribution) {
             record["colorSchemeDistribution"] = schemeString
         }
         
@@ -586,16 +514,13 @@ class UsageAnalytics: ObservableObject {
         record["usedAnimation"] = snapshot.usedAnimation ? 1 : 0
         
         // Distributions (encoded as JSON strings)
-        if let fractalTypeData = try? JSONEncoder().encode(snapshot.fractalTypeDistribution),
-           let fractalTypeString = String(data: fractalTypeData, encoding: .utf8) {
+        if let fractalTypeString = jsonString(from: snapshot.fractalTypeDistribution) {
             record["fractalTypeDistribution"] = fractalTypeString
         }
-        if let gradientData = try? JSONEncoder().encode(snapshot.gradientPresetDistribution),
-           let gradientString = String(data: gradientData, encoding: .utf8) {
+        if let gradientString = jsonString(from: snapshot.gradientPresetDistribution) {
             record["gradientPresetDistribution"] = gradientString
         }
-        if let lightingData = try? JSONEncoder().encode(snapshot.lightingPresetDistribution),
-           let lightingString = String(data: lightingData, encoding: .utf8) {
+        if let lightingString = jsonString(from: snapshot.lightingPresetDistribution) {
             record["lightingPresetDistribution"] = lightingString
         }
         

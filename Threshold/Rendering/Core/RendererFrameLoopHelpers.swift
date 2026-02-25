@@ -30,28 +30,56 @@ extension Renderer {
         if #available(visionOS 2.0, *) {
             let leftAnchor = anchors.leftHand
             let rightAnchor = anchors.rightHand
+            if isHandTrackingDispatchInFlight {
+                pendingHandTrackingDelta += gestureUpdateDelta
+                return
+            }
+
+            isHandTrackingDispatchInFlight = true
+            let accumulatedDelta = gestureUpdateDelta + pendingHandTrackingDelta
+            pendingHandTrackingDelta = 0
 
             Task { @MainActor in
+                defer {
+                    Task {
+                        await self.finishHandTrackingDispatch()
+                    }
+                }
+
                 guard self.appModel.handTrackingEnabled else {
-                    self.appModel.leftHandTracked = false
-                    self.appModel.rightHandTracked = false
+                    if self.appModel.leftHandTracked {
+                        self.appModel.leftHandTracked = false
+                    }
+                    if self.appModel.rightHandTracked {
+                        self.appModel.rightHandTracked = false
+                    }
                     return
                 }
 
                 // Only update UI-facing tracking state at ~15Hz to reduce @Observable invalidation
                 // Checking gestureUpdateDelta here: if accumulated time > 66ms, update UI state
-                if gestureUpdateDelta > 0.066 {
-                    self.appModel.leftHandTracked = leftAnchor?.isTracked ?? false
-                    self.appModel.rightHandTracked = rightAnchor?.isTracked ?? false
+                if accumulatedDelta > 0.066 {
+                    let isLeftTracked = leftAnchor?.isTracked ?? false
+                    let isRightTracked = rightAnchor?.isTracked ?? false
+                    if self.appModel.leftHandTracked != isLeftTracked {
+                        self.appModel.leftHandTracked = isLeftTracked
+                    }
+                    if self.appModel.rightHandTracked != isRightTracked {
+                        self.appModel.rightHandTracked = isRightTracked
+                    }
                 }
 
                 // Gesture processing always runs for responsive controls
                 self.appModel.gestureController?.updateHands(
                     leftAnchor: leftAnchor,
                     rightAnchor: rightAnchor,
-                    deltaTime: gestureUpdateDelta
+                    deltaTime: accumulatedDelta
                 )
             }
         }
+    }
+
+    func finishHandTrackingDispatch() {
+        isHandTrackingDispatchInFlight = false
     }
 }

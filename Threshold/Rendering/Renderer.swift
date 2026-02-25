@@ -214,6 +214,8 @@ actor Renderer {
     var smoothedFPS: Double = 0
     private var lastFPSUpdateTime: TimeInterval = 0
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
+    var isHandTrackingDispatchInFlight: Bool = false
+    var pendingHandTrackingDelta: Float = 0
     var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
     var lastPerfLogTime: TimeInterval = 0
     let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS

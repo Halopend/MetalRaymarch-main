@@ -18,6 +18,21 @@ final class RenderSettings: @unchecked Sendable {
         return body()
     }
     
+    // ── UserDefaults init helpers ──────────────────────────────────────────
+    // Collapse the repetitive 4-line closure pattern into one-liners.
+    
+    /// Load a persisted Bool, returning `fallback` if the key has never been set.
+    private static func loadBool(_ key: String, default fallback: Bool) -> Bool {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+    
+    /// Load a persisted Float, returning `fallback` when the stored value is 0 (i.e. unset).
+    private static func loadFloat(_ key: String, default fallback: Float) -> Float {
+        let v = UserDefaults.standard.float(forKey: key)
+        return v > 0 ? v : fallback
+    }
+    
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
@@ -41,71 +56,21 @@ final class RenderSettings: @unchecked Sendable {
     private var _midSensitivity: Float = 1.0         // Multiplier for mid band (0-2)
     private var _trebleSensitivity: Float = 1.0      // Multiplier for treble band (0-2)
     private var _beatSensitivity: Float = 1.0        // Multiplier for beat intensity (0-2)
-    private var _fractalAudioReactiveEnabled: Bool = {
-        let key = "fractalAudioReactiveEnabled"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAmount: Float = {
-        let stored = UserDefaults.standard.float(forKey: "fractalAudioAmount")
-        return stored > 0 ? stored : 0.6
-    }()
-    private var _fractalBeatPunch: Float = {
-        let stored = UserDefaults.standard.float(forKey: "fractalBeatPunch")
-        return stored > 0 ? stored : 0.7
-    }()
-    private var _fractalAudioAffectsScale: Bool = {
-        let key = "fractalAudioAffectsScale"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsFolding: Bool = {
-        let key = "fractalAudioAffectsFolding"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsRadius: Bool = {
-        let key = "fractalAudioAffectsRadius"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsColorMix: Bool = {
-        let key = "fractalAudioAffectsColorMix"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
+    private var _fractalAudioReactiveEnabled: Bool = loadBool("fractalAudioReactiveEnabled", default: true)
+    private var _fractalAudioAmount: Float              = loadFloat("fractalAudioAmount", default: 0.6)
+    private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
+    private var _fractalAudioAffectsScale: Bool         = loadBool("fractalAudioAffectsScale", default: true)
+    private var _fractalAudioAffectsFolding: Bool       = loadBool("fractalAudioAffectsFolding", default: true)
+    private var _fractalAudioAffectsRadius: Bool        = loadBool("fractalAudioAffectsRadius", default: true)
+    private var _fractalAudioAffectsColorMix: Bool      = loadBool("fractalAudioAffectsColorMix", default: true)
     
     // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
-    private var _fractalAudioAffectsGlow: Bool = {
-        let key = "fractalAudioAffectsGlow"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsFog: Bool = {
-        let key = "fractalAudioAffectsFog"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsBloom: Bool = {
-        let key = "fractalAudioAffectsBloom"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsHueSpeed: Bool = {
-        let key = "fractalAudioAffectsHueSpeed"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsSaturation: Bool = {
-        let key = "fractalAudioAffectsSaturation"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
-    private var _fractalAudioAffectsIterations: Bool = {
-        let key = "fractalAudioAffectsIterations"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return false }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
+    private var _fractalAudioAffectsGlow: Bool          = loadBool("fractalAudioAffectsGlow", default: true)
+    private var _fractalAudioAffectsFog: Bool           = loadBool("fractalAudioAffectsFog", default: true)
+    private var _fractalAudioAffectsBloom: Bool         = loadBool("fractalAudioAffectsBloom", default: true)
+    private var _fractalAudioAffectsHueSpeed: Bool      = loadBool("fractalAudioAffectsHueSpeed", default: true)
+    private var _fractalAudioAffectsSaturation: Bool    = loadBool("fractalAudioAffectsSaturation", default: true)
+    private var _fractalAudioAffectsIterations: Bool    = loadBool("fractalAudioAffectsIterations", default: false)
     
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
@@ -126,73 +91,27 @@ final class RenderSettings: @unchecked Sendable {
     private var _gestureSpread: Float = 0            // Normalized hand spread (0-1) for debug visualization
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
-    private var _gestureSensitivity: Float = {
-        let stored = UserDefaults.standard.float(forKey: "gestureSensitivity")
-        return stored > 0 ? stored : 3.0  // Default 3.0 if never saved
-    }()
-    private var _menuToggleGestureEnabled: Bool = {
-        let key = "menuToggleGestureEnabled"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return true }
-        return UserDefaults.standard.bool(forKey: key)
-    }()
+    private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
+    private var _menuToggleGestureEnabled: Bool        = loadBool("menuToggleGestureEnabled", default: true)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
         guard UserDefaults.standard.object(forKey: key) != nil else { return .middleAndRingToPalm }
         let raw = UserDefaults.standard.integer(forKey: key)
         return MenuToggleGestureMode(rawValue: Int32(raw)) ?? .middleAndRingToPalm
     }()
-    private var _menuToggleHoldDuration: Float = {
-        let stored = UserDefaults.standard.float(forKey: "menuToggleHoldDuration")
-        return stored > 0 ? stored : 0.06
-    }()
-    private var _menuToggleCooldown: Float = {
-        let stored = UserDefaults.standard.float(forKey: "menuToggleCooldown")
-        return stored > 0 ? stored : 0.35
-    }()
-    private var _menuToggleActivateThreshold: Float = {
-        let stored = UserDefaults.standard.float(forKey: "menuToggleActivateThreshold")
-        return stored > 0 ? stored : 0.48
-    }()
-    private var _menuToggleReleaseThreshold: Float = {
-        let stored = UserDefaults.standard.float(forKey: "menuToggleReleaseThreshold")
-        return stored > 0 ? stored : 0.30
-    }()
-    private var _twoHandPinchActivateThreshold: Float = {
-        let stored = UserDefaults.standard.float(forKey: "twoHandPinchActivateThreshold")
-        return stored > 0 ? stored : 0.78
-    }()
-    private var _twoHandPinchReleaseThreshold: Float = {
-        let stored = UserDefaults.standard.float(forKey: "twoHandPinchReleaseThreshold")
-        return stored > 0 ? stored : 0.56
-    }()
-    private var _ringPinchActivateThreshold: Float = {
-        let stored = UserDefaults.standard.float(forKey: "ringPinchActivateThreshold")
-        return stored > 0 ? stored : 0.46
-    }()
-    private var _ringPinchReleaseThreshold: Float = {
-        let stored = UserDefaults.standard.float(forKey: "ringPinchReleaseThreshold")
-        return stored > 0 ? stored : 0.28
-    }()
-    private var _gestureMinHandDistance: Float = {
-        let stored = UserDefaults.standard.float(forKey: "gestureMinHandDistance")
-        return stored > 0 ? stored : 0.05
-    }()
-    private var _gestureMaxHandDistance: Float = {
-        let stored = UserDefaults.standard.float(forKey: "gestureMaxHandDistance")
-        return stored > 0 ? stored : 0.60
-    }()
-    private var _gestureMaxStartHandDistance: Float = {
-        let stored = UserDefaults.standard.float(forKey: "gestureMaxStartHandDistance")
-        return stored > 0 ? stored : 0.45
-    }()
-    private var _gestureMaxActiveHandDistance: Float = {
-        let stored = UserDefaults.standard.float(forKey: "gestureMaxActiveHandDistance")
-        return stored > 0 ? stored : 0.90
-    }()
-    private var _translationSensitivity: Float = {
-        let stored = UserDefaults.standard.float(forKey: "translationSensitivity")
-        return stored > 0 ? stored : 1.0
-    }()
+    private var _menuToggleHoldDuration: Float        = loadFloat("menuToggleHoldDuration", default: 0.06)
+    private var _menuToggleCooldown: Float              = loadFloat("menuToggleCooldown", default: 0.35)
+    private var _menuToggleActivateThreshold: Float     = loadFloat("menuToggleActivateThreshold", default: 0.48)
+    private var _menuToggleReleaseThreshold: Float      = loadFloat("menuToggleReleaseThreshold", default: 0.30)
+    private var _twoHandPinchActivateThreshold: Float   = loadFloat("twoHandPinchActivateThreshold", default: 0.78)
+    private var _twoHandPinchReleaseThreshold: Float    = loadFloat("twoHandPinchReleaseThreshold", default: 0.56)
+    private var _ringPinchActivateThreshold: Float      = loadFloat("ringPinchActivateThreshold", default: 0.46)
+    private var _ringPinchReleaseThreshold: Float       = loadFloat("ringPinchReleaseThreshold", default: 0.28)
+    private var _gestureMinHandDistance: Float          = loadFloat("gestureMinHandDistance", default: 0.05)
+    private var _gestureMaxHandDistance: Float          = loadFloat("gestureMaxHandDistance", default: 0.60)
+    private var _gestureMaxStartHandDistance: Float     = loadFloat("gestureMaxStartHandDistance", default: 0.45)
+    private var _gestureMaxActiveHandDistance: Float    = loadFloat("gestureMaxActiveHandDistance", default: 0.90)
+    private var _translationSensitivity: Float          = loadFloat("translationSensitivity", default: 1.0)
 
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
