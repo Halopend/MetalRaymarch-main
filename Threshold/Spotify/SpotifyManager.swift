@@ -303,6 +303,17 @@ class SpotifyManager {
         await playURI(uri)
     }
 
+    /// Fetch the tracks inside a Spotify playlist.
+    func getPlaylistTracks(playlistId: String) async -> [SpotifyTrack] {
+        guard isConnected, let api = apiClient else { return [] }
+        do {
+            let page = try await api.getPlaylistTracks(playlistId: playlistId, limit: 100)
+            return page.items.compactMap(\.track)
+        } catch {
+            return []
+        }
+    }
+
     /// Search for tracks by query string.
     func searchTracks(query: String, limit: Int = 5) async -> [SpotifyTrack] {
         guard isConnected else { return [] }

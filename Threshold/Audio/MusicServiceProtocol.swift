@@ -181,6 +181,10 @@ protocol MusicServiceProvider: AnyObject {
     /// Play an album.
     func playAlbum(_ album: UnifiedAlbum, shuffle: Bool) async
 
+    /// Fetch the tracks inside a playlist.
+    /// Returns an ordered list of tracks; empty if unavailable.
+    func fetchPlaylistTracks(_ playlist: UnifiedPlaylist) async -> [UnifiedTrack]
+
     // ── Cross-service search ──────────────────────────────────────────────
     /// Search for a track by title and artist on this service.
     /// Used by `captureAttachment()` to cross-match songs across providers.

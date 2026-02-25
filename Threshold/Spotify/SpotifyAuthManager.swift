@@ -19,7 +19,7 @@ class SpotifyAuthManager {
     
     /// Register your app at https://developer.spotify.com/dashboard
     /// Set the redirect URI to: Threshold://spotify-callback
-    #warning("Replace YOUR_SPOTIFY_CLIENT_ID with your Spotify Developer Dashboard client ID")
+    /// Then paste your client ID below.
     static let clientID = "YOUR_SPOTIFY_CLIENT_ID"
     static let redirectURI = "Threshold://spotify-callback"
     static let scopes = [
@@ -86,6 +86,12 @@ class SpotifyAuthManager {
     
     /// Start the OAuth PKCE login flow.
     func login() {
+        // Guard against placeholder client ID
+        guard Self.clientID != "YOUR_SPOTIFY_CLIENT_ID" else {
+            error = "Spotify client ID not configured. Set SpotifyAuthManager.clientID to your Spotify Developer Dashboard client ID."
+            return
+        }
+
         let verifier = generateCodeVerifier()
         self.codeVerifier = verifier
         let challenge = generateCodeChallenge(from: verifier)

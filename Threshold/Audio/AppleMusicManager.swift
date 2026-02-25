@@ -190,6 +190,20 @@ final class AppleMusicManager {
         updateFrame()
     }
 
+    /// Return the songs inside a playlist, without starting playback.
+    func playlistTracks(id: UInt64) -> [LibrarySong] {
+        if playlistLookup.isEmpty { refreshLibrary() }
+        guard let playlist = playlistLookup[id] else { return [] }
+        return playlist.items.map { item in
+            LibrarySong(
+                id: item.persistentID,
+                title: item.title ?? "Unknown Title",
+                artist: item.artist ?? "Unknown Artist",
+                album: item.albumTitle ?? ""
+            )
+        }
+    }
+
     func playPlaylist(id: UInt64, shuffle: Bool = false) {
         guard isAuthorized else {
             requestAuthorization()

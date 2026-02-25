@@ -79,6 +79,14 @@ struct MetalProjectTestApp: App {
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 
+        // Music Library pop-out window
+        Window("Music Library", id: AppModel.libraryWindowID) {
+            MusicLibraryWindow()
+                .environment(appModel)
+        }
+        .defaultSize(width: 500, height: 700)
+        .windowResizability(.contentMinSize)
+
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
                 Renderer.startRenderLoop(layerRenderer, appModel: appModel)

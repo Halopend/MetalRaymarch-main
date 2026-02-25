@@ -141,6 +141,21 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         manager.playAlbum(id: albID, shuffle: shuffle)
     }
 
+    func fetchPlaylistTracks(_ playlist: UnifiedPlaylist) async -> [UnifiedTrack] {
+        guard let plID = UInt64(playlist.id) else { return [] }
+        return manager.playlistTracks(id: plID).map { song in
+            UnifiedTrack(
+                id: String(song.id),
+                serviceID: serviceID,
+                title: song.title,
+                artist: song.artist,
+                album: song.album,
+                artworkURL: nil,
+                durationSeconds: 0
+            )
+        }
+    }
+
     func playSongByNativeID(_ nativeID: String) async -> Bool {
         guard let songID = UInt64(nativeID) else { return false }
         manager.playSong(id: songID)

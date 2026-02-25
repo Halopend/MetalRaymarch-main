@@ -26,6 +26,10 @@ final class SpotifyServiceAdapter: MusicServiceProvider {
 
     // ── Connection ───────────────────────────────────────────────────────
     var connectionStatus: MusicServiceConnectionStatus {
+        // Surface auth-level errors (e.g. missing client ID)
+        if let authErr = manager.authManager.error {
+            return .error(authErr)
+        }
         if let err = manager.error {
             return .error(err)
         }
@@ -127,6 +131,28 @@ final class SpotifyServiceAdapter: MusicServiceProvider {
 
     func playAlbum(_ album: UnifiedAlbum, shuffle: Bool) async {
         await manager.playContext(album.id, shuffle: shuffle)
+    }
+
+    func fetchPlaylistTracks(_ playlist: UnifiedPlaylist) async -> [UnifiedTrack] {
+        // Extract playlist ID from URI (spotify:playlist:ID → ID)
+        let playlistId: String
+        if playlist.id.hasPrefix("spotify:playlist:") {
+            playlistId = String(playlist.id.dropFirst("spotify:playlist:".count))
+        } else {
+            playlistId = playlist.id
+        }
+        let tracks = await manager.getPlaylistTracks(playlistId: playlistId)
+        return tracks.map { t in
+            UnifiedTrack(
+                id: t.uri,
+                serviceID: serviceID,
+                title: t.name,
+                artist: t.artistNames,
+                album: t.album.name,
+                artworkURL: t.album.thumbnailURL,
+                durationSeconds: Double(t.durationMs) / 1000.0
+            )
+        }
     }
 
     func playSongByNativeID(_ nativeID: String) async -> Bool {

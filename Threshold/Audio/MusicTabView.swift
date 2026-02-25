@@ -14,6 +14,7 @@ import SwiftUI
 
 struct MusicTabContent: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.openWindow) private var openWindow
     @Bindable var cache: UISettingsCache
 
     // Library browsing state
@@ -37,9 +38,9 @@ struct MusicTabContent: View {
                 // 2. Unified Now Playing
                 nowPlayingCard
 
-                // 3. Unified library browser (expandable, works for active service)
-                if let active = appModel.musicService.activeProvider, active.isConnected {
-                    librarySection
+                // 3. Open Library button (pops into its own window)
+                if appModel.musicService.activeProvider?.isConnected == true {
+                    openLibraryButton
                 }
 
                 // 4. Audio Reactivity (the main event)
@@ -102,6 +103,28 @@ struct MusicTabContent: View {
                 .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
             }
         }
+    }
+
+    // MARK: - Open Library Button
+
+    private var openLibraryButton: some View {
+        Button {
+            openWindow(id: AppModel.libraryWindowID)
+        } label: {
+            HStack {
+                Image(systemName: "music.note.list")
+                    .font(.subheadline)
+                Text("Open Library")
+                    .font(.subheadline.bold())
+                Spacer()
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Unified Now Playing

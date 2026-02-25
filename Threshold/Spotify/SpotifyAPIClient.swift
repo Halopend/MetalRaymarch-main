@@ -151,6 +151,12 @@ actor SpotifyAPIClient {
 
     // MARK: - Search
 
+    /// Get the tracks inside a playlist by playlist ID.
+    func getPlaylistTracks(playlistId: String, limit: Int = 100, offset: Int = 0) async throws -> SpotifyPagingObject<SpotifyPlaylistTrackItem> {
+        let data = try await request("GET", path: "/playlists/\(playlistId)/tracks?limit=\(limit)&offset=\(offset)")
+        return try decode(SpotifyPagingObject<SpotifyPlaylistTrackItem>.self, from: data)
+    }
+
     /// Search for tracks matching the given query string.
     /// Returns up to `limit` results.
     func searchTracks(query: String, limit: Int = 5) async throws -> [SpotifyTrack] {

@@ -332,6 +332,20 @@ struct SpotifySearchResult: Codable {
     let tracks: SpotifyPagingObject<SpotifyTrack>
 }
 
+// MARK: - Playlist Tracks
+
+/// An item inside a Spotify playlist.
+/// The `track` field can be nil for local/unavailable files.
+struct SpotifyPlaylistTrackItem: Codable {
+    let addedAt: String?
+    let track: SpotifyTrack?
+
+    enum CodingKeys: String, CodingKey {
+        case addedAt = "added_at"
+        case track
+    }
+}
+
 // MARK: - Error Types
 
 enum SpotifyError: LocalizedError, @unchecked Sendable {
