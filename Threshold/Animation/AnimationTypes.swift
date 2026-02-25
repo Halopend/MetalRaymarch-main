@@ -327,6 +327,156 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
 
 // MARK: - Animation Scene
 
+// MARK: - Song Attachment
+
+/// A song linked to a scene so it auto-plays when the animation starts.
+enum SongSource: String, Codable, Equatable {
+    case appleMusic
+    case spotify
+
+    /// Map from a MusicServiceProvider.serviceID.
+    init?(serviceID: String) {
+        switch serviceID {
+        case "appleMusic": self = .appleMusic
+        case "spotify":    self = .spotify
+        default:           return nil
+        }
+    }
+
+    /// The corresponding MusicServiceProvider.serviceID.
+    var serviceID: String { rawValue }
+}
+
+/// Persistable song reference attached to an animation scene.
+///
+/// Stores `trackIDs` — an **ordered** list of `UnifiedTrackID`s, one per
+/// service where the song was found. The first element is the original
+/// capture service; the rest are cross-matched alternatives. On playback
+/// the system walks this list (reordered by the user's service priority)
+/// until one succeeds.
+///
+/// Legacy fields `appleMusicID` and `spotifyURI` are kept for
+/// backward-compatible decoding of scenes saved before the unification layer.
+struct SongAttachment: Codable, Equatable {
+    var source: SongSource
+    var title: String
+    var artist: String
+
+    // ── Multi-service IDs (canonical) ─────────────────────────────────────
+    /// Ordered list of service-specific identifiers for this song.
+    /// The first entry is the original capture source. Additional entries
+    /// are cross-matched alternatives for fallback playback.
+    var trackIDs: [UnifiedTrackID]
+
+    /// Convenience: the primary (first) track ID.
+    var trackID: UnifiedTrackID { trackIDs[0] }
+
+    /// All service IDs that have an identifier for this song.
+    var availableServiceIDs: [String] { trackIDs.map(\.serviceID) }
+
+    // ── Legacy fields (backward compat) ──────────────────────────────────
+    var appleMusicID: String?
+    var spotifyURI: String?
+
+    // ── Primary initializer (multi-service) ──────────────────────────────
+    init(trackIDs: [UnifiedTrackID], title: String, artist: String) {
+        precondition(!trackIDs.isEmpty, "SongAttachment requires at least one trackID")
+        self.trackIDs = trackIDs
+        self.source = SongSource(serviceID: trackIDs[0].serviceID) ?? .appleMusic
+        self.title = title
+        self.artist = artist
+        // Populate legacy fields for round-trip safety
+        for tid in trackIDs {
+            switch tid.serviceID {
+            case "appleMusic": self.appleMusicID = tid.nativeID
+            case "spotify":    self.spotifyURI   = tid.nativeID
+            default: break
+            }
+        }
+    }
+
+    /// Convenience: single-ID initializer (delegates to multi-ID).
+    init(trackID: UnifiedTrackID, title: String, artist: String) {
+        self.init(trackIDs: [trackID], title: title, artist: artist)
+    }
+
+    // ── Legacy initializer (kept for existing callers) ────────────────
+    init(source: SongSource, title: String, artist: String,
+         appleMusicID: String?, spotifyURI: String?) {
+        self.source = source
+        self.title = title
+        self.artist = artist
+        self.appleMusicID = appleMusicID
+        self.spotifyURI = spotifyURI
+        // Build trackIDs from legacy fields
+        var ids: [UnifiedTrackID] = []
+        switch source {
+        case .appleMusic:
+            ids.append(UnifiedTrackID(serviceID: "appleMusic",
+                                      nativeID: appleMusicID ?? ""))
+            if let uri = spotifyURI, !uri.isEmpty {
+                ids.append(UnifiedTrackID(serviceID: "spotify", nativeID: uri))
+            }
+        case .spotify:
+            ids.append(UnifiedTrackID(serviceID: "spotify",
+                                      nativeID: spotifyURI ?? ""))
+            if let amid = appleMusicID, !amid.isEmpty {
+                ids.append(UnifiedTrackID(serviceID: "appleMusic", nativeID: amid))
+            }
+        }
+        self.trackIDs = ids
+    }
+
+    // ── Custom Codable for backward compatibility ──────────────────────
+    enum CodingKeys: String, CodingKey {
+        case source, title, artist, trackID, trackIDs
+        case appleMusicID, spotifyURI
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        source = try c.decode(SongSource.self, forKey: .source)
+        title  = try c.decode(String.self, forKey: .title)
+        artist = try c.decode(String.self, forKey: .artist)
+        appleMusicID = try c.decodeIfPresent(String.self, forKey: .appleMusicID)
+        spotifyURI   = try c.decodeIfPresent(String.self, forKey: .spotifyURI)
+
+        // 1) Prefer trackIDs array if present (new format)
+        if let ids = try? c.decode([UnifiedTrackID].self, forKey: .trackIDs), !ids.isEmpty {
+            trackIDs = ids
+        }
+        // 2) Fall back to single trackID (previous format)
+        else if let tid = try? c.decode(UnifiedTrackID.self, forKey: .trackID) {
+            trackIDs = [tid]
+        }
+        // 3) Synthesize from legacy fields (oldest format)
+        else {
+            var ids: [UnifiedTrackID] = []
+            switch source {
+            case .appleMusic:
+                ids.append(UnifiedTrackID(serviceID: "appleMusic",
+                                          nativeID: appleMusicID ?? ""))
+            case .spotify:
+                ids.append(UnifiedTrackID(serviceID: "spotify",
+                                          nativeID: spotifyURI ?? ""))
+            }
+            trackIDs = ids
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(source, forKey: .source)
+        try c.encode(title, forKey: .title)
+        try c.encode(artist, forKey: .artist)
+        try c.encode(trackIDs, forKey: .trackIDs)
+        // Also write single trackID for forward compat with older builds
+        try c.encode(trackID, forKey: .trackID)
+        try c.encodeIfPresent(appleMusicID, forKey: .appleMusicID)
+        try c.encodeIfPresent(spotifyURI, forKey: .spotifyURI)
+    }
+}
+
 /// A scene is a sequence of keyframes that play in order.
 /// Think of it like a CSS @keyframes animation.
 struct AnimationScene: Codable, Identifiable, Equatable {
@@ -336,6 +486,9 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     var isLooping: Bool
     var createdAt: Date
     var modifiedAt: Date
+    
+    /// Optional song that auto-plays when this scene starts
+    var attachedSong: SongAttachment?
     
     /// Total duration of the scene (sum of all keyframe durations)
     var totalDuration: TimeInterval {

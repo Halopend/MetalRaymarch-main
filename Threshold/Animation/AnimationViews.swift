@@ -250,6 +250,10 @@ struct SceneRowView: View {
                     if scene.isLooping {
                         Image(systemName: "repeat")
                     }
+                    if scene.attachedSong != nil {
+                        Image(systemName: "music.note")
+                            .foregroundStyle(.pink)
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -426,9 +430,70 @@ struct SceneEditorView: View {
                 Text(formatDuration(scene.totalDuration))
                     .foregroundStyle(.secondary)
             }
+            
+            Divider()
+            
+            // Attached song
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Attached Song")
+                    .font(.subheadline.bold())
+                
+                if let song = scene.attachedSong {
+                    HStack(spacing: 8) {
+                        // Show icons for ALL available services
+                        HStack(spacing: 3) {
+                            ForEach(song.trackIDs, id: \.self) { tid in
+                                Image(systemName: iconName(for: tid.serviceID))
+                                    .font(.caption2)
+                                    .foregroundStyle(iconColor(for: tid.serviceID))
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(song.title).font(.caption).lineLimit(1)
+                            Text(song.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            if song.trackIDs.count > 1 {
+                                Text("\(song.trackIDs.count) services")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        Spacer()
+                        Button {
+                            scene.attachedSong = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
+                } else {
+                    Text("Auto-plays when the scene starts.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                
+                Button {
+                    Task {
+                        if let attachment = await appModel.musicService.captureAttachmentWithFallbacks() {
+                            scene.attachedSong = attachment
+                        }
+                    }
+                } label: {
+                    Label(
+                        scene.attachedSong == nil ? "Attach Now Playing" : "Replace with Now Playing",
+                        systemImage: "link.badge.plus"
+                    )
+                    .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(appModel.musicService.nowPlaying == nil)
+            }
         }
         .padding(16)
-        .frame(width: 260)
+        .frame(width: 280)
     }
     
     // Standalone: NavigationStack with toolbar – for sheet presentation
@@ -577,6 +642,16 @@ struct SceneEditorView: View {
             let seconds = Int(duration) % 60
             return "\(minutes)m \(seconds)s"
         }
+    }
+
+    // ── Service icon / color helpers ──────────────────────────────────────
+
+    private func iconName(for serviceID: String) -> String {
+        appModel.musicService?.provider(for: serviceID)?.iconName ?? "music.note"
+    }
+
+    private func iconColor(for serviceID: String) -> Color {
+        appModel.musicService?.provider(for: serviceID)?.accentColor ?? .secondary
     }
 }
 

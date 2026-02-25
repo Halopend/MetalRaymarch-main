@@ -92,6 +92,12 @@ actor SpotifyAPIClient {
         _ = try await request("PUT", path: "/me/player/play")
     }
     
+    /// Start playback of a specific track URI (e.g. "spotify:track:...").
+    func playURI(_ uri: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["uris": [uri]])
+        _ = try await request("PUT", path: "/me/player/play", body: body)
+    }
+    
     /// Pause playback.
     func pause() async throws {
         _ = try await request("PUT", path: "/me/player/pause")
@@ -110,6 +116,50 @@ actor SpotifyAPIClient {
     /// Seek to position in current track.
     func seek(positionMs: Int) async throws {
         _ = try await request("PUT", path: "/me/player/seek?position_ms=\(positionMs)")
+    }
+
+    // MARK: - User Library
+
+    /// Get the user's playlists (paginated, up to `limit` items starting at `offset`).
+    func getUserPlaylists(limit: Int = 50, offset: Int = 0) async throws -> SpotifyPagingObject<SpotifySimplifiedPlaylist> {
+        let data = try await request("GET", path: "/me/playlists?limit=\(limit)&offset=\(offset)")
+        return try decode(SpotifyPagingObject<SpotifySimplifiedPlaylist>.self, from: data)
+    }
+
+    /// Get the user's saved tracks (paginated).
+    func getSavedTracks(limit: Int = 50, offset: Int = 0) async throws -> SpotifyPagingObject<SpotifySavedTrack> {
+        let data = try await request("GET", path: "/me/tracks?limit=\(limit)&offset=\(offset)")
+        return try decode(SpotifyPagingObject<SpotifySavedTrack>.self, from: data)
+    }
+
+    /// Get the user's saved albums (paginated).
+    func getSavedAlbums(limit: Int = 50, offset: Int = 0) async throws -> SpotifyPagingObject<SpotifySavedAlbum> {
+        let data = try await request("GET", path: "/me/albums?limit=\(limit)&offset=\(offset)")
+        return try decode(SpotifyPagingObject<SpotifySavedAlbum>.self, from: data)
+    }
+
+    /// Play a Spotify context (playlist or album URI) optionally with shuffle.
+    func playContext(_ contextURI: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["context_uri": contextURI])
+        _ = try await request("PUT", path: "/me/player/play", body: body)
+    }
+
+    /// Set shuffle mode on the active device.
+    func setShuffle(_ state: Bool) async throws {
+        _ = try await request("PUT", path: "/me/player/shuffle?state=\(state)")
+    }
+
+    // MARK: - Search
+
+    /// Search for tracks matching the given query string.
+    /// Returns up to `limit` results.
+    func searchTracks(query: String, limit: Int = 5) async throws -> [SpotifyTrack] {
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return []
+        }
+        let data = try await request("GET", path: "/search?q=\(encoded)&type=track&limit=\(limit)")
+        let result = try decode(SpotifySearchResult.self, from: data)
+        return result.tracks.items
     }
     
     /// Clear caches (e.g., on logout).

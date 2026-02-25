@@ -134,6 +134,10 @@ final class AnimationManager {
     /// Set this from AppModel to enable precompilation for animation keyframes
     var preparePipelineHandler: ((Int, Int) -> Void)?
     
+    /// Callback to start playing the scene's attached song.
+    /// Set from AppModel — receives the SongAttachment to play.
+    var playSongHandler: ((SongAttachment) -> Void)?
+    
     // ═══════════════════════════════════════════════════════════════════════════
     // FILE STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -319,6 +323,12 @@ final class AnimationManager {
         
         playhead.state = .playing
         UsageAnalytics.shared.trackAnimationUsed()
+        
+        // Auto-play attached song when scene starts
+        if let song = currentScene?.attachedSong {
+            playSongHandler?(song)
+        }
+        
         print("▶️ Playing scene '\(currentScene?.name ?? "?")'")  
     }
     

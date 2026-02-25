@@ -25,7 +25,10 @@ class SpotifyAuthManager {
     static let scopes = [
         "user-read-playback-state",
         "user-modify-playback-state",
-        "user-read-currently-playing"
+        "user-read-currently-playing",
+        "user-library-read",
+        "playlist-read-private",
+        "playlist-read-collaborative"
     ].joined(separator: " ")
     
     private static let authURL = "https://accounts.spotify.com/authorize"

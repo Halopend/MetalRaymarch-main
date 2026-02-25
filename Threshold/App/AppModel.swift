@@ -43,6 +43,9 @@ class AppModel {
     // Apple Music integration for music visualizer
     let appleMusicManager = AppleMusicManager()
     
+    // Unified music service (wraps Apple Music + Spotify)
+    private(set) var musicService: MusicService!
+    
     // Hand tracking state
     var handTrackingEnabled: Bool = {
         let key = "handTrackingEnabled"
@@ -119,12 +122,20 @@ class AppModel {
         // Initialize parameter recorder
         parameterRecorder = ParameterRecorder(renderSettings: renderSettings)
         
+        // Initialize unified music service
+        musicService = MusicService(appleMusic: appleMusicManager, spotify: spotifyManager)
+        
         // Initialize animation manager
         animationManager = AnimationManager(renderSettings: renderSettings)
         
         // Wire up animation manager's pipeline preparation callback
         animationManager?.preparePipelineHandler = { [weak self] iterations, raySteps in
             self?.preparePipeline(iterations: iterations, raySteps: raySteps)
+        }
+        
+        // Wire up song playback for scene-attached songs via unified music service
+        animationManager?.playSongHandler = { [weak self] song in
+            self?.musicService.play(attachment: song)
         }
         
         // Initialize SharePlay session

@@ -3,8 +3,9 @@
 //  Threshold
 //
 //  Unified music sidebar tab.
-//  Shows a single "Now Playing" card (auto-selects Apple Music or Spotify),
-//  playback controls, and fractal audio-reactivity settings.
+//  Shows a single "Now Playing" card, service toggle, unified library
+//  browser (works for any registered MusicServiceProvider), playback
+//  controls, and fractal audio-reactivity settings.
 //
 
 import SwiftUI
@@ -15,7 +16,7 @@ struct MusicTabContent: View {
     @Environment(AppModel.self) private var appModel
     @Bindable var cache: UISettingsCache
 
-    // Apple Music library browsing state
+    // Library browsing state
     @State private var showLibrary = false
     @State private var libraryScope: LibraryScope = .songs
     @State private var librarySearch = ""
@@ -30,14 +31,14 @@ struct MusicTabContent: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 14) {
-                // 1. Unified Now Playing
+                // 1. Service toggle / picker
+                serviceToggle
+
+                // 2. Unified Now Playing
                 nowPlayingCard
 
-                // 2. Service connections (compact)
-                connectionsSection
-
-                // 3. Apple Music library browser (expandable)
-                if appModel.appleMusicManager.isAuthorized {
+                // 3. Unified library browser (expandable, works for active service)
+                if let active = appModel.musicService.activeProvider, active.isConnected {
                     librarySection
                 }
 
@@ -46,181 +47,110 @@ struct MusicTabContent: View {
 
                 // 5. Level meters
                 levelMeters
+
+                // 6. Service connections (settings)
+                connectionsSection
+
+                // 7. Fallback priority ordering
+                if appModel.musicService.connectedProviders.count > 1 {
+                    servicePrioritySection
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
         }
     }
 
+    // MARK: - Service Toggle
+
+    private var serviceToggle: some View {
+        let music = appModel.musicService!
+        let connected = music.connectedProviders
+        return Group {
+            if connected.count > 1 {
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Active Service")
+                            .font(.subheadline.bold())
+                        Spacer()
+                    }
+                    Picker("Service", selection: Binding(
+                        get: { music.preferredServiceID ?? music.activeProvider?.serviceID ?? "" },
+                        set: { newID in music.setPreferredService(newID) }
+                    )) {
+                        ForEach(connected, id: \.serviceID) { provider in
+                            Label(provider.displayName, systemImage: provider.iconName)
+                                .tag(provider.serviceID)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+            } else if connected.count == 1, let single = connected.first {
+                HStack {
+                    Image(systemName: single.iconName)
+                        .foregroundStyle(single.accentColor)
+                    Text(single.displayName)
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Text("Active")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+            }
+        }
+    }
+
     // MARK: - Unified Now Playing
 
-    /// Prefer Apple Music if it's playing; otherwise show Spotify.
-    private var activeSource: ActiveMusicSource {
-        if appModel.appleMusicManager.isPlaying || (!appModel.spotifyManager.isPlaying && !appModel.appleMusicManager.nowPlayingTitle.isEmpty) {
-            if appModel.appleMusicManager.isAuthorized && !appModel.appleMusicManager.nowPlayingTitle.isEmpty {
-                return .appleMusic
-            }
-        }
-        if appModel.spotifyManager.isConnected, appModel.spotifyManager.currentTrack != nil {
-            return .spotify
-        }
-        if appModel.appleMusicManager.isAuthorized, !appModel.appleMusicManager.nowPlayingTitle.isEmpty {
-            return .appleMusic
-        }
-        return .none
-    }
-
-    private enum ActiveMusicSource { case appleMusic, spotify, none }
-
     private var nowPlayingCard: some View {
-        VStack(spacing: 10) {
-            switch activeSource {
-            case .appleMusic:
-                appleMusicNowPlaying
-            case .spotify:
-                spotifyNowPlaying
-            case .none:
-                emptyNowPlaying
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-
-    private var emptyNowPlaying: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "music.note")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("Nothing Playing")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            Text("Connect to Apple Music or Spotify below")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-    }
-
-    // MARK: Apple Music Now Playing
-
-    private var appleMusicNowPlaying: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                // Album art placeholder
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.quaternary)
-                    .overlay(
-                        Image(systemName: "apple.logo")
-                            .foregroundStyle(.pink.opacity(0.6))
-                    )
-                    .frame(width: 56, height: 56)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(appModel.appleMusicManager.nowPlayingTitle)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(appModel.appleMusicManager.nowPlayingArtist)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-
-                Image(systemName: "apple.logo")
-                    .font(.caption)
-                    .foregroundStyle(.pink)
-            }
-
-            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-                VStack(spacing: 4) {
-                    ProgressView(value: Double(appModel.appleMusicManager.progressFraction))
-                        .tint(.pink)
-                    HStack {
-                        Text(appModel.appleMusicManager.currentTimeString)
-                            .font(.caption2).monospacedDigit()
-                        Spacer()
-                        Text(appModel.appleMusicManager.totalTimeString)
-                            .font(.caption2).monospacedDigit()
-                    }
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            // Transport
-            HStack(spacing: 24) {
-                Spacer()
-                Button { appModel.appleMusicManager.previousTrack() } label: {
-                    Image(systemName: "backward.fill").font(.title3)
-                }
-                .buttonStyle(.plain)
-
-                Button { appModel.appleMusicManager.togglePlayPause() } label: {
-                    Image(systemName: appModel.appleMusicManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 40))
-                }
-                .buttonStyle(.plain)
-                .tint(.pink)
-
-                Button { appModel.appleMusicManager.nextTrack() } label: {
-                    Image(systemName: "forward.fill").font(.title3)
-                }
-                .buttonStyle(.plain)
-                Spacer()
-            }
-        }
-    }
-
-    // MARK: Spotify Now Playing
-
-    private var spotifyNowPlaying: some View {
-        VStack(spacing: 10) {
-            if let track = appModel.spotifyManager.currentTrack {
+        let music = appModel.musicService!
+        return VStack(spacing: 10) {
+            if let track = music.nowPlaying {
+                // Track info
                 HStack(spacing: 12) {
                     // Album art
-                    if let artURL = track.album.thumbnailURL {
+                    if let artURL = track.artworkURL {
                         AsyncImage(url: artURL) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                                .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
+                            artPlaceholder(for: track.source)
                         }
                         .frame(width: 56, height: 56)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.quaternary)
-                            .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
-                            .frame(width: 56, height: 56)
+                        artPlaceholder(for: track.source)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(track.name)
+                        Text(track.title)
                             .font(.headline)
                             .lineLimit(1)
-                        Text(track.artistNames)
+                        Text(track.artist)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                     Spacer()
 
-                    Image(systemName: "music.note.tv")
+                    Image(systemName: music.sourceIcon)
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(music.accentColor)
                 }
 
+                // Progress bar
                 TimelineView(.periodic(from: .now, by: 0.5)) { _ in
                     VStack(spacing: 4) {
-                        ProgressView(value: Double(appModel.spotifyManager.progressFraction))
-                            .tint(.green)
+                        ProgressView(value: Double(music.progressFraction))
+                            .tint(music.accentColor)
                         HStack {
-                            Text(appModel.spotifyManager.currentTimeString)
+                            Text(music.currentTimeString)
                                 .font(.caption2).monospacedDigit()
                             Spacer()
-                            Text(appModel.spotifyManager.totalTimeString)
+                            Text(music.totalTimeString)
                                 .font(.caption2).monospacedDigit()
                         }
                         .foregroundStyle(.secondary)
@@ -230,85 +160,72 @@ struct MusicTabContent: View {
                 // Transport
                 HStack(spacing: 24) {
                     Spacer()
-                    Button { Task { await appModel.spotifyManager.previous() } } label: {
+                    Button { music.previous() } label: {
                         Image(systemName: "backward.fill").font(.title3)
                     }
                     .buttonStyle(.plain)
 
-                    Button { Task { await appModel.spotifyManager.togglePlayPause() } } label: {
-                        Image(systemName: appModel.spotifyManager.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    Button { music.togglePlayPause() } label: {
+                        Image(systemName: music.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 40))
                     }
                     .buttonStyle(.plain)
-                    .tint(.green)
+                    .tint(music.accentColor)
 
-                    Button { Task { await appModel.spotifyManager.next() } } label: {
+                    Button { music.next() } label: {
                         Image(systemName: "forward.fill").font(.title3)
                     }
                     .buttonStyle(.plain)
                     Spacer()
                 }
+            } else {
+                // Empty state
+                VStack(spacing: 8) {
+                    Image(systemName: "music.note")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Nothing Playing")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text("Connect a music service below")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
             }
         }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
+
+    private func artPlaceholder(for source: SongSource) -> some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(.quaternary)
+            .overlay(
+                Image(systemName: source == .appleMusic ? "apple.logo" : "music.note")
+                    .foregroundStyle(source == .appleMusic ? .pink.opacity(0.6) : .secondary)
+            )
+            .frame(width: 56, height: 56)
     }
 
     // MARK: - Service Connections
 
     private var connectionsSection: some View {
-        VStack(spacing: 6) {
-            // Apple Music row
+        let music = appModel.musicService!
+        return VStack(spacing: 6) {
             HStack {
-                Image(systemName: "apple.logo")
-                    .font(.caption)
-                    .foregroundStyle(appModel.appleMusicManager.isAuthorized ? .green : .secondary)
-                Text("Apple Music")
-                    .font(.subheadline)
+                Text("Services")
+                    .font(.subheadline.bold())
                 Spacer()
-                if appModel.appleMusicManager.isAuthorized {
-                    Text("Connected")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                } else {
-                    Button("Authorize") {
-                        appModel.appleMusicManager.requestAuthorization()
-                        appModel.appleMusicManager.updateFrame()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
             }
 
-            Divider()
-
-            // Spotify row
-            HStack {
-                Image(systemName: "music.note.tv")
-                    .font(.caption)
-                    .foregroundStyle(appModel.spotifyManager.isConnected ? .green : .secondary)
-                Text("Spotify")
-                    .font(.subheadline)
-                Spacer()
-                if appModel.spotifyManager.isConnected {
-                    Button("Disconnect") {
-                        appModel.spotifyManager.disconnect()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.red)
-                } else {
-                    Button("Connect") {
-                        appModel.spotifyManager.connect()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.green)
+            // Dynamic rows for every registered provider
+            ForEach(music.providers, id: \.serviceID) { provider in
+                serviceRow(provider)
+                if provider.serviceID != music.providers.last?.serviceID {
+                    Divider()
                 }
-            }
-
-            if let error = appModel.spotifyManager.error {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
             }
 
             Divider()
@@ -336,17 +253,125 @@ struct MusicTabContent: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
     }
 
-    // MARK: - Apple Music Library Browser
+    /// A single service connection row — works for any provider.
+    private func serviceRow(_ provider: MusicServiceProvider) -> some View {
+        HStack {
+            Image(systemName: provider.iconName)
+                .font(.caption)
+                .foregroundStyle(provider.isConnected ? provider.accentColor : .secondary)
+            Text(provider.displayName)
+                .font(.subheadline)
+            Spacer()
+            switch provider.connectionStatus {
+            case .connected:
+                if provider.serviceID == "appleMusic" {
+                    Text("Connected")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                } else {
+                    Button("Disconnect") {
+                        provider.disconnect()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.red)
+                }
+            case .error(let msg):
+                Text(msg)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+            case .connecting:
+                ProgressView()
+                    .controlSize(.small)
+            case .disconnected:
+                Button("Connect") {
+                    provider.connect()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(provider.accentColor)
+            }
+        }
+    }
+
+    // MARK: - Service Priority
+
+    private var servicePrioritySection: some View {
+        let music = appModel.musicService!
+        let order = music.servicePriority
+
+        return VStack(spacing: 6) {
+            HStack {
+                Text("Fallback Priority")
+                    .font(.subheadline.bold())
+                Spacer()
+                Text("Drag to reorder")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Text("When a song is attached, playback tries services in this order.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            ForEach(Array(order.enumerated()), id: \.element) { idx, serviceID in
+                if let provider = music.provider(for: serviceID) {
+                    HStack(spacing: 8) {
+                        Text("\(idx + 1).")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+                        Image(systemName: provider.iconName)
+                            .font(.caption)
+                            .foregroundStyle(provider.isConnected ? provider.accentColor : .secondary)
+                        Text(provider.displayName)
+                            .font(.subheadline)
+                        Spacer()
+                        Button {
+                            music.moveServiceUp(serviceID)
+                        } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.caption2)
+                        }
+                        .disabled(idx == 0)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(idx == 0 ? .quaternary : .secondary)
+                        Button {
+                            music.moveServiceDown(serviceID)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .disabled(idx == order.count - 1)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(idx == order.count - 1 ? .quaternary : .secondary)
+                    }
+                    .padding(.vertical, 4)
+                    if idx < order.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
+
+    // MARK: - Unified Library Browser
 
     private var librarySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let music = appModel.musicService!
+        let activeServiceName = music.activeProvider?.displayName ?? "Library"
+        return VStack(alignment: .leading, spacing: 8) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { showLibrary.toggle() }
             } label: {
                 HStack {
                     Image(systemName: "music.note.list")
                         .font(.caption)
-                    Text("Apple Music Library")
+                    Text("\(activeServiceName) Library")
                         .font(.subheadline.bold())
                     Spacer()
                     Image(systemName: showLibrary ? "chevron.up" : "chevron.down")
@@ -365,7 +390,9 @@ struct MusicTabContent: View {
     }
 
     private var libraryBrowser: some View {
-        VStack(spacing: 8) {
+        let music = appModel.musicService!
+        let activeID = music.activeProvider?.serviceID
+        return VStack(spacing: 8) {
             HStack {
                 Picker("", selection: $libraryScope) {
                     ForEach(LibraryScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -379,7 +406,7 @@ struct MusicTabContent: View {
                 }
 
                 Button {
-                    appModel.appleMusicManager.refreshLibrary()
+                    music.refreshLibrary(for: activeID)
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption)
@@ -391,11 +418,11 @@ struct MusicTabContent: View {
             TextField("Search…", text: $librarySearch)
                 .textFieldStyle(.roundedBorder)
 
-            if appModel.appleMusicManager.libraryLoading {
+            if music.isLibraryLoading(for: activeID) {
                 ProgressView("Loading…")
                     .font(.caption)
             } else {
-                if let err = appModel.appleMusicManager.libraryErrorMessage {
+                if let err = music.libraryError(for: activeID) {
                     Text(err).font(.caption).foregroundStyle(.red)
                 }
 
@@ -403,16 +430,16 @@ struct MusicTabContent: View {
                     LazyVStack(spacing: 6) {
                         switch libraryScope {
                         case .songs:
-                            ForEach(Array(filteredSongs.prefix(100)), id: \.id) { song in
-                                songRow(song)
+                            ForEach(Array(filteredSongs(for: activeID).prefix(100)), id: \.id) { track in
+                                unifiedSongRow(track, music: music)
                             }
                         case .playlists:
-                            ForEach(Array(filteredPlaylists.prefix(100)), id: \.id) { pl in
-                                playlistRow(pl)
+                            ForEach(Array(filteredPlaylists(for: activeID).prefix(100)), id: \.id) { pl in
+                                unifiedPlaylistRow(pl, music: music)
                             }
                         case .albums:
-                            ForEach(Array(filteredAlbums.prefix(100)), id: \.id) { album in
-                                albumRow(album)
+                            ForEach(Array(filteredAlbums(for: activeID).prefix(100)), id: \.id) { album in
+                                unifiedAlbumRow(album, music: music)
                             }
                         }
                     }
@@ -421,42 +448,61 @@ struct MusicTabContent: View {
             }
         }
         .onAppear {
-            if appModel.appleMusicManager.librarySongs.isEmpty,
-               !appModel.appleMusicManager.libraryLoading {
-                appModel.appleMusicManager.refreshLibrary()
+            if music.librarySongs(for: activeID).isEmpty,
+               !music.isLibraryLoading(for: activeID) {
+                music.refreshLibrary(for: activeID)
             }
         }
     }
 
-    // Filtered helpers
-    private var query: String { librarySearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    // MARK: - Unified Library Filters
 
-    private var filteredSongs: [AppleMusicManager.LibrarySong] {
-        let s = appModel.appleMusicManager.librarySongs
+    private var query: String {
+        librarySearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func filteredSongs(for serviceID: String?) -> [UnifiedTrack] {
+        let s = appModel.musicService.librarySongs(for: serviceID)
         guard !query.isEmpty else { return s }
         return s.filter { $0.title.lowercased().contains(query) || $0.artist.lowercased().contains(query) }
     }
-    private var filteredPlaylists: [AppleMusicManager.LibraryPlaylist] {
-        let p = appModel.appleMusicManager.libraryPlaylists
+
+    private func filteredPlaylists(for serviceID: String?) -> [UnifiedPlaylist] {
+        let p = appModel.musicService.libraryPlaylists(for: serviceID)
         guard !query.isEmpty else { return p }
         return p.filter { $0.name.lowercased().contains(query) }
     }
-    private var filteredAlbums: [AppleMusicManager.LibraryAlbum] {
-        let a = appModel.appleMusicManager.libraryAlbums
+
+    private func filteredAlbums(for serviceID: String?) -> [UnifiedAlbum] {
+        let a = appModel.musicService.libraryAlbums(for: serviceID)
         guard !query.isEmpty else { return a }
         return a.filter { $0.title.lowercased().contains(query) || $0.artist.lowercased().contains(query) }
     }
 
-    // Row views
-    private func songRow(_ song: AppleMusicManager.LibrarySong) -> some View {
-        Button { appModel.appleMusicManager.playSong(id: song.id) } label: {
+    // MARK: - Unified Library Rows
+
+    private func unifiedSongRow(_ track: UnifiedTrack, music: MusicService) -> some View {
+        Button { music.playSong(track) } label: {
             HStack(spacing: 8) {
-                Image(systemName: "music.note").font(.caption2).foregroundStyle(.secondary)
+                if let url = track.artworkURL {
+                    AsyncImage(url: url) { img in
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "music.note").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Image(systemName: "music.note").font(.caption2).foregroundStyle(.secondary)
+                }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(song.title).font(.caption).lineLimit(1)
-                    Text(song.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(track.title).font(.caption).lineLimit(1)
+                    Text(track.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
+                if track.durationSeconds > 0 {
+                    Text(track.durationString).font(.caption2).foregroundStyle(.tertiary)
+                }
             }
             .padding(6)
             .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.4)))
@@ -465,11 +511,26 @@ struct MusicTabContent: View {
         .buttonStyle(.plain)
     }
 
-    private func playlistRow(_ pl: AppleMusicManager.LibraryPlaylist) -> some View {
-        Button { appModel.appleMusicManager.playPlaylist(id: pl.id, shuffle: libraryShuffle) } label: {
+    private func unifiedPlaylistRow(_ pl: UnifiedPlaylist, music: MusicService) -> some View {
+        Button { music.playPlaylist(pl, shuffle: libraryShuffle) } label: {
             HStack(spacing: 8) {
-                Image(systemName: "music.note.list").font(.caption2).foregroundStyle(.secondary)
-                Text(pl.name).font(.caption).lineLimit(1)
+                if let url = pl.artworkURL {
+                    AsyncImage(url: url) { img in
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "music.note.list").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Image(systemName: "music.note.list").font(.caption2).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(pl.name).font(.caption).lineLimit(1)
+                    if let owner = pl.ownerName {
+                        Text(owner).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
                 Spacer()
                 Text("\(pl.trackCount)").font(.caption2).foregroundStyle(.tertiary)
             }
@@ -480,10 +541,20 @@ struct MusicTabContent: View {
         .buttonStyle(.plain)
     }
 
-    private func albumRow(_ album: AppleMusicManager.LibraryAlbum) -> some View {
-        Button { appModel.appleMusicManager.playAlbum(id: album.id, shuffle: libraryShuffle) } label: {
+    private func unifiedAlbumRow(_ album: UnifiedAlbum, music: MusicService) -> some View {
+        Button { music.playAlbum(album, shuffle: libraryShuffle) } label: {
             HStack(spacing: 8) {
-                Image(systemName: "square.stack").font(.caption2).foregroundStyle(.secondary)
+                if let url = album.artworkURL {
+                    AsyncImage(url: url) { img in
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Image(systemName: "square.stack").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Image(systemName: "square.stack").font(.caption2).foregroundStyle(.secondary)
+                }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(album.title).font(.caption).lineLimit(1)
                     Text(album.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)

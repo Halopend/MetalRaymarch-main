@@ -238,6 +238,100 @@ struct SpotifySegment: Codable {
     }
 }
 
+// MARK: - User Library
+
+struct SpotifyPagingObject<Item: Codable>: Codable {
+    let items: [Item]
+    let total: Int
+    let limit: Int
+    let offset: Int
+    let next: String?
+}
+
+struct SpotifySimplifiedPlaylist: Codable, Identifiable {
+    let id: String
+    let name: String
+    let images: [SpotifyImage]
+    let tracks: SpotifyPlaylistTracksRef
+    let owner: SpotifyPlaylistOwner
+    let uri: String
+
+    var artworkURL: URL? {
+        images.first.flatMap { URL(string: $0.url) }
+    }
+
+    var thumbnailURL: URL? {
+        images.last.flatMap { URL(string: $0.url) }
+    }
+}
+
+struct SpotifyPlaylistTracksRef: Codable {
+    let total: Int
+}
+
+struct SpotifyPlaylistOwner: Codable {
+    let displayName: String?
+    let id: String
+
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
+        case id
+    }
+}
+
+struct SpotifySavedTrack: Codable {
+    let addedAt: String?
+    let track: SpotifyTrack
+
+    enum CodingKeys: String, CodingKey {
+        case addedAt = "added_at"
+        case track
+    }
+}
+
+struct SpotifySavedAlbum: Codable {
+    let addedAt: String?
+    let album: SpotifyFullAlbum
+
+    enum CodingKeys: String, CodingKey {
+        case addedAt = "added_at"
+        case album
+    }
+}
+
+struct SpotifyFullAlbum: Codable, Identifiable {
+    let id: String
+    let name: String
+    let artists: [SpotifyArtist]
+    let images: [SpotifyImage]
+    let totalTracks: Int
+    let uri: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, artists, images, uri
+        case totalTracks = "total_tracks"
+    }
+
+    var artistNames: String {
+        artists.map(\.name).joined(separator: ", ")
+    }
+
+    var artworkURL: URL? {
+        images.first.flatMap { URL(string: $0.url) }
+    }
+
+    var thumbnailURL: URL? {
+        images.last.flatMap { URL(string: $0.url) }
+    }
+}
+
+// MARK: - Search
+
+/// Top-level response from Spotify's `/v1/search?type=track`.
+struct SpotifySearchResult: Codable {
+    let tracks: SpotifyPagingObject<SpotifyTrack>
+}
+
 // MARK: - Error Types
 
 enum SpotifyError: LocalizedError, @unchecked Sendable {

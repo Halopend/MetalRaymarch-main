@@ -100,6 +100,13 @@ class SpotifyManager {
     private(set) var durationMs: Int = 0
     private(set) var audioFeatures: SpotifyAudioFeatures?
     private(set) var error: String?
+
+    // MARK: - Library State
+    private(set) var savedTracks: [SpotifySavedTrack] = []
+    private(set) var userPlaylists: [SpotifySimplifiedPlaylist] = []
+    private(set) var savedAlbums: [SpotifySavedAlbum] = []
+    private(set) var isLibraryLoading: Bool = false
+    private(set) var libraryError: String?
     
     /// Wall-clock time when progressMs was last synced from polling
     private var progressSyncTime: Date = .now
@@ -198,6 +205,19 @@ class SpotifyManager {
         }
     }
     
+    /// Play a specific Spotify track URI (e.g. "spotify:track:...").
+    func playURI(_ uri: String) async {
+        do {
+            try await apiClient?.playURI(uri)
+            isPlaying = true
+            // Refresh state quickly
+            try? await Task.sleep(for: .milliseconds(300))
+            await pollPlaybackState()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+    
     func pause() async {
         do {
             try await apiClient?.pause()
@@ -246,6 +266,67 @@ class SpotifyManager {
                 progressSeconds: Float(posMs) / 1000.0,
                 isPlaying: isPlaying
             )
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    // MARK: - Library
+
+    /// Fetch the user's saved tracks, playlists, and albums from Spotify.
+    func refreshLibrary() async {
+        guard isConnected, let api = apiClient else {
+            libraryError = "Not connected to Spotify."
+            return
+        }
+        isLibraryLoading = true
+        libraryError = nil
+
+        do {
+            let tracks = try await api.getSavedTracks(limit: 50)
+            savedTracks = tracks.items
+
+            let playlists = try await api.getUserPlaylists(limit: 50)
+            userPlaylists = playlists.items
+
+            let albums = try await api.getSavedAlbums(limit: 50)
+            savedAlbums = albums.items
+        } catch {
+            libraryError = error.localizedDescription
+        }
+
+        isLibraryLoading = false
+    }
+
+    /// Play a specific Spotify track by URI.
+    func playTrackURI(_ uri: String) async {
+        await playURI(uri)
+    }
+
+    /// Search for tracks by query string.
+    func searchTracks(query: String, limit: Int = 5) async -> [SpotifyTrack] {
+        guard isConnected else { return [] }
+        do {
+            return try await apiClient?.searchTracks(query: query, limit: limit) ?? []
+        } catch {
+            return []
+        }
+    }
+
+    /// Play a Spotify playlist or album by context URI, optionally shuffled.
+    func playContext(_ contextURI: String, shuffle: Bool = false) async {
+        do {
+            if shuffle {
+                try await apiClient?.setShuffle(true)
+            }
+            try await apiClient?.playContext(contextURI)
+            isPlaying = true
+            try? await Task.sleep(for: .milliseconds(300))
+            await pollPlaybackState()
+            if !shuffle {
+                // Reset shuffle to off after non-shuffle play
+                try? await apiClient?.setShuffle(false)
+            }
         } catch {
             self.error = error.localizedDescription
         }
