@@ -64,6 +64,16 @@ class AppModel {
     var leftHandTracked: Bool = false
     var rightHandTracked: Bool = false
     
+    /// Diagnostic string describing why gestures may not be working.
+    /// Updated by the render loop and displayed in the Gesture Controls UI section.
+    var gestureStatus: String = "Waiting for immersive space…"
+    
+    /// Whether hand tracking authorization was granted by the system.
+    var handTrackingAuthorized: Bool = false
+    
+    /// Whether the hand tracking ARKit provider is actively running.
+    var handTrackingRunning: Bool = false
+    
     // Gesture controller for mapping hand gestures to parameters
     var gestureController: GestureController?
     
@@ -208,7 +218,26 @@ class AppModel {
 
     func setMenuHovering(_ hovering: Bool) {
         isMenuHovering = hovering
+        lastHoverEventTime = CACurrentMediaTime()
         refreshMenuInteractionState()
+    }
+    
+    /// Timestamp of the last `.onHover` event received.  Used to detect stuck hover state.
+    @ObservationIgnored private var lastHoverEventTime: CFTimeInterval = 0
+    
+    /// Call periodically (e.g. from the render loop FPS update) to auto-clear hover if
+    /// no hover event has been received for an extended period.
+    /// This prevents `suppressParameterGestures` from getting permanently stuck when
+    /// the `.onHover(false)` callback is dropped by the system.
+    func clearStaleHoverIfNeeded() {
+        guard isMenuHovering else { return }
+        let now = CACurrentMediaTime()
+        // If no hover event for 3 seconds, assume the user is no longer gazing at the window
+        if lastHoverEventTime > 0, now - lastHoverEventTime > 3.0 {
+            isMenuHovering = false
+            refreshMenuInteractionState()
+            print("🖐️ Auto-cleared stale hover state (no hover events for 3s)")
+        }
     }
 
     func beginMenuAdjustment() {

@@ -377,6 +377,8 @@ struct ContentView: View {
                 }
             }
             Divider()
+            Toggle("Halton Jitter TAA", isOn: $cache.haltonJitterEnabled)
+                .onChange(of: cache.haltonJitterEnabled) { _, v in cache.push(\.haltonJitterEnabled, value: v) }
             Toggle("Dynamic Render Quality", isOn: $cache.dynamicRenderQualityEnabled)
                 .onChange(of: cache.dynamicRenderQualityEnabled) { _, v in cache.push(\.dynamicRenderQualityEnabled, value: v) }
             if cache.dynamicRenderQualityEnabled {
@@ -930,6 +932,33 @@ struct ContentView: View {
                     Label("Gesture Controls", systemImage: "hand.draw").font(.headline)
                     Spacer()
                 }
+
+                // Gesture diagnostic status
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(gestureStatusColor)
+                        .frame(width: 8, height: 8)
+                    Text(appModel.gestureStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if appModel.leftHandTracked || appModel.rightHandTracked {
+                        HStack(spacing: 4) {
+                            if appModel.leftHandTracked {
+                                Image(systemName: "hand.raised.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.green)
+                            }
+                            if appModel.rightHandTracked {
+                                Image(systemName: "hand.raised.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+
                 Toggle("Enable Hand Gesture Controls", isOn: Binding(
                     get: { appModel.handTrackingEnabled },
                     set: { appModel.handTrackingEnabled = $0 }
@@ -1106,6 +1135,19 @@ struct ContentView: View {
         case .neonSunset: return Color(red: 1.0, green: 0.5, blue: 0.3)
         case .neonMatrix: return Color(red: 0.0, green: 1.0, blue: 0.4)
         }
+    }
+
+    /// Color for the gesture status indicator dot
+    private var gestureStatusColor: Color {
+        let status = appModel.gestureStatus
+        if status.hasPrefix("Active:") { return .green }
+        if status.hasPrefix("Ready") { return .cyan }
+        if status.contains("Suppressed") { return .yellow }
+        if status.contains("disabled") || status.contains("not authorized") || status.contains("not running") || status.contains("stopped") || status.contains("failed") {
+            return .red
+        }
+        if status.contains("No hands") { return .orange }
+        return .gray
     }
     
     private var fpsColor: Color {

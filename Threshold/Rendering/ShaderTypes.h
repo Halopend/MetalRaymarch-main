@@ -226,6 +226,12 @@ typedef struct
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
     float blendFactor;       // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
+    // === GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA ===
+    // Sub-pixel jitter offset from Halton(2,3) sequence for temporal anti-aliasing.
+    // When geometry is stable, each frame gets a different sub-pixel offset,
+    // providing free temporal supersampling at 90Hz via display persistence.
+    vector_float2 jitterOffset; // Sub-pixel jitter in pixels (±0.5 range)
+    int accumulationFrame;      // Frame count since last parameter change (0 = first frame)
     float pad_gmt;           // Alignment padding
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
@@ -282,6 +288,9 @@ typedef struct
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
     float blendFactor;           // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
+    // === GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA ===
+    vector_float2 jitterOffset;  // Sub-pixel jitter in pixels (±0.5 range)
+    int accumulationFrame;       // Frame count since last parameter change (0 = first frame)
     float pad_gmt;               // Alignment padding
     // === TEMPORAL REPROJECTION ===
     matrix_float4x4 currentViewProjMatrix;   // Current frame: modelView * projection (for depth write)

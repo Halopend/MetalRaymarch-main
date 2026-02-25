@@ -164,6 +164,9 @@ final class UISettingsCache {
     var gestureMaxActiveHandDistance: Float = 0.90
     var translationSensitivity: Float = 1.0
     
+    // Halton jitter temporal AA
+    var haltonJitterEnabled: Bool = true
+    
     // Dynamic quality
     var dynamicRenderQualityEnabled: Bool = true
     var dynamicRenderQualityMin: Float = 0.5
@@ -286,6 +289,7 @@ final class UISettingsCache {
         gestureMaxStartHandDistance = settings.gestureMaxStartHandDistance
         gestureMaxActiveHandDistance = settings.gestureMaxActiveHandDistance
         translationSensitivity = settings.translationSensitivity
+        haltonJitterEnabled = settings.haltonJitterEnabled
         dynamicRenderQualityEnabled = settings.dynamicRenderQualityEnabled
         dynamicRenderQualityMin = settings.dynamicRenderQualityMin
         dynamicRenderQualityMax = settings.dynamicRenderQualityMax

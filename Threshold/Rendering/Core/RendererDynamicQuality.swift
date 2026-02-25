@@ -18,9 +18,16 @@ extension Renderer {
             // Update the manager with current FPS - resolution scaling only applies if foveation is available
             let canUseResolutionScaling = layerRenderer.configuration.isFoveationEnabled
 
-            if settings.isMenuInteractionActive {
-                let interactionQuality = max(settings.dynamicRenderQualityMin, min(settings.dynamicRenderQualityMax, 0.65))
-                manager.setQuality(interactionQuality, layerRenderer: canUseResolutionScaling ? layerRenderer : nil)
+            // === GMT-FRACTALS PATTERN: Interaction-aware quality reduction ===
+            // Like GMT's UniformManager downscaling during isGizmoInteracting/isCameraInteracting,
+            // drop quality during ANY active interaction (menu OR hand gestures).
+            // Menu interaction: 0.65 quality (UI responsiveness priority)
+            // Gesture interaction: 0.55 quality (more aggressive — gestures cause rapid parameter
+            // changes that invalidate per-frame work faster than menu hover)
+            if settings.isMenuInteractionActive || (settings.isGeometryGestureActive && settings.haltonJitterEnabled) {
+                let interactionQuality: Float = settings.isGeometryGestureActive ? 0.55 : 0.65
+                let clampedQuality = max(settings.dynamicRenderQualityMin, min(settings.dynamicRenderQualityMax, interactionQuality))
+                manager.setQuality(clampedQuality, layerRenderer: canUseResolutionScaling ? layerRenderer : nil)
                 settings.currentRenderQuality = manager.currentQuality
                 settings.fractalIterations = manager.effectiveIterations(base: settings.baseFractalIterations)
                 settings.maxRaySteps = manager.effectiveRaySteps(base: settings.baseMaxRaySteps)

@@ -67,41 +67,57 @@ extension Renderer {
 
     func startARSession() async {
         guard WorldTrackingProvider.isSupported else {
-            if RENDERER_DEBUG { print("⚠️ World tracking is not supported on this device") }
+            print("⚠️ World tracking is not supported on this device – hand gestures unavailable")
+            await MainActor.run { appModel.gestureStatus = "World tracking not supported" }
             return
         }
 
         if RENDERER_DEBUG { print("ℹ️ Requesting only world sensing (for pose) plus hand tracking; no extra sensors requested.") }
         var authStatus = await arSession.queryAuthorization(for: [.worldSensing, .handTracking])
         if authStatus[.worldSensing] == .notDetermined || authStatus[.handTracking] == .notDetermined {
-            if RENDERER_DEBUG { print("🔐 Requesting ARKit world-sensing + hand-tracking authorization") }
+            print("🔐 Requesting ARKit world-sensing + hand-tracking authorization")
             authStatus = await arSession.requestAuthorization(for: [.worldSensing, .handTracking])
         }
 
         if authStatus[.worldSensing] != .allowed {
-            if RENDERER_DEBUG {
-                print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
-                print("   Pose will be limited (rotation only)")
-            }
+            print("⚠️ World sensing not authorized. Status: \(String(describing: authStatus[.worldSensing]))")
+            print("   Pose will be limited (rotation only)")
         }
 
-        if authStatus[.handTracking] != .allowed {
-            if RENDERER_DEBUG { print("⚠️ Hand tracking not authorized. Status: \(String(describing: authStatus[.handTracking]))") }
+        let handTrackingAllowed = authStatus[.handTracking] == .allowed
+        await MainActor.run {
+            appModel.handTrackingAuthorized = handTrackingAllowed
+        }
+
+        if !handTrackingAllowed {
+            print("⚠️ Hand tracking NOT authorized. Status: \(String(describing: authStatus[.handTracking]))")
+            print("   → Go to Settings > Privacy & Security > Hand & Body Tracking to enable")
+            await MainActor.run {
+                appModel.gestureStatus = "Hand tracking not authorized – check Settings"
+            }
+        } else {
+            print("✓ Hand tracking authorized")
         }
 
         do {
             var providers: [any DataProvider] = [worldTracking]
-            if let ht = handTracking, authStatus[.handTracking] == .allowed {
+            if let ht = handTracking, handTrackingAllowed {
                 providers.append(ht)
+                print("✓ Hand tracking provider added to ARKit session")
+            } else if !handTrackingAllowed {
+                print("⚠️ Hand tracking provider NOT added (authorization denied)")
             }
             try await arSession.run(providers)
+            print("✓ ARKit session started with \(providers.count) providers")
             if RENDERER_DEBUG {
-                print("✓ ARKit session started with world tracking and hand tracking")
                 print("  World tracking state: \(worldTracking.state)")
             }
         } catch {
             if !hasLoggedWorldTrackingWarning {
-                if RENDERER_DEBUG { print("⚠️ ARKit session failed: \(error)") }
+                print("⚠️ ARKit session failed: \(error)")
+                await MainActor.run {
+                    appModel.gestureStatus = "ARKit session failed: \(error.localizedDescription)"
+                }
                 hasLoggedWorldTrackingWarning = true
             }
         }

@@ -120,6 +120,8 @@ extension Renderer {
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
                             blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
+                            jitterOffset: currentJitterOffset(),
+                            accumulationFrame: Int32(accumulationFrameCount),
                             pad_gmt: 0.0,
                             precomputedFractal: precomputedFractal,
                             precomputedLighting: precomputedLighting,

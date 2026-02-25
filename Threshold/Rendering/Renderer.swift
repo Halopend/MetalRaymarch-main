@@ -63,6 +63,44 @@ actor Renderer {
     var cachedPrecomputedLighting: PrecomputedLighting = PrecomputedLighting()
     var cachedModelMatrix: matrix_float4x4 = matrix_identity_float4x4
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA
+    // Pre-computed Halton(2,3) sequence for sub-pixel jitter (like GMT's 2048-entry table).
+    // When geometry is stable, each frame gets a different sub-pixel offset,
+    // providing free temporal supersampling at 90Hz via display persistence.
+    // ═══════════════════════════════════════════════════════════════════════════
+    var accumulationFrameCount: Int = 0  // Frames since last geometry change
+    private var previousGeometryState: GeometryState = .dynamic
+    
+    /// Halton sequence value for quasi-random sub-pixel jitter
+    /// Produces low-discrepancy sequence for even coverage of sub-pixel space
+    static func halton(index: Int, base: Int) -> Float {
+        var result: Float = 0
+        var f: Float = 1.0 / Float(base)
+        var i = index
+        while i > 0 {
+            result += f * Float(i % base)
+            i /= base
+            f /= Float(base)
+        }
+        return result
+    }
+    
+    /// Get jitter offset for current accumulation frame
+    /// Returns ±0.5 pixel offset from Halton(2,3) sequence
+    func currentJitterOffset() -> SIMD2<Float> {
+        // Check if Halton jitter is enabled in settings
+        guard appModel.renderSettings.haltonJitterEnabled else { return .zero }
+        if accumulationFrameCount == 0 {
+            return .zero  // No jitter on first frame after change
+        }
+        let idx = (accumulationFrameCount % 256) + 1  // Wrap at 256, skip index 0
+        return SIMD2<Float>(
+            Self.halton(index: idx, base: 2) - 0.5,
+            Self.halton(index: idx, base: 3) - 0.5
+        )
+    }
+    
     // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
@@ -149,6 +187,8 @@ actor Renderer {
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
     var isHandTrackingDispatchInFlight: Bool = false
     var pendingHandTrackingDelta: Float = 0
+    var hasLoggedHandTrackingNil: Bool = false          // One-shot guard for nil provider log
+    var lastHandTrackingStateLogTime: TimeInterval = 0  // Throttle non-running state logs
     var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
     var lastPerfLogTime: TimeInterval = 0
     let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS
@@ -816,6 +856,15 @@ actor Renderer {
         }
         let settingsSnapshot = settings.snapshot()
         
+        // === GMT-FRACTALS: Accumulation Frame Counter ===
+        // Reset when geometry transitions FROM stable, increment when stable.
+        // Drives Halton jitter offset for temporal AA.
+        if settingsSnapshot.geometryState != .stable || settingsSnapshot.isGeometryGestureActive {
+            accumulationFrameCount = 0
+        } else {
+            accumulationFrameCount += 1
+        }
+        
         self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
 
         // Check if using adaptive 8x8 compute pipeline
@@ -1037,6 +1086,8 @@ actor Renderer {
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
             blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
+            jitterOffset: currentJitterOffset(),
+            accumulationFrame: Int32(accumulationFrameCount),
             pad_gmt: 0.0,
             currentViewProjMatrix: currentViewProj,
             previousViewProjMatrix: previousViewProjMatrices[viewIndex],

@@ -251,6 +251,13 @@ final class GestureController {
     // Accumulated position from drag gestures (target position)
     private var accumulatedPosition: SIMD3<Float> = .zero
     
+    // === GMT-FRACTALS: Asymmetric Smoothed Gesture Speed ===
+    // Like CameraController.ts's smoothedDistEstimate, but applied to gesture
+    // drag magnitude. Instant response for deceleration (safety/precision),
+    // lerped response for acceleration (prevents jarring speed-ups).
+    private var smoothedDragSpeed: Float = 0.0
+    private let dragSpeedIncreaseLerpRate: Float = 40.0  // Higher than GMT's 8.0 for responsive drag
+    
     // === MENU TOGGLE GESTURE STATE (Right hand, configurable mode) ===
     private var menuToggleActive: Bool = false
     private var menuToggleHoldTimer: Float = 0
@@ -506,6 +513,7 @@ final class GestureController {
             if pinkyGestureState.isActive  { pinkyGestureState.isActive = false }
             if rightIndexDragActive        { rightIndexDragActive = false }
             settings.activeGestureIndex = 0
+            settings.isGeometryGestureActive = false
             settings.gestureSpread = 0
             return
         }
@@ -583,6 +591,12 @@ final class GestureController {
         
         // Update active gesture for HUD
         settings.activeGestureIndex = activeDigit
+        
+        // Wire geometry gesture flag so the state machine and dynamic quality know
+        // when a geometry-affecting gesture is in progress.
+        let anyGeometryGestureActive = indexGestureState.isActive || middleGestureState.isActive ||
+                                       ringGestureState.isActive || pinkyGestureState.isActive
+        settings.isGeometryGestureActive = anyGeometryGestureActive
         
         // ═══════════════════════════════════════════════════════════════════════════
         // DEBUG VISUALIZATION: Calculate hand spread for debug sphere
@@ -786,6 +800,7 @@ final class GestureController {
             rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
             rightIndexPrevPalm = rightHand.palmPosition
             accumulatedPosition = settings.effectiveTargetPosition
+            smoothedDragSpeed = 0.0  // Reset asymmetric smoothing on new gesture
             #if DEBUG
             print("👆 Right index drag STARTED")
             #endif
@@ -806,9 +821,30 @@ final class GestureController {
             let rawDelta = currentPos - previousPos
             let deltaLength = simd_length(rawDelta)
             
+            // === GMT-FRACTALS PATTERN: Asymmetric Smoothed Speed ===
+            // Like CameraController.ts's smoothedDistEstimate (L34):
+            // - Instant response when DECELERATING (user wants precision/stop)
+            // - Lerped response when ACCELERATING (prevents jarring speed-ups)
+            // This gives snappy stops with smooth speed ramp-ups.
+            // NOTE: On gesture start, smoothedDragSpeed is 0 — initialize directly
+            // from the first movement to avoid a dead-feeling cold-start ramp.
+            let dt: Float = 1.0 / 90.0  // Approximate frame time at 90Hz
+            if smoothedDragSpeed < 1e-8 {
+                // First active frame after gesture start: seed from actual movement
+                smoothedDragSpeed = deltaLength
+            } else if deltaLength < smoothedDragSpeed {
+                // Deceleration: instant response (safety, precision)
+                smoothedDragSpeed = deltaLength
+            } else {
+                // Acceleration: lerp toward target (smooth ramp-up)
+                let lerpFactor = 1.0 - exp(-dragSpeedIncreaseLerpRate * dt)
+                smoothedDragSpeed += (deltaLength - smoothedDragSpeed) * lerpFactor
+            }
+            
             // Non-linear velocity response for flicking:
             // - Slow movements (< threshold): linear with base multiplier
             // - Fast movements: exponential boost for responsive flicking
+            // Uses smoothedDragSpeed for the magnitude scaling (asymmetric smoothed)
             let slowThreshold: Float = 0.002  // 2mm/frame threshold
             let maxStep: Float = 0.30         // 30cm per frame cap
             let baseMultiplier: Float = 2.0   // Even slow movements get 2x boost
@@ -818,12 +854,16 @@ final class GestureController {
                 let direction = rawDelta / deltaLength
                 var scaledLength: Float
                 
-                if deltaLength <= slowThreshold {
+                // Use smoothedDragSpeed for the magnitude curve (asymmetric smoothing)
+                // but keep the direction from rawDelta (no direction smoothing)
+                let effectiveSpeed = smoothedDragSpeed
+                
+                if effectiveSpeed <= slowThreshold {
                     // Slow movement: boosted linear response
-                    scaledLength = deltaLength * baseMultiplier
+                    scaledLength = effectiveSpeed * baseMultiplier
                 } else {
                     // Fast movement: apply acceleration curve
-                    let excess = deltaLength - slowThreshold
+                    let excess = effectiveSpeed - slowThreshold
                     let boost: Float = 8.0   // Higher amplification
                     let power: Float = 1.1   // Gentler curve so it kicks in sooner
                     scaledLength = (slowThreshold * baseMultiplier) + pow(excess, power) * boost

@@ -175,6 +175,10 @@ final class RenderSettings: @unchecked Sendable {
     // Replaces hardcoded palettes with user-editable gradient stops.
     private var _gradientState: GradientState = GradientState()
     
+    // === GMT-FRACTALS: HALTON JITTER TEMPORAL AA ===
+    // Sub-pixel jitter for free temporal supersampling when geometry is stable
+    private var _haltonJitterEnabled: Bool = RenderSettings.loadBool("haltonJitterEnabled", default: true)
+    
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
     private var _dynamicRenderQualityEnabled: Bool = true   // Enable dynamic quality adjustment
@@ -1071,6 +1075,27 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _doppelgangerOffset = newValue } }
     }
     
+    // === GMT-FRACTALS: HALTON JITTER TEMPORAL AA ===
+    
+    /// Enable Halton sub-pixel jitter for temporal anti-aliasing when geometry is stable.
+    /// Provides free supersampling at 90Hz via display persistence.
+    var haltonJitterEnabled: Bool {
+        get { withLock { _haltonJitterEnabled } }
+        set {
+            withLock { _haltonJitterEnabled = newValue }
+            UserDefaults.standard.set(newValue, forKey: "haltonJitterEnabled")
+        }
+    }
+    
+    // === GEOMETRY STABILITY STATE (read-only) ===
+    
+    /// Whether a geometry-affecting gesture is currently active (read-only).
+    /// Set internally by the geometry state machine in `interpolateToTargets`.
+    var isGeometryGestureActive: Bool {
+        get { withLock { _isGeometryGestureActive } }
+        set { withLock { _isGeometryGestureActive = newValue } }
+    }
+    
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     
     /// Enable dynamic render quality adjustment based on FPS
@@ -1504,6 +1529,51 @@ final class RenderSettings: @unchecked Sendable {
             // Guard against bad deltaTime values that could cause instability
             let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
             
+            // ═══════════════════════════════════════════════════════════════════════════
+            // GMT-FRACTALS PATTERN: Convergence Lock
+            // Like VirtualSpace.updateSmoothing which skips computation when distSq < 1e-21,
+            // skip the expensive smoothDamp calls when all parameters have converged AND
+            // all velocities are near zero. This saves ~7 smoothDamp calls per frame at 90Hz
+            // (630 calls/sec) when the fractal is sitting still.
+            // ═══════════════════════════════════════════════════════════════════════════
+            let convergenceThreshold: Float = 1e-6
+            let velocityThreshold: Float = 1e-5
+            let distSqMinDist = (_minDistance - _targetMinDistance) * (_minDistance - _targetMinDistance)
+            let distSqFold = (_foldingLimit - _targetFoldingLimit) * (_foldingLimit - _targetFoldingLimit)
+            let distSqSphere = (_sphereRadius - _targetSphereRadius) * (_sphereRadius - _targetSphereRadius)
+            let posDiff = _position - _targetPosition
+            let distSqPos = posDiff.x * posDiff.x + posDiff.y * posDiff.y + posDiff.z * posDiff.z
+            let totalDistSq = distSqMinDist + distSqFold + distSqSphere + distSqPos
+            let totalVelSq = _velocityMinDistance * _velocityMinDistance +
+                             _velocityFoldingLimit * _velocityFoldingLimit +
+                             _velocitySphereRadius * _velocitySphereRadius +
+                             simd_dot(_velocityPosition, _velocityPosition)
+            
+            let isConverged = totalDistSq < convergenceThreshold && totalVelSq < velocityThreshold
+            
+            if isConverged {
+                // Snap to exact targets and zero velocities to prevent micro-drift
+                _minDistance = _targetMinDistance
+                _foldingLimit = _targetFoldingLimit
+                _sphereRadius = _targetSphereRadius
+                _position = _targetPosition
+                _velocityMinDistance = 0.0
+                _velocityFoldingLimit = 0.0
+                _velocitySphereRadius = 0.0
+                _velocityPosition = .zero
+                
+                // Still update geometry state machine when converged
+                if !_isGeometryGestureActive && _geometryState != .stable {
+                    _geometryState = .stable
+                    _geometryStableFrameCount = 0
+                } else if _geometryState == .stable {
+                    _geometryStableFrameCount += 1
+                }
+                // Step multiplier stays at 1.2 when converged (already settled)
+                let targetStepMultiplier: Float = 1.2
+                _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
+            } else {
+            
             // Check for NaN/Inf in targets before interpolating
             if _targetMinDistance.isNaN || _targetMinDistance.isInfinite {
                 print("⚠️ ANOMALY: targetMinDistance is \(_targetMinDistance), resetting to 0.8")
@@ -1655,6 +1725,8 @@ final class RenderSettings: @unchecked Sendable {
             let targetStepMultiplier: Float = allGeometrySettled ? 1.2 : 1.0
             // Smooth transition to avoid popping
             _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
+            
+            } // end convergence lock else
         }
     }
     

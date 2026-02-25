@@ -11,10 +11,36 @@ extension Renderer {
 
     /// Update hand tracking data and process gesture controls
     func updateHandTracking(atTime time: TimeInterval) {
-        guard let ht = handTracking else { return }
+        guard let ht = handTracking else {
+            // Log once if handTracking provider is nil (should never happen after init)
+            if !hasLoggedHandTrackingNil {
+                hasLoggedHandTrackingNil = true
+                print("⚠️ HandTrackingProvider is nil – hand gestures unavailable")
+            }
+            return
+        }
 
         // Only process if hand tracking is running
-        guard ht.state == .running else { return }
+        guard ht.state == .running else {
+            // Throttled log for non-running state (once per 5 seconds)
+            if time - lastHandTrackingStateLogTime > 5.0 {
+                lastHandTrackingStateLogTime = time
+                print("⚠️ HandTrackingProvider state: \(ht.state) – gestures inactive")
+                Task { @MainActor in
+                    self.appModel.handTrackingRunning = false
+                    // Build a user-facing status string
+                    switch ht.state {
+                    case .stopped:
+                        self.appModel.gestureStatus = "Hand tracking stopped (not authorized?)"
+                    case .paused:
+                        self.appModel.gestureStatus = "Hand tracking paused"
+                    default:
+                        self.appModel.gestureStatus = "Hand tracking not running (\(ht.state))"
+                    }
+                }
+            }
+            return
+        }
 
         // Get hand anchors at the current time
         let anchors = ht.handAnchors(at: time)
@@ -46,6 +72,11 @@ extension Renderer {
                     }
                 }
 
+                // Mark tracking as running (for UI diagnostics)
+                if !self.appModel.handTrackingRunning {
+                    self.appModel.handTrackingRunning = true
+                }
+
                 guard self.appModel.handTrackingEnabled else {
                     if self.appModel.leftHandTracked {
                         self.appModel.leftHandTracked = false
@@ -53,8 +84,12 @@ extension Renderer {
                     if self.appModel.rightHandTracked {
                         self.appModel.rightHandTracked = false
                     }
+                    self.appModel.gestureStatus = "Hand tracking disabled in settings"
                     return
                 }
+
+                // Clear stale hover to prevent gesture suppression from getting stuck
+                self.appModel.clearStaleHoverIfNeeded()
 
                 // Only update UI-facing tracking state at ~15Hz to reduce @Observable invalidation
                 // Checking gestureUpdateDelta here: if accumulated time > 66ms, update UI state
@@ -66,6 +101,25 @@ extension Renderer {
                     }
                     if self.appModel.rightHandTracked != isRightTracked {
                         self.appModel.rightHandTracked = isRightTracked
+                    }
+
+                    // Update diagnostic status
+                    let suppressed = self.appModel.gestureController?.suppressParameterGestures ?? false
+                    if suppressed {
+                        self.appModel.gestureStatus = "Suppressed (looking at menu window)"
+                    } else if !isLeftTracked && !isRightTracked {
+                        self.appModel.gestureStatus = "No hands detected"
+                    } else {
+                        let activeGesture = self.appModel.renderSettings.activeGestureIndex
+                        if activeGesture > 0 {
+                            let names = ["", "Index → minDist", "Middle → foldLimit", "Ring → sphereRadius", "Pinky → scale"]
+                            self.appModel.gestureStatus = "Active: \(names[min(activeGesture, 4)])"
+                        } else {
+                            var parts: [String] = []
+                            if isLeftTracked { parts.append("L") }
+                            if isRightTracked { parts.append("R") }
+                            self.appModel.gestureStatus = "Ready (\(parts.joined(separator: "+")) tracked)"
+                        }
                     }
                 }
 

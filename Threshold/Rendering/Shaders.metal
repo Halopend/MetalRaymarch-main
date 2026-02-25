@@ -1450,6 +1450,14 @@ kernel void adaptiveHierarchical8x8(
     // 4. Compute direction from camera to that point (both in model space)
     
     float2 pixelCenter = float2(pixelCoord) + 0.5;
+    
+    // === GMT-FRACTALS PATTERN: Halton Sub-Pixel Jitter for Temporal AA ===
+    // When geometry is stable (blendFactor < 1.0), apply sub-pixel jitter from
+    // a pre-computed Halton(2,3) sequence. At 90Hz, the display integrates ~3 frames
+    // via persistence, giving free temporal supersampling without accumulation buffers.
+    // jitterOffset is ±0.5 pixels, computed on CPU from Halton sequence.
+    pixelCenter += uniforms.jitterOffset;
+    
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     
@@ -1933,6 +1941,12 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     Uniforms uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
     
+    // === GMT-FRACTALS: Halton Sub-Pixel Jitter ===
+    // Apply sub-pixel jitter for temporal AA when geometry is stable.
+    // This shifts the ray slightly each frame, providing free supersampling
+    // via the display's temporal integration at 90Hz.
+    fragCoord += uniforms.jitterOffset;
+    
     // Render fractal
     return fragmentMain(in, uniforms, fragCoord, uniforms.time);
 }
@@ -1953,6 +1967,10 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     FragmentOutput output;
     Uniforms uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
+    
+    // === GMT-FRACTALS: Halton Sub-Pixel Jitter for quad-shared path ===
+    fragCoord += uniforms.jitterOffset;
+    
     float time = uniforms.time;
     
     float gTime = time * 0.01 + 15.00;
