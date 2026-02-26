@@ -2,7 +2,20 @@
 import Foundation
 import Metal
 
+enum RenderFramePath {
+    case adaptiveCompute
+    case fragment(useQuadShared: Bool)
+}
+
 extension Renderer {
+    func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {
+        if settingsSnapshot.tileSize == 8,
+           adaptiveHierarchicalPipeline8x8 != nil {
+            return .adaptiveCompute
+        }
+        return .fragment(useQuadShared: settingsSnapshot.tileSize == 2)
+    }
+
     func configureDirectRenderTargets(renderPassDescriptor: MTLRenderPassDescriptor, drawable: LayerRenderer.Drawable) {
         renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
         renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]

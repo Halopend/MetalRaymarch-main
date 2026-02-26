@@ -93,10 +93,10 @@ struct EffectSliderRow: View {
                     appModel.beginMenuAdjustment()
                 } else {
                     appModel.endMenuAdjustment()
-                    onChanged()
                 }
             })
             .disabled(!enabled)
+            .onChange(of: value) { _, _ in onChanged() }
             if showToggle {
                 Toggle("", isOn: $enabled)
                     .labelsHidden()

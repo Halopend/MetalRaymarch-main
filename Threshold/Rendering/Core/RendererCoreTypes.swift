@@ -27,6 +27,7 @@ enum FunctionConstantIndex: Int {
 
 enum RendererError: Error {
     case badVertexDescriptor
+    case metalLibraryUnavailable
 }
 
 extension LayerRenderer.Clock.Instant.Duration {

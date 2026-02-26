@@ -7,7 +7,6 @@
 
 import SwiftUI
 import ARKit
-import os  // For os_unfair_lock - fastest available lock primitive
 
 @MainActor
 @Observable
@@ -68,9 +67,6 @@ class AppModel {
     /// Updated by the render loop and displayed in the Gesture Controls UI section.
     var gestureStatus: String = "Waiting for immersive space…"
     
-    /// Whether hand tracking authorization was granted by the system.
-    var handTrackingAuthorized: Bool = false
-    
     /// Whether the hand tracking ARKit provider is actively running.
     var handTrackingRunning: Bool = false
     
@@ -81,9 +77,6 @@ class AppModel {
     
     // Preset management
     let presetManager = PresetManager()
-    
-    // Parameter recording
-    var parameterRecorder: ParameterRecorder?
     
     // Animation/Scene playback manager
     var animationManager: AnimationManager?
@@ -129,9 +122,6 @@ class AppModel {
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings)
         
-        // Initialize parameter recorder
-        parameterRecorder = ParameterRecorder(renderSettings: renderSettings)
-        
         // Initialize unified music service
         musicService = MusicService(appleMusic: appleMusicManager, spotify: spotifyManager)
         
@@ -172,17 +162,6 @@ class AppModel {
     /// Save current state for restore on next launch
     func saveLastState() {
         presetManager.saveLastState(from: renderSettings)
-    }
-    
-    /// Toggle recording state
-    func toggleRecording() {
-        guard let recorder = parameterRecorder else { return }
-        
-        if recorder.isRecording {
-            let _ = recorder.stopRecording()
-        } else if recorder.isIdle {
-            recorder.startRecording()
-        }
     }
     
     /// Callback to open the menu window (set by App scene)
@@ -261,19 +240,5 @@ class AppModel {
         return await captureScreenshotHandler?()
     }
     
-    /// Update the recorder (call from render loop)
-    func updateRecorder(deltaTime: Float) {
-        guard let recorder = parameterRecorder else { return }
-        
-        // Update recording if active
-        if recorder.isRecording {
-            recorder.update()
-        }
-        
-        // Update playback if active
-        if recorder.isPlaying {
-            recorder.updatePlayback(deltaTime: deltaTime)
-        }
-    }
 }
 

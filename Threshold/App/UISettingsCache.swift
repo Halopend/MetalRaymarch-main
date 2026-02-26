@@ -7,7 +7,6 @@
 //
 
 import SwiftUI
-import RealityKit
 
 // MARK: - Cached UI Settings
 // Local state that syncs with RenderSettings periodically to avoid lock contention

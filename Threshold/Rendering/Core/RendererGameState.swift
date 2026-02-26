@@ -9,7 +9,7 @@ extension Renderer {
         // Scale gets its own smoothing since it's not gesture-controlled
         let smoothSpeed: Float = 15.0
         let smoothFactor = 1.0 - exp(-smoothSpeed * cachedDeltaTime)
-        smoothedPosition = settingsSnapshot.position  // Already smoothed by interpolateToTargets
+        let smoothedPosition = settingsSnapshot.position  // Already smoothed by interpolateToTargets
         smoothedScale = smoothedScale + (settingsSnapshot.scale - smoothedScale) * smoothFactor
 
         // Use cached rotation matrix (constant, computed once in init)
@@ -97,7 +97,6 @@ extension Renderer {
                             safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
                             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
                             colorIterations: settingsSnapshot.colorIterations,
-                            useHierarchical: settingsSnapshot.useHierarchical ? 1 : 0,
                             limitFlash: settingsSnapshot.limitFlash,
                             showHUD: settingsSnapshot.showHUD ? 1 : 0,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),

@@ -14,7 +14,6 @@ extension Renderer {
                 residencySet = try device.makeResidencySet(descriptor: descriptor)
 
                 residencySet?.addAllocation(dynamicUniformBuffer)
-                residencySet?.addAllocation(cubeMap)
 
                 if let tileBuffer = tileUniformBuffer {
                     residencySet?.addAllocation(tileBuffer)
@@ -85,9 +84,6 @@ extension Renderer {
         }
 
         let handTrackingAllowed = authStatus[.handTracking] == .allowed
-        await MainActor.run {
-            appModel.handTrackingAuthorized = handTrackingAllowed
-        }
 
         if !handTrackingAllowed {
             print("⚠️ Hand tracking NOT authorized. Status: \(String(describing: authStatus[.handTracking]))")

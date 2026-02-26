@@ -96,7 +96,10 @@ class SpotifyAuthManager {
         self.codeVerifier = verifier
         let challenge = generateCodeChallenge(from: verifier)
         
-        var components = URLComponents(string: Self.authURL)!
+        guard var components = URLComponents(string: Self.authURL) else {
+            error = "Invalid auth URL"
+            return
+        }
         components.queryItems = [
             URLQueryItem(name: "client_id", value: Self.clientID),
             URLQueryItem(name: "response_type", value: "code"),
@@ -139,8 +142,9 @@ class SpotifyAuthManager {
     
     /// Handle the OAuth callback URL (called from .onOpenURL)
     func handleCallback(_ url: URL) async {
-        guard url.scheme == "Threshold",
-              url.host == "spotify-callback" else { return }
+          guard let scheme = url.scheme,
+              scheme.caseInsensitiveCompare("threshold") == .orderedSame,
+              url.host?.lowercased() == "spotify-callback" else { return }
         
         guard let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first(where: { $0.name == "code" })?.value else {
@@ -168,8 +172,13 @@ class SpotifyAuthManager {
             error = "Missing code verifier"
             return
         }
+
+        guard let tokenURL = URL(string: Self.tokenURL) else {
+            error = "Invalid Spotify token URL"
+            return
+        }
         
-        var request = URLRequest(url: URL(string: Self.tokenURL)!)
+        var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         
@@ -208,7 +217,11 @@ class SpotifyAuthManager {
     }
     
     private func refreshAccessToken(refreshToken: String) async throws {
-        var request = URLRequest(url: URL(string: Self.tokenURL)!)
+        guard let tokenURL = URL(string: Self.tokenURL) else {
+            throw SpotifyError.apiError(statusCode: 0, message: "Invalid Spotify token URL")
+        }
+
+        var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         
@@ -217,7 +230,7 @@ class SpotifyAuthManager {
             "refresh_token": refreshToken,
             "client_id": Self.clientID
         ]
-        request.httpBody = body.map { "\($0.key)=\($0.value)" }
+        request.httpBody = body.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
             .joined(separator: "&")
             .data(using: .utf8)
         

@@ -60,23 +60,6 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMandelbox         = 0,
 };
 
-// Color scheme selection (built-in presets)
-typedef NS_ENUM(EnumBackingType, ColorSchemeType)
-{
-    ColorSchemeClassic           = 0,  // Original Mandelbox colors (red/gray/gold)
-    ColorSchemeOcean             = 1,  // Deep blues and teals
-    ColorSchemeFire              = 2,  // Warm oranges and reds
-    ColorSchemeForest            = 3,  // Greens and browns
-    ColorSchemeNebula            = 4,  // Purple/pink cosmic
-    ColorSchemeMono              = 5,  // Grayscale with subtle tints
-    ColorSchemeAurora            = 6,  // Northern lights (greens/blues/purples)
-    ColorSchemeVolcanic          = 7,  // Dark with lava accents
-    ColorSchemeNeonCyber         = 8,  // Neon cyberpunk (hot pink/cyan/purple)
-    ColorSchemeNeonSunset        = 9,  // Neon sunset (orange/magenta/violet)
-    ColorSchemeNeonMatrix        = 10, // Neon matrix (bright greens/black)
-    ColorSchemeCount             = 11, // Number of schemes (for bounds checking)
-};
-
 // Maximum gradient stops supported (matches GradientColorSystem.swift)
 #define MAX_GRADIENT_STOPS 8
 
@@ -201,7 +184,6 @@ typedef struct
     int safetyBubbleEnabled;  // Enable safety bubble (0/1)
     float safetyBubbleShape;  // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
     float colorIterations;   // How many iterations contribute to color
-    int useHierarchical;     // 1 = hierarchical coarse/fine, 0 = standard
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)

@@ -78,9 +78,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
     
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
-    private var _preferFoveated: Bool = false        // Legacy flag (no longer mutually exclusive)
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
-    private var _useHierarchical: Bool = true        // Use hierarchical coarse/fine raymarching
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
@@ -117,12 +115,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
-    
-    // Sphere projection mode
-    // 0 = off (normal fractal), 1 = outward projection, 2 = inward projection, 
-    // 3 = intersection highlight, 4 = animated blend, 5 = reverse octree,
-    // 6 = layered depth, 7 = spiral sample
-    private var _sphereProjectionMode: Int = 0
     
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -541,12 +533,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _fractalType = newValue } }
     }
 
-    /// Prefer system foveated rendering over MetalFX upscaling (legacy; now allowed together)
-    var preferFoveated: Bool {
-        get { withLock { _preferFoveated } }
-        set { withLock { _preferFoveated = newValue } }
-    }
-
     // 0 = disabled (standard per-pixel raymarch)
     // 2 = 2x2 tiles (4x overhead reduction, high quality)
     // 4 = 4x4 tiles (16x overhead reduction, performance mode)
@@ -554,11 +540,6 @@ final class RenderSettings: @unchecked Sendable {
     var tileSize: Int {
         get { withLock { _tileSize } }
         set { withLock { _tileSize = newValue } }
-    }
-    
-    var useHierarchical: Bool {
-        get { withLock { _useHierarchical } }
-        set { withLock { _useHierarchical = newValue } }
     }
     
     var debugHierarchical: Bool {
@@ -785,20 +766,6 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleShape: Float {
         get { withLock { _safetyBubbleShape } }
         set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
-    }
-    
-    /// Sphere projection mode
-    /// 0 = off (normal fractal rendering)
-    /// 1 = outward projection (sample fractal from beyond sphere)
-    /// 2 = inward projection (sample fractal from center toward surface)
-    /// 3 = intersection highlight (rim where fractal meets sphere)
-    /// 4 = animated blend (pulsing between sphere and fractal)
-    /// 5 = reverse octree (sample from 8 octant directions, blend)
-    /// 6 = layered depth (multiple depth samples blended)
-    /// 7 = spiral sample (rotating sample position)
-    var sphereProjectionMode: Int {
-        get { withLock { _sphereProjectionMode } }
-        set { withLock { _sphereProjectionMode = max(0, min(7, newValue)) } }
     }
     
     // === COLOR SCHEME SETTINGS ===
@@ -1284,25 +1251,12 @@ final class RenderSettings: @unchecked Sendable {
                 beatIntensity: _beatIntensity,
                 visualizerMode: _visualizerMode,
                 visualizerIntensity: _visualizerIntensity,
-                audioSource: _audioSource,
-                bassSensitivity: _bassSensitivity,
-                midSensitivity: _midSensitivity,
-                trebleSensitivity: _trebleSensitivity,
-                beatSensitivity: _beatSensitivity,
-                fractalAudioReactiveEnabled: _fractalAudioReactiveEnabled,
-                fractalAudioAmount: _fractalAudioAmount,
-                fractalBeatPunch: _fractalBeatPunch,
-                fractalAudioAffectsScale: _fractalAudioAffectsScale,
-                fractalAudioAffectsFolding: _fractalAudioAffectsFolding,
-                fractalAudioAffectsRadius: _fractalAudioAffectsRadius,
-                fractalAudioAffectsColorMix: _fractalAudioAffectsColorMix,
                 foldingLimit: _foldingLimit,
                 sphereRadius: _sphereRadius,
                 colorIterations: _colorIterations,
                 resolutionScale: _resolutionScale,
                 fractalType: _fractalType,
                 tileSize: _tileSize,
-                useHierarchical: _useHierarchical,
                 debugHierarchical: _debugHierarchical,
                 limitFlash: _limitFlash,
                 showHUD: _showHUD,
@@ -1311,12 +1265,8 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
-                sphereProjectionMode: _sphereProjectionMode,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
-                doppelgangerEnabled: _doppelgangerEnabled,
-                doppelgangerPlane: _doppelgangerPlane,
-                doppelgangerOffset: _doppelgangerOffset,
                 geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier

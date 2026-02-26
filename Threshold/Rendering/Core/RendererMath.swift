@@ -27,15 +27,3 @@ func matrix4x4_scale(_ scaleX: Float, _ scaleY: Float, _ scaleZ: Float) -> matri
                                           vector_float4(0, 0, scaleZ, 0),
                                           vector_float4(0, 0, 0, 1)))
 }
-
-func decomposePose(_ m: matrix_float4x4) -> (translation: SIMD3<Float>, rotation: simd_quatf) {
-    let translation = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
-    let rotation = simd_quaternion(m)
-    return (translation, rotation)
-}
-
-func composePose(translation: SIMD3<Float>, rotation: simd_quatf) -> matrix_float4x4 {
-    var mat = matrix_float4x4(rotation)
-    mat.columns.3 = SIMD4<Float>(translation, 1)
-    return mat
-}

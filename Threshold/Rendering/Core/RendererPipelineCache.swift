@@ -83,17 +83,6 @@ extension Renderer {
         }
     }
 
-    /// Precompiles pipelines for a list of presets (e.g., on app launch).
-    /// Call this during loading screen to avoid compilation hitches when switching presets.
-    func precompilePipelines(forPresets presets: [FractalPreset]) {
-        if RENDERER_DEBUG { print("Precompiling \(presets.count) preset pipelines...") }
-        for preset in presets {
-            _ = getPipeline(forPreset: preset, useQuadShared: false)
-            _ = getPipeline(forPreset: preset, useQuadShared: true)
-        }
-        if RENDERER_DEBUG { print("✓ Preset pipeline precompilation complete") }
-    }
-
     /// Precompiles pipelines for all saved presets on app launch.
     /// Runs asynchronously to avoid blocking the main thread.
     func precompilePresetPipelines() async {
@@ -367,14 +356,4 @@ extension Renderer {
         return pipelineCache.count
     }
 
-    /// Returns all cache keys currently in the unified pipeline cache.
-    /// Useful for debugging which pipelines have been compiled.
-    var pipelineCacheKeys: [String] {
-        return Array(pipelineCache.keys).sorted()
-    }
-
-    /// Returns all cache keys currently in the compute pipeline cache.
-    var computePipelineCacheKeys: [String] {
-        return Array(computePipelineCache.keys).sorted()
-    }
 }

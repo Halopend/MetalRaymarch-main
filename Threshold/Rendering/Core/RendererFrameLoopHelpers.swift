@@ -67,9 +67,9 @@ extension Renderer {
 
             Task { @MainActor in
                 defer {
-                    Task {
-                        await self.finishHandTrackingDispatch()
-                    }
+                    // Call directly — finishHandTrackingDispatch is nonisolated
+                    // so it doesn't need to hop back to the Renderer actor.
+                    self.finishHandTrackingDispatch()
                 }
 
                 // Mark tracking as running (for UI diagnostics)
@@ -133,7 +133,7 @@ extension Renderer {
         }
     }
 
-    func finishHandTrackingDispatch() {
+    nonisolated func finishHandTrackingDispatch() {
         isHandTrackingDispatchInFlight = false
     }
 }

@@ -20,25 +20,12 @@ struct RenderSettingsSnapshot {
     let beatIntensity: Float
     let visualizerMode: Int32
     let visualizerIntensity: Float
-    let audioSource: Int32
-    let bassSensitivity: Float
-    let midSensitivity: Float
-    let trebleSensitivity: Float
-    let beatSensitivity: Float
-    let fractalAudioReactiveEnabled: Bool
-    let fractalAudioAmount: Float
-    let fractalBeatPunch: Float
-    let fractalAudioAffectsScale: Bool
-    let fractalAudioAffectsFolding: Bool
-    let fractalAudioAffectsRadius: Bool
-    let fractalAudioAffectsColorMix: Bool
     let foldingLimit: Float
     let sphereRadius: Float
     let colorIterations: Float
     let resolutionScale: Float
     let fractalType: FractalModelType
     let tileSize: Int
-    let useHierarchical: Bool
     let debugHierarchical: Bool
     let limitFlash: Float
     let showHUD: Bool
@@ -47,17 +34,8 @@ struct RenderSettingsSnapshot {
     let safetyBubbleEnabled: Bool
     let safetyBubbleRadius: Float
     let safetyBubbleShape: Float
-    let sphereProjectionMode: Int  // 0=off, 1=outward, 2=inward, 3=intersection, 4=animated, 5=octree, 6=layered, 7=spiral
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // DOPPELGANGER MODE
-    // Pre-fold reflection that creates an exact structural twin of the fractal
-    // ═══════════════════════════════════════════════════════════════════════════
-    let doppelgangerEnabled: Bool
-    let doppelgangerPlane: SIMD3<Float>   // Mirror plane normal (normalized)
-    let doppelgangerOffset: Float         // Signed distance of mirror plane from origin
 
     // ═══════════════════════════════════════════════════════════════════════════
     // GEOMETRY STABILITY STATE

@@ -140,6 +140,10 @@ class SpotifyManager {
     private var pollTask: Task<Void, Never>?
     private var lastTrackId: String?
     private let pollInterval: TimeInterval = 1.0
+    private let libraryPageSize: Int = 50
+    private let playlistTrackPageSize: Int = 100
+    private let maxLibraryItems: Int = 500
+    private let maxPlaylistTracks: Int = 1000
     
     // MARK: - Lifecycle
     
@@ -283,14 +287,13 @@ class SpotifyManager {
         libraryError = nil
 
         do {
-            let tracks = try await api.getSavedTracks(limit: 50)
-            savedTracks = tracks.items
+            async let tracks = fetchAllSavedTracks(api: api)
+            async let playlists = fetchAllPlaylists(api: api)
+            async let albums = fetchAllSavedAlbums(api: api)
 
-            let playlists = try await api.getUserPlaylists(limit: 50)
-            userPlaylists = playlists.items
-
-            let albums = try await api.getSavedAlbums(limit: 50)
-            savedAlbums = albums.items
+            savedTracks = try await tracks
+            userPlaylists = try await playlists
+            savedAlbums = try await albums
         } catch {
             libraryError = error.localizedDescription
         }
@@ -307,11 +310,75 @@ class SpotifyManager {
     func getPlaylistTracks(playlistId: String) async -> [SpotifyTrack] {
         guard isConnected, let api = apiClient else { return [] }
         do {
-            let page = try await api.getPlaylistTracks(playlistId: playlistId, limit: 100)
-            return page.items.compactMap(\.track)
+            var allTracks: [SpotifyTrack] = []
+            var offset = 0
+
+            while allTracks.count < maxPlaylistTracks {
+                let page = try await api.getPlaylistTracks(playlistId: playlistId, limit: playlistTrackPageSize, offset: offset)
+                let newTracks = page.items.compactMap(\.track)
+                allTracks.append(contentsOf: newTracks)
+
+                if page.next == nil || page.items.isEmpty || allTracks.count >= page.total {
+                    break
+                }
+                offset += page.items.count
+            }
+
+            return Array(allTracks.prefix(maxPlaylistTracks))
         } catch {
             return []
         }
+    }
+
+    private func fetchAllSavedTracks(api: SpotifyAPIClient) async throws -> [SpotifySavedTrack] {
+        var allItems: [SpotifySavedTrack] = []
+        var offset = 0
+
+        while allItems.count < maxLibraryItems {
+            let page = try await api.getSavedTracks(limit: libraryPageSize, offset: offset)
+            allItems.append(contentsOf: page.items)
+
+            if page.next == nil || page.items.isEmpty || allItems.count >= page.total {
+                break
+            }
+            offset += page.items.count
+        }
+
+        return Array(allItems.prefix(maxLibraryItems))
+    }
+
+    private func fetchAllPlaylists(api: SpotifyAPIClient) async throws -> [SpotifySimplifiedPlaylist] {
+        var allItems: [SpotifySimplifiedPlaylist] = []
+        var offset = 0
+
+        while allItems.count < maxLibraryItems {
+            let page = try await api.getUserPlaylists(limit: libraryPageSize, offset: offset)
+            allItems.append(contentsOf: page.items)
+
+            if page.next == nil || page.items.isEmpty || allItems.count >= page.total {
+                break
+            }
+            offset += page.items.count
+        }
+
+        return Array(allItems.prefix(maxLibraryItems))
+    }
+
+    private func fetchAllSavedAlbums(api: SpotifyAPIClient) async throws -> [SpotifySavedAlbum] {
+        var allItems: [SpotifySavedAlbum] = []
+        var offset = 0
+
+        while allItems.count < maxLibraryItems {
+            let page = try await api.getSavedAlbums(limit: libraryPageSize, offset: offset)
+            allItems.append(contentsOf: page.items)
+
+            if page.next == nil || page.items.isEmpty || allItems.count >= page.total {
+                break
+            }
+            offset += page.items.count
+        }
+
+        return Array(allItems.prefix(maxLibraryItems))
     }
 
     /// Search for tracks by query string.

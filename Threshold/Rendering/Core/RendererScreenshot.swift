@@ -104,8 +104,6 @@ extension Renderer {
             renderEncoder.setVertexBuffer(buffer.buffer, offset: buffer.offset, index: index)
         }
 
-        renderEncoder.setFragmentTexture(cubeMap, index: TextureIndex.color.rawValue)
-
         for submesh in mesh.submeshes {
             renderEncoder.drawIndexedPrimitives(type: submesh.primitiveType,
                                                 indexCount: submesh.indexCount,
