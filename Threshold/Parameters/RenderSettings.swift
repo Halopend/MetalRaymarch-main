@@ -145,6 +145,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _bloomEffect: BloomEffect = .off
     private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     private var _gradientCycleEffect: GradientCycleEffect = .off
+    private var _polarRotationEffect: PolarRotationEffect = .off
+    private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
     
     // === DOPPELGANGER MODE ===
     private var _doppelgangerEnabled: Bool = false              // Pre-fold mirror creates structural twin
@@ -1035,6 +1037,17 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
     }
+
+    /// Polar rotation effect (animates polar angle for Mandelbulb / Quaternion Julia)
+    var polarRotationEffect: PolarRotationEffect {
+        get { withLock { _polarRotationEffect } }
+        set {
+            withLock {
+                _polarRotationEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
+    }
     
     // === DOPPELGANGER MODE ===
     
@@ -1114,6 +1127,11 @@ final class RenderSettings: @unchecked Sendable {
         withLock {
             // Update animation time
             _colorAnimTime += deltaTime
+
+            // Accumulate polar rotation angle when enabled and fractal supports it
+            if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
+                _polarRotationAccum += deltaTime * _polarRotationEffect.speed * _polarRotationEffect.amplitude
+            }
             
             // Handle ongoing transition
             if _colorSchemeTransitionProgress < 1.0 {
@@ -1248,7 +1266,28 @@ final class RenderSettings: @unchecked Sendable {
     /// Get a snapshot of render-critical settings in a single lock.
     func snapshot() -> RenderSettingsSnapshot {
         return withLock {
-            RenderSettingsSnapshot(
+            // Apply animated polar rotation offset into a local copy of formulaParams
+            var fp = _formulaParams
+            if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
+                switch _fractalType {
+                case .mandelbulb:
+                    // params[4] = PolarRotation — add accumulated anim offset to user's static value
+                    let base = FormulaCatalog.getParam(fp, index: 4)
+                    FormulaCatalog.setParam(&fp, index: 4, value: base + _polarRotationAccum)
+                case .quaternionJulia:
+                    // Rotate the C-constant through the (x,y) plane of quaternion space
+                    let cx = FormulaCatalog.getParam(fp, index: 0)
+                    let cy = FormulaCatalog.getParam(fp, index: 1)
+                    let cosA = cos(_polarRotationAccum)
+                    let sinA = sin(_polarRotationAccum)
+                    FormulaCatalog.setParam(&fp, index: 0, value: cx * cosA - cy * sinA)
+                    FormulaCatalog.setParam(&fp, index: 1, value: cx * sinA + cy * cosA)
+                default:
+                    break
+                }
+            }
+
+            return RenderSettingsSnapshot(
                 minDistance: _minDistance,
                 scale: _scale,
                 position: _position,
@@ -1270,7 +1309,7 @@ final class RenderSettings: @unchecked Sendable {
                 colorIterations: _colorIterations,
                 resolutionScale: _resolutionScale,
                 fractalType: _fractalType,
-                formulaParams: _formulaParams,
+                formulaParams: fp,
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 limitFlash: _limitFlash,

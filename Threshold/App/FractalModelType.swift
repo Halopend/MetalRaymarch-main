@@ -82,6 +82,32 @@ enum FractalModelType: Int32, Codable, CaseIterable {
             return "Julia Box"
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // EFFECT TAGS — Associates effects with compatible fractal types.
+    // Universal effects (hue, pulse, glow, bloom, fog, gradientCycle) apply to
+    // every fractal. Geometry-specific effects like polarRotation are restricted.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// The set of universal effect tags shared by all fractal types.
+    private static let universalTags: Set<EffectTag> = [
+        .hueRotation, .pulse, .glow, .bloom, .fog, .gradientCycle
+    ]
+
+    /// Effects this fractal type supports. UI should hide cards for unsupported tags.
+    var supportedEffectTags: Set<EffectTag> {
+        switch self {
+        case .mandelbulb, .quaternionJulia:
+            return Self.universalTags.union([.polarRotation])
+        default:
+            return Self.universalTags
+        }
+    }
+
+    /// Quick check whether a given effect tag is meaningful for this fractal.
+    func supports(_ tag: EffectTag) -> Bool {
+        supportedEffectTags.contains(tag)
+    }
     
     /// Build default FormulaParams for non-Mandelbox types
     func defaultFormulaParams() -> FormulaParams {

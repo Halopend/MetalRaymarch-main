@@ -55,6 +55,7 @@ final class UISettingsCache {
     var bloomEffect: BloomEffect = .off
     var fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     var gradientCycleEffect: GradientCycleEffect = .off
+    var polarRotationEffect: PolarRotationEffect = .off
     
     // === SAVED CUSTOM GRADIENTS (persisted via UserDefaults) ===
     var savedCustomGradients: [GradientColorMap] = UISettingsCache.loadSavedGradients()
@@ -249,6 +250,7 @@ final class UISettingsCache {
         bloomEffect = settings.bloomEffect
         fogEffect = settings.fogEffect
         gradientCycleEffect = settings.gradientCycleEffect
+        polarRotationEffect = settings.polarRotationEffect
         lightingMode = settings.lightingMode
         lightingSoftness = settings.lightingSoftness
         bassSensitivity = settings.bassSensitivity
@@ -356,5 +358,6 @@ final class UISettingsCache {
         bloomEffect = settings.bloomEffect
         fogEffect = settings.fogEffect
         gradientCycleEffect = settings.gradientCycleEffect
+        polarRotationEffect = settings.polarRotationEffect
     }
 }

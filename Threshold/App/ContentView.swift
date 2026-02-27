@@ -895,6 +895,26 @@ struct ContentView: View {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+
+            // ── Polar Rotation (fractal-specific) ──
+            if cache.fractalType.supports(.polarRotation) {
+                VStack(spacing: 4) {
+                    EffectSliderRow(icon: "arrow.trianglehead.counterclockwise.rotate.90", label: "Polar Speed",
+                        value: Binding(get: { cache.polarRotationEffect.speed }, set: { cache.polarRotationEffect.speed = $0 }),
+                        range: 0...1,
+                        enabled: Binding(get: { cache.polarRotationEffect.enabled }, set: { cache.polarRotationEffect.enabled = $0 }),
+                        onChanged: { cache.push(\.polarRotationEffect, value: cache.polarRotationEffect) })
+                    EffectSliderRow(icon: "dial.medium", label: "Polar Amplitude",
+                        value: Binding(get: { cache.polarRotationEffect.amplitude }, set: { cache.polarRotationEffect.amplitude = $0 }),
+                        range: 0...2,
+                        enabled: Binding(get: { cache.polarRotationEffect.enabled }, set: { cache.polarRotationEffect.enabled = $0 }),
+                        onChanged: { cache.push(\.polarRotationEffect, value: cache.polarRotationEffect) },
+                        showToggle: false)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
     }
     

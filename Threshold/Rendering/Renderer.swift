@@ -44,6 +44,7 @@ actor Renderer {
     var lastComputePipelineKey: String = ""
     
     // === COMPUTE PIPELINE SELECTION FAST-PATH ===
+    var lastComputeFT: Int32 = -1
     var lastComputeFI: Int = -1
     var lastComputeRS: Int = -1
     var lastSelectedComputePipeline: MTLComputePipelineState?

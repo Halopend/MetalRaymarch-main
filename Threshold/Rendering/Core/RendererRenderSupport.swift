@@ -54,9 +54,11 @@ extension Renderer {
         let frameMs = frameTimeSeconds * 1000.0
 
 #if DEBUG
+        let benchFractalType: Int = Int(settingsSnapshot.fractalType.rawValue)
+        let benchFractalName: String = settingsSnapshot.fractalType.displayName
         BenchmarkManager.shared.recordSample(
-            fractalType: Int(settingsSnapshot.fractalType),
-            fractalName: FractalModelType(rawValue: settingsSnapshot.fractalType)?.displayName ?? "Unknown",
+            fractalType: benchFractalType,
+            fractalName: benchFractalName,
             gpuMs: gpuMs,
             cpuMs: cpuEncodeMs,
             frameTimeMs: frameMs

@@ -10,6 +10,35 @@
 import Foundation
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// MARK: - Effect Tags (Fractal-Effect Association)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Each tag identifies an effect category. Fractal types declare which tags they
+// support, allowing the UI to show/hide effect cards based on the active fractal.
+
+/// Identifies a modular lighting/shape effect for fractal-type association.
+enum EffectTag: String, Codable, CaseIterable {
+    case hueRotation      = "HUE"       // Color cycling — universal
+    case pulse            = "PLS"       // Rhythmic brightness — universal
+    case glow             = "GLW"       // Ray-step glow — universal
+    case bloom            = "BLM"       // Bright-area bleed — universal
+    case fog              = "FOG"       // Distance fog — universal
+    case gradientCycle    = "GRC"       // Gradient offset animation — universal
+    case polarRotation    = "POL"       // Polar/spherical rotation animation — Mandelbulb, Quaternion Julia
+
+    var displayName: String {
+        switch self {
+        case .hueRotation:   return "Hue Rotation"
+        case .pulse:         return "Pulse"
+        case .glow:          return "Glow"
+        case .bloom:         return "Bloom"
+        case .fog:           return "Fog"
+        case .gradientCycle: return "Gradient Cycle"
+        case .polarRotation: return "Polar Rotation"
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - LightingEffect Protocol
 // ═══════════════════════════════════════════════════════════════════════════════
 // All lighting effects share a common toggle + primary-value pattern.
@@ -199,6 +228,37 @@ struct GradientCycleEffect: LightingEffect {
     
     static var fast: GradientCycleEffect {
         GradientCycleEffect(enabled: true, speed: 0.4, smoothLoop: true)
+    }
+}
+
+/// Polar rotation effect — animates the polar angle offset for spherical-coordinate fractals
+/// (Mandelbulb) and rotates the quaternion C-constant plane (Quaternion Julia).
+/// Only meaningful for fractal types that declare `.polarRotation` in their supported tags.
+struct PolarRotationEffect: LightingEffect {
+    var enabled: Bool = false
+    var speed: Float = 0.15         // Rotation speed in radians/second (0–1)
+    var amplitude: Float = 1.0      // Multiplier on the rotation angle (0–2, 1 = full sweep)
+
+    var primaryValue: Float {
+        get { speed }
+        set { speed = newValue }
+    }
+    static let primaryLabel = "Speed"
+
+    static var off: PolarRotationEffect {
+        PolarRotationEffect(enabled: false, speed: 0.0, amplitude: 0.0)
+    }
+
+    static var slow: PolarRotationEffect {
+        PolarRotationEffect(enabled: true, speed: 0.08, amplitude: 0.6)
+    }
+
+    static var medium: PolarRotationEffect {
+        PolarRotationEffect(enabled: true, speed: 0.15, amplitude: 1.0)
+    }
+
+    static var fast: PolarRotationEffect {
+        PolarRotationEffect(enabled: true, speed: 0.4, amplitude: 1.5)
     }
 }
 

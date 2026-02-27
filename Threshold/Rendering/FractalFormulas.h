@@ -113,10 +113,12 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
             
-            float sTheta, cTheta;
-            sincos(theta * power, sTheta, cTheta);
-            float sPhi, cPhi;
-            sincos(phi * power, sPhi, cPhi);
+            float thetaP = theta * power;
+            float sTheta = sin(thetaP);
+            float cTheta = cos(thetaP);
+            float phiP = phi * power;
+            float sPhi = sin(phiP);
+            float cPhi = cos(phiP);
             
             z = rn * float3(sTheta * cPhi,
                             sTheta * sPhi,
@@ -128,10 +130,12 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
             
-            float sTheta, cTheta;
-            sincos(theta * power, sTheta, cTheta);
-            float sPhi, cPhi;
-            sincos(phi * power, sPhi, cPhi);
+            float thetaP = theta * power;
+            float sTheta = sin(thetaP);
+            float cTheta = cos(thetaP);
+            float phiP = phi * power;
+            float sPhi = sin(phiP);
+            float cPhi = cos(phiP);
             
             z = rn * float3(cTheta * cPhi,
                             cTheta * sPhi,
@@ -180,10 +184,12 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
-            float sTheta, cTheta;
-            sincos(theta * power, sTheta, cTheta);
-            float sPhi, cPhi;
-            sincos(phi * power, sPhi, cPhi);
+            float thetaP = theta * power;
+            float sTheta = sin(thetaP);
+            float cTheta = cos(thetaP);
+            float phiP = phi * power;
+            float sPhi = sin(phiP);
+            float cPhi = cos(phiP);
             z = rn * float3(sTheta * cPhi,
                             sTheta * sPhi,
                             cTheta);
@@ -192,10 +198,12 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
-            float sTheta, cTheta;
-            sincos(theta * power, sTheta, cTheta);
-            float sPhi, cPhi;
-            sincos(phi * power, sPhi, cPhi);
+            float thetaP = theta * power;
+            float sTheta = sin(thetaP);
+            float cTheta = cos(thetaP);
+            float phiP = phi * power;
+            float sPhi = sin(phiP);
+            float cPhi = cos(phiP);
             z = rn * float3(cTheta * cPhi,
                             cTheta * sPhi,
                             sTheta);

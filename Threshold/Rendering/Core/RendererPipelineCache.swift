@@ -250,11 +250,13 @@ extension Renderer {
     /// - Parameters:
     ///   - library: The default Metal library
     ///   - kernelName: Compute kernel function name
+    ///   - fractalType: Optional FC_FRACTAL_TYPE value to bake in (devirtualizes fractal dispatch)
     ///   - fractalIterations: FC_FRACTAL_ITERATIONS value to bake in
     ///   - shadowIterations: FC_SHADOW_ITERATIONS value to bake in
     ///   - maxRaySteps: FC_MAX_RAY_STEPS value to bake in
     /// - Returns: Specialized compute pipeline, or nil on failure
     static func buildComputePipeline(device: MTLDevice, library: MTLLibrary, kernelName: String,
+                                     fractalType: Int32? = nil,
                                      fractalIterations: Int32, shadowIterations: Int32, maxRaySteps: Int32) -> MTLComputePipelineState? {
         let constants = MTLFunctionConstantValues()
         var fi = fractalIterations
@@ -264,6 +266,9 @@ extension Renderer {
         var hud: Bool = false
         var neon: Bool = false
 
+        if var type = fractalType {
+            constants.setConstantValue(&type, type: .int, index: FunctionConstantIndex.fractalType.rawValue)
+        }
         constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
         constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
         constants.setConstantValue(&rs, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)

@@ -312,6 +312,49 @@ struct LightingEffectsSection: View {
                     }
                 })
             }
+
+            // ── Fractal-Specific Effects ─────────────────────────────────
+            // These cards only appear when the active fractal supports them.
+
+            if cache.fractalType.supports(.polarRotation) {
+                LightingEffectCard(
+                    title: "Polar Rotation",
+                    icon: "arrow.trianglehead.counterclockwise.rotate.90",
+                    enabled: polarRotationEnabledBinding,
+                    onToggle: {
+                        cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                    }
+                ) {
+                    VStack(spacing: 6) {
+                        HStack {
+                            Text("Speed")
+                            Spacer()
+                            Text("\(cache.polarRotationEffect.speed, specifier: "%.2f")")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: polarRotationSpeedBinding, in: 0...1, onEditingChanged: { editing in
+                            if !editing {
+                                cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                            }
+                        })
+
+                        HStack {
+                            Text("Amplitude")
+                            Spacer()
+                            Text("\(cache.polarRotationEffect.amplitude, specifier: "%.2f")")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: polarRotationAmplitudeBinding, in: 0...2, onEditingChanged: { editing in
+                            if !editing {
+                                cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                            }
+                        })
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
     }
     
@@ -412,6 +455,29 @@ struct LightingEffectsSection: View {
         Binding(
             get: { cache.gradientCycleEffect.speed },
             set: { cache.gradientCycleEffect.speed = $0 }
+        )
+    }
+
+    // MARK: - Polar Rotation bindings
+
+    private var polarRotationEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { cache.polarRotationEffect.enabled },
+            set: { cache.polarRotationEffect.enabled = $0 }
+        )
+    }
+
+    private var polarRotationSpeedBinding: Binding<Float> {
+        Binding(
+            get: { cache.polarRotationEffect.speed },
+            set: { cache.polarRotationEffect.speed = $0 }
+        )
+    }
+
+    private var polarRotationAmplitudeBinding: Binding<Float> {
+        Binding(
+            get: { cache.polarRotationEffect.amplitude },
+            set: { cache.polarRotationEffect.amplitude = $0 }
         )
     }
 }
