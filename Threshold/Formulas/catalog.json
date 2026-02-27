@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "formulas": [
+    {
+      "id": "mandelbox",
+      "name": "Mandelbox",
+      "fractalType": 0,
+      "category": "Box Folds",
+      "description": "Classic Mandelbox — uses dedicated box/sphere fold path.",
+      "usesMandelboxParams": true,
+      "params": []
+    },
+    {
+      "id": "mandelbulb",
+      "name": "Mandelbulb",
+      "fractalType": 1,
+      "category": "Power / Quaternion",
+      "description": "Power-based 3D Mandelbrot. Higher powers produce more lobes.",
+      "params": [
+        { "index": 0, "name": "Power",         "default": 8.0,   "min": 2.0,   "max": 32.0,  "step": 0.5  },
+        { "index": 1, "name": "Bailout",        "default": 4.0,   "min": 1.0,   "max": 64.0,  "step": 1.0  },
+        { "index": 2, "name": "DerivBias",      "default": 1.0,   "min": 0.01,  "max": 4.0,   "step": 0.1  },
+        { "index": 3, "name": "AlternateVer",   "default": 0,     "min": 0,     "max": 1,     "step": 1,   "isBool": true },
+        { "index": 4, "name": "PolarRotation",  "default": 0,     "min": -3.14, "max": 3.14,  "step": 0.01 },
+        { "index": 8, "name": "Julia",          "default": 0,     "min": 0,     "max": 1,     "step": 1,   "isBool": true },
+        { "index": 9, "name": "JuliaC.x",       "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 },
+        { "index": 10, "name": "JuliaC.y",      "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 },
+        { "index": 11, "name": "JuliaC.z",      "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 }
+      ]
+    },
+    {
+      "id": "menger",
+      "name": "Menger Sponge",
+      "fractalType": 2,
+      "category": "Kaleidoscopic IFS",
+      "description": "Classic Menger sponge — recursive box with cross-shaped holes.",
+      "params": [
+        { "index": 0, "name": "Scale",    "default": 3.0, "min": 1.0, "max": 6.0,  "step": 0.1 },
+        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
+        { "index": 2, "name": "Offset.y", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
+        { "index": 3, "name": "Offset.z", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 }
+      ]
+    },
+    {
+      "id": "sierpinski",
+      "name": "Sierpinski",
+      "fractalType": 3,
+      "category": "Kaleidoscopic IFS",
+      "description": "Sierpinski tetrahedron — iterated fold-and-scale.",
+      "params": [
+        { "index": 0, "name": "Scale",    "default": 2.0, "min": 1.0, "max": 6.0,  "step": 0.1 },
+        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
+        { "index": 2, "name": "Offset.y", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
+        { "index": 3, "name": "Offset.z", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 }
+      ]
+    },
+    {
+      "id": "dodecahedron",
+      "name": "Dodecahedron",
+      "fractalType": 4,
+      "category": "Kaleidoscopic IFS",
+      "description": "Dodecahedron IFS — golden-ratio symmetry folds.",
+      "params": [
+        { "index": 0, "name": "Scale",         "default": 2.0,   "min": 1.0,  "max": 6.0,  "step": 0.1 },
+        { "index": 1, "name": "Phi",           "default": 1.618, "min": 0.5,  "max": 3.0,  "step": 0.01 },
+        { "index": 2, "name": "Log10Bailout",  "default": 2.0,   "min": 0.5,  "max": 6.0,  "step": 0.5 }
+      ]
+    },
+    {
+      "id": "pseudoKleinian",
+      "name": "Pseudo Kleinian",
+      "fractalType": 5,
+      "category": "Julia Box",
+      "description": "Pseudo-Kleinian lattice — box folds with conditional plane offsets.",
+      "params": [
+        { "index": 0,  "name": "Size",       "default": 1.0,  "min": 0.1, "max": 4.0,  "step": 0.05 },
+        { "index": 1,  "name": "CSize.x",    "default": 0.8,  "min": 0.0, "max": 2.0,  "step": 0.05 },
+        { "index": 2,  "name": "CSize.y",    "default": 0.8,  "min": 0.0, "max": 2.0,  "step": 0.05 },
+        { "index": 3,  "name": "CSize.z",    "default": 1.3,  "min": 0.0, "max": 2.0,  "step": 0.05 },
+        { "index": 4,  "name": "C.x",        "default": 0,    "min": -2.0, "max": 2.0, "step": 0.05 },
+        { "index": 5,  "name": "C.y",        "default": 0,    "min": -2.0, "max": 2.0, "step": 0.05 },
+        { "index": 6,  "name": "C.z",        "default": 0,    "min": -2.0, "max": 2.0, "step": 0.05 },
+        { "index": 7,  "name": "DEoffset",   "default": 0,    "min": -1.0, "max": 1.0, "step": 0.01 },
+        { "index": 8,  "name": "Offset.x",   "default": 0,    "min": -2.0, "max": 2.0, "step": 0.05 },
+        { "index": 9,  "name": "Offset.y",   "default": 0,    "min": -2.0, "max": 2.0, "step": 0.05 },
+        { "index": 10, "name": "Offset.z",   "default": -1.0, "min": -2.0, "max": 2.0, "step": 0.05 }
+      ]
+    },
+    {
+      "id": "quaternionJulia",
+      "name": "Quaternion Julia",
+      "fractalType": 6,
+      "category": "Power / Quaternion",
+      "description": "4D quaternion Julia set sliced in 3D.",
+      "params": [
+        { "index": 0, "name": "C.x",       "default": -0.2, "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 1, "name": "C.y",       "default": 0.8,  "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 2, "name": "C.z",       "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 3, "name": "C.w",       "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 4, "name": "Threshold", "default": 10.0, "min": 1.0,  "max": 100.0, "step": 1.0 }
+      ]
+    },
+    {
+      "id": "amazingSurface",
+      "name": "Amazing Surface",
+      "fractalType": 7,
+      "category": "Box Folds",
+      "description": "Amazing Surface / Mandelbox variant with fold modes.",
+      "params": [
+        { "index": 0,  "name": "Scale",            "default": 2.0,  "min": -4.0, "max": 4.0,  "step": 0.1 },
+        { "index": 1,  "name": "MinRad2",          "default": 0.25, "min": 0.01, "max": 2.0,  "step": 0.01 },
+        { "index": 2,  "name": "FoldType",         "default": 0,    "min": 0,    "max": 2,    "step": 1    },
+        { "index": 3,  "name": "FoldValues.x",     "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 4,  "name": "FoldValues.y",     "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 5,  "name": "PreTranslation.x", "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 6,  "name": "PreTranslation.y", "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 7,  "name": "PreTranslation.z", "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 8,  "name": "Julia",            "default": 0,    "min": 0,    "max": 1,    "step": 1,   "isBool": true },
+        { "index": 9,  "name": "JuliaC.x",         "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 10, "name": "JuliaC.y",         "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 11, "name": "JuliaC.z",         "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.01 }
+      ]
+    },
+    {
+      "id": "pseudoKnightyan",
+      "name": "Pseudo Knightyan",
+      "fractalType": 8,
+      "category": "Julia Box",
+      "description": "Pseudo-Knightyan — conditional fold lattice with twist.",
+      "params": [
+        { "index": 0, "name": "CSize.x",     "default": 0.82, "min": 0.0, "max": 2.0,   "step": 0.01 },
+        { "index": 1, "name": "CSize.y",     "default": 0.92, "min": 0.0, "max": 2.0,   "step": 0.01 },
+        { "index": 2, "name": "CSize.z",     "default": 0.78, "min": 0.0, "max": 2.0,   "step": 0.01 },
+        { "index": 3, "name": "Size",        "default": 1.0,  "min": 0.1, "max": 4.0,   "step": 0.05 },
+        { "index": 4, "name": "DEfactor",    "default": 1.0,  "min": 0.01, "max": 4.0,  "step": 0.1  },
+        { "index": 5, "name": "TwiddleRXY",  "default": 0.13, "min": -1.0, "max": 1.0,  "step": 0.01 }
+      ]
+    },
+    {
+      "id": "mandalayBox",
+      "name": "Mandalay Box",
+      "fractalType": 9,
+      "category": "Box Folds",
+      "description": "Mandalay Box — scale/fold hybrid with Julia option.",
+      "params": [
+        { "index": 0,  "name": "Scale",     "default": -1.77, "min": -4.0, "max": 4.0,  "step": 0.1  },
+        { "index": 1,  "name": "MinRad2",   "default": 0.42,  "min": 0.01, "max": 2.0,  "step": 0.01 },
+        { "index": 2,  "name": "DoBoxFold", "default": 0,     "min": 0,    "max": 1,    "step": 1,   "isBool": true },
+        { "index": 3,  "name": "fo.x",      "default": 1.0,   "min": -2.0, "max": 4.0,  "step": 0.05 },
+        { "index": 4,  "name": "fo.y",      "default": 1.0,   "min": -2.0, "max": 4.0,  "step": 0.05 },
+        { "index": 5,  "name": "fo.z",      "default": 1.0,   "min": -2.0, "max": 4.0,  "step": 0.05 },
+        { "index": 6,  "name": "g.x",       "default": 0,     "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 7,  "name": "g.y",       "default": 0,     "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 8,  "name": "g.z",       "default": 0,     "min": -2.0, "max": 2.0,  "step": 0.05 },
+        { "index": 9,  "name": "Serial",    "default": 0,     "min": 0,    "max": 1,    "step": 1,   "isBool": true },
+        { "index": 10, "name": "Julia",     "default": 0,     "min": 0,    "max": 1,    "step": 1,   "isBool": true },
+        { "index": 11, "name": "JuliaC.x",  "default": 0,     "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 12, "name": "JuliaC.y",  "default": 0,     "min": -2.0, "max": 2.0,  "step": 0.01 },
+        { "index": 13, "name": "JuliaC.z",  "default": 0,     "min": -2.0, "max": 2.0,  "step": 0.01 }
+      ]
+    },
+    {
+      "id": "sphereSponge",
+      "name": "Sphere Sponge",
+      "fractalType": 10,
+      "category": "Julia Box",
+      "description": "Sphere Sponge — recursive sphere inversions.",
+      "params": [
+        { "index": 0, "name": "Scale",      "default": 2.0, "min": 1.0, "max": 6.0, "step": 0.1 },
+        { "index": 1, "name": "BubbleSize", "default": 3.0, "min": 0.5, "max": 10.0, "step": 0.1 }
+      ]
+    },
+    {
+      "id": "octahedron",
+      "name": "Octahedron",
+      "fractalType": 11,
+      "category": "Kaleidoscopic IFS",
+      "description": "Octahedron IFS — abs folds with scale + offset.",
+      "params": [
+        { "index": 0, "name": "Scale",    "default": 2.0, "min": 1.0, "max": 6.0,  "step": 0.1  },
+        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
+        { "index": 2, "name": "Offset.y", "default": 0,   "min": 0.0, "max": 4.0,  "step": 0.05 },
+        { "index": 3, "name": "Offset.z", "default": 0,   "min": 0.0, "max": 4.0,  "step": 0.05 }
+      ]
+    },
+    {
+      "id": "icosahedron",
+      "name": "Icosahedron",
+      "fractalType": 12,
+      "category": "Kaleidoscopic IFS",
+      "description": "Icosahedron IFS — golden-ratio + five-fold symmetry folds.",
+      "params": [
+        { "index": 0, "name": "Scale",    "default": 2.0,   "min": 1.0,  "max": 6.0,  "step": 0.1  },
+        { "index": 1, "name": "Phi",      "default": 1.618, "min": 0.5,  "max": 3.0,  "step": 0.01 },
+        { "index": 2, "name": "Offset.x", "default": 1.0,   "min": 0.0,  "max": 4.0,  "step": 0.05 },
+        { "index": 3, "name": "Offset.y", "default": 0,     "min": 0.0,  "max": 4.0,  "step": 0.05 },
+        { "index": 4, "name": "Offset.z", "default": 0,     "min": 0.0,  "max": 4.0,  "step": 0.05 }
+      ]
+    },
+    {
+      "id": "surfaceKIFS",
+      "name": "Surface KIFS",
+      "fractalType": 13,
+      "category": "Julia Box",
+      "description": "Surface KIFS — kaleidoscopic IFS with rotation matrix.",
+      "params": [
+        { "index": 0,  "name": "Scale",       "default": 1.7,  "min": 0.5,  "max": 4.0,   "step": 0.05 },
+        { "index": 1,  "name": "Fold.x",      "default": 0,    "min": -2.0, "max": 2.0,   "step": 0.05 },
+        { "index": 2,  "name": "Fold.y",      "default": 0,    "min": -2.0, "max": 2.0,   "step": 0.05 },
+        { "index": 3,  "name": "Fold.z",      "default": 0,    "min": -2.0, "max": 2.0,   "step": 0.05 },
+        { "index": 4,  "name": "Julia.x",     "default": -2.0, "min": -4.0, "max": 4.0,   "step": 0.05 },
+        { "index": 5,  "name": "Julia.y",     "default": -2.0, "min": -4.0, "max": 4.0,   "step": 0.05 },
+        { "index": 6,  "name": "Julia.z",     "default": -0.5, "min": -4.0, "max": 4.0,   "step": 0.05 },
+        { "index": 7,  "name": "RotVector.x", "default": 0,    "min": -1.0, "max": 1.0,   "step": 0.05 },
+        { "index": 8,  "name": "RotVector.y", "default": 0,    "min": -1.0, "max": 1.0,   "step": 0.05 },
+        { "index": 9,  "name": "RotVector.z", "default": 1.0,  "min": -1.0, "max": 1.0,   "step": 0.05 },
+        { "index": 10, "name": "RotAngle",    "default": 40.0, "min": 0,    "max": 360.0, "step": 1    }
+      ]
+    },
+    {
+      "id": "mengerSphere",
+      "name": "Menger Sphere",
+      "fractalType": 14,
+      "category": "Kaleidoscopic IFS",
+      "description": "Menger Sphere — menger folds with optional spherification.",
+      "params": [
+        { "index": 0, "name": "Scale",    "default": 3.0, "min": 1.0, "max": 6.0, "step": 0.1  },
+        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05 },
+        { "index": 2, "name": "Offset.y", "default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05 },
+        { "index": 3, "name": "Offset.z", "default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05 },
+        { "index": 4, "name": "Spherify", "default": 0,   "min": 0,   "max": 1,   "step": 1,   "isBool": true }
+      ]
+    }
+  ]
+}

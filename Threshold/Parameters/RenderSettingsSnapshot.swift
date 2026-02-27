@@ -25,6 +25,7 @@ struct RenderSettingsSnapshot {
     let colorIterations: Float
     let resolutionScale: Float
     let fractalType: FractalModelType
+    let formulaParams: FormulaParams
     let tileSize: Int
     let debugHierarchical: Bool
     let limitFlash: Float

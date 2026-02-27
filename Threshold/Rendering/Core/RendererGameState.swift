@@ -102,6 +102,7 @@ extension Renderer {
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
                             gestureSpread: settingsSnapshot.gestureSpread,
                             fractalType: settingsSnapshot.fractalType.rawValue,
+                            formulaParams: settingsSnapshot.formulaParams,
                             lightingMode: settingsSnapshot.lightingMode.rawValue,
                             audioLevel: settingsSnapshot.audioLevel,
                             bassLevel: settingsSnapshot.bassLevel,

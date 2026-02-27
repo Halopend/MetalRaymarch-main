@@ -78,6 +78,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
     
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
+    private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
@@ -530,7 +531,20 @@ final class RenderSettings: @unchecked Sendable {
     
     var fractalType: FractalModelType {
         get { withLock { _fractalType } }
-        set { withLock { _fractalType = newValue } }
+        set {
+            withLock {
+                _fractalType = newValue
+                // Auto-set default formula params when switching types
+                if !newValue.usesMandelboxParams {
+                    _formulaParams = newValue.defaultFormulaParams()
+                }
+            }
+        }
+    }
+
+    var formulaParams: FormulaParams {
+        get { withLock { _formulaParams } }
+        set { withLock { _formulaParams = newValue } }
     }
 
     // 0 = disabled (standard per-pixel raymarch)
@@ -1256,6 +1270,7 @@ final class RenderSettings: @unchecked Sendable {
                 colorIterations: _colorIterations,
                 resolutionScale: _resolutionScale,
                 fractalType: _fractalType,
+                formulaParams: _formulaParams,
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 limitFlash: _limitFlash,

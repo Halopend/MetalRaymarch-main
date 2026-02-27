@@ -1058,6 +1058,7 @@ actor Renderer {
             debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
             limitFlash: settingsSnapshot.limitFlash,
             fractalType: settingsSnapshot.fractalType.rawValue,
+            formulaParams: settingsSnapshot.formulaParams,
             lightingMode: settingsSnapshot.lightingMode.rawValue,
             audioLevel: settingsSnapshot.audioLevel,
             bassLevel: settingsSnapshot.bassLevel,

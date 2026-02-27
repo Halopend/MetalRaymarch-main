@@ -58,7 +58,31 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
 typedef NS_ENUM(EnumBackingType, FractalType)
 {
     FractalTypeMandelbox         = 0,
+    FractalTypeMandelbulb        = 1,
+    FractalTypeMenger            = 2,
+    FractalTypeSierpinski        = 3,
+    FractalTypeDodecahedron      = 4,
+    FractalTypePseudoKleinian    = 5,
+    FractalTypeQuaternionJulia   = 6,
+    FractalTypeAmazingSurface    = 7,
+    FractalTypePseudoKnightyan   = 8,
+    FractalTypeMandalayBox       = 9,
+    FractalTypeSphereSponge      = 10,
+    FractalTypeOctahedron        = 11,
+    FractalTypeIcosahedron       = 12,
+    FractalTypeSurfaceKIFS       = 13,
+    FractalTypeMengerSphere      = 14,
 };
+
+// === FORMULA PARAMETERS ===
+// Generic parameter block for non-Mandelbox fractal formulas.
+// 16 float slots + 2 rotation matrices, bridging Swift ↔ GPU.
+typedef struct
+{
+    float params[16];                  // Up to 16 formula-specific parameters
+    matrix_float3x3 rotMatrix1;        // Primary rotation matrix
+    matrix_float3x3 rotMatrix2;        // Secondary rotation matrix (IFS types)
+} FormulaParams;
 
 // Maximum gradient stops supported (matches GradientColorSystem.swift)
 #define MAX_GRADIENT_STOPS 8
@@ -188,7 +212,8 @@ typedef struct
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
     float gestureSpread;     // Normalized hand spread distance (0-1) for debug visualization
-    int fractalType;         // 0=Mandelbox (only supported type)
+    int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
+    FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     int lightingMode;        // 0=static, 1=animated, 2=audio-reactive, 3=visualizer
     float audioLevel;        // Audio level for reactive lighting (0-1)
     // === PER-BAND AUDIO (expanded for visualizer) ===
@@ -250,7 +275,8 @@ typedef struct
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
-    int fractalType;             // 0=Mandelbox (only supported type)
+    int fractalType;             // 0=Mandelbox, 1-14=formula types (see FractalType enum)
+    FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     int lightingMode;            // 0=static, 1=animated, 2=audio-reactive, 3=visualizer
     float audioLevel;            // Audio level for reactive lighting (0-1)
     // === PER-BAND AUDIO (expanded for visualizer) ===
