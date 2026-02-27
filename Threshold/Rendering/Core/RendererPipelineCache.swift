@@ -41,9 +41,10 @@ extension Renderer {
         // Build cache key matching the preset format
         let colorIters = appModel.renderSettings.colorIterations  // Direct read (own lock) — avoids full snapshot
         let colorScheme = appModel.renderSettings.colorScheme  // Read directly - not in snapshot
+        let fractalType = appModel.renderSettings.fractalType
         let neon = colorScheme.rawValue >= 8 ? 1 : 0  // neonCyber, neonSunset, neonMatrix
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
 
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -59,11 +60,12 @@ extension Renderer {
             qualityMode: qualityMode,
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
+            fractalType: fractalType.rawValue,
             neonModeEnabled: neon == 1,
             colorIterations: Int32(colorIters)  // Use actual color iterations, not fractal iterations
         )
 
-        print("🔧 [ShaderCompilation] Building pipeline for FI=\(iterations) RS=\(raySteps)...")
+        print("🔧 [ShaderCompilation] Building pipeline for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)...")
 
         do {
             let pipeline = try Renderer.buildSpecializedPipeline(
@@ -75,10 +77,10 @@ extension Renderer {
                 fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
             )
             pipelineCache[cacheKey] = pipeline
-            print("✅ [ShaderCompilation] Ready: FI=\(iterations) RS=\(raySteps)")
+            print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)")
             return pipeline
         } catch {
-            print("❌ [ShaderCompilation] FAILED for FI=\(iterations) RS=\(raySteps): \(error)")
+            print("❌ [ShaderCompilation] FAILED for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps): \(error)")
             return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
         }
     }
@@ -151,8 +153,9 @@ extension Renderer {
         }
 
         // Build unified cache key (only on parameter change)
+        let fractalType = appModel.renderSettings.fractalType
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
 
         let result: MTLRenderPipelineState
         var isSpecialized = true
@@ -167,7 +170,7 @@ extension Renderer {
         }
         // 2. Try fallback to neon=off variant (quality preset)
         else {
-            let fallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+            let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
             if let pipeline = pipelineCache[fallbackKey] {
                 if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
                     print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
@@ -178,7 +181,7 @@ extension Renderer {
             // 3. Ultimate fallback to generic pipeline
             else {
                 if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
-                    print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FI=\(iterations) RS=\(raySteps))")
+                    print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
                     lastLoggedPipelineKey = "fallback"
                 }
                 isSpecialized = false
@@ -297,13 +300,15 @@ extension Renderer {
     /// 3. Builds on-demand for exact configuration (cached for future frames)
     /// 4. Falls back to generic (no function constants) pipeline — shader uses runtime params
     func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
+        let fractalType = appModel.renderSettings.fractalType
+        
         // Fast-path: parameters unchanged since last call
-        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS,
+        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT,
            let cached = lastSelectedComputePipeline {
             return cached
         }
 
-        let exactKey = "FI\(fractalIterations)_RS\(maxRaySteps)"
+        let exactKey = "FT\(fractalType.rawValue)_FI\(fractalIterations)_RS\(maxRaySteps)"
 
         // 1. Exact match — FC values match precomputed absScalePow
         if let pipeline = computePipelineCache[exactKey] {
@@ -311,6 +316,7 @@ extension Renderer {
                 print("🎯 [ComputeCache] Exact hit: \(exactKey)")
                 lastComputePipelineKey = exactKey
             }
+            lastComputeFT = fractalType.rawValue
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
             lastSelectedComputePipeline = pipeline
@@ -323,14 +329,16 @@ extension Renderer {
         let library = cachedDefaultLibrary ?? device.makeDefaultLibrary()
         if cachedDefaultLibrary == nil { cachedDefaultLibrary = library }
         if let library = library {
+            let ft = Int32(fractalType.rawValue)
             let fi = Int32(fractalIterations)
             let si = Int32(max(fractalIterations - 2, 2))
             let rs = Int32(maxRaySteps)
             if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
-                                                            fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
+                                                            fractalType: ft, fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
                 computePipelineCache[exactKey] = pipeline
                 if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
                 lastComputePipelineKey = exactKey
+                lastComputeFT = fractalType.rawValue
                 lastComputeFI = fractalIterations
                 lastComputeRS = maxRaySteps
                 lastSelectedComputePipeline = pipeline
@@ -345,6 +353,7 @@ extension Renderer {
             lastComputePipelineKey = "fallback"
         }
         let fallback = adaptiveHierarchicalPipeline8x8
+        lastComputeFT = fractalType.rawValue
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
         lastSelectedComputePipeline = fallback

@@ -112,20 +112,30 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
-            float sTheta = sin(theta * power);
-            z = rn * float3(sTheta * cos(phi * power),
-                            sTheta * sin(phi * power),
-                            cos(theta * power));
+            
+            float sTheta, cTheta;
+            sincos(theta * power, sTheta, cTheta);
+            float sPhi, cPhi;
+            sincos(phi * power, sPhi, cPhi);
+            
+            z = rn * float3(sTheta * cPhi,
+                            sTheta * sPhi,
+                            cTheta);
         } else {
             // Standard spherical coordinates
             float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
-            float cTheta = cos(theta * power);
-            z = rn * float3(cTheta * cos(phi * power),
-                            cTheta * sin(phi * power),
-                            sin(theta * power));
+            
+            float sTheta, cTheta;
+            sincos(theta * power, sTheta, cTheta);
+            float sPhi, cPhi;
+            sincos(phi * power, sPhi, cPhi);
+            
+            z = rn * float3(cTheta * cPhi,
+                            cTheta * sPhi,
+                            sTheta);
         }
 
         z += c;
@@ -170,19 +180,25 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
-            float sTheta = sin(theta * power);
-            z = rn * float3(sTheta * cos(phi * power),
-                            sTheta * sin(phi * power),
-                            cos(theta * power));
+            float sTheta, cTheta;
+            sincos(theta * power, sTheta, cTheta);
+            float sPhi, cPhi;
+            sincos(phi * power, sPhi, cPhi);
+            z = rn * float3(sTheta * cPhi,
+                            sTheta * sPhi,
+                            cTheta);
         } else {
             float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
-            float cTheta = cos(theta * power);
-            z = rn * float3(cTheta * cos(phi * power),
-                            cTheta * sin(phi * power),
-                            sin(theta * power));
+            float sTheta, cTheta;
+            sincos(theta * power, sTheta, cTheta);
+            float sPhi, cPhi;
+            sincos(phi * power, sPhi, cPhi);
+            z = rn * float3(cTheta * cPhi,
+                            cTheta * sPhi,
+                            sTheta);
         }
         z += c;
         z  = rot * z;
@@ -214,13 +230,20 @@ FORCE_INLINE float DE_Menger(float3 pos, FormulaParams fp, float3x3 rot,
         // Fold into positive octant
         z = abs(z);
         // Sort components so z.x >= z.y >= z.z
-        if (z.x < z.y) z.xy = z.yx;
-        if (z.x < z.z) z.xz = z.zx;
-        if (z.y < z.z) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float min_xy = min(z.x, z.y);
+        float max_xy = max(z.x, z.y);
+        float min_z = min(min_xy, z.z);
+        float max_z = max(max_xy, z.z);
+        z.x = max_z;
+        z.z = min_z;
+        z.y = sum - (max_z + min_z);
 
-        z = z * scale - offset * (scale - 1.0f);
-        if (z.z < -0.5f * offset.z * (scale - 1.0f))
-            z.z += offset.z * (scale - 1.0f);
+        float3 offsetScaled = offset * (scale - 1.0f);
+        z = z * scale - offsetScaled;
+        
+        float foldZ = -0.5f * offsetScaled.z;
+        z.z += (z.z < foldZ) ? offsetScaled.z : 0.0f;
 
         z = rot * z;
         dr = dr * abs(scale) + 1.0f;
@@ -251,13 +274,17 @@ FORCE_INLINE float DE_Menger_Dist(float3 pos, FormulaParams fp, float3x3 rot, in
 
     for (int i = 0; i < iterations; ++i) {
         z = abs(z);
-        if (z.x < z.y) z.xy = z.yx;
-        if (z.x < z.z) z.xz = z.zx;
-        if (z.y < z.z) z.yz = z.zy;
+        float sum = z.x + z.y + z.z;
+        float min_xy = min(z.x, z.y);
+        float max_xy = max(z.x, z.y);
+        float min_z = min(min_xy, z.z);
+        float max_z = max(max_xy, z.z);
+        z.x = max_z;
+        z.z = min_z;
+        z.y = sum - (max_z + min_z);
 
         z = z * scale - offsetScaled;
-        if (z.z < halfOffsetZn)
-            z.z += offsetScaled.z;
+        z.z += (z.z < halfOffsetZn) ? offsetScaled.z : 0.0f;
 
         z = rot * z;
         dr = dr * abs(scale) + 1.0f;

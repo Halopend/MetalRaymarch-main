@@ -19,6 +19,7 @@ enum FunctionConstantIndex: Int {
     case qualityMode = 4
     case debugHierarchical = 5
     case maxRaySteps = 6  // Base max ray steps (actual count scaled by quality at runtime)
+    case fractalType = 7  // Devirtualizes FractalDE_Dispatch
     case neonModeEnabled = 8  // Eliminates neon orbit trap computation when false
     case colorIterations = 9  // Enables loop unrolling in ColourWithScheme
     // index 10 = FC_SHARE_SHADOWS (set in shader only)

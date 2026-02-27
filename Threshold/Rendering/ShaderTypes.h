@@ -48,10 +48,12 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexQualityMode         = 4,  // int: 0=high, 1=medium, 2=low - controls feature degradation
     FCIndexDebugHierarchical   = 5,  // bool: Debug visualization toggle
     FCIndexMaxRaySteps         = 6,  // int: Max raymarch steps (enables loop optimization)
-    FCIndexNeonModeEnabled     = 8,  // bool: Eliminates neon orbit tracking when false
-    FCIndexColorIterations     = 9,  // int: Color iteration count (enables loop unrolling)
-    FCIndexVisualizerEnabled   = 12, // bool: Enables dedicated audio visualizer overlay
-    FCIndexShadowsEnabled      = 11, // bool: Eliminates entire shadow code path when false
+    FCIndexFractalType         = 7,  // int: Devirtualize FractalDE_Dispatch
+    FCIndexNeonModeEnabled     = 8,  // bool: Toggle neon orbit traps
+    FCIndexColorIterations     = 9,  // int: Loop unrolling for ColourWithScheme
+    FCIndexShareShadows        = 10, // bool: Share shadows (set in shader)
+    FCIndexShadowsEnabled      = 11, // bool: Toggle shadow computation
+    FCIndexVisualizerEnabled   = 12, // bool: Toggle audio visualizer
 };
 
 // Fractal type selection

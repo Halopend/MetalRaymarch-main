@@ -53,6 +53,16 @@ extension Renderer {
     ) {
         let frameMs = frameTimeSeconds * 1000.0
 
+#if DEBUG
+        BenchmarkManager.shared.recordSample(
+            fractalType: Int(settingsSnapshot.fractalType),
+            fractalName: FractalModelType(rawValue: settingsSnapshot.fractalType)?.displayName ?? "Unknown",
+            gpuMs: gpuMs,
+            cpuMs: cpuEncodeMs,
+            frameTimeMs: frameMs
+        )
+#endif
+
         if frameMs < perfLogFrameMsThreshold { return }
         if nowTime - lastPerfLogTime < 0.5 { return }
         lastPerfLogTime = nowTime

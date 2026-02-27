@@ -61,6 +61,9 @@ struct ContentView: View {
     @State private var isProfilerRunning = false
     @State private var lastProfileTime: Date?
     @State private var isTestAnimationPlaying = false
+#if DEBUG
+    @State private var isBenchmarking = false
+#endif
     
     private var parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
         appModel.gestureController?.getParameterRanges() ?? (0.1...5.0, 0.1...13.0, 0.1...2.0)
@@ -1235,6 +1238,34 @@ struct ContentView: View {
                     HStack { Image(systemName: isTestAnimationPlaying ? "stop.fill" : "play.fill"); Text(isTestAnimationPlaying ? "Stop" : "Play Test") }
                 }.buttonStyle(.borderedProminent).tint(isTestAnimationPlaying ? .red : themeColor)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            
+#if DEBUG
+            VStack(alignment: .leading, spacing: 8) {
+                HStack { Image(systemName: "timer").foregroundStyle(themeColor); Text("Benchmarking").font(.headline) }
+                HStack {
+                    Button {
+                        isBenchmarking.toggle()
+                        BenchmarkManager.shared.toggleBenchmarking()
+                    } label: {
+                        HStack {
+                            Image(systemName: isBenchmarking ? "stop.circle.fill" : "play.circle.fill")
+                            Text(isBenchmarking ? "Stop Benchmarking" : "Start Benchmarking")
+                        }
+                    }.buttonStyle(.borderedProminent).tint(isBenchmarking ? .red : themeColor)
+                    
+                    if !isBenchmarking {
+                        Button {
+                            BenchmarkManager.shared.clearStats()
+                        } label: {
+                            Text("Clear Stats")
+                        }.buttonStyle(.bordered)
+                    }
+                }
+                Text("Check Xcode console for results.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+#endif
         }
     }
 }

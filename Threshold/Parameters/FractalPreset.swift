@@ -289,7 +289,7 @@ struct FractalPreset: Codable, Identifiable {
     /// Presets with identical function constant values can share pipelines.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
-        return "FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
+        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
     }
     
     /// Create a preset from current render settings

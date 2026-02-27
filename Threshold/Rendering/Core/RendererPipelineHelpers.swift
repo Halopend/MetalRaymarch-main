@@ -49,6 +49,7 @@ extension Renderer {
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
+        var fractalType: Int32?            // FC index 7 - devirtualizes FractalDE_Dispatch
         var neonModeEnabled: Bool?         // FC index 8 - eliminates neon orbit tracking
         var colorIterations: Int32?        // FC index 9 - enables loop unrolling in color
         var shadowsEnabled: Bool?          // FC index 11 - GMT-fractals: compile-out shadows entirely
@@ -77,6 +78,9 @@ extension Renderer {
             }
             if var raySteps = maxRaySteps {
                 constants.setConstantValue(&raySteps, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
+            }
+            if var fType = fractalType {
+                constants.setConstantValue(&fType, type: .int, index: FunctionConstantIndex.fractalType.rawValue)
             }
             if var neon = neonModeEnabled {
                 constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)

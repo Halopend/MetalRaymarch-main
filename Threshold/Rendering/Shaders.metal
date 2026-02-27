@@ -91,6 +91,9 @@ constant bool FC_DEBUG_HIERARCHICAL [[function_constant(5)]];
 // This is the second most critical loop after Map()
 constant int FC_MAX_RAY_STEPS [[function_constant(6)]];
 
+// Devirtualize fractal type dispatch to eliminate unused formulas
+constant int FC_FRACTAL_TYPE [[function_constant(7)]];
+
 // Neon color mode toggle - eliminates neon orbit trap computation when disabled
 // (neon mode requires extra orbit tracking in ColourWithScheme)
 constant bool FC_NEON_MODE_ENABLED [[function_constant(8)]];
@@ -177,15 +180,15 @@ constant half kPowEpsilonHalf = 1e-4h;
 constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
 constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
 
-// Shading constants (tuned for softer, less harsh lighting)
-constant float kSpecularPower = 10.0f;          // Specular highlight power
-constant float kSpecularIntensity = 1.2f;       // Specular intensity multiplier (reduced from 2.0 for softer look)
-constant float kAttenPower = 1.2f;              // Light attenuation power (reduced from 1.5 for smoother falloff)
+    // Shading constants (tuned for softer, less harsh lighting)
+    constant float kSpecularPower = 50.0f;          // Specular highlight power
+    constant float kSpecularIntensity = 2.0f;       // Specular intensity multiplier
+    constant float kAttenPower = 1.5f;              // Light attenuation power
 
 // Quality thresholds
 constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quality
 constant float kMinQualityForNormals = 0.2f;    // Use cheap normals below this
-constant float kMinQualityForSpecular = 0.7f;   // Skip specular below this
+constant float kMinQualityForSpecular = 0.9f;   // Skip specular below this
 constant float kMinQualityForPostFX = 0.5f;     // Use simple gamma below this
 
 // Temporal accumulation confidence tuning
@@ -534,26 +537,29 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
 
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit,
                                int iterations, int fractalType, FormulaParams fp) {
-    if (fractalType == FractalTypeMandelbox) {
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    if (type == FractalTypeMandelbox) {
         return Map(pos, params, foldingLimit, iterations);
     }
-    return FractalDE_Dispatch(pos, fractalType, fp, iterations);
+    return FractalDE_Dispatch(pos, type, fp, iterations);
 }
 
 FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float foldingLimit,
                                        int iterations, int fractalType, FormulaParams fp) {
-    if (fractalType == FractalTypeMandelbox) {
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    if (type == FractalTypeMandelbox) {
         return MapDistOnly(pos, params, foldingLimit, iterations);
     }
-    return FractalDE_Dispatch(pos, fractalType, fp, iterations);
+    return FractalDE_Dispatch(pos, type, fp, iterations);
 }
 
 FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float foldingLimit,
                                          float fractionalIterations, int fractalType, FormulaParams fp) {
-    if (fractalType == FractalTypeMandelbox) {
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    if (type == FractalTypeMandelbox) {
         return MapContinuous(pos, params, foldingLimit, fractionalIterations);
     }
-    return FractalDE_Dispatch(pos, fractalType, fp, int(fractionalIterations));
+    return FractalDE_Dispatch(pos, type, fp, int(fractionalIterations));
 }
 
 // =============================================================================
@@ -1867,9 +1873,14 @@ kernel void adaptiveHierarchical8x8(
         col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
         
         // Specular
-        float3 ref = reflect(marchDir, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
-        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+        float3 V = -marchDir;
+        float NoV = saturate(dot(nor, V));
+        float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
+        float specPower = mix(20.0f, 110.0f, saturate(1.0f - uniforms.lightingSoftness));
+        float3 Hspot = normalize(spot + V);
+        float3 Hsun = normalize(sunDir + V);
+        float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
+        float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
         col += half3(specSpot) * shaSpot * bri;
         col += half3(specSun) * shaSun * briSun;
     }
@@ -2070,9 +2081,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
 
             if (quality > kMinQualityForSpecular) {
-                float3 ref = reflect(marchDir, nor);
-                float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
-                float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+                float3 V = -marchDir;
+                float NoV = saturate(dot(nor, V));
+                float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
+                float specPower = mix(20.0f, 110.0f, saturate(1.0f - uniforms.lightingSoftness));
+                float3 Hspot = normalize(spot + V);
+                float3 Hsun = normalize(sunDir + V);
+                float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
+                float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
                 col += half3(specSpot) * shaSpot * bri;
                 col += half3(specSun) * shaSun * briSun;
             }
