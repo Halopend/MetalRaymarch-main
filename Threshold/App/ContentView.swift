@@ -268,7 +268,9 @@ struct ContentView: View {
                 Label("Fractal Type", systemImage: "cube.fill").font(.headline)
                 Spacer()
                 Picker("Type", selection: $cache.fractalType) {
-                    ForEach(FractalModelType.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    ForEach(FractalModelType.allCases, id: \.self) { type in
+                        Label(type.displayName, systemImage: type.icon).tag(type)
+                    }
                 }
                 .pickerStyle(.menu).frame(maxWidth: 180)
                 .onChange(of: cache.fractalType) { _, newValue in
@@ -287,34 +289,39 @@ struct ContentView: View {
 
             Divider()
 
-            // Shape parameters grouped
-            VStack(spacing: 4) {
-                HStack {
-                    Label("Shape Parameters", systemImage: "skew").font(.headline)
-                    Spacer()
-                }
-                .padding(.bottom, 4)
+            // Mandelbox-specific shape parameters (only shown for Mandelbox)
+            if cache.fractalType.usesMandelboxParams {
+                VStack(spacing: 4) {
+                    HStack {
+                        Label("Shape Parameters", systemImage: "skew").font(.headline)
+                        Spacer()
+                    }
+                    .padding(.bottom, 4)
 
-                EffectSliderRow(icon: "arrow.down.right.and.arrow.up.left", label: "Min Distance",
-                    value: $cache.targetMinDistance, range: parameterRanges.minDistance,
-                    enabled: .constant(true),
-                    onChanged: { cache.push(\.targetMinDistance, value: cache.targetMinDistance) },
-                    showToggle: false)
-                Divider().padding(.leading, 159)
-                EffectSliderRow(icon: "arrow.triangle.branch", label: "Folding Limit",
-                    value: $cache.targetFoldingLimit, range: parameterRanges.foldingLimit,
-                    enabled: .constant(true),
-                    onChanged: { cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit) },
-                    showToggle: false)
-                Divider().padding(.leading, 159)
-                EffectSliderRow(icon: "circle.dashed", label: "Sphere Radius",
-                    value: $cache.targetSphereRadius, range: parameterRanges.sphereRadius,
-                    enabled: .constant(true),
-                    onChanged: { cache.push(\.targetSphereRadius, value: cache.targetSphereRadius) },
-                    showToggle: false)
+                    EffectSliderRow(icon: "arrow.down.right.and.arrow.up.left", label: "Min Distance",
+                        value: $cache.targetMinDistance, range: parameterRanges.minDistance,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.targetMinDistance, value: cache.targetMinDistance) },
+                        showToggle: false)
+                    Divider().padding(.leading, 159)
+                    EffectSliderRow(icon: "arrow.triangle.branch", label: "Folding Limit",
+                        value: $cache.targetFoldingLimit, range: parameterRanges.foldingLimit,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit) },
+                        showToggle: false)
+                    Divider().padding(.leading, 159)
+                    EffectSliderRow(icon: "circle.dashed", label: "Sphere Radius",
+                        value: $cache.targetSphereRadius, range: parameterRanges.sphereRadius,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.targetSphereRadius, value: cache.targetSphereRadius) },
+                        showToggle: false)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
             }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
+
+            // Formula-specific parameters (auto-generated from catalog.json)
+            FormulaParamsEditor(cache: cache)
         }
     }
     

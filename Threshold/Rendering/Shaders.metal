@@ -1054,8 +1054,21 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         
         float3 gradient = float3(dx - d0, dy - d0, dz - d0);
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+    } else if (fractalType != 0 && cache.valid) {
+        // Non-Mandelbox with cached center distance: 3 lean _Dist calls
+        // with reduced iterations (40% of full).  The cache already holds
+        // the center DE from the hit evaluation — reuse it.
+        int normalIters = max((iterations * 2) / 5, 3);
+        float e = max(distance * 0.0005f, 0.0001f);
+        float d0 = cache.distance;
+        float3 gradient = float3(
+            FractalDE_Dispatch(pos + float3(e,0,0), fractalType, fp, normalIters) - d0,
+            FractalDE_Dispatch(pos + float3(0,e,0), fractalType, fp, normalIters) - d0,
+            FractalDE_Dispatch(pos + float3(0,0,e), fractalType, fp, normalIters) - d0
+        );
+        return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
     } else {
-        // Standard path: 4 Map calls with full iterations (used for all non-Mandelbox)
+        // Fallback: 4 Map calls with full iterations
         float e = distance * 0.001;
         float d = MapUnified(pos, params, foldingLimit, iterations, fractalType, fp);
         float3 gradient = float3(

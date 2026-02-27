@@ -21,6 +21,7 @@ final class UISettingsCache {
     var targetSphereRadius: Float = 0.5
     var baseFractalIterations: Int = 9
     var baseMaxRaySteps: Int = 64
+    var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
     
     // Color & effects
     var colorScheme: ColorScheme = .nebula
@@ -214,6 +215,7 @@ final class UISettingsCache {
     func loadFromSettings() {
         guard let settings else { return }
         fractalType = settings.fractalType
+        formulaParams = settings.formulaParams
         fractalScale = settings.fractalScale
         targetMinDistance = settings.targetMinDistance
         targetFoldingLimit = settings.targetFoldingLimit
@@ -332,6 +334,18 @@ final class UISettingsCache {
         colorSchemeSaturation = pp.saturation
         colorSchemeContrast = pp.contrast
         colorSchemeGamma = pp.gamma
+    }
+    
+    /// Update a single formula param slot and push the entire struct to RenderSettings.
+    func pushFormulaParam(index: Int, value: Float) {
+        FormulaCatalog.setParam(&formulaParams, index: index, value: value)
+        settings?.formulaParams = formulaParams
+    }
+    
+    /// Reset formula params to defaults for the current type and push.
+    func resetFormulaParams() {
+        formulaParams = fractalType.defaultFormulaParams()
+        settings?.formulaParams = formulaParams
     }
     
     func reloadLightingEffects() {
