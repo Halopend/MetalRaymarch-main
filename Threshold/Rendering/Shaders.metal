@@ -1753,8 +1753,13 @@ kernel void adaptiveHierarchical8x8(
         fineStartT = reprojectedStartT;
     }
 
+    // === TEMPORAL REPROJECTION FOR ALL FRACTAL TYPES ===
+    // When fineStartT > 0.06 (from temporal reprojection or tile coarse pass),
+    // SceneWithCacheFromStart begins near the known surface — typically ~5-10
+    // steps instead of 30-60.  Previously only Mandelbox used this path;
+    // all other formulas did a full march every frame, wasting temporal data.
     SceneResult sceneResult;
-    if (fractalType == 0) {
+    if (fineStartT > 0.06f) {
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
                                               uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
     } else {
