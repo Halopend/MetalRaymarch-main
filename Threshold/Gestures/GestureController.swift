@@ -543,7 +543,7 @@ final class GestureController {
             let action = settings.actionForDigit(digit)
 
             if let formulaIndex = action.formulaParamIndex,
-               let node = ParameterNodeRegistry.shared.node(for: settings.fractalType, formulaIndex: formulaIndex) {
+               let node = ParameterNodeRegistry.shared.node(for: settings.fractalType, action: action) {
                 processTwoHandGesture(
                     digit: digit,
                     state: &fingerGestureState[digit]!,

@@ -111,6 +111,7 @@ class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
 class FloatParameterNode: BaseParameterNode<Float> {
     let range: ClosedRange<Float>
     let step: Float
+    let gestureAction: FingerGestureAction?
     let readValue: (UISettingsCache) -> Float
     let writeValue: (UISettingsCache, Float) -> Void
 

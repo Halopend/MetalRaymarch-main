@@ -74,20 +74,12 @@ enum FingerGestureAction: Int32, CaseIterable, Codable {
     }
 
     static func availableActions(for type: FractalModelType) -> [FingerGestureAction] {
-        let formulaSlots = ParameterNodeRegistry.shared
-            .formulaBatch(for: type)
-            .floatNodes
-            .compactMap { node -> FingerGestureAction? in
-                let pieces = node.id.split(separator: ".")
-                guard pieces.count >= 3, let index = Int(pieces[2]) else { return nil }
-                return FingerGestureAction(rawValue: Int32(100 + index))
-            }
-        return coreCases + formulaSlots
+        coreCases + ParameterNodeRegistry.shared.formulaGestureActions(for: type)
     }
 
     func contextualDisplayName(for type: FractalModelType) -> String {
-        guard let index = formulaParamIndex,
-              let node = ParameterNodeRegistry.shared.node(for: type, formulaIndex: index) else {
+        guard formulaParamIndex != nil,
+              let node = ParameterNodeRegistry.shared.node(for: type, action: self) else {
             return displayName
         }
         return "\(type.displayName): \(node.name)"
