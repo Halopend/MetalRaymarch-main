@@ -351,6 +351,27 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         formulaActionMapping(for: type, action: action)?.node
     }
 
+    func gestureBindableParameters(for type: FractalModelType) -> [GestureBindableParameter] {
+        formulaBatch(for: type).floatNodes.map { node in
+            let pieces = node.id.split(separator: ".")
+            let formulaIndex = pieces.count >= 3 ? Int(pieces[2]) : nil
+            return GestureBindableParameter(
+                fractalType: type,
+                parameterNodeID: node.id,
+                formulaIndex: formulaIndex,
+                display: GestureDisplayMetadata(
+                    title: node.name,
+                    subtitle: node.group?.title,
+                    icon: node.icon
+                )
+            )
+        }
+    }
+
+    func node(for binding: GestureBindableParameter) -> FloatParameterNode? {
+        formulaBatch(for: binding.fractalType).floatNodes.first { $0.id == binding.parameterNodeID }
+    }
+
     func fractalParameterMappingJSON(prettyPrinted: Bool = true) -> String? {
         struct Mapping: Codable {
             struct FractalEntry: Codable {

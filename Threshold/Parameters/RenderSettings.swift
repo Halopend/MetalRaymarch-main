@@ -32,6 +32,39 @@ final class RenderSettings: @unchecked Sendable {
         let v = UserDefaults.standard.float(forKey: key)
         return v > 0 ? v : fallback
     }
+
+    private static func loadGestureBinding(_ key: String,
+                                           legacyKey: String,
+                                           default fallback: GestureActionBinding) -> GestureActionBinding {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode(GestureActionBinding.self, from: data) {
+            return decoded
+        }
+        guard defaults.object(forKey: legacyKey) != nil else { return fallback }
+        let legacyRaw = Int32(defaults.integer(forKey: legacyKey))
+        guard let legacy = FingerGestureAction(rawValue: legacyRaw) else { return fallback }
+        return migrateLegacyGestureAction(legacy, fallback: fallback)
+    }
+
+    private static func migrateLegacyGestureAction(_ action: FingerGestureAction,
+                                                   fallback: GestureActionBinding) -> GestureActionBinding {
+        if let formulaIndex = action.formulaParamIndex,
+           let node = ParameterNodeRegistry.shared.node(for: .mandelbox, formulaIndex: formulaIndex) {
+            return .parameter(
+                GestureBindableParameter(
+                    fractalType: .mandelbox,
+                    parameterNodeID: node.id,
+                    formulaIndex: formulaIndex,
+                    display: GestureDisplayMetadata(title: node.name, subtitle: node.group?.title, icon: node.icon)
+                )
+            )
+        }
+        if FingerGestureAction.coreCases.contains(action) {
+            return .core(action)
+        }
+        return fallback
+    }
     
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
@@ -100,26 +133,10 @@ final class RenderSettings: @unchecked Sendable {
     }()
 
     // ── Configurable finger → gesture action assignments ───────────────────
-    private var _indexFingerAction: FingerGestureAction = {
-        let key = "indexFingerAction"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return .grab }
-        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .grab
-    }()
-    private var _middleFingerAction: FingerGestureAction = {
-        let key = "middleFingerAction"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return .minDistance }
-        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .minDistance
-    }()
-    private var _ringFingerAction: FingerGestureAction = {
-        let key = "ringFingerAction"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return .fractalScale }
-        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .fractalScale
-    }()
-    private var _pinkyFingerAction: FingerGestureAction = {
-        let key = "pinkyFingerAction"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return .sphereRadius }
-        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .sphereRadius
-    }()
+    private var _indexFingerBinding: GestureActionBinding = loadGestureBinding("indexFingerBinding", legacyKey: "indexFingerAction", default: .core(.grab))
+    private var _middleFingerBinding: GestureActionBinding = loadGestureBinding("middleFingerBinding", legacyKey: "middleFingerAction", default: .core(.minDistance))
+    private var _ringFingerBinding: GestureActionBinding = loadGestureBinding("ringFingerBinding", legacyKey: "ringFingerAction", default: .core(.fractalScale))
+    private var _pinkyFingerBinding: GestureActionBinding = loadGestureBinding("pinkyFingerBinding", legacyKey: "pinkyFingerAction", default: .core(.sphereRadius))
     private var _menuToggleHoldDuration: Float        = loadFloat("menuToggleHoldDuration", default: 0.06)
     private var _menuToggleCooldown: Float              = loadFloat("menuToggleCooldown", default: 0.35)
     private var _menuToggleActivateThreshold: Float     = loadFloat("menuToggleActivateThreshold", default: 0.48)
@@ -696,56 +713,62 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    // ── Finger → gesture action assignments ────────────────────────────────
-    var indexFingerAction: FingerGestureAction {
-        get { withLock { _indexFingerAction } }
-        set {
-            withLock { _indexFingerAction = newValue }
-            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "indexFingerAction")
-        }
-    }
-    var middleFingerAction: FingerGestureAction {
-        get { withLock { _middleFingerAction } }
-        set {
-            withLock { _middleFingerAction = newValue }
-            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "middleFingerAction")
-        }
-    }
-    var ringFingerAction: FingerGestureAction {
-        get { withLock { _ringFingerAction } }
-        set {
-            withLock { _ringFingerAction = newValue }
-            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "ringFingerAction")
-        }
-    }
-    var pinkyFingerAction: FingerGestureAction {
-        get { withLock { _pinkyFingerAction } }
-        set {
-            withLock { _pinkyFingerAction = newValue }
-            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "pinkyFingerAction")
+    // ── Finger → gesture binding assignments ───────────────────────────────
+    private func persistGestureBinding(_ binding: GestureActionBinding, key: String) {
+        if let data = try? JSONEncoder().encode(binding) {
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
 
-    /// Returns the action assigned to a given finger digit (1=index, 2=middle, 3=ring, 4=pinky).
-    func actionForDigit(_ digit: Int) -> FingerGestureAction {
+    var indexFingerBinding: GestureActionBinding {
+        get { withLock { _indexFingerBinding } }
+        set {
+            withLock { _indexFingerBinding = newValue }
+            persistGestureBinding(newValue, key: "indexFingerBinding")
+        }
+    }
+    var middleFingerBinding: GestureActionBinding {
+        get { withLock { _middleFingerBinding } }
+        set {
+            withLock { _middleFingerBinding = newValue }
+            persistGestureBinding(newValue, key: "middleFingerBinding")
+        }
+    }
+    var ringFingerBinding: GestureActionBinding {
+        get { withLock { _ringFingerBinding } }
+        set {
+            withLock { _ringFingerBinding = newValue }
+            persistGestureBinding(newValue, key: "ringFingerBinding")
+        }
+    }
+    var pinkyFingerBinding: GestureActionBinding {
+        get { withLock { _pinkyFingerBinding } }
+        set {
+            withLock { _pinkyFingerBinding = newValue }
+            persistGestureBinding(newValue, key: "pinkyFingerBinding")
+        }
+    }
+
+    /// Returns the binding assigned to a given finger digit (1=index, 2=middle, 3=ring, 4=pinky).
+    func bindingForDigit(_ digit: Int) -> GestureActionBinding {
         withLock {
             switch digit {
-            case 1: return _indexFingerAction
-            case 2: return _middleFingerAction
-            case 3: return _ringFingerAction
-            case 4: return _pinkyFingerAction
-            default: return .none
+            case 1: return _indexFingerBinding
+            case 2: return _middleFingerBinding
+            case 3: return _ringFingerBinding
+            case 4: return _pinkyFingerBinding
+            default: return .core(.none)
             }
         }
     }
 
-    /// Returns the digit (1-4) assigned to a given action, or nil if unassigned.
-    func digitForAction(_ action: FingerGestureAction) -> Int? {
+    /// Returns the digit (1-4) assigned to a given binding, or nil if unassigned.
+    func digitForBinding(_ binding: GestureActionBinding) -> Int? {
         withLock {
-            if _indexFingerAction == action  { return 1 }
-            if _middleFingerAction == action { return 2 }
-            if _ringFingerAction == action   { return 3 }
-            if _pinkyFingerAction == action  { return 4 }
+            if _indexFingerBinding == binding  { return 1 }
+            if _middleFingerBinding == binding { return 2 }
+            if _ringFingerBinding == binding   { return 3 }
+            if _pinkyFingerBinding == binding  { return 4 }
             return nil
         }
     }

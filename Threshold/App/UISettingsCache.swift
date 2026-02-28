@@ -152,10 +152,10 @@ final class UISettingsCache {
     var menuToggleGestureEnabled: Bool = true
     var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
     // Configurable finger → action assignments
-    var indexFingerAction: FingerGestureAction = .grab
-    var middleFingerAction: FingerGestureAction = .minDistance
-    var ringFingerAction: FingerGestureAction = .fractalScale
-    var pinkyFingerAction: FingerGestureAction = .sphereRadius
+    var indexFingerBinding: GestureActionBinding = .core(.grab)
+    var middleFingerBinding: GestureActionBinding = .core(.minDistance)
+    var ringFingerBinding: GestureActionBinding = .core(.fractalScale)
+    var pinkyFingerBinding: GestureActionBinding = .core(.sphereRadius)
     var menuToggleHoldDuration: Float = 0.06
     var menuToggleCooldown: Float = 0.35
     var menuToggleActivateThreshold: Float = 0.48
@@ -284,10 +284,10 @@ final class UISettingsCache {
         gestureSensitivity = settings.gestureSensitivity
         menuToggleGestureEnabled = settings.menuToggleGestureEnabled
         menuToggleGestureMode = settings.menuToggleGestureMode
-        indexFingerAction = settings.indexFingerAction
-        middleFingerAction = settings.middleFingerAction
-        ringFingerAction = settings.ringFingerAction
-        pinkyFingerAction = settings.pinkyFingerAction
+        indexFingerBinding = settings.indexFingerBinding
+        middleFingerBinding = settings.middleFingerBinding
+        ringFingerBinding = settings.ringFingerBinding
+        pinkyFingerBinding = settings.pinkyFingerBinding
         menuToggleHoldDuration = settings.menuToggleHoldDuration
         menuToggleCooldown = settings.menuToggleCooldown
         menuToggleActivateThreshold = settings.menuToggleActivateThreshold
@@ -314,28 +314,28 @@ final class UISettingsCache {
     }
     
 
-    func setFingerAction(_ action: FingerGestureAction, for pair: FingerPair) {
+    func setFingerBinding(_ binding: GestureActionBinding, for pair: FingerPair) {
         switch pair {
         case .index:
-            indexFingerAction = action
-            push(\.indexFingerAction, value: action)
+            indexFingerBinding = binding
+            push(\.indexFingerBinding, value: binding)
         case .middle:
-            middleFingerAction = action
-            push(\.middleFingerAction, value: action)
+            middleFingerBinding = binding
+            push(\.middleFingerBinding, value: binding)
         case .ring:
-            ringFingerAction = action
-            push(\.ringFingerAction, value: action)
+            ringFingerBinding = binding
+            push(\.ringFingerBinding, value: binding)
         case .pinky:
-            pinkyFingerAction = action
-            push(\.pinkyFingerAction, value: action)
+            pinkyFingerBinding = binding
+            push(\.pinkyFingerBinding, value: binding)
         }
     }
 
-    func fingerPair(for action: FingerGestureAction) -> FingerPair? {
-        if indexFingerAction == action { return .index }
-        if middleFingerAction == action { return .middle }
-        if ringFingerAction == action { return .ring }
-        if pinkyFingerAction == action { return .pinky }
+    func fingerPair(for binding: GestureActionBinding) -> FingerPair? {
+        if indexFingerBinding == binding { return .index }
+        if middleFingerBinding == binding { return .middle }
+        if ringFingerBinding == binding { return .ring }
+        if pinkyFingerBinding == binding { return .pinky }
         return nil
     }
 
