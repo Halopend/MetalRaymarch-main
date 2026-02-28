@@ -313,6 +313,32 @@ final class UISettingsCache {
         settings?[keyPath: keyPath] = value
     }
     
+
+    func setFingerAction(_ action: FingerGestureAction, for pair: FingerPair) {
+        switch pair {
+        case .index:
+            indexFingerAction = action
+            push(\.indexFingerAction, value: action)
+        case .middle:
+            middleFingerAction = action
+            push(\.middleFingerAction, value: action)
+        case .ring:
+            ringFingerAction = action
+            push(\.ringFingerAction, value: action)
+        case .pinky:
+            pinkyFingerAction = action
+            push(\.pinkyFingerAction, value: action)
+        }
+    }
+
+    func fingerPair(for action: FingerGestureAction) -> FingerPair? {
+        if indexFingerAction == action { return .index }
+        if middleFingerAction == action { return .middle }
+        if ringFingerAction == action { return .ring }
+        if pinkyFingerAction == action { return .pinky }
+        return nil
+    }
+
     @MainActor
     func pushFractalType(_ type: FractalModelType, gestureController: GestureController?) {
         let oldType = settings?.fractalType
