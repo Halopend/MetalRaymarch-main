@@ -8,6 +8,14 @@ enum FingerGestureAction: Int32, CaseIterable, Codable, Hashable {
     case sphereRadius = 4
     case fractalScale = 5
 
+    static var allCases: [FingerGestureAction] {
+        [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale,
+         .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+         .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+         .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+         .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15]
+    }
+
     @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam0  = 100
     @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")

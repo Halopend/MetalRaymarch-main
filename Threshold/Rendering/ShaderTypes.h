@@ -189,6 +189,22 @@ typedef struct
     float lightIntensity;             // Precomputed light intensity multiplier
 } PrecomputedLighting;
 
+// === PRECOMPUTED AUDIO ===
+// Packs per-band audio energy plus aggregate meters for reuse across shaders.
+typedef struct
+{
+    vector_float4 bands;   // x=bass, y=mid, z=treble, w=beat intensity
+    vector_float2 energy;  // x=peak of bands, y=weighted energy (bass-heavy)
+    vector_float2 pad;     // Alignment padding
+} PrecomputedAudio;
+
+// === PRECOMPUTED FOG ===
+// Captures fog scalars that benefit from CPU-side precomputation.
+typedef struct
+{
+    vector_float4 fog; // x=intensity, y=1/intensity (0 if disabled), z/w=unused
+} PrecomputedFog;
+
 typedef struct
 {
     matrix_float4x4 projectionMatrix;
@@ -245,6 +261,8 @@ typedef struct
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
+    PrecomputedAudio precomputedAudio;            // Aggregated audio energy
+    PrecomputedFog precomputedFog;                // Fog helpers
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } Uniforms;
 
@@ -311,6 +329,8 @@ typedef struct
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
+    PrecomputedAudio precomputedAudio;            // Aggregated audio energy
+    PrecomputedFog precomputedFog;                // Fog helpers
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 

@@ -6,7 +6,7 @@ enum ParameterArbitrationPolicy: String, CaseIterable, Codable, Sendable {
     case weightedBlend
 }
 
-enum ParameterOperationSource: String, CaseIterable, Codable, Sendable {
+enum ParameterArbitrationSource: String, CaseIterable, Codable, Sendable {
     case ui
     case gesture
     case animation
@@ -21,14 +21,14 @@ struct ParameterOperationMetricsSnapshot: Sendable {
     let currentFrameIndex: UInt64
 }
 
-final class ParameterOperationDispatcher: @unchecked Sendable {
-    static let shared = ParameterOperationDispatcher()
+final class ParameterArbitrationDispatcher: @unchecked Sendable {
+    static let shared = ParameterArbitrationDispatcher()
 
     private struct SourceState {
-        var lastWriter: ParameterOperationSource = .system
+        var lastWriter: ParameterArbitrationSource = .system
         var lastWriteTime: CFTimeInterval = 0
         var gestureActiveUntil: CFTimeInterval = 0
-        var weightedInputs: [ParameterOperationSource: Float] = [:]
+        var weightedInputs: [ParameterArbitrationSource: Float] = [:]
     }
 
     private var policy: ParameterArbitrationPolicy = .gesturePriorityWhileActive
@@ -68,7 +68,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
     func applyFloat(parameterID: String,
                     incomingValue: Float,
-                    source: ParameterOperationSource,
+                    source: ParameterArbitrationSource,
                     currentValue: @autoclosure () -> Float,
                     apply: (Float) -> Void) {
         let resolved = resolveValue(parameterID: parameterID,
@@ -92,7 +92,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
     private func resolveValue(parameterID: String,
                               incomingValue: Float,
-                              source: ParameterOperationSource,
+                              source: ParameterArbitrationSource,
                               currentValue: Float) -> Float {
         lock.lock()
         defer { lock.unlock() }
@@ -127,7 +127,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
         case .weightedBlend:
             state.weightedInputs[source] = incomingValue
-            let weights: [ParameterOperationSource: Float] = [
+            let weights: [ParameterArbitrationSource: Float] = [
                 .gesture: 0.6,
                 .ui: 1.0,
                 .animation: 0.75,

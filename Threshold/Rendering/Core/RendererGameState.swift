@@ -56,6 +56,8 @@ extension Renderer {
             trebleLevel: settingsSnapshot.trebleLevel,
             beatIntensity: settingsSnapshot.beatIntensity
         )
+        let precomputedAudio = Self.makePrecomputedAudio(from: settingsSnapshot)
+        let precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)
 
         // Hoist lightingWave out of per-eye loop — sin() is identical for both eyes
         let baseColorMix = settingsSnapshot.colorMix
@@ -68,6 +70,8 @@ extension Renderer {
         cachedFrameTime = frameTime
         cachedPrecomputedFractal = precomputedFractal
         cachedPrecomputedLighting = precomputedLighting
+        cachedPrecomputedAudio = precomputedAudio
+        cachedPrecomputedFog = precomputedFog
         cachedModelMatrix = modelMatrix
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
@@ -130,6 +134,8 @@ extension Renderer {
                             pad_gmt: 0.0,
                             precomputedFractal: precomputedFractal,
                             precomputedLighting: precomputedLighting,
+                            precomputedAudio: precomputedAudio,
+                            precomputedFog: precomputedFog,
                             colorScheme: colorSchemeParams)
         }
 

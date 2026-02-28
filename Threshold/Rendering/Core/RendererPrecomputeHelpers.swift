@@ -83,4 +83,29 @@ extension Renderer {
             lightIntensity: lightIntensity
         )
     }
+
+    /// Precompute audio aggregates for shader use (avoids repeated max/weighted sums).
+    static func makePrecomputedAudio(from settings: RenderSettingsSnapshot) -> PrecomputedAudio {
+        let bass = settings.bassLevel
+        let mid = settings.midLevel
+        let treble = settings.trebleLevel
+        let beat = settings.beatIntensity
+        let maxBand = max(bass, max(mid, treble))
+        let weighted = bass * 0.6 + mid * 0.3 + treble * 0.1
+
+        return PrecomputedAudio(
+            bands: SIMD4<Float>(bass, mid, treble, beat),
+            energy: SIMD2<Float>(maxBand, weighted),
+            pad: .zero
+        )
+    }
+
+    /// Precompute fog helpers (inverse intensity avoids divides on GPU).
+    static func makePrecomputedFog(from settings: RenderSettingsSnapshot) -> PrecomputedFog {
+        let fogIntensity = settings.colorSchemeParams.fogIntensity
+        let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
+        return PrecomputedFog(
+            fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0)
+        )
+    }
 }

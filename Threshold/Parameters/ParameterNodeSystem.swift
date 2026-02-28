@@ -18,6 +18,48 @@ enum ParameterSection: String, CaseIterable, Codable, Sendable {
     case animation
 }
 
+// High-level bundles describe which conceptual group a parameter belongs to. This allows
+// UI, gesture, and modulation layers to address related parameters consistently.
+enum ParameterBundle: String, Codable, Sendable {
+    case camera           // user/world transforms
+    case position         // world position / translation
+    case scale            // fractal/world scale
+    case rotation         // world rotation
+    case julia            // Julia set seeds / offsets
+    case polarRotation    // polar phase / bulb rotations
+    case color            // palette, color mix
+    case lighting         // lighting/effects
+    case fractalCore      // minDistance, folding limit, sphere radius
+    case custom           // fallback when no specific bundle fits
+}
+
+// Layer ordering: UI defines the base, gesture overrides, precompute can override derived
+// values, music applies an offset, and system sits at the top for authoritative writes.
+enum ParameterLayer: String, Codable, Sendable {
+    case ui
+    case gesture
+    case precompute
+    case music
+    case system
+}
+
+struct ParameterMetadata: Sendable {
+    let bundle: ParameterBundle
+    let range: ClosedRange<Float>
+    let step: Float
+    let smoothingTime: Float
+
+    init(bundle: ParameterBundle = .custom,
+         range: ClosedRange<Float>,
+         step: Float,
+         smoothingTime: Float = 0) {
+        self.bundle = bundle
+        self.range = range
+        self.step = step
+        self.smoothingTime = max(0, smoothingTime)
+    }
+}
+
 struct ParameterGroup: Hashable, Codable, Sendable {
     let id: String
     let title: String
@@ -59,6 +101,7 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     let source: ParameterNodeSource
     let icon: String
     let isGestureMappable: Bool
+    let metadata: ParameterMetadata?
 
     fileprivate(set) var isDirty: Bool = false
 
@@ -69,7 +112,8 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
          group: ParameterGroup?,
          source: ParameterNodeSource,
          icon: String,
-         isGestureMappable: Bool) {
+         isGestureMappable: Bool,
+         metadata: ParameterMetadata?) {
         self.id = id
         self.name = name
         self.descriptionText = descriptionText
@@ -78,6 +122,7 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
         self.source = source
         self.icon = icon
         self.isGestureMappable = isGestureMappable
+        self.metadata = metadata
     }
 
     func markDirty() { isDirty = true }
@@ -99,7 +144,8 @@ class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
          source: ParameterNodeSource,
          icon: String,
          isGestureMappable: Bool,
-         defaultValue: Value) {
+         defaultValue: Value,
+         metadata: ParameterMetadata? = nil) {
         self.defaultValue = defaultValue
         self.currentValue = defaultValue
         super.init(
@@ -110,7 +156,8 @@ class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
             group: group,
             source: source,
             icon: icon,
-            isGestureMappable: isGestureMappable
+            isGestureMappable: isGestureMappable,
+            metadata: metadata
         )
     }
 
@@ -121,8 +168,9 @@ class FloatParameterNode: BaseParameterNode<Float> {
     let range: ClosedRange<Float>
     let step: Float
     let gestureAction: FingerGestureAction?
-    let readValue: (UISettingsCache) -> Float
-    let writeValue: (UISettingsCache, Float) -> Void
+    let readValue: @MainActor (UISettingsCache) -> Float
+    let writeValue: @MainActor (UISettingsCache, Float) -> Void
+    private var layerStack: ParameterLayerStack
 
     init(id: String,
          name: String,
@@ -135,12 +183,14 @@ class FloatParameterNode: BaseParameterNode<Float> {
          range: ClosedRange<Float>,
          step: Float,
          isGestureMappable: Bool,
-         readValue: @escaping (UISettingsCache) -> Float,
-         writeValue: @escaping (UISettingsCache, Float) -> Void) {
+         readValue: @MainActor @escaping (UISettingsCache) -> Float,
+         writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
         self.range = range
         self.step = step
+        self.gestureAction = nil
         self.readValue = readValue
         self.writeValue = writeValue
+        self.layerStack = ParameterLayerStack(defaultValue: defaultValue, range: range)
         super.init(id: id,
                    name: name,
                    descriptionText: descriptionText,
@@ -149,7 +199,8 @@ class FloatParameterNode: BaseParameterNode<Float> {
                    source: source,
                    icon: icon,
                    isGestureMappable: isGestureMappable,
-                   defaultValue: defaultValue)
+                   defaultValue: defaultValue,
+                   metadata: ParameterMetadata(range: range, step: step))
     }
 
     @inline(__always)
@@ -157,11 +208,32 @@ class FloatParameterNode: BaseParameterNode<Float> {
         let clamped = max(0, min(1, t))
         return a + (b - a) * clamped
     }
+
+    @discardableResult
+    func applyLayer(_ layer: ParameterLayer,
+                    value: Float,
+                    smoothingTime: Float? = nil,
+                    timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
+        let resolved = layerStack.apply(layer: layer, value: value, smoothingTime: smoothingTime, timestamp: timestamp)
+        super.currentValue = resolved
+        return resolved
+    }
+
+    func resolvedValue(timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
+        let resolved = layerStack.resolvedValue(at: timestamp)
+        super.currentValue = resolved
+        return resolved
+    }
+
+    func bootstrapBaseIfNeeded(from value: Float, timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) {
+        layerStack.setBaseIfNeeded(value, timestamp: timestamp)
+        super.currentValue = layerStack.resolvedValue(at: timestamp)
+    }
 }
 
 final class BoolParameterNode: BaseParameterNode<Bool> {
-    let readValue: (UISettingsCache) -> Bool
-    let writeValue: (UISettingsCache, Bool) -> Void
+    let readValue: @MainActor (UISettingsCache) -> Bool
+    let writeValue: @MainActor (UISettingsCache, Bool) -> Void
 
     init(id: String,
          name: String,
@@ -172,8 +244,8 @@ final class BoolParameterNode: BaseParameterNode<Bool> {
          icon: String,
          defaultValue: Bool,
          isGestureMappable: Bool,
-         readValue: @escaping (UISettingsCache) -> Bool,
-         writeValue: @escaping (UISettingsCache, Bool) -> Void) {
+         readValue: @MainActor @escaping (UISettingsCache) -> Bool,
+         writeValue: @MainActor @escaping (UISettingsCache, Bool) -> Void) {
         self.readValue = readValue
         self.writeValue = writeValue
         super.init(id: id,
@@ -234,8 +306,8 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
          step: Float,
          smoothingTime: Float,
          isGestureMappable: Bool,
-         readValue: @escaping (UISettingsCache) -> Float,
-         writeValue: @escaping (UISettingsCache, Float) -> Void) {
+         readValue: @MainActor @escaping (UISettingsCache) -> Float,
+         writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
         self.smoothingTime = max(0, smoothingTime)
         self.smoothedValue = defaultValue
         self.delayBuffer = FloatDelayBuffer(initialValue: defaultValue, responseTime: max(0.001, smoothingTime))
@@ -251,7 +323,8 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
                    step: step,
                    isGestureMappable: isGestureMappable,
                    readValue: readValue,
-                   writeValue: writeValue)
+                   writeValue: writeValue,
+                   metadata: ParameterMetadata(range: range, step: step, smoothingTime: smoothingTime))
     }
 
     override var currentValue: Float {
@@ -289,6 +362,114 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
         smoothedValue = value
         super.currentValue = value
         markDirty()
+    }
+}
+
+// MARK: - Layered Value Stack
+
+private struct ParameterLayerEntry {
+    var rawValue: Float
+    var smoothingTime: Float?
+    private(set) var lastResolved: Float
+    private(set) var lastTimestamp: TimeInterval
+
+    init(rawValue: Float,
+         smoothingTime: Float?,
+         timestamp: TimeInterval) {
+        self.rawValue = rawValue
+        self.smoothingTime = smoothingTime
+        self.lastResolved = rawValue
+        self.lastTimestamp = timestamp
+    }
+
+    mutating func resolvedValue(at timestamp: TimeInterval) -> Float {
+        guard let smoothingTime, smoothingTime > 0 else {
+            lastResolved = rawValue
+            lastTimestamp = timestamp
+            return rawValue
+        }
+
+        let dt = max(0, timestamp - lastTimestamp)
+        let alpha = 1 - exp(-dt / max(0.001, smoothingTime))
+        let resolved = lastResolved + (rawValue - lastResolved) * alpha
+        lastResolved = resolved
+        lastTimestamp = timestamp
+        return resolved
+    }
+}
+
+struct ParameterLayerStack {
+    private var ui: ParameterLayerEntry?
+    private var gesture: ParameterLayerEntry?
+    private var precompute: ParameterLayerEntry?
+    private var music: ParameterLayerEntry?
+    private var system: ParameterLayerEntry?
+
+    private(set) var defaultValue: Float
+    private(set) var range: ClosedRange<Float>
+
+    init(defaultValue: Float, range: ClosedRange<Float>, timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) {
+        self.defaultValue = defaultValue
+        self.range = range
+        self.ui = ParameterLayerEntry(rawValue: defaultValue, smoothingTime: nil, timestamp: timestamp)
+    }
+
+    var hasBootstrappedBase: Bool { ui != nil }
+
+    mutating func setBaseIfNeeded(_ value: Float, timestamp: TimeInterval) {
+        guard ui == nil else { return }
+        ui = ParameterLayerEntry(rawValue: value, smoothingTime: nil, timestamp: timestamp)
+    }
+
+    @discardableResult
+    mutating func apply(layer: ParameterLayer,
+                        value: Float,
+                        smoothingTime: Float?,
+                        timestamp: TimeInterval) -> Float {
+        let entry = ParameterLayerEntry(rawValue: value, smoothingTime: smoothingTime, timestamp: timestamp)
+        set(entry: entry, for: layer)
+        return resolvedValue(at: timestamp)
+    }
+
+    mutating func resolvedValue(at timestamp: TimeInterval) -> Float {
+        var value = resolve(entry: &ui, at: timestamp) ?? defaultValue
+
+        if let gesture = resolve(entry: &gesture, at: timestamp) {
+            value = gesture
+        }
+
+        if let precompute = resolve(entry: &precompute, at: timestamp) {
+            value = precompute
+        }
+
+        if let system = resolve(entry: &system, at: timestamp) {
+            value = system
+        }
+
+        if let music = resolve(entry: &music, at: timestamp) {
+            value += music
+        }
+
+        return min(range.upperBound, max(range.lowerBound, value))
+    }
+
+    // MARK: - Internal helpers
+
+    private mutating func resolve(entry: inout ParameterLayerEntry?, at timestamp: TimeInterval) -> Float? {
+        guard var entryValue = entry else { return nil }
+        let resolved = entryValue.resolvedValue(at: timestamp)
+        entry = entryValue
+        return resolved
+    }
+
+    private mutating func set(entry: ParameterLayerEntry?, for layer: ParameterLayer) {
+        switch layer {
+        case .ui: ui = entry
+        case .gesture: gesture = entry
+        case .precompute: precompute = entry
+        case .music: music = entry
+        case .system: system = entry
+        }
     }
 }
 
@@ -330,6 +511,14 @@ final class ParameterNodeRegistry: @unchecked Sendable {
 
     private init() {
         rebuildFormulaBatches(force: true)
+    }
+
+    func metricsSnapshot() -> MetricsSnapshot {
+        MetricsSnapshot(
+            batchRebuildCount: batchRebuildCount,
+            nodeLookupCount: nodeLookupCount,
+            nodeLookupDurationMs: nodeLookupDuration * 1000
+        )
     }
 
     func rebuildFormulaBatches(force: Bool = false) {
@@ -399,6 +588,35 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         formulaBatch(for: binding.fractalType).floatNodes.first { $0.id == binding.parameterNodeID }
     }
 
+    // MARK: - Per-Frame Smoothing Tick
+
+    /// Call once per frame from the MainActor task to advance smoothing on all nodes.
+    @MainActor
+    func updateSmoothing(deltaTime: Float, for type: FractalModelType) {
+        let batch = formulaBatch(for: type)
+        for node in batch.floatNodes {
+            if let smoothed = node as? SmoothedFloatParameterNode {
+                smoothed.updateSmoothing(deltaTime: deltaTime)
+            }
+        }
+    }
+
+    // MARK: - Dirty-Tracking Sync
+
+    /// Returns IDs of nodes that have been modified since last clean, then marks them clean.
+    @MainActor
+    func consumeDirtyNodes(for type: FractalModelType) -> [String] {
+        let batch = formulaBatch(for: type)
+        var dirtyIDs: [String] = []
+        for node in batch.nodes {
+            if node.isDirty {
+                dirtyIDs.append(node.id)
+                node.markClean()
+            }
+        }
+        return dirtyIDs
+    }
+
     func fractalParameterMappingJSON(prettyPrinted: Bool = true) -> String? {
         struct Mapping: Codable {
             struct FractalEntry: Codable {
@@ -435,7 +653,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         var seenFormulaIndices: Set<Int> = []
         var floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]
 
-        let nodes = descriptor.params.map { param in
+        let nodes: [AnyParameterNodeBase] = descriptor.params.map { param in
             assert(
                 seenFormulaIndices.insert(param.index).inserted,
                 "Duplicate formula parameter index \(param.index) for fractal type \(type.rawValue)"

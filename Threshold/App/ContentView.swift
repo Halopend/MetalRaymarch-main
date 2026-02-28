@@ -1245,7 +1245,8 @@ struct ContentView: View {
     }
     
     private var settingsAdvancedContent: some View {
-        VStack(spacing: 16) {
+        @Bindable var appModel = appModel
+        return VStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack { Image(systemName: "slider.horizontal.3").foregroundStyle(themeColor); Text("Quality Constraints").font(.headline) }
                 VStack(spacing: 12) {

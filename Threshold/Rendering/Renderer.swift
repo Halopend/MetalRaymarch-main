@@ -61,6 +61,8 @@ actor Renderer {
     var cachedFrameTime: Float = 0
     var cachedPrecomputedFractal: PrecomputedFractalParams = PrecomputedFractalParams()
     var cachedPrecomputedLighting: PrecomputedLighting = PrecomputedLighting()
+    var cachedPrecomputedAudio: PrecomputedAudio = PrecomputedAudio()
+    var cachedPrecomputedFog: PrecomputedFog = PrecomputedFog()
     var cachedModelMatrix: matrix_float4x4 = matrix_identity_float4x4
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -202,6 +204,9 @@ actor Renderer {
     private var musicAnchorHueWasEnabled: Bool = false
     private var musicAnchorSaturation: Float = 1.0
     private var musicAnchorIterations: Int = 9
+
+    private var parameterOperationFrameIndex: UInt64 = 0
+    private let parameterOperationDispatcher = ParameterOperationDispatcher()
 
     var smoothedScale: Float = 1.0
     
@@ -657,6 +662,7 @@ actor Renderer {
         // Single consolidated MainActor dispatch only when needed.
         // Avoid scheduling a per-frame task when no animation or audio updates are active.
         let shouldUpdateAnimation = settings.isAnimationPlaying
+        let fractalType = settings.fractalType
         if shouldUpdateAnimation || isAudioMode {
             Task { @MainActor in
                 if shouldUpdateAnimation {
@@ -666,6 +672,9 @@ actor Renderer {
                     self.appModel.spotifyManager.updateFrame()
                     self.appModel.appleMusicManager.updateFrame()
                 }
+                // Advance per-node smoothing and consume dirty flags
+                ParameterNodeRegistry.shared.updateSmoothing(deltaTime: Float(animDelta), for: fractalType)
+                let _ = ParameterNodeRegistry.shared.consumeDirtyNodes(for: fractalType)
             }
         }
         
@@ -758,41 +767,60 @@ actor Renderer {
                 let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
                 let drive = min(1.0, bandDrive * (0.9 * amount) + beat * (0.1 + 0.6 * beatPunch))
 
-                // ── Geometry modulation (existing) ──────────────────────────
+                // ── Geometry modulation (layered music offset) ──────────────
+                var audioOperations: [ParameterOperation] = []
+                let dampening = max(0.02, 0.08 + (1.0 - amount) * 0.12)
+
+                func enqueue(_ id: String, target: Float, anchor: Float) {
+                    let offset = target - anchor
+                    audioOperations.append(
+                        ParameterOperation(
+                            targetID: id,
+                            source: .audio,
+                            value: .absolute(offset),
+                            frameIndex: parameterOperationFrameIndex,
+                            smoothing: .init(smoothingTime: dampening)
+                        )
+                    )
+                }
+
                 if settings.fractalAudioAffectsScale {
                     // Bass + beat expand/contract fractal scale
-                    settings.fractalScale = max(1.6, min(5.2, musicAnchorFractalScale + (drive - 0.35) * (0.15 + 0.8 * amount)))
+                    let target = max(1.6, min(5.2, musicAnchorFractalScale + (drive - 0.35) * (0.15 + 0.8 * amount)))
+                    enqueue("core.fractalScale", target: target, anchor: musicAnchorFractalScale)
                 }
                 if settings.fractalAudioAffectsFolding {
                     // Bass drives box fold, beats punch it
-                    settings.foldingLimit = max(0.7, min(1.7, musicAnchorFoldingLimit + (bass - 0.4) * (0.08 + 0.24 * amount) + beat * (0.03 + 0.12 * beatPunch)))
+                    let target = max(0.7, min(1.7, musicAnchorFoldingLimit + (bass - 0.4) * (0.08 + 0.24 * amount) + beat * (0.03 + 0.12 * beatPunch)))
+                    enqueue("core.targetFoldingLimit", target: target, anchor: musicAnchorFoldingLimit)
                 }
                 if settings.fractalAudioAffectsRadius {
                     // Mids modulate sphere radius, beats add punch
-                    settings.sphereRadius = max(0.03, min(1.2, musicAnchorSphereRadius + mid * (0.05 + 0.20 * amount) + beat * (0.01 + 0.08 * beatPunch)))
+                    let target = max(0.03, min(1.2, musicAnchorSphereRadius + mid * (0.05 + 0.20 * amount) + beat * (0.01 + 0.08 * beatPunch)))
+                    enqueue("core.targetSphereRadius", target: target, anchor: musicAnchorSphereRadius)
                 }
                 if settings.fractalAudioAffectsColorMix {
                     // Overall drive shifts color palette blend
-                    settings.colorMix = max(0.0, min(1.0, musicAnchorColorMix * (1.0 - 0.4 * amount) + drive * (0.2 + 0.6 * amount)))
+                    let target = max(0.0, min(1.0, musicAnchorColorMix * (1.0 - 0.4 * amount) + drive * (0.2 + 0.6 * amount)))
+                    enqueue("core.colorMix", target: target, anchor: musicAnchorColorMix)
                 }
-                
+
                 // ── Effect modulation (Fractal Forge–inspired) ─────────────
-                
+
                 // GLOW ← RMS energy + kick pulses (additive brightness)
                 if settings.fractalAudioAffectsGlow {
                     let glowDrive = bass * 0.5 + beat * 0.4 + mid * 0.1
                     let baseGlow = musicAnchorGlowWasEnabled ? musicAnchorGlowIntensity : 0.25
                     let glowVal = baseGlow + glowDrive * (0.2 + 0.5 * amount)
-                    settings.audioModulateGlowIntensity(glowVal)
+                    enqueue("effect.glow", target: glowVal, anchor: musicAnchorGlowIntensity)
                 }
                 
                 // FOG ← INVERSELY mapped to energy (quiet=fog, loud=clear)
                 if settings.fractalAudioAffectsFog {
                     let energyLevel = bass * 0.4 + mid * 0.3 + beat * 0.3
                     let baseFog = musicAnchorFogWasEnabled ? musicAnchorFogIntensity : 0.30
-                    // High energy → fog fades away; quiet → fog thickens
-                    let fogVal = baseFog * (1.0 - energyLevel * (0.4 + 0.5 * amount))
-                    settings.audioModulateFogIntensity(max(0.02, fogVal))
+                    let fogVal = max(0.02, baseFog * (1.0 - energyLevel * (0.4 + 0.5 * amount)))
+                    enqueue("effect.fog", target: fogVal, anchor: musicAnchorFogIntensity)
                 }
                 
                 // BLOOM ← beat bloom with fast attack (kick-triggered flash)
@@ -800,7 +828,7 @@ actor Renderer {
                     let bloomDrive = beat * 0.6 + bass * 0.4
                     let baseBloom = musicAnchorBloomWasEnabled ? musicAnchorBloomStrength : 0.15
                     let bloomVal = baseBloom + bloomDrive * (0.15 + 0.4 * amount * beatPunch)
-                    settings.audioModulateBloomStrength(bloomVal)
+                    enqueue("effect.bloom", target: bloomVal, anchor: musicAnchorBloomStrength)
                 }
                 
                 // HUE SPEED ← treble + mid (high frequency accelerates color cycling)
@@ -808,16 +836,15 @@ actor Renderer {
                     let hueDrive = treble * 0.6 + mid * 0.3 + beat * 0.1
                     let baseHue = musicAnchorHueWasEnabled ? musicAnchorHueSpeed : 0.04
                     let hueVal = baseHue + hueDrive * (0.08 + 0.25 * amount)
-                    settings.audioModulateHueSpeed(hueVal)
+                    enqueue("effect.hueSpeed", target: hueVal, anchor: musicAnchorHueSpeed)
                 }
                 
                 // SATURATION ← tonal/harmonic energy (richer colors on harmonic content)
                 if settings.fractalAudioAffectsSaturation {
                     let satDrive = mid * 0.5 + treble * 0.3 + bass * 0.2
                     let baseSat = musicAnchorSaturation
-                    // Gently boost saturation on strong tonal content
                     let satVal = baseSat + satDrive * (0.2 + 0.6 * amount)
-                    settings.audioModulateSaturation(satVal)
+                    enqueue("effect.saturation", target: satVal, anchor: musicAnchorSaturation)
                 }
                 
                 // ITERATIONS ← mid energy adds detail on transients (⚠️ performance)
@@ -825,6 +852,14 @@ actor Renderer {
                     let iterDrive = mid * 0.6 + treble * 0.4
                     let extra = Int(iterDrive * amount * 3.0)  // +0 to +3 max
                     settings.fractalIterations = min(musicAnchorIterations + 3, musicAnchorIterations + extra)
+                }
+
+                if !audioOperations.isEmpty {
+                    parameterOperationDispatcher.dispatch(
+                        ParameterTransaction(frameIndex: parameterOperationFrameIndex, operations: audioOperations),
+                        settings: settings
+                    )
+                    parameterOperationFrameIndex &+= 1
                 }
                 
             } else {
@@ -1035,6 +1070,8 @@ actor Renderer {
         // These are frame-uniform (identical for both eyes), computed once per frame.
         let computePrecomputedFractal = cachedPrecomputedFractal
         let computePrecomputedLighting = cachedPrecomputedLighting
+        let computePrecomputedAudio = cachedPrecomputedAudio
+        let computePrecomputedFog = cachedPrecomputedFog
         let frameTime = cachedFrameTime
         
         var tileUniforms = TileUniforms(
@@ -1087,6 +1124,8 @@ actor Renderer {
             pad_temporal: (0, 0, 0),
             precomputedFractal: computePrecomputedFractal,
             precomputedLighting: computePrecomputedLighting,
+            precomputedAudio: computePrecomputedAudio,
+            precomputedFog: computePrecomputedFog,
             colorScheme: colorSchemeParams
         )
         

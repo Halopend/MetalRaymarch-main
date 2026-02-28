@@ -81,7 +81,7 @@ class AppModel {
     var parameterArbitrationPolicy: ParameterArbitrationPolicy = .gesturePriorityWhileActive {
         didSet {
             UserDefaults.standard.set(parameterArbitrationPolicy.rawValue, forKey: "parameterArbitrationPolicy")
-            ParameterOperationDispatcher.shared.setArbitrationPolicy(parameterArbitrationPolicy)
+            ParameterArbitrationDispatcher.shared.setArbitrationPolicy(parameterArbitrationPolicy)
         }
     }
 
@@ -259,7 +259,7 @@ class AppModel {
     }
 
     func parameterDiagnosticsText() -> String {
-        let op = ParameterOperationDispatcher.shared.metricsSnapshot()
+        let op = ParameterArbitrationDispatcher.shared.metricsSnapshot()
         let registry = ParameterNodeRegistry.shared.metricsSnapshot()
         return "Ops/frame: \(op.operationsProcessedThisFrame) (max \(op.maxOperationsPerFrame)) • Breaches: \(op.frameBudgetBreaches)\nBatch rebuilds: \(registry.batchRebuildCount) • Node lookups: \(registry.nodeLookupCount) in \(String(format: "%.2f", registry.nodeLookupDurationMs))ms"
     }

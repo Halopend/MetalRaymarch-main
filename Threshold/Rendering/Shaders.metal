@@ -225,10 +225,11 @@ FORCE_INLINE float4 computeSpotlight(float3 hitPos, float3 spotLightPosition) {
     return float4(toLight * invDist, atten);  // toLight * invDist = normalize(toLight)
 }
 
-// Apply fog based on distance
-// fogIntensity: 0 = no fog (returns 1), 1 = full fog (returns ~0)
-// OPTIMIZATION: Use fma and precompute constants
-FORCE_INLINE half3 applyFog(half3 col, float distance, float fogIntensity) {
+// Apply fog based on distance using CPU-precomputed scalars to avoid divides/branches
+// fog.fog.x = intensity, fog.fog.y = 1 / intensity (0 when disabled)
+FORCE_INLINE half3 applyFog(half3 col, float distance, constant PrecomputedFog& fog) {
+    float fogIntensity = fog.fog.x;
+    if (fogIntensity <= 0.0001f) { return col; }
     // exp(-distance * fogIntensity * 2.0 + 1.5) = exp(1.5) * exp(-distance * fogIntensity * 2.0)
     // Precomputed: exp(1.5) ≈ 4.4817
     float exponent = fma(distance, -fogIntensity * 2.0f, 1.5f);
@@ -1734,7 +1735,7 @@ kernel void adaptiveHierarchical8x8(
     if (tileIsEmpty) {
         // Apply minimal fog/glow for background consistency
         half3 col = half3(0.0h);
-        col = applyFog(col, kRayMissThreshold + 100.0, uniforms.fogIntensity);
+        col = applyFog(col, kRayMissThreshold + 100.0, uniforms.precomputedFog);
         col = clampColor(col);
         half2 texCoord = half2(pixelCenter / uniforms.resolution);
         col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash), 0.0h);
@@ -1887,7 +1888,7 @@ kernel void adaptiveHierarchical8x8(
     
     // Apply fog, glow, and clamp using helper functions
     half glowH = half(glow);
-    col = applyFog(col, adjustedDist, uniforms.fogIntensity);
+    col = applyFog(col, adjustedDist, uniforms.precomputedFog);
     col = applyGlow(col, glowH);
     col = clampColor(col);
     
@@ -2121,7 +2122,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     // Apply fog, glow, and clamp using helper functions
     half glow = half(ret.y);
-    col = applyFog(col, ret.x, uniforms.fogIntensity);
+    col = applyFog(col, ret.x, uniforms.precomputedFog);
     col = applyGlow(col, glow);
     col = clampColor(col);
 
@@ -2305,7 +2306,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     
     // Apply fog, glow, and clamp using helper functions
     half glowH = half(glow);
-    col = applyFog(col, adjustedDist, uniforms.fogIntensity);
+    col = applyFog(col, adjustedDist, uniforms.precomputedFog);
     col = applyGlow(col, glowH);
     col = clampColor(col);
     

@@ -6,6 +6,8 @@ enum ParameterOperationSource: String, Codable, Sendable {
     case slider
     case windowSlider
     case animation
+    case precompute
+    case audio
     case preset
     case system
 }
@@ -82,7 +84,9 @@ final class ParameterOperationDispatcher {
             .gesture: 10,
             .windowSlider: 20,
             .slider: 25,
+            .precompute: 28,
             .animation: 30,
+            .audio: 35,
             .preset: 40,
             .system: 50
         ])
@@ -91,6 +95,79 @@ final class ParameterOperationDispatcher {
             priority[source] ?? 0
         }
     }
+
+    private var coreStacks: [String: ParameterLayerStack] = [:]
+    private var formulaStacks: [String: ParameterLayerStack] = [:]
+
+    private struct CoreParameterDescriptor {
+        let range: ClosedRange<Float>
+        let bundle: ParameterBundle
+        let read: (RenderSettings) -> Float
+        let write: (RenderSettings, Float) -> Void
+    }
+
+    private let coreDescriptors: [String: CoreParameterDescriptor] = [
+        "core.targetMinDistance": CoreParameterDescriptor(
+            range: -5.0...15.0,
+            bundle: .fractalCore,
+            read: { $0.targetMinDistance },
+            write: { settings, value in settings.targetMinDistance = value }
+        ),
+        "core.targetFoldingLimit": CoreParameterDescriptor(
+            range: -10.0...30.0,
+            bundle: .fractalCore,
+            read: { $0.targetFoldingLimit },
+            write: { settings, value in settings.targetFoldingLimit = value }
+        ),
+        "core.targetSphereRadius": CoreParameterDescriptor(
+            range: -5.0...8.0,
+            bundle: .fractalCore,
+            read: { $0.targetSphereRadius },
+            write: { settings, value in settings.targetSphereRadius = value }
+        ),
+        "core.fractalScale": CoreParameterDescriptor(
+            range: -5.0...8.0,
+            bundle: .scale,
+            read: { $0.fractalScale },
+            write: { settings, value in settings.fractalScale = value }
+        ),
+        "core.colorMix": CoreParameterDescriptor(
+            range: 0.0...1.0,
+            bundle: .color,
+            read: { $0.colorMix },
+            write: { settings, value in settings.colorMix = value }
+        ),
+        "effect.glow": CoreParameterDescriptor(
+            range: 0.0...2.0,
+            bundle: .lighting,
+            read: { $0.glowEffect.intensity },
+            write: { settings, value in settings.audioModulateGlowIntensity(value) }
+        ),
+        "effect.fog": CoreParameterDescriptor(
+            range: 0.0...1.0,
+            bundle: .lighting,
+            read: { $0.fogEffect.intensity },
+            write: { settings, value in settings.audioModulateFogIntensity(value) }
+        ),
+        "effect.bloom": CoreParameterDescriptor(
+            range: 0.0...2.0,
+            bundle: .lighting,
+            read: { $0.bloomEffect.strength },
+            write: { settings, value in settings.audioModulateBloomStrength(value) }
+        ),
+        "effect.hueSpeed": CoreParameterDescriptor(
+            range: 0.0...0.5,
+            bundle: .color,
+            read: { $0.hueRotationEffect.speed },
+            write: { settings, value in settings.audioModulateHueSpeed(value) }
+        ),
+        "effect.saturation": CoreParameterDescriptor(
+            range: 0.0...3.0,
+            bundle: .color,
+            read: { $0.colorSchemeSaturation },
+            write: { settings, value in settings.audioModulateSaturation(value) }
+        )
+    ]
 
     private let sourcePolicy: SourcePolicy
     var debugTraceEnabled = false
@@ -140,13 +217,18 @@ final class ParameterOperationDispatcher {
     }
 
     private func apply(_ operation: ParameterOperation, cache: UISettingsCache) {
+        let timestamp = operation.timestamp
+        let layer = layer(for: operation.source)
+
         let formulaBatch = ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
         if let node = formulaBatch.floatNodes.first(where: { $0.id == operation.targetID }) {
-            let current = node.readValue(cache)
-            let newValue = operation.value.resolved(from: current)
-            node.writeValue(cache, newValue)
+            node.bootstrapBaseIfNeeded(from: node.readValue(cache), timestamp: timestamp)
+            let current = node.resolvedValue(timestamp: timestamp)
+            let incoming = operation.value.resolved(from: current)
+            let resolved = node.applyLayer(layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
+            node.writeValue(cache, resolved)
             if debugTraceEnabled {
-                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(newValue)")
+                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
             }
             return
         }
@@ -161,50 +243,69 @@ final class ParameterOperationDispatcher {
             return
         }
 
-        applyCore(operation, settings: cache.renderSettings)
+        applyCore(operation, settings: cache.renderSettings, layer: layer)
     }
 
     private func apply(_ operation: ParameterOperation, settings: RenderSettings) {
+        let timestamp = operation.timestamp
+        let layer = layer(for: operation.source)
         let pieces = operation.targetID.split(separator: ".")
         if pieces.count >= 4,
            pieces[0] == "formula",
-           let formulaIndex = Int(pieces[2]) {
+           let fractalRaw = Int(pieces[1]),
+           let formulaIndex = Int(pieces[2]),
+           let fractalType = FractalModelType(rawValue: Int32(fractalRaw)) {
             var params = settings.formulaParams
             let current = FormulaCatalog.getParam(params, index: formulaIndex)
-            let newValue = operation.value.resolved(from: current)
-            FormulaCatalog.setParam(&params, index: formulaIndex, value: newValue)
+            let nodeRange: ClosedRange<Float> = ParameterNodeRegistry.shared
+                .node(for: fractalType, formulaIndex: formulaIndex)?.range ?? -Float.greatestFiniteMagnitude...Float.greatestFiniteMagnitude
+            var stack = formulaStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: current, range: nodeRange, timestamp: timestamp)
+            stack.setBaseIfNeeded(current, timestamp: timestamp)
+            let incoming = operation.value.resolved(from: stack.resolvedValue(at: timestamp))
+            let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
+            FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
             settings.formulaParams = params
+            formulaStacks[operation.targetID] = stack
             if debugTraceEnabled {
-                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(newValue)")
+                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
             }
             return
         }
 
-        applyCore(operation, settings: settings)
+        applyCore(operation, settings: settings, layer: layer)
     }
 
-    private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?) {
+    private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?, layer: ParameterLayer) {
         guard let settings else { return }
+        guard let descriptor = coreDescriptors[operation.targetID] else { return }
 
-        func assign(_ current: Float, _ set: (Float) -> Void) {
-            let newValue = operation.value.resolved(from: current)
-            set(newValue)
-            if debugTraceEnabled {
-                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(newValue)")
-            }
+        var stack = coreStacks[operation.targetID]
+
+        if stack == nil {
+            let base = descriptor.read(settings)
+            stack = ParameterLayerStack(defaultValue: base, range: descriptor.range, timestamp: operation.timestamp)
         }
 
-        switch operation.targetID {
-        case "core.targetMinDistance":
-            assign(settings.targetMinDistance) { settings.targetMinDistance = $0 }
-        case "core.targetFoldingLimit":
-            assign(settings.targetFoldingLimit) { settings.targetFoldingLimit = $0 }
-        case "core.targetSphereRadius":
-            assign(settings.targetSphereRadius) { settings.targetSphereRadius = $0 }
-        case "core.fractalScale":
-            assign(settings.fractalScale) { settings.fractalScale = $0 }
-        default:
-            break
+        stack?.setBaseIfNeeded(descriptor.read(settings), timestamp: operation.timestamp)
+
+        let current = stack?.resolvedValue(at: operation.timestamp) ?? descriptor.read(settings)
+        let incoming = operation.value.resolved(from: current)
+        let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: operation.timestamp) ?? incoming
+        descriptor.write(settings, min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved)))
+        if let stack { coreStacks[operation.targetID] = stack }
+
+        if debugTraceEnabled {
+            print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
+        }
+    }
+
+    private func layer(for source: ParameterOperationSource) -> ParameterLayer {
+        switch source {
+        case .gesture: return .gesture
+        case .slider, .windowSlider, .preset: return .ui
+        case .precompute: return .precompute
+        case .audio: return .music
+        case .animation, .system: return .system
         }
     }
 }
