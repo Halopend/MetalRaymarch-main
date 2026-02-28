@@ -82,7 +82,7 @@ private struct ParameterNodeRow: View {
                     showToggle: false
                 )
 
-                if floatNode.isGestureMappable, let formulaSlot = floatNode.gestureAction {
+                if floatNode.isGestureMappable, let formulaSlot = floatGestureSlot {
                     Menu {
                         ForEach(FingerPair.allCases, id: \.self) { pair in
                             Button {
@@ -107,9 +107,15 @@ private struct ParameterNodeRow: View {
         }
     }
 
+    private var floatGestureSlot: FingerGestureAction? {
+        guard let floatNode = node as? FloatParameterNode else { return nil }
+        let pieces = floatNode.id.split(separator: ".")
+        guard pieces.count >= 3, let index = Int(pieces[2]) else { return nil }
+        return FingerGestureAction(rawValue: Int32(100 + index))
+    }
+
     private var currentGestureAssignment: FingerPair? {
-        guard let floatNode = node as? FloatParameterNode,
-              let slot = floatNode.gestureAction else { return nil }
+        guard let slot = floatGestureSlot else { return nil }
         return cache.fingerPair(for: slot)
     }
 

@@ -125,13 +125,11 @@ class FloatParameterNode: BaseParameterNode<Float> {
          defaultValue: Float,
          range: ClosedRange<Float>,
          step: Float,
-         gestureAction: FingerGestureAction? = nil,
          isGestureMappable: Bool,
          readValue: @escaping (UISettingsCache) -> Float,
          writeValue: @escaping (UISettingsCache, Float) -> Void) {
         self.range = range
         self.step = step
-        self.gestureAction = gestureAction
         self.readValue = readValue
         self.writeValue = writeValue
         super.init(id: id,
@@ -225,7 +223,6 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
          defaultValue: Float,
          range: ClosedRange<Float>,
          step: Float,
-         gestureAction: FingerGestureAction? = nil,
          smoothingTime: Float,
          isGestureMappable: Bool,
          readValue: @escaping (UISettingsCache) -> Float,
@@ -243,7 +240,6 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
                    defaultValue: defaultValue,
                    range: range,
                    step: step,
-                   gestureAction: gestureAction,
                    isGestureMappable: isGestureMappable,
                    readValue: readValue,
                    writeValue: writeValue)
@@ -294,24 +290,12 @@ struct ParameterNodeBatch {
     let nodes: [AnyParameterNodeBase]
     let floatNodes: [FloatParameterNode]
     let boolNodes: [BoolParameterNode]
-    let floatNodeByGestureAction: [FingerGestureAction: FloatParameterNode]
 
     init(fractalType: FractalModelType, nodes: [AnyParameterNodeBase]) {
         self.fractalType = fractalType
         self.nodes = nodes
         self.floatNodes = nodes.compactMap { $0 as? FloatParameterNode }
         self.boolNodes = nodes.compactMap { $0 as? BoolParameterNode }
-        var map: [FingerGestureAction: FloatParameterNode] = [:]
-        for node in self.floatNodes {
-            if let action = node.gestureAction {
-                map[action] = node
-            }
-        }
-        self.floatNodeByGestureAction = map
-    }
-
-    var formulaGestureActions: [FingerGestureAction] {
-        floatNodes.compactMap(\.gestureAction)
     }
 }
 
@@ -340,16 +324,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     }
 
     func node(for type: FractalModelType, formulaIndex: Int) -> FloatParameterNode? {
-        guard let action = FingerGestureAction(rawValue: Int32(100 + formulaIndex)) else { return nil }
-        return node(for: type, action: action)
-    }
-
-    func node(for type: FractalModelType, action: FingerGestureAction) -> FloatParameterNode? {
-        formulaBatch(for: type).floatNodeByGestureAction[action]
-    }
-
-    func formulaGestureActions(for type: FractalModelType) -> [FingerGestureAction] {
-        formulaBatch(for: type).formulaGestureActions
+        formulaBatch(for: type).floatNodes.first { $0.id.hasPrefix("formula.\(type.rawValue).\(formulaIndex).") }
     }
 
     func fractalParameterMappingJSON(prettyPrinted: Bool = true) -> String? {
@@ -417,7 +392,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 defaultValue: param.default,
                 range: param.min...param.max,
                 step: param.step,
-                gestureAction: FingerGestureAction(rawValue: Int32(100 + param.index)),
                 smoothingTime: 0,
                 isGestureMappable: true,
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
