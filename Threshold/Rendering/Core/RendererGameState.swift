@@ -12,11 +12,16 @@ extension Renderer {
         let smoothedPosition = settingsSnapshot.position  // Already smoothed by interpolateToTargets
         smoothedScale = smoothedScale + (settingsSnapshot.scale - smoothedScale) * smoothFactor
 
-        // Use cached rotation matrix (constant, computed once in init)
+        // Use cached base rotation matrix (constant −90° Y) combined with user world rotation
+        let userRotationMatrix = matrix4x4_from_quaternion(settingsSnapshot.worldRotation)
+        let combinedRotationMatrix = userRotationMatrix * cachedRotationMatrix
+        
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
-        let scaleMatrix = matrix4x4_scale(smoothedScale, smoothedScale, smoothedScale)
+        // Combine base scale with grab-gesture scale factor
+        let effectiveScale = smoothedScale * settingsSnapshot.grabScale
+        let scaleMatrix = matrix4x4_scale(effectiveScale, effectiveScale, effectiveScale)
 
-        let modelMatrix = translationMatrix * cachedRotationMatrix * scaleMatrix
+        let modelMatrix = translationMatrix * combinedRotationMatrix * scaleMatrix
 
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4

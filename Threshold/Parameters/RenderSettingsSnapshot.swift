@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 // RenderSettings uses os_unfair_lock for minimal lock overhead
 // This is the fastest synchronization primitive on Apple platforms
@@ -37,6 +38,10 @@ struct RenderSettingsSnapshot {
     let safetyBubbleShape: Float
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
+    
+    // Two-point grab world rotation + scale
+    let worldRotation: simd_quatf
+    let grabScale: Float
 
     // ═══════════════════════════════════════════════════════════════════════════
     // GEOMETRY STABILITY STATE

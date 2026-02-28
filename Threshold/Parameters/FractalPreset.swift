@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Foundation
+import simd
 
 /// Represents a saved preset with all render settings and a preview image
 struct FractalPreset: Codable, Identifiable {
@@ -384,6 +385,13 @@ struct FractalPreset: Codable, Identifiable {
             sphereRadius: sphereRadius,
             position: position
         )
+        
+        // Reset grab transform to identity when loading a preset
+        let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        settings.worldRotation = identity
+        settings.targetWorldRotation = identity
+        settings.grabScale = 1.0
+        settings.targetGrabScale = 1.0
         
         if includePerformance {
             if let resolutionScale = resolutionScale {

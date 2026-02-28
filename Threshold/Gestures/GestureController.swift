@@ -238,9 +238,20 @@ final class GestureController {
     
     // Two-hand gesture states (one per finger pair)
     private var indexGestureState = TwoHandGestureState()    // minDistance
-    private var middleGestureState = TwoHandGestureState()   // foldingLimit
     private var ringGestureState = TwoHandGestureState()     // sphereRadius
     private var pinkyGestureState = TwoHandGestureState()    // fractalScale
+    
+    // === TWO-POINT GRAB STATE (middle finger, both hands) ===
+    // Grabs two points in space; pulling apart scales, rotating rotates the world.
+    private var grabActive: Bool = false
+    private var grabStartLeftPos: SIMD3<Float> = .zero       // Left pinch position when grab started
+    private var grabStartRightPos: SIMD3<Float> = .zero      // Right pinch position when grab started
+    private var grabStartDistance: Float = 0                  // Distance between hands at grab start
+    private var grabStartMidpoint: SIMD3<Float> = .zero      // Midpoint of the two grab points at start
+    private var grabStartAxis: SIMD3<Float> = .zero          // Normalized axis (right-left) at start
+    private var grabStartRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // World rotation when grab started
+    private var grabStartScale: Float = 1.0                  // grabScale when gesture started
+    private var grabStartPosition: SIMD3<Float> = .zero      // World position when gesture started
     
     // Single-hand drag state
     private var rightIndexDragActive: Bool = false
@@ -284,9 +295,9 @@ final class GestureController {
         
         // Reset all gesture states to avoid stale data
         indexGestureState = TwoHandGestureState()
-        middleGestureState = TwoHandGestureState()
         ringGestureState = TwoHandGestureState()
         pinkyGestureState = TwoHandGestureState()
+        grabActive = false
         rightIndexDragActive = false
         menuToggleActive = false
         menuToggleHoldTimer = 0
@@ -508,7 +519,7 @@ final class GestureController {
         // cleanly so releasing the suppression doesn't cause a jump.
         if suppressParameterGestures {
             if indexGestureState.isActive  { indexGestureState.isActive = false }
-            if middleGestureState.isActive { middleGestureState.isActive = false }
+            if grabActive                  { grabActive = false }
             if ringGestureState.isActive   { ringGestureState.isActive = false }
             if pinkyGestureState.isActive  { pinkyGestureState.isActive = false }
             if rightIndexDragActive        { rightIndexDragActive = false }
@@ -544,20 +555,11 @@ final class GestureController {
         }
         if indexGestureState.isActive { activeDigit = 1 }
         
-        // MIDDLE FINGER: foldingLimit
-        processTwoHandGesture(
-            digit: 2,
-            state: &middleGestureState,
-            currentTarget: settings.effectiveTargetFoldingLimit,
-            range: ranges.foldingLimit
-        ) { newValue in
-            if settings.isAnimationPlaying {
-                settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
-            } else {
-                settings.targetFoldingLimit = newValue
-            }
-        }
-        if middleGestureState.isActive { activeDigit = 2 }
+        // MIDDLE FINGER: TWO-POINT GRAB (world scale + rotation + translation)
+        // Both hands pinch middle fingers → grab two points in space.
+        // Pulling apart scales the world. Rotating rotates the world.
+        processTwoPointGrab()
+        if grabActive { activeDigit = 2 }
         
         // RING FINGER: sphereRadius (sphere inversion radius)
         processTwoHandGesture(
@@ -594,7 +596,7 @@ final class GestureController {
         
         // Wire geometry gesture flag so the state machine and dynamic quality know
         // when a geometry-affecting gesture is in progress.
-        let anyGeometryGestureActive = indexGestureState.isActive || middleGestureState.isActive ||
+        let anyGeometryGestureActive = indexGestureState.isActive || grabActive ||
                                        ringGestureState.isActive || pinkyGestureState.isActive
         settings.isGeometryGestureActive = anyGeometryGestureActive
         
@@ -617,6 +619,146 @@ final class GestureController {
         
         // SINGLE-HAND gesture: Right index pinch drag → translate
         processRightIndexDrag()
+    }
+    
+    // MARK: - Two-Point Grab Gesture (Middle Finger, Both Hands)
+    
+    /// Two-point grab: both hands pinch middle fingers to grab two points in space.
+    /// - Pulling hands apart/together → scales the fractal world (grabScale)
+    /// - Rotating the axis between hands → rotates the fractal world (worldRotation)
+    /// - Moving the midpoint → translates the fractal world (position)
+    ///
+    /// The transform is relative: it captures the start state and applies deltas.
+    /// Scale is multiplicative (ratio of current distance / start distance).
+    /// Rotation is computed from the angular change of the axis between hands.
+    private func processTwoPointGrab() {
+        guard let settings = renderSettings else { return }
+        
+        let digit = 2  // Middle finger
+        let leftPinch = leftHand.pinchStrength(digit: digit)
+        let rightPinch = rightHand.pinchStrength(digit: digit)
+        
+        let activateThresh = settings.twoHandPinchActivateThreshold
+        let releaseThresh = settings.twoHandPinchReleaseThreshold
+        
+        let leftPos = leftHand.pinchPosition(digit: digit)
+        let rightPos = rightHand.pinchPosition(digit: digit)
+        
+        let leftPosValid = simd_length_squared(leftPos) > 1e-6
+        let rightPosValid = simd_length_squared(rightPos) > 1e-6
+        
+        let currentDistance = simd_length(leftPos - rightPos)
+        let maxStartHandDistance = settings.gestureMaxStartHandDistance
+        let maxActiveHandDistance = max(settings.gestureMaxActiveHandDistance, maxStartHandDistance)
+        
+        // Check if both hands are pinching
+        let bothActive: Bool
+        if grabActive {
+            bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         leftPosValid && rightPosValid &&
+                         currentDistance <= maxActiveHandDistance &&
+                         leftPinch >= releaseThresh &&
+                         rightPinch >= releaseThresh
+        } else {
+            bothActive = leftHand.isTracked && rightHand.isTracked &&
+                         leftPosValid && rightPosValid &&
+                         currentDistance <= maxStartHandDistance &&
+                         leftPinch >= activateThresh &&
+                         rightPinch >= activateThresh
+        }
+        
+        // === GESTURE START ===
+        if bothActive && !grabActive {
+            grabActive = true
+            grabStartLeftPos = leftPos
+            grabStartRightPos = rightPos
+            grabStartDistance = max(currentDistance, 0.01)  // Prevent division by zero
+            grabStartMidpoint = (leftPos + rightPos) * 0.5
+            let axis = rightPos - leftPos
+            let axisLen = simd_length(axis)
+            grabStartAxis = axisLen > 1e-4 ? axis / axisLen : SIMD3<Float>(1, 0, 0)
+            grabStartRotation = settings.targetWorldRotation
+            grabStartScale = settings.targetGrabScale
+            grabStartPosition = settings.effectiveTargetPosition
+            
+            if HAND_TRACKING_DEBUG {
+                print("🤲✊ Two-point GRAB started: dist=\(grabStartDistance), mid=\(grabStartMidpoint)")
+            }
+        }
+        
+        // === GESTURE ACTIVE ===
+        if bothActive && grabActive {
+            let currentMidpoint = (leftPos + rightPos) * 0.5
+            let currentAxis = rightPos - leftPos
+            let currentAxisLen = simd_length(currentAxis)
+            let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : grabStartAxis
+            
+            // 1) SCALE: ratio of current hand distance to start distance
+            let scaleRatio = currentDistance / max(grabStartDistance, 0.01)
+            // Apply sensitivity: sqrt makes it less twitchy for small movements
+            let adjustedScale = grabStartScale * scaleRatio
+            // Clamp to reasonable range (0.05× to 20× of starting scale)
+            let clampedScale = max(0.05, min(20.0, adjustedScale))
+            settings.targetGrabScale = clampedScale
+            
+            // 2) ROTATION: compute quaternion from start axis to current axis
+            //    This gives us the rotation the user applied by moving their hands
+            let dot = simd_clamp(simd_dot(grabStartAxis, currentAxisNorm), -1.0, 1.0)
+            let cross = simd_cross(grabStartAxis, currentAxisNorm)
+            let crossLen = simd_length(cross)
+            
+            let deltaRotation: simd_quatf
+            if crossLen > 1e-6 {
+                // Standard case: axes are not parallel
+                let angle = acos(dot)
+                let rotAxis = cross / crossLen
+                deltaRotation = simd_quatf(angle: angle, axis: rotAxis)
+            } else if dot < 0 {
+                // Axes are anti-parallel (180° flip) — pick an arbitrary perpendicular axis
+                let perp: SIMD3<Float> = abs(grabStartAxis.x) < 0.9
+                    ? simd_normalize(simd_cross(grabStartAxis, SIMD3<Float>(1, 0, 0)))
+                    : simd_normalize(simd_cross(grabStartAxis, SIMD3<Float>(0, 1, 0)))
+                deltaRotation = simd_quatf(angle: .pi, axis: perp)
+            } else {
+                // Axes are the same — no rotation
+                deltaRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            }
+            
+            // Apply delta rotation on top of the starting rotation
+            settings.targetWorldRotation = (deltaRotation * grabStartRotation).normalized
+            
+            // 3) TRANSLATION: midpoint drag moves the fractal
+            //    Scale the translation by the sensitivity so it feels like you're
+            //    actually moving the grabbed points.
+            let midpointDelta = currentMidpoint - grabStartMidpoint
+            let translationSensitivity = settings.translationSensitivity
+            let newPosition = grabStartPosition + midpointDelta * translationSensitivity
+            if settings.isAnimationPlaying {
+                settings.manualOffsetPosition = newPosition - settings.animationBasePosition
+            } else {
+                settings.targetPosition = newPosition
+                accumulatedPosition = newPosition
+            }
+            
+            // Track hand gesture usage for analytics
+            UsageAnalytics.shared.trackHandGestureUsed()
+        }
+        
+        // === GESTURE END ===
+        if !bothActive && grabActive {
+            grabActive = false
+            if HAND_TRACKING_DEBUG {
+                let reason: String
+                if !leftHand.isTracked || !rightHand.isTracked {
+                    reason = "hand tracking lost"
+                } else if leftPinch < releaseThresh || rightPinch < releaseThresh {
+                    reason = "pinch released"
+                } else {
+                    reason = "hands too far apart"
+                }
+                print("🤲✊ Two-point GRAB ended (\(reason))")
+            }
+        }
     }
     
     /// Process a two-hand gesture for a specific finger

@@ -190,6 +190,15 @@ final class RenderSettings: @unchecked Sendable {
     private var _targetSphereRadius: Float = 0.5
     private var _targetPosition: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
     
+    // === TWO-POINT GRAB GESTURE: World rotation + scale ===
+    // Driven by two-hand middle-finger pinch grab gesture.
+    // worldRotation is a unit quaternion applied in the model matrix.
+    // grabScale is a multiplier applied on top of the base `_scale`.
+    private var _worldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // identity
+    private var _targetWorldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    private var _grabScale: Float = 1.0         // Two-point grab scale factor (multiplied with _scale)
+    private var _targetGrabScale: Float = 1.0
+
     // === ANIMATION BASE + MANUAL OFFSETS ===
     // Animation drives base values. Manual gestures apply offsets when animation is playing.
     private var _isAnimationPlaying: Bool = false
@@ -233,6 +242,25 @@ final class RenderSettings: @unchecked Sendable {
     var position: SIMD3<Float> {
         get { withLock { _position } }
         set { withLock { _position = newValue } }
+    }
+    
+    // --- Two-point grab world rotation (unit quaternion) ---
+    var worldRotation: simd_quatf {
+        get { withLock { _worldRotation } }
+        set { withLock { _worldRotation = newValue } }
+    }
+    var targetWorldRotation: simd_quatf {
+        get { withLock { _targetWorldRotation } }
+        set { withLock { _targetWorldRotation = newValue } }
+    }
+    /// Grab-gesture scale factor (multiplied with base scale)
+    var grabScale: Float {
+        get { withLock { _grabScale } }
+        set { withLock { _grabScale = newValue } }
+    }
+    var targetGrabScale: Float {
+        get { withLock { _targetGrabScale } }
+        set { withLock { _targetGrabScale = newValue } }
     }
     
     var fractalScale: Float {
@@ -1321,6 +1349,8 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleShape: _safetyBubbleShape,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
+                worldRotation: _worldRotation,
+                grabScale: _grabScale,
                 geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier
@@ -1561,6 +1591,8 @@ final class RenderSettings: @unchecked Sendable {
                 _foldingLimit = _targetFoldingLimit
                 _sphereRadius = _targetSphereRadius
                 _position = _targetPosition
+                _worldRotation = _targetWorldRotation
+                _grabScale = _targetGrabScale
                 _velocityMinDistance = 0.0
                 _velocityFoldingLimit = 0.0
                 _velocitySphereRadius = 0.0
@@ -1654,6 +1686,16 @@ final class RenderSettings: @unchecked Sendable {
                 deltaTime: clampedDT
             )
             
+            // Smooth interpolation for world rotation (slerp) and grab scale (exp lerp)
+            let rotLerpT = 1.0 - exp(-12.0 * clampedDT)  // Same speed as main smoothing
+            _worldRotation = simd_slerp(_worldRotation, _targetWorldRotation, rotLerpT)
+            // Re-normalize to prevent drift
+            _worldRotation = _worldRotation.normalized
+            
+            let scaleRatio = _targetGrabScale / max(_grabScale, 1e-6)
+            let logRatio = log(max(scaleRatio, 1e-6))
+            _grabScale *= exp(logRatio * rotLerpT)  // Exponential lerp for multiplicative scale
+            
             // Clamp current values to sane ranges as a safety net
             // These MUST cover the full gesture/slider ranges (including negatives
             // for inverted effects) otherwise gestures and UI appear to "stop working"
@@ -1742,6 +1784,8 @@ final class RenderSettings: @unchecked Sendable {
             _foldingLimit = _targetFoldingLimit
             _sphereRadius = _targetSphereRadius
             _position = _targetPosition
+            _worldRotation = _targetWorldRotation
+            _grabScale = _targetGrabScale
             // Reset velocities when snapping
             _velocityMinDistance = 0.0
             _velocityFoldingLimit = 0.0

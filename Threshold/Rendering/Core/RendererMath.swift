@@ -1,5 +1,20 @@
 import simd
 
+/// Convert a unit quaternion (x, y, z, w) to a 4×4 rotation matrix.
+func matrix4x4_from_quaternion(_ q: simd_quatf) -> matrix_float4x4 {
+    let v = q.vector   // (x, y, z, w)
+    let x = v.x, y = v.y, z = v.z, w = v.w
+    let xx = x * x, yy = y * y, zz = z * z
+    let xy = x * y, xz = x * z, yz = y * z
+    let wx = w * x, wy = w * y, wz = w * z
+    return matrix_float4x4(columns: (
+        vector_float4(1 - 2*(yy + zz), 2*(xy + wz),     2*(xz - wy),     0),
+        vector_float4(2*(xy - wz),     1 - 2*(xx + zz),  2*(yz + wx),     0),
+        vector_float4(2*(xz + wy),     2*(yz - wx),      1 - 2*(xx + yy), 0),
+        vector_float4(0, 0, 0, 1)
+    ))
+}
+
 func matrix4x4_rotation(radians: Float, axis: SIMD3<Float>) -> matrix_float4x4 {
     let unitAxis = normalize(axis)
     let ct = cosf(radians)
