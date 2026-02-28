@@ -327,6 +327,26 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         formulaBatch(for: type).floatNodes.first { $0.id.hasPrefix("formula.\(type.rawValue).\(formulaIndex).") }
     }
 
+    func formulaGestureActions(for type: FractalModelType) -> [FingerGestureAction] {
+        formulaBatch(for: type).floatNodes.compactMap { node in
+            guard let formulaIndex = formulaIndex(for: node, type: type) else { return nil }
+            return FingerGestureAction(formulaParamIndex: formulaIndex)
+        }
+    }
+
+    func formulaActionMapping(for type: FractalModelType,
+                              action: FingerGestureAction) -> (formulaIndex: Int, node: FloatParameterNode)? {
+        guard let formulaIndex = action.formulaParamIndex,
+              let node = node(for: type, formulaIndex: formulaIndex) else {
+            return nil
+        }
+        return (formulaIndex, node)
+    }
+
+    func node(for type: FractalModelType, action: FingerGestureAction) -> FloatParameterNode? {
+        formulaActionMapping(for: type, action: action)?.node
+    }
+
     func fractalParameterMappingJSON(prettyPrinted: Bool = true) -> String? {
         struct Mapping: Codable {
             struct FractalEntry: Codable {
@@ -428,5 +448,13 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         if name.contains("pre") { return "arrow.right" }
         if name.contains("bubble") { return "circle.grid.3x3" }
         return "slider.horizontal.3"
+    }
+
+    private func formulaIndex(for node: FloatParameterNode, type: FractalModelType) -> Int? {
+        let prefix = "formula.\(type.rawValue)."
+        guard node.id.hasPrefix(prefix) else { return nil }
+        let suffix = node.id.dropFirst(prefix.count)
+        guard let segment = suffix.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true).first else { return nil }
+        return Int(segment)
     }
 }

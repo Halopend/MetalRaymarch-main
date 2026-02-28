@@ -27,6 +27,28 @@ enum FingerGestureAction: Int32, CaseIterable, Codable {
 
     static let coreCases: [FingerGestureAction] = [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale]
 
+    init?(formulaParamIndex: Int) {
+        switch formulaParamIndex {
+        case 0: self = .formulaParam0
+        case 1: self = .formulaParam1
+        case 2: self = .formulaParam2
+        case 3: self = .formulaParam3
+        case 4: self = .formulaParam4
+        case 5: self = .formulaParam5
+        case 6: self = .formulaParam6
+        case 7: self = .formulaParam7
+        case 8: self = .formulaParam8
+        case 9: self = .formulaParam9
+        case 10: self = .formulaParam10
+        case 11: self = .formulaParam11
+        case 12: self = .formulaParam12
+        case 13: self = .formulaParam13
+        case 14: self = .formulaParam14
+        case 15: self = .formulaParam15
+        default: return nil
+        }
+    }
+
     var formulaParamIndex: Int? {
         switch self {
         case .formulaParam0: return 0

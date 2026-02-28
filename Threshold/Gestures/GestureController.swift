@@ -542,16 +542,15 @@ final class GestureController {
         for digit in 1...4 {
             let action = settings.actionForDigit(digit)
 
-            if let formulaIndex = action.formulaParamIndex,
-               let node = ParameterNodeRegistry.shared.node(for: settings.fractalType, action: action) {
+            if let mapping = ParameterNodeRegistry.shared.formulaActionMapping(for: settings.fractalType, action: action) {
                 processTwoHandGesture(
                     digit: digit,
                     state: &fingerGestureState[digit]!,
-                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
-                    range: node.range
+                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: mapping.formulaIndex),
+                    range: mapping.node.range
                 ) { newValue in
                     var current = settings.formulaParams
-                    FormulaCatalog.setParam(&current, index: formulaIndex, value: newValue)
+                    FormulaCatalog.setParam(&current, index: mapping.formulaIndex, value: newValue)
                     settings.formulaParams = current
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
