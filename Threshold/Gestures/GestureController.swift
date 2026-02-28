@@ -529,6 +529,8 @@ final class GestureController {
             return
         }
         
+        ParameterOperationDispatcher.shared.beginFrame()
+
         // Track active gesture for HUD display
         var activeDigit = 0
         
@@ -551,8 +553,15 @@ final class GestureController {
                     range: node.range
                 ) { newValue in
                     var current = settings.formulaParams
-                    FormulaCatalog.setParam(&current, index: formulaIndex, value: newValue)
-                    settings.formulaParams = current
+                    ParameterOperationDispatcher.shared.applyFloat(
+                        parameterID: "formula.\(settings.fractalType.rawValue).\(formulaIndex)",
+                        incomingValue: newValue,
+                        source: .gesture,
+                        currentValue: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex)
+                    ) { resolvedValue in
+                        FormulaCatalog.setParam(&current, index: formulaIndex, value: resolvedValue)
+                        settings.formulaParams = current
+                    }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 if fingerGestureState[digit]!.isActive { activeDigit = digit }
@@ -574,7 +583,12 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
                     } else {
-                        settings.targetMinDistance = newValue
+                        ParameterOperationDispatcher.shared.applyFloat(
+                            parameterID: "core.targetMinDistance",
+                            incomingValue: newValue,
+                            source: .gesture,
+                            currentValue: settings.targetMinDistance
+                        ) { settings.targetMinDistance = $0 }
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -590,7 +604,12 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
                     } else {
-                        settings.targetFoldingLimit = newValue
+                        ParameterOperationDispatcher.shared.applyFloat(
+                            parameterID: "core.targetFoldingLimit",
+                            incomingValue: newValue,
+                            source: .gesture,
+                            currentValue: settings.targetFoldingLimit
+                        ) { settings.targetFoldingLimit = $0 }
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -606,7 +625,12 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
                     } else {
-                        settings.targetSphereRadius = newValue
+                        ParameterOperationDispatcher.shared.applyFloat(
+                            parameterID: "core.targetSphereRadius",
+                            incomingValue: newValue,
+                            source: .gesture,
+                            currentValue: settings.targetSphereRadius
+                        ) { settings.targetSphereRadius = $0 }
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -622,7 +646,12 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
                     } else {
-                        settings.fractalScale = newValue
+                        ParameterOperationDispatcher.shared.applyFloat(
+                            parameterID: "core.fractalScale",
+                            incomingValue: newValue,
+                            source: .gesture,
+                            currentValue: settings.fractalScale
+                        ) { settings.fractalScale = $0 }
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }

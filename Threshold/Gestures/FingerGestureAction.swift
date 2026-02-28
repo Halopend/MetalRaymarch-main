@@ -73,6 +73,11 @@ enum FingerGestureAction: Int32, CaseIterable, Codable {
         }
     }
 
+
+    static func formulaAction(for index: Int) -> FingerGestureAction? {
+        guard (0...15).contains(index) else { return nil }
+        return FingerGestureAction(rawValue: 100 + Int32(index))
+    }
     static func availableActions(for type: FractalModelType) -> [FingerGestureAction] {
         coreCases + ParameterNodeRegistry.shared.formulaGestureActions(for: type)
     }

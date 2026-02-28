@@ -375,8 +375,16 @@ final class UISettingsCache {
     
     /// Update a single formula param slot and push the entire struct to RenderSettings.
     func pushFormulaParam(index: Int, value: Float) {
-        FormulaCatalog.setParam(&formulaParams, index: index, value: value)
-        settings?.formulaParams = formulaParams
+        guard let settings else { return }
+        ParameterOperationDispatcher.shared.applyFloat(
+            parameterID: "formula.\(settings.fractalType.rawValue).\(index)",
+            incomingValue: value,
+            source: .ui,
+            currentValue: FormulaCatalog.getParam(formulaParams, index: index)
+        ) { resolvedValue in
+            FormulaCatalog.setParam(&formulaParams, index: index, value: resolvedValue)
+            settings.formulaParams = formulaParams
+        }
     }
     
     /// Reset formula params to defaults for the current type and push.

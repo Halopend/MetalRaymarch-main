@@ -1,5 +1,14 @@
 import Foundation
 
+enum ParameterDebugLogGate {
+    static var isEnabled: Bool = false
+
+    static func log(_ message: @autoclosure () -> String) {
+        guard isEnabled else { return }
+        print("🧭 \(message())")
+    }
+}
+
 // MARK: - Shared Parameter Taxonomy
 
 enum ParameterSection: String, CaseIterable, Codable, Sendable {
@@ -290,30 +299,64 @@ struct ParameterNodeBatch {
     let nodes: [AnyParameterNodeBase]
     let floatNodes: [FloatParameterNode]
     let boolNodes: [BoolParameterNode]
+    let floatNodeByFormulaIndex: [Int: FloatParameterNode]
+    let floatNodeByAction: [FingerGestureAction: FloatParameterNode]
 
     init(fractalType: FractalModelType, nodes: [AnyParameterNodeBase]) {
         self.fractalType = fractalType
         self.nodes = nodes
         self.floatNodes = nodes.compactMap { $0 as? FloatParameterNode }
         self.boolNodes = nodes.compactMap { $0 as? BoolParameterNode }
+        self.floatNodeByFormulaIndex = Dictionary(uniqueKeysWithValues: floatNodes.compactMap { node in
+            guard let index = ParameterNodeBatch.formulaIndex(from: node.id) else { return nil }
+            return (index, node)
+        })
+        self.floatNodeByAction = Dictionary(uniqueKeysWithValues: floatNodeByFormulaIndex.compactMap { index, node in
+            guard let action = FingerGestureAction.formulaAction(for: index) else { return nil }
+            return (action, node)
+        })
+    }
+
+    private static func formulaIndex(from id: String) -> Int? {
+        let parts = id.split(separator: ".")
+        guard parts.count >= 4 else { return nil }
+        return Int(parts[2])
     }
 }
 
 final class ParameterNodeRegistry: @unchecked Sendable {
     static let shared = ParameterNodeRegistry()
 
-    private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
-
-    private init() {
-        rebuildFormulaBatches()
+    struct MetricsSnapshot: Sendable {
+        let batchRebuildCount: Int
+        let nodeLookupCount: Int
+        let nodeLookupDurationMs: Double
     }
 
-    func rebuildFormulaBatches() {
+    private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
+    private var batchRebuildCount: Int = 0
+    private var nodeLookupCount: Int = 0
+    private var nodeLookupDuration: CFTimeInterval = 0
+    private var lastRebuildTimestamp: CFTimeInterval = 0
+    private let minRebuildInterval: CFTimeInterval = 0.25
+
+    private init() {
+        rebuildFormulaBatches(force: true)
+    }
+
+    func rebuildFormulaBatches(force: Bool = false) {
+        let now = CFAbsoluteTimeGetCurrent()
+        if !force, now - lastRebuildTimestamp < minRebuildInterval {
+            ParameterDebugLogGate.log("Skipped formula batch rebuild to avoid per-frame churn.")
+            return
+        }
         var newBatches: [FractalModelType: ParameterNodeBatch] = [:]
         for type in FractalModelType.allCases {
             newBatches[type] = ParameterNodeBatch(fractalType: type, nodes: formulaNodes(for: type))
         }
         formulaBatches = newBatches
+        batchRebuildCount += 1
+        lastRebuildTimestamp = now
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
@@ -324,7 +367,33 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     }
 
     func node(for type: FractalModelType, formulaIndex: Int) -> FloatParameterNode? {
-        formulaBatch(for: type).floatNodes.first { $0.id.hasPrefix("formula.\(type.rawValue).\(formulaIndex).") }
+        let start = CFAbsoluteTimeGetCurrent()
+        defer {
+            nodeLookupCount += 1
+            nodeLookupDuration += CFAbsoluteTimeGetCurrent() - start
+        }
+        return formulaBatch(for: type).floatNodeByFormulaIndex[formulaIndex]
+    }
+
+    func node(for type: FractalModelType, action: FingerGestureAction) -> FloatParameterNode? {
+        let start = CFAbsoluteTimeGetCurrent()
+        defer {
+            nodeLookupCount += 1
+            nodeLookupDuration += CFAbsoluteTimeGetCurrent() - start
+        }
+        return formulaBatch(for: type).floatNodeByAction[action]
+    }
+
+    func formulaGestureActions(for type: FractalModelType) -> [FingerGestureAction] {
+        Array(formulaBatch(for: type).floatNodeByAction.keys).sorted { $0.rawValue < $1.rawValue }
+    }
+
+    func metricsSnapshot() -> MetricsSnapshot {
+        MetricsSnapshot(
+            batchRebuildCount: batchRebuildCount,
+            nodeLookupCount: nodeLookupCount,
+            nodeLookupDurationMs: nodeLookupDuration * 1_000
+        )
     }
 
     func fractalParameterMappingJSON(prettyPrinted: Bool = true) -> String? {
