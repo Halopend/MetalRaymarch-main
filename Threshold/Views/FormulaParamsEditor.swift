@@ -12,7 +12,7 @@ struct FormulaParamsEditor: View {
     }
 
     var body: some View {
-        if let desc = descriptor, !(desc.usesMandelboxParams ?? false), !parameterBatch.nodes.isEmpty {
+        if let desc = descriptor, !parameterBatch.nodes.isEmpty {
             VStack(spacing: 4) {
                 HStack {
                     Label("\(desc.name) Parameters", systemImage: cache.fractalType.icon)

@@ -745,10 +745,14 @@ actor Renderer {
             // Music drives fractal geometry AND effects (Fractal Forge-inspired)
             if settings.fractalAudioReactiveEnabled {
                 if !musicFractalAnchorValid {
-                    // Capture geometry anchors
-                    musicAnchorFractalScale = settings.fractalScale
-                    musicAnchorFoldingLimit = settings.foldingLimit
-                    musicAnchorSphereRadius = settings.sphereRadius
+                    // Capture geometry anchors from TARGET values so the offset base
+                    // matches the user's intended value, not the in-flight smoothed
+                    // current that may still be interpolating toward it.
+                    musicAnchorFractalScale = settings.targetFractalScale
+                    // Folding / sphere anchors now read from formulaParams (unified path)
+                    let anchorFP = settings.formulaParams
+                    musicAnchorFoldingLimit = FormulaCatalog.getParam(anchorFP, index: 1)
+                    musicAnchorSphereRadius = FormulaCatalog.getParam(anchorFP, index: 2)
                     musicAnchorColorMix = settings.colorMix
                     
                     // Capture effect anchors (save original values + enabled state)
@@ -795,19 +799,19 @@ actor Renderer {
                 }
 
                 if settings.fractalAudioAffectsScale {
-                    // Bass + beat expand/contract fractal scale
+                    // Bass + beat expand/contract fractal scale (universal core param)
                     let target = max(1.6, min(5.2, musicAnchorFractalScale + (drive - 0.35) * (0.15 + 0.8 * amount)))
-                    enqueue("core.fractalScale", target: target, anchor: musicAnchorFractalScale)
+                    enqueue("core.targetFractalScale", target: target, anchor: musicAnchorFractalScale)
                 }
                 if settings.fractalAudioAffectsFolding {
-                    // Bass drives box fold, beats punch it
+                    // Bass drives box fold, beats punch it → formula param path
                     let target = max(0.7, min(1.7, musicAnchorFoldingLimit + (bass - 0.4) * (0.08 + 0.24 * amount) + beat * (0.03 + 0.12 * beatPunch)))
-                    enqueue("core.targetFoldingLimit", target: target, anchor: musicAnchorFoldingLimit)
+                    enqueue("formula.0.1.Folding Limit", target: target, anchor: musicAnchorFoldingLimit)
                 }
                 if settings.fractalAudioAffectsRadius {
-                    // Mids modulate sphere radius, beats add punch
+                    // Mids modulate sphere radius, beats add punch → formula param path
                     let target = max(0.03, min(1.2, musicAnchorSphereRadius + mid * (0.05 + 0.20 * amount) + beat * (0.01 + 0.08 * beatPunch)))
-                    enqueue("core.targetSphereRadius", target: target, anchor: musicAnchorSphereRadius)
+                    enqueue("formula.0.2.Sphere Radius", target: target, anchor: musicAnchorSphereRadius)
                 }
                 if settings.fractalAudioAffectsColorMix {
                     // Overall drive shifts color palette blend
@@ -873,9 +877,15 @@ actor Renderer {
                 }
                 
             } else {
+                if musicFractalAnchorValid {
+                    parameterOperationDispatcher.clearMusicLayers(settings: settings)
+                }
                 musicFractalAnchorValid = false
             }
         } else {
+            if musicFractalAnchorValid {
+                parameterOperationDispatcher.clearMusicLayers(settings: settings)
+            }
             musicFractalAnchorValid = false
         }
         let settingsSnapshot = settings.snapshot()

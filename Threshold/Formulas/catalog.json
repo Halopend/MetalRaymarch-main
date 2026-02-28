@@ -6,9 +6,12 @@
       "name": "Mandelbox",
       "fractalType": 0,
       "category": "Box Folds",
-      "description": "Classic Mandelbox — uses dedicated box/sphere fold path.",
-      "usesMandelboxParams": true,
-      "params": []
+      "description": "Classic Mandelbox — box fold + sphere fold geometry.",
+      "params": [
+        { "index": 0, "name": "Min Distance", "default": 0.8,  "min": -5.0,  "max": 15.0, "step": 0.01, "bundle": "fractalCore" },
+        { "index": 1, "name": "Folding Limit", "default": 1.0,  "min": -10.0, "max": 30.0, "step": 0.01, "bundle": "fractalCore" },
+        { "index": 2, "name": "Sphere Radius", "default": 0.5,  "min": -5.0,  "max": 8.0,  "step": 0.01, "bundle": "fractalCore" }
+      ]
     },
     {
       "id": "mandelbulb",

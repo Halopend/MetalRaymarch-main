@@ -17,8 +17,8 @@ extension Renderer {
         let combinedRotationMatrix = userRotationMatrix * cachedRotationMatrix
         
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
-        // Combine base scale with grab-gesture scale factor
-        let effectiveScale = smoothedScale * settingsSnapshot.grabScale
+        // Combine base scale with detail scale factor (from grab gesture)
+        let effectiveScale = smoothedScale * settingsSnapshot.detailScale
         let scaleMatrix = matrix4x4_scale(effectiveScale, effectiveScale, effectiveScale)
 
         let modelMatrix = translationMatrix * combinedRotationMatrix * scaleMatrix

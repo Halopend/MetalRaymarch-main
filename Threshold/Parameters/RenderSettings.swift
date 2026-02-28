@@ -207,16 +207,19 @@ final class RenderSettings: @unchecked Sendable {
     private var _targetMinDistance: Float = 0.8
     private var _targetFoldingLimit: Float = 1.0
     private var _targetSphereRadius: Float = 0.5
+    private var _targetFractalScale: Float = 2.8
     private var _targetPosition: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
     
     // === TWO-POINT GRAB GESTURE: World rotation + scale ===
     // Driven by two-hand middle-finger pinch grab gesture.
     // worldRotation is a unit quaternion applied in the model matrix.
-    // grabScale is a multiplier applied on top of the base `_scale`.
+    // detailScale is a multiplier applied on top of the base `_scale`.
+    // Driven by two-hand grab gesture (pulling hands apart/together).
+    // Named "detail" to distinguish from Mandelbox `fractalScale` parameter.
     private var _worldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // identity
     private var _targetWorldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-    private var _grabScale: Float = 1.0         // Two-point grab scale factor (multiplied with _scale)
-    private var _targetGrabScale: Float = 1.0
+    private var _detailScale: Float = 1.0         // Two-point grab scale factor (multiplied with _scale)
+    private var _targetDetailScale: Float = 1.0
 
     // === ANIMATION BASE + MANUAL OFFSETS ===
     // Animation drives base values. Manual gestures apply offsets when animation is playing.
@@ -237,6 +240,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _velocityMinDistance: Float = 0.0
     private var _velocityFoldingLimit: Float = 0.0
     private var _velocitySphereRadius: Float = 0.0
+    private var _velocityFractalScale: Float = 0.0
     private var _velocityPosition: SIMD3<Float> = .zero
     
     // === REFINING PARAMETERS (Polychronakis 2024 / Keinert 2014) ===
@@ -272,14 +276,14 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _targetWorldRotation } }
         set { withLock { _targetWorldRotation = newValue } }
     }
-    /// Grab-gesture scale factor (multiplied with base scale)
-    var grabScale: Float {
-        get { withLock { _grabScale } }
-        set { withLock { _grabScale = newValue } }
+    /// Detail scale factor (multiplied with base scale) — driven by grab gesture
+    var detailScale: Float {
+        get { withLock { _detailScale } }
+        set { withLock { _detailScale = newValue } }
     }
-    var targetGrabScale: Float {
-        get { withLock { _targetGrabScale } }
-        set { withLock { _targetGrabScale = newValue } }
+    var targetDetailScale: Float {
+        get { withLock { _targetDetailScale } }
+        set { withLock { _targetDetailScale = newValue } }
     }
     
     var fractalScale: Float {
@@ -579,21 +583,44 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 _fractalType = newValue
                 // Auto-set default formula params when switching types
-                if !newValue.usesMandelboxParams {
-                    _formulaParams = newValue.defaultFormulaParams()
-                }
+                _formulaParams = newValue.defaultFormulaParams()
                 // Rebind any gesture fingers assigned to core actions unsupported by
-                // the new fractal type (e.g. fractalScale on non-Mandelbox).
+                // the new fractal type (e.g. fractalScale on non-Mandelbox), and
+                // clean cross-type .parameter() bindings that belong to a different
+                // fractal type.
                 let supported = Set(newValue.supportedCoreGestureActions)
                 func sanitize(_ binding: inout GestureActionBinding) {
-                    if case .core(let action) = binding, !supported.contains(action) {
-                        binding = .core(.none)
+                    switch binding {
+                    case .core(let action):
+                        if !supported.contains(action) {
+                            binding = .core(.none)
+                        }
+                    case .parameter(let descriptor):
+                        if descriptor.fractalType != newValue {
+                            binding = .core(.none)
+                        }
                     }
                 }
                 sanitize(&_indexFingerBinding)
                 sanitize(&_middleFingerBinding)
                 sanitize(&_ringFingerBinding)
                 sanitize(&_pinkyFingerBinding)
+
+                // Restore default finger → core bindings for any finger that was
+                // cleared to .none, provided the default is supported by the new type.
+                // This ensures switching back to Mandelbox automatically re-enables
+                // the standard geometry gesture mappings.
+                func restoreDefault(_ binding: inout GestureActionBinding, _ fallback: GestureActionBinding) {
+                    if case .core(.none) = binding,
+                       case .core(let action) = fallback,
+                       supported.contains(action) {
+                        binding = fallback
+                    }
+                }
+                restoreDefault(&_indexFingerBinding,  .core(.grab))
+                restoreDefault(&_middleFingerBinding, .core(.minDistance))
+                restoreDefault(&_ringFingerBinding,   .core(.fractalScale))
+                restoreDefault(&_pinkyFingerBinding,  .core(.sphereRadius))
             }
         }
     }
@@ -1419,7 +1446,7 @@ final class RenderSettings: @unchecked Sendable {
                 lightingSoftness: _lightingSoftness,
                 fogIntensity: _fogEffect.intensity,
                 worldRotation: _worldRotation,
-                grabScale: _grabScale,
+                detailScale: _detailScale,
                 geometryState: _geometryState,
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier
@@ -1457,6 +1484,11 @@ final class RenderSettings: @unchecked Sendable {
     var targetSphereRadius: Float {
         get { withLock { _targetSphereRadius } }
         set { withLock { _targetSphereRadius = newValue } }
+    }
+    
+    var targetFractalScale: Float {
+        get { withLock { _targetFractalScale } }
+        set { withLock { _targetFractalScale = newValue } }
     }
     
     var targetPosition: SIMD3<Float> {
@@ -1539,7 +1571,7 @@ final class RenderSettings: @unchecked Sendable {
     
     var effectiveTargetFractalScale: Float {
         withLock {
-            _isAnimationPlaying ? _animationBaseFractalScale + _manualOffsetFractalScale : _fractalScale
+            _isAnimationPlaying ? _animationBaseFractalScale + _manualOffsetFractalScale : _targetFractalScale
         }
     }
     
@@ -1611,6 +1643,21 @@ final class RenderSettings: @unchecked Sendable {
             let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
             
             // ═══════════════════════════════════════════════════════════════════════════
+            // MANDELBOX BRIDGE: Sync formula params → target properties
+            // Mandelbox's shader reads minDistance / foldingLimit / sphereRadius from
+            // dedicated uniform fields (not formulaParams).  All user-facing write paths
+            // now go through formulaParams, so we bridge into the target* properties
+            // here so the existing smoothDamp → snapshot → shader pipeline works.
+            // During animation playback the AnimationManager drives targets directly,
+            // so skip the bridge to avoid overwriting the animation's values.
+            // ═══════════════════════════════════════════════════════════════════════════
+            if _fractalType == .mandelbox && !_isAnimationPlaying {
+                _targetMinDistance   = FormulaCatalog.getParam(_formulaParams, index: 0)
+                _targetFoldingLimit  = FormulaCatalog.getParam(_formulaParams, index: 1)
+                _targetSphereRadius  = FormulaCatalog.getParam(_formulaParams, index: 2)
+            }
+            
+            // ═══════════════════════════════════════════════════════════════════════════
             // GMT-FRACTALS PATTERN: Convergence Lock
             // Like VirtualSpace.updateSmoothing which skips computation when distSq < 1e-21,
             // skip the expensive smoothDamp calls when all parameters have converged AND
@@ -1622,12 +1669,14 @@ final class RenderSettings: @unchecked Sendable {
             let distSqMinDist = (_minDistance - _targetMinDistance) * (_minDistance - _targetMinDistance)
             let distSqFold = (_foldingLimit - _targetFoldingLimit) * (_foldingLimit - _targetFoldingLimit)
             let distSqSphere = (_sphereRadius - _targetSphereRadius) * (_sphereRadius - _targetSphereRadius)
+            let distSqScale = (_fractalScale - _targetFractalScale) * (_fractalScale - _targetFractalScale)
             let posDiff = _position - _targetPosition
             let distSqPos = posDiff.x * posDiff.x + posDiff.y * posDiff.y + posDiff.z * posDiff.z
-            let totalDistSq = distSqMinDist + distSqFold + distSqSphere + distSqPos
+            let totalDistSq = distSqMinDist + distSqFold + distSqSphere + distSqScale + distSqPos
             let totalVelSq = _velocityMinDistance * _velocityMinDistance +
                              _velocityFoldingLimit * _velocityFoldingLimit +
                              _velocitySphereRadius * _velocitySphereRadius +
+                             _velocityFractalScale * _velocityFractalScale +
                              simd_dot(_velocityPosition, _velocityPosition)
             
             let isConverged = totalDistSq < convergenceThreshold && totalVelSq < velocityThreshold
@@ -1637,12 +1686,14 @@ final class RenderSettings: @unchecked Sendable {
                 _minDistance = _targetMinDistance
                 _foldingLimit = _targetFoldingLimit
                 _sphereRadius = _targetSphereRadius
+                _fractalScale = _targetFractalScale
                 _position = _targetPosition
                 _worldRotation = _targetWorldRotation
-                _grabScale = _targetGrabScale
+                _detailScale = _targetDetailScale
                 _velocityMinDistance = 0.0
                 _velocityFoldingLimit = 0.0
                 _velocitySphereRadius = 0.0
+                _velocityFractalScale = 0.0
                 _velocityPosition = .zero
                 
                 // Still update geometry state machine when converged
@@ -1673,6 +1724,11 @@ final class RenderSettings: @unchecked Sendable {
                 _targetSphereRadius = 0.5
                 _velocitySphereRadius = 0.0
             }
+            if _targetFractalScale.isNaN || _targetFractalScale.isInfinite {
+                print("⚠️ ANOMALY: targetFractalScale is \(_targetFractalScale), resetting to 2.8")
+                _targetFractalScale = 2.8
+                _velocityFractalScale = 0.0
+            }
             if _targetPosition.x.isNaN || _targetPosition.y.isNaN || _targetPosition.z.isNaN {
                 print("⚠️ ANOMALY: targetPosition contains NaN, resetting to zero")
                 _targetPosition = .zero
@@ -1702,6 +1758,15 @@ final class RenderSettings: @unchecked Sendable {
                 current: _sphereRadius,
                 target: _targetSphereRadius,
                 velocity: &_velocitySphereRadius,
+                smoothTime: smoothTime,
+                maxSpeed: maxSpeed,
+                deltaTime: clampedDT
+            )
+            
+            _fractalScale = smoothDamp(
+                current: _fractalScale,
+                target: _targetFractalScale,
+                velocity: &_velocityFractalScale,
                 smoothTime: smoothTime,
                 maxSpeed: maxSpeed,
                 deltaTime: clampedDT
@@ -1739,9 +1804,9 @@ final class RenderSettings: @unchecked Sendable {
             // Re-normalize to prevent drift
             _worldRotation = _worldRotation.normalized
             
-            let scaleRatio = _targetGrabScale / max(_grabScale, 1e-6)
+            let scaleRatio = _targetDetailScale / max(_detailScale, 1e-6)
             let logRatio = log(max(scaleRatio, 1e-6))
-            _grabScale *= exp(logRatio * rotLerpT)  // Exponential lerp for multiplicative scale
+            _detailScale *= exp(logRatio * rotLerpT)  // Exponential lerp for multiplicative scale
             
             // Clamp current values to sane ranges as a safety net
             // These MUST cover the full gesture/slider ranges (including negatives
@@ -1752,6 +1817,7 @@ final class RenderSettings: @unchecked Sendable {
             _minDistance = max(-5.0, min(15.0, _minDistance))
             _foldingLimit = max(-10.0, min(30.0, _foldingLimit))
             _sphereRadius = max(-5.0, min(8.0, _sphereRadius))
+            _fractalScale = max(-5.0, min(8.0, _fractalScale))
             
             // Clamp position to prevent drifting to infinity
             let maxPos: Float = 100.0
@@ -1766,8 +1832,8 @@ final class RenderSettings: @unchecked Sendable {
             let minDistSettled = abs(_minDistance - _targetMinDistance) < geometrySettleThreshold
             let foldSettled = abs(_foldingLimit - _targetFoldingLimit) < geometrySettleThreshold
             let sphereSettled = abs(_sphereRadius - _targetSphereRadius) < geometrySettleThreshold
-            // Note: fractalScale is set directly (no smoothing), so it's always "settled"
-            let allGeometrySettled = minDistSettled && foldSettled && sphereSettled
+            let scaleSettled = abs(_fractalScale - _targetFractalScale) < geometrySettleThreshold
+            let allGeometrySettled = minDistSettled && foldSettled && sphereSettled && scaleSettled
             
             switch _geometryState {
             case .dynamic:
@@ -1830,6 +1896,7 @@ final class RenderSettings: @unchecked Sendable {
             _targetMinDistance = _minDistance
             _targetFoldingLimit = _foldingLimit
             _targetSphereRadius = _sphereRadius
+            _targetFractalScale = _fractalScale
             _targetPosition = _position
             _manualOffsetMinDistance = 0.0
             _manualOffsetFoldingLimit = 0.0
@@ -1840,6 +1907,7 @@ final class RenderSettings: @unchecked Sendable {
             _velocityMinDistance = 0.0
             _velocityFoldingLimit = 0.0
             _velocitySphereRadius = 0.0
+            _velocityFractalScale = 0.0
             _velocityPosition = .zero
         }
     }
@@ -1858,12 +1926,12 @@ final class RenderSettings: @unchecked Sendable {
     /// Much faster than the full smooth-damp pipeline but takes the edge off
     /// hand-tracking jitter. Uses an adaptive rate: slower for tiny movements
     /// (dead-zone on noise), faster for clear intentional motion.
-    func applyGrabState(position: SIMD3<Float>, worldRotation: simd_quatf, grabScale: Float) {
+    func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float) {
         withLock {
             // Adaptive lerp: base 0.30 (smoother), ramp up to 0.55 for large motions.
             // This damps hand-tracking micro-jitter while keeping big gestures snappy.
             let positionDelta = simd_length(position - _position)
-            let scaleDelta = abs(log(max(grabScale, 1e-6)) - log(max(_grabScale, 1e-6)))
+            let scaleDelta = abs(log(max(detailScale, 1e-6)) - log(max(_detailScale, 1e-6)))
             let motionMag = positionDelta + scaleDelta * 0.5  // rough combined metric
             let tBase: Float = 0.30
             let tMax:  Float = 0.55
@@ -1883,21 +1951,21 @@ final class RenderSettings: @unchecked Sendable {
             _targetWorldRotation = _worldRotation
             
             // Scale: exponential lerp (so doubling and halving feel symmetric)
-            let logCurrent = log(max(_grabScale, 1e-6))
-            let logTarget = log(max(grabScale, 1e-6))
-            _grabScale = exp(logCurrent + (logTarget - logCurrent) * t)
-            _targetGrabScale = _grabScale
+            let logCurrent = log(max(_detailScale, 1e-6))
+            let logTarget = log(max(detailScale, 1e-6))
+            _detailScale = exp(logCurrent + (logTarget - logCurrent) * t)
+            _targetDetailScale = _detailScale
         }
     }
     
-    /// Reset grab transform to identity (worldRotation = identity, grabScale = 1)
-    func resetGrabTransform() {
+    /// Reset detail transform to identity (worldRotation = identity, detailScale = 1)
+    func resetDetailTransform() {
         withLock {
             let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
             _worldRotation = identity
             _targetWorldRotation = identity
-            _grabScale = 1.0
-            _targetGrabScale = 1.0
+            _detailScale = 1.0
+            _targetDetailScale = 1.0
         }
     }
     

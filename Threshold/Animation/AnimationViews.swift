@@ -610,7 +610,17 @@ struct SceneEditorView: View {
         settings.targetFoldingLimit = keyframe.foldingLimit
         settings.targetSphereRadius = keyframe.sphereRadius
         settings.fractalScale = keyframe.fractalScale
+        settings.targetFractalScale = keyframe.fractalScale
         settings.targetPosition = keyframe.position
+        
+        // Apply formula params (unified path — covers Mandelbox shape params too)
+        if let vals = keyframe.formulaParamValues {
+            var fp = settings.formulaParams
+            for i in 0..<min(16, vals.count) {
+                FormulaCatalog.setParam(&fp, index: i, value: vals[i])
+            }
+            settings.formulaParams = fp
+        }
         
         // Apply quality settings
         settings.baseFractalIterations = keyframe.baseFractalIterations
@@ -632,6 +642,12 @@ struct SceneEditorView: View {
         scene.keyframes[index].position = settings.targetPosition
         scene.keyframes[index].baseFractalIterations = settings.baseFractalIterations
         scene.keyframes[index].baseMaxRaySteps = settings.baseMaxRaySteps
+        
+        // Capture formula params (unified path — includes Mandelbox)
+        let fp = settings.formulaParams
+        var vals = [Float](repeating: 0, count: 16)
+        for i in 0..<16 { vals[i] = FormulaCatalog.getParam(fp, index: i) }
+        scene.keyframes[index].formulaParamValues = vals
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {

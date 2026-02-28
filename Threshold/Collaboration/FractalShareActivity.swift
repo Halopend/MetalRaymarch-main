@@ -94,6 +94,7 @@ struct FractalSyncMessage: Codable, Sendable {
             settings.fractalType = fractalModel
         }
         settings.fractalScale = fractalScale
+        settings.targetFractalScale = fractalScale
         settings.fractalIterations = fractalIterations
         settings.maxRaySteps = maxRaySteps
         

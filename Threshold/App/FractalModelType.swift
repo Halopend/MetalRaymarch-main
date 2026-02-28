@@ -45,17 +45,21 @@ enum FractalModelType: Int32, Codable, CaseIterable {
         }
     }
     
-    /// Whether this type uses the Mandelbox-specific path (FractalParams + box/sphere fold macros)
-    var usesMandelboxParams: Bool { self == .mandelbox }
+    /// Deprecated — Mandelbox now uses the unified formula-param path.
+    /// Kept only so the fractalType setter can migrate legacy core gesture bindings.
+    var usesMandelboxParams: Bool { false }
 
     /// Core gesture actions that are meaningful for this fractal type.
-    /// Mandelbox uses the full set (box fold / sphere fold geometry).
-    /// Other fractals only get grab + none — their parameters are per-formula nodes.
+    /// Mandelbox keeps the legacy shape-param actions (.minDistance, .foldingLimit,
+    /// .sphereRadius) so existing gesture bindings serialise correctly; they are
+    /// routed to the formula-param dispatcher at runtime.
+    /// All types get .fractalScale since the Scale slider is universal.
     var supportedCoreGestureActions: [FingerGestureAction] {
-        if usesMandelboxParams {
+        switch self {
+        case .mandelbox:
             return [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale]
-        } else {
-            return [.none, .grab]
+        default:
+            return [.none, .grab, .fractalScale]
         }
     }
 
@@ -177,7 +181,8 @@ enum FractalModelType: Int32, Codable, CaseIterable {
             // Scale=3, Offset=(1,1,1), Spherify=0
             fp.params.0 = 3.0; fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
         case .mandelbox:
-            break // Uses dedicated Mandelbox path
+            // Min Distance=0.8, Folding Limit=1.0, Sphere Radius=0.5
+            fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
         }
         
         return fp

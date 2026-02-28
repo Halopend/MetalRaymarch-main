@@ -170,6 +170,9 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
     
+    // Formula parameters for non-Mandelbox types (16 float slots)
+    var formulaParamValues: [Float]?
+    
     /// Create a keyframe from current render settings
     init(from settings: RenderSettings, name: String = "Keyframe", duration: TimeInterval = 2.0) {
         self.id = UUID()
@@ -200,6 +203,12 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.bloomEffect = settings.bloomEffect
         self.fogEffect = settings.fogEffect
         self.gradientCycleEffect = settings.gradientCycleEffect
+        
+        // Capture formula params for all types (unified path)
+        let fp = settings.formulaParams
+        var vals = [Float](repeating: 0, count: 16)
+        for i in 0..<16 { vals[i] = FormulaCatalog.getParam(fp, index: i) }
+        self.formulaParamValues = vals
     }
     
     /// Create with explicit values
@@ -215,7 +224,8 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             bloomEffect: BloomEffect? = nil,
             fogEffect: FogEffect? = nil,
             gradientCycleEffect: GradientCycleEffect? = nil,
-         easingType: EasingFunction = .bezier, bezierHandle: BezierHandle = .easeInOut) {
+         easingType: EasingFunction = .bezier, bezierHandle: BezierHandle = .easeInOut,
+         formulaParamValues: [Float]? = nil) {
         self.id = id
         self.name = name
         self.duration = duration
@@ -239,6 +249,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.gradientCycleEffect = gradientCycleEffect
         self.easingType = easingType
         self.bezierHandle = bezierHandle
+        self.formulaParamValues = formulaParamValues
     }
     
     /// Interpolate between two keyframes
@@ -301,7 +312,12 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
                                        smoothLoop: clampedT < 0.5 ? a.smoothLoop : b.smoothLoop)
         }
         
-        return AnimationKeyframe(
+        func lerpFormulaParams(_ a: [Float]?, _ b: [Float]?) -> [Float]? {
+            guard let a, let b, a.count == b.count else { return clampedT < 0.5 ? a : b }
+            return zip(a, b).map { lerp($0, $1) }
+        }
+        
+        var result = AnimationKeyframe(
             id: self.id,
             name: self.name,
             duration: self.duration,
@@ -322,6 +338,8 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             fogEffect: lerpFog(self.fogEffect, other.fogEffect),
             gradientCycleEffect: lerpGradientCycle(self.gradientCycleEffect, other.gradientCycleEffect)
         )
+        result.formulaParamValues = lerpFormulaParams(self.formulaParamValues, other.formulaParamValues)
+        return result
     }
 }
 

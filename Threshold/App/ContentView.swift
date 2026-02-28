@@ -65,10 +65,6 @@ struct ContentView: View {
     @State private var isBenchmarking = false
 #endif
     
-    private var parameterRanges: (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
-        appModel.gestureController?.getParameterRanges() ?? (0.1...5.0, 0.1...13.0, 0.1...2.0)
-    }
-    
     private var fpsIndicatorColor: Color {
         let fps = appModel.fps
         if fps >= 85 { return .green }
@@ -228,7 +224,7 @@ struct ContentView: View {
             Button {
                 appModel.renderSettings.targetPosition = .zero
                 appModel.renderSettings.position = .zero
-                appModel.renderSettings.resetGrabTransform()
+                appModel.renderSettings.resetDetailTransform()
                 appModel.gestureController?.applyFractalDefaults()
                 cache.loadFromSettings()
             } label: {
@@ -288,49 +284,58 @@ struct ContentView: View {
             EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Scale",
                 value: $cache.fractalScale, range: -3.0...5.0,
                 enabled: .constant(true),
-                onChanged: { cache.push(\.fractalScale, value: cache.fractalScale) },
+                onChanged: { cache.push(\.targetFractalScale, value: cache.fractalScale) },
                 showToggle: false)
 
             Divider()
 
-            // Mandelbox-specific shape parameters (only shown for Mandelbox)
-            if cache.fractalType.usesMandelboxParams {
-                VStack(spacing: 4) {
-                    HStack {
-                        Label("Shape Parameters", systemImage: "skew").font(.headline)
-                        Spacer()
-                    }
-                    .padding(.bottom, 4)
-
-                    EffectSliderRow(icon: "arrow.down.right.and.arrow.up.left", label: "Min Distance",
-                        value: $cache.targetMinDistance, range: parameterRanges.minDistance,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.targetMinDistance, value: cache.targetMinDistance) },
-                        showToggle: false)
-                    Divider().padding(.leading, 159)
-                    EffectSliderRow(icon: "arrow.triangle.branch", label: "Folding Limit",
-                        value: $cache.targetFoldingLimit, range: parameterRanges.foldingLimit,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.targetFoldingLimit, value: cache.targetFoldingLimit) },
-                        showToggle: false)
-                    Divider().padding(.leading, 159)
-                    EffectSliderRow(icon: "circle.dashed", label: "Sphere Radius",
-                        value: $cache.targetSphereRadius, range: parameterRanges.sphereRadius,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.targetSphereRadius, value: cache.targetSphereRadius) },
-                        showToggle: false)
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
-            }
-
-            // Formula-specific parameters (auto-generated from catalog.json)
+            // Formula-specific parameters (auto-generated from catalog.json — includes Mandelbox)
             FormulaParamsEditor(cache: cache)
         }
     }
     
     private var fractalSpaceContent: some View {
         VStack(spacing: 12) {
+            // ── Detail (Grab Gesture Transform) ──────────────────────────────
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Detail", systemImage: "move.3d").font(.headline)
+                    Spacer()
+                    Button {
+                        appModel.renderSettings.resetDetailTransform()
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                    .controlSize(.small)
+                }
+                Text("Orientation and zoom controlled by the grab gesture (both hands pinch).")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                
+                HStack {
+                    Label("Zoom", systemImage: "magnifyingglass").font(.caption)
+                    Spacer()
+                    Text(String(format: "%.2f×", cache.liveDetailScale))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                
+                HStack {
+                    Label("Rotation", systemImage: "rotate.3d").font(.caption)
+                    Spacer()
+                    let euler = eulerAngles(from: cache.liveWorldRotation)
+                    Text(String(format: "%.0f° %.0f° %.0f°", euler.x, euler.y, euler.z))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+            
+            // ── Safety Bubble ────────────────────────────────────────────────
             VStack(spacing: 8) {
                 HStack {
                     Label("Safety Bubble", systemImage: "shield.lefthalf.filled").font(.headline)
@@ -410,6 +415,25 @@ struct ContentView: View {
     
     private func qualityColor(_ quality: Float) -> Color {
         if quality >= 0.8 { return .green } else if quality >= 0.6 { return .yellow } else { return .orange }
+    }
+    
+    /// Extract Euler angles (degrees) from a quaternion for display.
+    private func eulerAngles(from q: simd_quatf) -> SIMD3<Float> {
+        let sinP = 2.0 * (q.real * q.imag.y - q.imag.z * q.imag.x)
+        let pitch: Float
+        if abs(sinP) >= 1 {
+            pitch = copysign(.pi / 2, sinP)
+        } else {
+            pitch = asin(sinP)
+        }
+        let sinYCosP = 2.0 * (q.real * q.imag.z + q.imag.x * q.imag.y)
+        let cosYCosP = 1.0 - 2.0 * (q.imag.y * q.imag.y + q.imag.z * q.imag.z)
+        let yaw = atan2(sinYCosP, cosYCosP)
+        let sinRCosP = 2.0 * (q.real * q.imag.x + q.imag.y * q.imag.z)
+        let cosRCosP = 1.0 - 2.0 * (q.imag.x * q.imag.x + q.imag.y * q.imag.y)
+        let roll = atan2(sinRCosP, cosRCosP)
+        let toDeg: Float = 180.0 / .pi
+        return SIMD3<Float>(pitch * toDeg, yaw * toDeg, roll * toDeg)
     }
 
     /// Picker row for assigning a `FingerGestureAction` to a finger pair.

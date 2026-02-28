@@ -577,8 +577,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     }
 
     private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
-    /// Core parameter nodes (minDistance, foldingLimit, sphereRadius, fractalScale, colorMix).
-    /// Keyed by their targetID string (e.g. "core.targetMinDistance").
+    /// Core parameter nodes (fractalScale, colorMix).
+    /// Keyed by their targetID string (e.g. "core.fractalScale").
     private(set) var coreNodes: [String: FloatParameterNode] = [:]
     /// Effect parameter nodes (glow, fog, bloom, hueSpeed, saturation).
     private(set) var effectNodes: [String: FloatParameterNode] = [:]
@@ -613,64 +613,13 @@ final class ParameterNodeRegistry: @unchecked Sendable {
 
     /// One-time build of engine-level parameter nodes for core geometry and effects.
     /// IDs and ranges mirror the descriptors in ParameterOperationDispatcher.
+    /// NOTE: minDistance / foldingLimit / sphereRadius are now catalog-driven formula
+    /// params (built per-type in buildFormulaBatch) rather than hard-coded core nodes.
     private func buildCoreAndEffectNodes() {
         let coreGroup = ParameterGroup(id: "core.geometry", title: "Fractal Geometry")
         let effectGroup = ParameterGroup(id: "effect.postprocess", title: "Post-Processing")
 
         // --- Core geometry nodes ---
-        coreNodes["core.targetMinDistance"] = FloatParameterNode(
-            id: "core.targetMinDistance",
-            name: "Min Distance",
-            descriptionText: "Minimum ray-march distance estimate",
-            section: .core,
-            group: coreGroup,
-            source: .core,
-            scope: .core,
-            bundle: .fractalCore,
-            icon: "ruler",
-            defaultValue: 0.8,
-            range: -5.0...15.0,
-            step: 0.01,
-            isGestureMappable: true,
-            readValue: { $0.targetMinDistance },
-            writeValue: { cache, v in cache.targetMinDistance = v; cache.push(\.targetMinDistance, value: v) }
-        )
-
-        coreNodes["core.targetFoldingLimit"] = FloatParameterNode(
-            id: "core.targetFoldingLimit",
-            name: "Folding Limit",
-            descriptionText: "Box folding limit for Mandelbox/hybrid",
-            section: .core,
-            group: coreGroup,
-            source: .core,
-            scope: .core,
-            bundle: .fractalCore,
-            icon: "arrow.triangle.branch",
-            defaultValue: 1.0,
-            range: -10.0...30.0,
-            step: 0.01,
-            isGestureMappable: true,
-            readValue: { $0.targetFoldingLimit },
-            writeValue: { cache, v in cache.targetFoldingLimit = v; cache.push(\.targetFoldingLimit, value: v) }
-        )
-
-        coreNodes["core.targetSphereRadius"] = FloatParameterNode(
-            id: "core.targetSphereRadius",
-            name: "Sphere Radius",
-            descriptionText: "Sphere-fold radius",
-            section: .core,
-            group: coreGroup,
-            source: .core,
-            scope: .core,
-            bundle: .fractalCore,
-            icon: "circle.dashed",
-            defaultValue: 0.5,
-            range: -5.0...8.0,
-            step: 0.01,
-            isGestureMappable: true,
-            readValue: { $0.targetSphereRadius },
-            writeValue: { cache, v in cache.targetSphereRadius = v; cache.push(\.targetSphereRadius, value: v) }
-        )
 
         coreNodes["core.fractalScale"] = FloatParameterNode(
             id: "core.fractalScale",
@@ -687,7 +636,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             step: 0.01,
             isGestureMappable: true,
             readValue: { $0.fractalScale },
-            writeValue: { cache, v in cache.fractalScale = v; cache.push(\.fractalScale, value: v) }
+            writeValue: { cache, v in cache.fractalScale = v; cache.push(\.targetFractalScale, value: v) }
         )
 
         coreNodes["core.colorMix"] = FloatParameterNode(
@@ -877,8 +826,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     }
 
     private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
-        guard let descriptor = FormulaCatalog.shared.descriptor(for: type),
-              !(descriptor.usesMandelboxParams ?? false) else {
+        guard let descriptor = FormulaCatalog.shared.descriptor(for: type) else {
             return ParameterNodeBatch(fractalType: type, nodes: [])
         }
 
@@ -909,7 +857,10 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                     defaultValue: param.default > 0.5,
                     isGestureMappable: false,
                     readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) > 0.5 },
-                    writeValue: { cache, value in cache.pushFormulaParam(index: param.index, value: value ? 1 : 0) }
+                    writeValue: { cache, value in
+                        FormulaCatalog.setParam(&cache.formulaParams, index: param.index, value: value ? 1 : 0)
+                        cache.renderSettings?.formulaParams = cache.formulaParams
+                    }
                 )
             }
 
@@ -928,7 +879,10 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 smoothingTime: 0,
                 isGestureMappable: true,
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
-                writeValue: { cache, value in cache.pushFormulaParam(index: param.index, value: value) }
+                writeValue: { cache, value in
+                    FormulaCatalog.setParam(&cache.formulaParams, index: param.index, value: value)
+                    cache.renderSettings?.formulaParams = cache.formulaParams
+                }
             )
 
             floatNodeByFormulaIndex[param.index] = node

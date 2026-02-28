@@ -41,9 +41,9 @@ struct RenderSettingsSnapshot {
     // Fog intensity for CPU precomputation (not sent to GPU in ColorSchemeParams)
     let fogIntensity: Float
     
-    // Two-point grab world rotation + scale
+    // Two-point grab world rotation + detail scale
     let worldRotation: simd_quatf
-    let grabScale: Float
+    let detailScale: Float
 
     // ═══════════════════════════════════════════════════════════════════════════
     // GEOMETRY STABILITY STATE

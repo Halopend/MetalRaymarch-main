@@ -36,7 +36,6 @@ struct FormulaDescriptor: Codable, Identifiable {
     let fractalType: Int32
     let category: String
     let description: String
-    var usesMandelboxParams: Bool?
     let params: [FormulaParamDescriptor]
 }
 
@@ -117,7 +116,7 @@ final class FormulaCatalog: @unchecked Sendable {
     /// Build a `FormulaParams` from an array of `(paramIndex, value)` overrides.
     /// Missing params get their catalog default. Falls back to `FractalModelType.defaultFormulaParams()`.
     func buildParams(for type: FractalModelType, overrides: [(Int, Float)] = []) -> FormulaParams {
-        guard let desc = byType[type.rawValue], !(desc.usesMandelboxParams ?? false) else {
+        guard let desc = byType[type.rawValue] else {
             return type.defaultFormulaParams()
         }
         

@@ -105,29 +105,11 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     }
 
     private let coreDescriptors: [String: CoreParameterDescriptor] = [
-        "core.targetMinDistance": CoreParameterDescriptor(
-            range: -5.0...15.0,
-            bundle: .fractalCore,
-            read: { $0.targetMinDistance },
-            write: { settings, value in settings.targetMinDistance = value }
-        ),
-        "core.targetFoldingLimit": CoreParameterDescriptor(
-            range: -10.0...30.0,
-            bundle: .fractalCore,
-            read: { $0.targetFoldingLimit },
-            write: { settings, value in settings.targetFoldingLimit = value }
-        ),
-        "core.targetSphereRadius": CoreParameterDescriptor(
-            range: -5.0...8.0,
-            bundle: .fractalCore,
-            read: { $0.targetSphereRadius },
-            write: { settings, value in settings.targetSphereRadius = value }
-        ),
-        "core.fractalScale": CoreParameterDescriptor(
+        "core.targetFractalScale": CoreParameterDescriptor(
             range: -5.0...8.0,
             bundle: .scale,
-            read: { $0.fractalScale },
-            write: { settings, value in settings.fractalScale = value }
+            read: { $0.targetFractalScale },
+            write: { settings, value in settings.targetFractalScale = value }
         ),
         "core.colorMix": CoreParameterDescriptor(
             range: 0.0...1.0,
@@ -262,7 +244,12 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             var stack = formulaStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: current, range: nodeRange, timestamp: timestamp)
             stack.setBaseIfNeeded(current, timestamp: timestamp)
             let incoming = operation.value.resolved(from: stack.resolvedValue(at: timestamp))
-            let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
+            // Mandelbox shape params (indices 0-2) use smoothDamp in
+            // interpolateToTargets via the bridge, so bypass the layer stack's
+            // own exponential lerp to avoid double-smoothing.
+            let useSmoothDampBridge = fractalType == .mandelbox && formulaIndex <= 2
+            let effectiveSmoothTime = useSmoothDampBridge ? Float(0) : operation.smoothing.smoothingTime
+            let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: timestamp)
             FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
             settings.formulaParams = params
             formulaStacks[operation.targetID] = stack
@@ -280,9 +267,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     /// add its own exponential lerp — that caused double-smoothing and stall bugs
     /// where the partially-lerped value froze when operations stopped arriving.
     private static let smoothDampedCoreIDs: Set<String> = [
-        "core.targetMinDistance",
-        "core.targetFoldingLimit",
-        "core.targetSphereRadius"
+        "core.targetFractalScale"
     ]
 
     private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?, layer: ParameterLayer) {
@@ -304,13 +289,14 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let incoming = operation.value.resolved(from: current)
 
         if bypassLayerSmoothing {
-            // Write rawValue directly — smoothDamp in interpolateToTargets() handles animation.
-            // The stack still tracks layer priority so source arbitration works.
-            // Pass smoothingTime=0 to explicitly disable the layer's exponential lerp
-            // (nil would be replaced with the default 0.08s by the stack).
-            let clamped = min(descriptor.range.upperBound, max(descriptor.range.lowerBound, incoming))
-            let _ = stack?.apply(layer: layer, value: incoming, smoothingTime: 0, timestamp: operation.timestamp)
-            descriptor.write(settings, clamped)
+            // smoothDamp in interpolateToTargets() handles animation, so bypass the
+            // layer stack's own exponential lerp (smoothingTime=0). However, use the
+            // stack's *resolved* value for the write so that the music layer's
+            // additive offset is correctly combined with the base (gesture/slider)
+            // value instead of overwriting it with the raw incoming offset.
+            let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: 0, timestamp: operation.timestamp)
+                ?? min(descriptor.range.upperBound, max(descriptor.range.lowerBound, incoming))
+            descriptor.write(settings, resolved)
         } else {
             let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: operation.timestamp) ?? incoming
             descriptor.write(settings, min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved)))
@@ -330,5 +316,42 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         case .audio: return .music
         case .animation, .system: return .system
         }
+    }
+
+    /// Zero out the music (audio) layer in every core parameter stack and re-write
+    /// the stack-resolved value to settings. Call when audio reactivity stops so
+    /// stale music offsets don't bleed into subsequent slider / gesture operations.
+    func clearMusicLayers(settings: RenderSettings) {
+        let timestamp = CFAbsoluteTimeGetCurrent()
+        for (id, var stack) in coreStacks {
+            let resolved = stack.apply(layer: .music, value: 0, smoothingTime: 0, timestamp: timestamp)
+            coreStacks[id] = stack
+            // For bypass IDs, write the corrected value to settings so the stale
+            // music offset is removed.  Non-bypass IDs also benefit from cleanup.
+            if let descriptor = coreDescriptors[id] {
+                descriptor.write(settings, resolved)
+            }
+        }
+        // Also clear the music layer in formula param stacks (e.g. Mandelbox
+        // shape params that are now dispatched via the formula path).
+        var params = settings.formulaParams
+        for (id, var stack) in formulaStacks {
+            let resolved = stack.apply(layer: .music, value: 0, smoothingTime: 0, timestamp: timestamp)
+            formulaStacks[id] = stack
+            // Parse formula index from the ID and write back to formulaParams
+            let pieces = id.split(separator: ".")
+            if pieces.count >= 3, pieces[0] == "formula",
+               let formulaIndex = Int(pieces[2]) {
+                FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
+            }
+        }
+        settings.formulaParams = params
+    }
+
+    /// Discard all formula parameter layer stacks. Call when the fractal type
+    /// changes so stale entries from the old type's formula params don't interfere
+    /// with the new type.
+    func clearFormulaStacks() {
+        formulaStacks.removeAll()
     }
 }

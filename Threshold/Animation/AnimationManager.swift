@@ -512,6 +512,15 @@ final class AnimationManager {
         settings.baseFractalIterations = keyframe.baseFractalIterations
         settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
         settings.position = keyframe.position
+        
+        // Apply formula params for all types (unified path)
+        if let vals = keyframe.formulaParamValues {
+            var fp = settings.formulaParams
+            for i in 0..<min(16, vals.count) {
+                FormulaCatalog.setParam(&fp, index: i, value: vals[i])
+            }
+            settings.formulaParams = fp
+        }
 
           // Apply optional color scheme from keyframe (also syncs gradient preset)
         if let rawScheme = keyframe.colorScheme,
@@ -558,6 +567,7 @@ final class AnimationManager {
         settings.targetMinDistance = minDistance
         settings.targetFoldingLimit = foldingLimit
         settings.targetSphereRadius = sphereRadius
+        settings.targetFractalScale = keyframe.fractalScale + settings.manualOffsetFractalScale
         settings.targetPosition = position
     }
     

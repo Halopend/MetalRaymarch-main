@@ -119,10 +119,9 @@ final class ParameterNodeRegistryTests: XCTestCase {
 
     func testCoreNodesRegistered() {
         let registry = ParameterNodeRegistry.shared
+        // minDistance / foldingLimit / sphereRadius are now catalog-driven
+        // formula param nodes, not engine-level core nodes.
         let expectedCoreIDs = [
-            "core.targetMinDistance",
-            "core.targetFoldingLimit",
-            "core.targetSphereRadius",
             "core.fractalScale",
             "core.colorMix"
         ]
@@ -147,7 +146,6 @@ final class ParameterNodeRegistryTests: XCTestCase {
 
     func testCoreNodeBundles() {
         let registry = ParameterNodeRegistry.shared
-        XCTAssertEqual(registry.coreNode(id: "core.targetMinDistance")?.metadata?.bundle, .fractalCore)
         XCTAssertEqual(registry.coreNode(id: "core.fractalScale")?.metadata?.bundle, .scale)
         XCTAssertEqual(registry.coreNode(id: "core.colorMix")?.metadata?.bundle, .color)
     }
@@ -176,15 +174,15 @@ final class ParameterNodeRegistryTests: XCTestCase {
 
     func testCoreAndEffectNodesCounts() {
         let registry = ParameterNodeRegistry.shared
-        XCTAssertEqual(registry.coreNodes.count, 5, "Expected 5 core nodes")
+        XCTAssertEqual(registry.coreNodes.count, 2, "Expected 2 core nodes (fractalScale, colorMix)")
         XCTAssertEqual(registry.effectNodes.count, 5, "Expected 5 effect nodes")
     }
 
     func testCoreNodeRanges() {
         let registry = ParameterNodeRegistry.shared
-        if let node = registry.coreNode(id: "core.targetMinDistance") {
+        if let node = registry.coreNode(id: "core.fractalScale") {
             XCTAssertEqual(node.range.lowerBound, -5.0)
-            XCTAssertEqual(node.range.upperBound, 15.0)
+            XCTAssertEqual(node.range.upperBound, 8.0)
         }
         if let node = registry.coreNode(id: "core.colorMix") {
             XCTAssertEqual(node.range.lowerBound, 0.0)
@@ -321,9 +319,6 @@ final class ParameterCapTests: XCTestCase {
         // ParameterOperationDispatcher descriptor range.
         let registry = ParameterNodeRegistry.shared
         let expectedRanges: [(String, ClosedRange<Float>)] = [
-            ("core.targetMinDistance", -5.0...15.0),
-            ("core.targetFoldingLimit", -10.0...30.0),
-            ("core.targetSphereRadius", -5.0...8.0),
             ("core.fractalScale", -5.0...8.0),
             ("core.colorMix", 0.0...1.0),
             ("effect.glow", 0.0...2.0),

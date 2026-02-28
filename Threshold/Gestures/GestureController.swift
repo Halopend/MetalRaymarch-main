@@ -244,7 +244,7 @@ final class GestureController {
     private var grabStartMidpoint: SIMD3<Float> = .zero      // Midpoint of the two grab points at start
     private var grabStartAxis: SIMD3<Float> = .zero          // Normalized axis (right-left) at start
     private var grabStartRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // World rotation when grab started
-    private var grabStartScale: Float = 1.0                  // grabScale when gesture started
+    private var detailStartScale: Float = 1.0                  // detailScale when gesture started
     private var grabStartPosition: SIMD3<Float> = .zero      // World position when gesture started
     
     // Single-hand drag state
@@ -313,15 +313,20 @@ final class GestureController {
         guard let settings = renderSettings else { return }
         let ranges = currentRanges()
         
+        // Reset core shape properties (kept for smoothDamp/shader bridge).
         settings.targetMinDistance = ranges.defaultMinDistance
         settings.targetFoldingLimit = ranges.defaultFoldingLimit
         settings.targetSphereRadius = ranges.defaultSphereRadius
-        settings.fractalScale = ranges.defaultFractalScale
+        settings.targetFractalScale = ranges.defaultFractalScale
         
         // Also update the immediate values for instant feedback
         settings.minDistance = ranges.defaultMinDistance
         settings.foldingLimit = ranges.defaultFoldingLimit
         settings.sphereRadius = ranges.defaultSphereRadius
+        settings.fractalScale = ranges.defaultFractalScale
+
+        // Reset formula params to catalog defaults (includes Mandelbox now).
+        settings.formulaParams = settings.fractalType.defaultFormulaParams()
         
         // Reset gesture states
         syncWithSettings()
@@ -575,16 +580,20 @@ final class GestureController {
                 processTwoPointGrab(digit: digit)
                 if grabActive { activeDigit = digit }
                 
-            case .minDistance, .foldingLimit, .sphereRadius, .fractalScale:
-                // These are Mandelbox-specific geometry controls. If the current fractal
-                // doesn't use them, deactivate the gesture and skip processing.
-                guard settings.fractalType.usesMandelboxParams else {
+            case .minDistance, .foldingLimit, .sphereRadius:
+                // Shape params are now formula params for Mandelbox. Non-Mandelbox
+                // types won't have these bindings (sanitised on type switch).
+                guard settings.fractalType == .mandelbox else {
                     if fingerGestureState[digit]?.isActive == true {
                         fingerGestureState[digit]?.isActive = false
                     }
                     continue
                 }
-                processMandelboxCoreGesture(digit: digit, action: action, ranges: ranges, settings: settings, activeDigit: &activeDigit)
+                processMandelboxShapeGesture(digit: digit, action: action, ranges: ranges, settings: settings, activeDigit: &activeDigit)
+
+            case .fractalScale:
+                // Fractal scale is a universal core parameter (all types).
+                processCoreScaleGesture(digit: digit, ranges: ranges, settings: settings, activeDigit: &activeDigit)
                 
             case .none:
                 // Deactivate any stale state for unassigned fingers
@@ -611,29 +620,49 @@ final class GestureController {
         processRightIndexDrag()
     }
     
-    // MARK: - Mandelbox Core Gesture Dispatch
+    // MARK: - Shape & Scale Gesture Dispatch
     
-    /// Dispatches a two-hand gesture for Mandelbox-specific core parameters.
-    /// Consolidates the four repetitive cases (minDistance, foldingLimit, sphereRadius, fractalScale)
-    /// into a single method to reduce duplication and ensure consistent handling.
-    private func processMandelboxCoreGesture(
+    /// Maps a FingerGestureAction (.minDistance / .foldingLimit / .sphereRadius)
+    /// to the corresponding Mandelbox formula-param index.
+    private static let shapeActionToFormulaIndex: [FingerGestureAction: Int] = [
+        .minDistance:   0,
+        .foldingLimit:  1,
+        .sphereRadius:  2
+    ]
+
+    /// Dispatches a two-hand gesture for Mandelbox shape params through the unified
+    /// formula-param dispatcher.  Preserves animation-offset blending so gestures
+    /// during animation playback behave identically to the legacy core path.
+    private func processMandelboxShapeGesture(
         digit: Int,
         action: FingerGestureAction,
         ranges: FractalParamRanges,
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
-        let (currentTarget, range, targetID): (Float, ClosedRange<Float>, String) = {
+        guard let formulaIndex = Self.shapeActionToFormulaIndex[action] else { return }
+        
+        let currentTarget: Float = {
             switch action {
-            case .minDistance:   return (settings.effectiveTargetMinDistance, ranges.minDistance, "core.targetMinDistance")
-            case .foldingLimit:  return (settings.effectiveTargetFoldingLimit, ranges.foldingLimit, "core.targetFoldingLimit")
-            case .sphereRadius:  return (settings.effectiveTargetSphereRadius, ranges.sphereRadius, "core.targetSphereRadius")
-            case .fractalScale:  return (settings.effectiveTargetFractalScale, ranges.fractalScale, "core.fractalScale")
-            default: return (0, 0...1, "")
+            case .minDistance:   return settings.effectiveTargetMinDistance
+            case .foldingLimit:  return settings.effectiveTargetFoldingLimit
+            case .sphereRadius:  return settings.effectiveTargetSphereRadius
+            default: return 0
             }
         }()
-        guard !targetID.isEmpty else { return }
-        
+
+        let range: ClosedRange<Float> = {
+            switch action {
+            case .minDistance:  return ranges.minDistance
+            case .foldingLimit: return ranges.foldingLimit
+            case .sphereRadius: return ranges.sphereRadius
+            default: return 0...1
+            }
+        }()
+
+        let batch = ParameterNodeRegistry.shared.formulaBatch(for: .mandelbox)
+        guard let node = batch.floatNodeByFormulaIndex[formulaIndex] else { return }
+
         processTwoHandGesture(
             digit: digit,
             state: &fingerGestureState[digit]!,
@@ -644,7 +673,7 @@ final class GestureController {
             if settings.isAnimationPlaying {
                 switch action {
                 case .minDistance:
-                    targetValue = settings.animationBaseMinDistance + newValue - settings.animationBaseMinDistance
+                    targetValue = newValue
                     settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
                 case .foldingLimit:
                     targetValue = newValue
@@ -652,9 +681,6 @@ final class GestureController {
                 case .sphereRadius:
                     targetValue = newValue
                     settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
-                case .fractalScale:
-                    targetValue = newValue
-                    settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
                 default:
                     targetValue = newValue
                 }
@@ -662,7 +688,45 @@ final class GestureController {
                 targetValue = newValue
             }
             let op = ParameterOperation(
-                targetID: targetID,
+                targetID: node.id,
+                source: .gesture,
+                value: .absolute(targetValue),
+                frameIndex: operationFrameCounter,
+                smoothing: .init()
+            )
+            operationDispatcher.dispatch(
+                ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
+                settings: settings
+            )
+            UsageAnalytics.shared.trackHandGestureUsed()
+        }
+        if fingerGestureState[digit]!.isActive { activeDigit = digit }
+    }
+
+    /// Dispatches a two-hand gesture for the universal fractalScale core parameter.
+    /// Kept on the core path because fractalScale has its own smoothDamp and
+    /// applies to every fractal type.
+    private func processCoreScaleGesture(
+        digit: Int,
+        ranges: FractalParamRanges,
+        settings: RenderSettings,
+        activeDigit: inout Int
+    ) {
+        processTwoHandGesture(
+            digit: digit,
+            state: &fingerGestureState[digit]!,
+            currentTarget: settings.effectiveTargetFractalScale,
+            range: ranges.fractalScale
+        ) { newValue in
+            let targetValue: Float
+            if settings.isAnimationPlaying {
+                targetValue = newValue
+                settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
+            } else {
+                targetValue = newValue
+            }
+            let op = ParameterOperation(
+                targetID: "core.targetFractalScale",
                 source: .gesture,
                 value: .absolute(targetValue),
                 frameIndex: operationFrameCounter,
@@ -680,7 +744,7 @@ final class GestureController {
     // MARK: - Two-Point Grab Gesture (Configurable Finger, Both Hands)
     
     /// Two-point grab: both hands pinch the assigned finger to grab two points in space.
-    /// - Pulling hands apart/together → scales the fractal world (grabScale)
+    /// - Pulling hands apart/together → scales the fractal world (detailScale)
     /// - Rotating the axis between hands → rotates the fractal world (worldRotation)
     /// - Position is derived so the pivot (hand midpoint) stays "pinned" in world space.
     ///
@@ -689,7 +753,7 @@ final class GestureController {
     /// Factored into T × R × R_fixed × S form:
     ///   newPos       = currentMid + rot(deltaRot, scaleRatio × (startPos - startMid))
     ///   newUserRot   = deltaRot × startRot
-    ///   newGrabScale = startGrabScale × scaleRatio
+    ///   newDetailScale = startDetailScale × scaleRatio
     ///
     /// This works because uniform scaling commutes with rotation in the model matrix.
     private func processTwoPointGrab(digit: Int) {
@@ -738,10 +802,10 @@ final class GestureController {
             let axisLen = simd_length(axis)
             grabStartAxis = axisLen > 1e-4 ? axis / axisLen : SIMD3<Float>(1, 0, 0)
             // Capture CURRENT values (what's visually shown), not targets.
-            // Since applyGrabState snaps current=target, these are the same after
+            // Since applyDetailState snaps current=target, these are the same after
             // the first gesture. But on the very first grab, we want what's on screen.
             grabStartRotation = settings.worldRotation
-            grabStartScale = settings.grabScale
+            detailStartScale = settings.detailScale
             grabStartPosition = settings.position
             
             if HAND_TRACKING_DEBUG {
@@ -758,7 +822,7 @@ final class GestureController {
             
             // 1) SCALE: ratio of current hand distance to start distance
             let scaleRatio = currentDistance / max(grabStartDistance, 0.01)
-            let adjustedScale = grabStartScale * scaleRatio
+            let adjustedScale = detailStartScale * scaleRatio
             // Clamp to reasonable range (0.05× to 20× of starting scale)
             let clampedScale = max(0.05, min(20.0, adjustedScale))
             
@@ -787,7 +851,7 @@ final class GestureController {
             //    The world-space point under the hand midpoint stays "pinned" as
             //    scale and rotation change around it.
             //    newPos = currentMid + dR.act(scaleRatio × (startPos - startMid))
-            let effectiveScaleRatio = clampedScale / max(grabStartScale, 1e-6)
+            let effectiveScaleRatio = clampedScale / max(detailStartScale, 1e-6)
             let startOffset = grabStartPosition - grabStartMidpoint
             let scaledOffset = effectiveScaleRatio * startOffset
             let rotatedOffset = deltaRotation.act(scaledOffset)
@@ -805,13 +869,13 @@ final class GestureController {
                 // Still need to set rotation/scale directly
                 settings.worldRotation = newRotation
                 settings.targetWorldRotation = newRotation
-                settings.grabScale = clampedScale
-                settings.targetGrabScale = clampedScale
+                settings.detailScale = clampedScale
+                settings.targetDetailScale = clampedScale
             } else {
-                settings.applyGrabState(
+                settings.applyDetailState(
                     position: newPosition,
                     worldRotation: newRotation,
-                    grabScale: clampedScale
+                    detailScale: clampedScale
                 )
                 accumulatedPosition = newPosition
             }

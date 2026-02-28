@@ -43,6 +43,10 @@ struct FractalPreset: Codable, Identifiable {
     var foldingLimit: Float
     var sphereRadius: Float
     
+    // Formula parameters (non-Mandelbox fractal types)
+    // Stored as raw float array [0..15] to avoid C-struct Codable issues.
+    var formulaParamValues: [Float]?
+    
     // Performance settings (optional to save)
     var resolutionScale: Float?
     var tileSize: Int?
@@ -82,7 +86,7 @@ struct FractalPreset: Codable, Identifiable {
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
-        case minDistance, fractalScale, foldingLimit, sphereRadius
+        case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
@@ -151,6 +155,7 @@ struct FractalPreset: Codable, Identifiable {
         fractalScale = try container.decode(Float.self, forKey: .fractalScale)
         foldingLimit = try container.decode(Float.self, forKey: .foldingLimit)
         sphereRadius = try container.decode(Float.self, forKey: .sphereRadius)
+        formulaParamValues = try container.decodeIfPresent([Float].self, forKey: .formulaParamValues)
         resolutionScale = try container.decodeIfPresent(Float.self, forKey: .resolutionScale)
         tileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
@@ -208,6 +213,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encode(fractalScale, forKey: .fractalScale)
         try container.encode(foldingLimit, forKey: .foldingLimit)
         try container.encode(sphereRadius, forKey: .sphereRadius)
+        try container.encodeIfPresent(formulaParamValues, forKey: .formulaParamValues)
         try container.encodeIfPresent(resolutionScale, forKey: .resolutionScale)
         try container.encodeIfPresent(tileSize, forKey: .tileSize)
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
@@ -319,6 +325,12 @@ struct FractalPreset: Codable, Identifiable {
         preset.foldingLimit = settings.foldingLimit
         preset.sphereRadius = settings.sphereRadius
         
+        // Capture formula params for all types (unified path)
+        let fp = settings.formulaParams
+        var vals = [Float](repeating: 0, count: 16)
+        for i in 0..<16 { vals[i] = FormulaCatalog.getParam(fp, index: i) }
+        preset.formulaParamValues = vals
+        
         preset.resolutionScale = settings.resolutionScale
         preset.tileSize = settings.tileSize
         
@@ -374,8 +386,18 @@ struct FractalPreset: Codable, Identifiable {
         
         settings.minDistance = minDistance
         settings.fractalScale = fractalScale
+        settings.targetFractalScale = fractalScale
         settings.foldingLimit = foldingLimit
         settings.sphereRadius = sphereRadius
+        
+        // Restore formula params for all types (unified path)
+        if let vals = formulaParamValues {
+            var fp = fractalType.defaultFormulaParams()
+            for i in 0..<min(16, vals.count) {
+                FormulaCatalog.setParam(&fp, index: i, value: vals[i])
+            }
+            settings.formulaParams = fp
+        }
         
         // Also set target values for gesture-controlled parameters
         // This ensures smooth transitions when loading presets
@@ -386,12 +408,12 @@ struct FractalPreset: Codable, Identifiable {
             position: position
         )
         
-        // Reset grab transform to identity when loading a preset
+        // Reset detail transform to identity when loading a preset
         let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
         settings.worldRotation = identity
         settings.targetWorldRotation = identity
-        settings.grabScale = 1.0
-        settings.targetGrabScale = 1.0
+        settings.detailScale = 1.0
+        settings.targetDetailScale = 1.0
         
         if includePerformance {
             if let resolutionScale = resolutionScale {

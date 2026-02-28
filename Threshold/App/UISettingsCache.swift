@@ -187,6 +187,8 @@ final class UISettingsCache {
     var liveMaxRaySteps: Int = 64
     var liveFractalScale: Float = 2.8
     var livePosition: SIMD3<Float> = .zero
+    var liveDetailScale: Float = 1.0
+    var liveWorldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
     var liveFPS: Double = 0  // Mirrors appModel.fps without triggering @Observable invalidation
     
     private weak var _appModel: AppModel?
@@ -215,6 +217,8 @@ final class UISettingsCache {
         liveMaxRaySteps = settings.maxRaySteps
         liveFractalScale = settings.fractalScale
         livePosition = settings.position
+        liveDetailScale = settings.detailScale
+        liveWorldRotation = settings.worldRotation
         if let appModel = _appModel {
             liveFPS = appModel.fps
         }
@@ -224,7 +228,7 @@ final class UISettingsCache {
         guard let settings else { return }
         fractalType = settings.fractalType
         formulaParams = settings.formulaParams
-        fractalScale = settings.fractalScale
+        fractalScale = settings.targetFractalScale
         targetMinDistance = settings.targetMinDistance
         targetFoldingLimit = settings.targetFoldingLimit
         targetSphereRadius = settings.targetSphereRadius
@@ -366,6 +370,8 @@ final class UISettingsCache {
         let oldType = settings?.fractalType
         settings?.fractalType = type
         if oldType != type {
+            // Clear stale formula parameter layer stacks from the old type
+            parameterOperationDispatcher.clearFormulaStacks()
             gestureController?.applyFractalDefaults()
             loadFromSettings()
         }
