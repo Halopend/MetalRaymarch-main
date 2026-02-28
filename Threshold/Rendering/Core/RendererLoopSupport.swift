@@ -3,6 +3,7 @@ import Foundation
 extension Renderer {
     func renderLoop() {
         while true {
+            
             if !appModel.isAppActive {
                 Thread.sleep(forTimeInterval: 0.05)
                 continue
