@@ -290,12 +290,16 @@ struct ParameterNodeBatch {
     let nodes: [AnyParameterNodeBase]
     let floatNodes: [FloatParameterNode]
     let boolNodes: [BoolParameterNode]
+    let floatNodeByFormulaIndex: [Int: FloatParameterNode]
 
-    init(fractalType: FractalModelType, nodes: [AnyParameterNodeBase]) {
+    init(fractalType: FractalModelType,
+         nodes: [AnyParameterNodeBase],
+         floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]) {
         self.fractalType = fractalType
         self.nodes = nodes
         self.floatNodes = nodes.compactMap { $0 as? FloatParameterNode }
         self.boolNodes = nodes.compactMap { $0 as? BoolParameterNode }
+        self.floatNodeByFormulaIndex = floatNodeByFormulaIndex
     }
 }
 
@@ -311,20 +315,20 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     func rebuildFormulaBatches() {
         var newBatches: [FractalModelType: ParameterNodeBatch] = [:]
         for type in FractalModelType.allCases {
-            newBatches[type] = ParameterNodeBatch(fractalType: type, nodes: formulaNodes(for: type))
+            newBatches[type] = buildFormulaBatch(for: type)
         }
         formulaBatches = newBatches
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         if let cached = formulaBatches[type] { return cached }
-        let built = ParameterNodeBatch(fractalType: type, nodes: formulaNodes(for: type))
+        let built = buildFormulaBatch(for: type)
         formulaBatches[type] = built
         return built
     }
 
     func node(for type: FractalModelType, formulaIndex: Int) -> FloatParameterNode? {
-        formulaBatch(for: type).floatNodes.first { $0.id.hasPrefix("formula.\(type.rawValue).\(formulaIndex).") }
+        formulaBatch(for: type).floatNodeByFormulaIndex[formulaIndex]
     }
 
     func formulaGestureActions(for type: FractalModelType) -> [FingerGestureAction] {
@@ -373,13 +377,22 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private func formulaNodes(for type: FractalModelType) -> [AnyParameterNodeBase] {
+    private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         guard let descriptor = FormulaCatalog.shared.descriptor(for: type),
-              !(descriptor.usesMandelboxParams ?? false) else { return [] }
+              !(descriptor.usesMandelboxParams ?? false) else {
+            return ParameterNodeBatch(fractalType: type, nodes: [])
+        }
 
         let group = ParameterGroup(id: descriptor.id, title: descriptor.name)
+        var seenFormulaIndices: Set<Int> = []
+        var floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]
 
-        return descriptor.params.map { param in
+        let nodes = descriptor.params.map { param in
+            assert(
+                seenFormulaIndices.insert(param.index).inserted,
+                "Duplicate formula parameter index \(param.index) for fractal type \(type.rawValue)"
+            )
+
             let label = displayLabel(for: param.name)
             let icon = icon(for: param.name)
             let id = "formula.\(type.rawValue).\(param.index).\(param.name)"
@@ -401,7 +414,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 )
             }
 
-            return SmoothedFloatParameterNode(
+            let node = SmoothedFloatParameterNode(
                 id: id,
                 name: label,
                 descriptionText: description,
@@ -417,7 +430,16 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
                 writeValue: { cache, value in cache.pushFormulaParam(index: param.index, value: value) }
             )
+
+            floatNodeByFormulaIndex[param.index] = node
+            return node
         }
+
+        return ParameterNodeBatch(
+            fractalType: type,
+            nodes: nodes,
+            floatNodeByFormulaIndex: floatNodeByFormulaIndex
+        )
     }
 
     private func displayLabel(for rawName: String) -> String {
