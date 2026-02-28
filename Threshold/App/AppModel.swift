@@ -69,6 +69,22 @@ class AppModel {
     
     /// Whether the hand tracking ARKit provider is actively running.
     var handTrackingRunning: Bool = false
+
+    /// Internal diagnostics for cross-source parameter arbitration.
+    var showParameterDebugPanel: Bool = false {
+        didSet {
+            UserDefaults.standard.set(showParameterDebugPanel, forKey: "showParameterDebugPanel")
+            ParameterDebugLogGate.isEnabled = showParameterDebugPanel
+        }
+    }
+
+    var parameterArbitrationPolicy: ParameterArbitrationPolicy = .gesturePriorityWhileActive {
+        didSet {
+            UserDefaults.standard.set(parameterArbitrationPolicy.rawValue, forKey: "parameterArbitrationPolicy")
+            ParameterOperationDispatcher.shared.setArbitrationPolicy(parameterArbitrationPolicy)
+        }
+    }
+
     
     // Gesture controller for mapping hand gestures to parameters
     var gestureController: GestureController?
@@ -241,11 +257,17 @@ class AppModel {
         renderSettings.isMenuInteractionActive = interacting
         gestureController?.suppressParameterGestures = interacting
     }
-    
+
+    func parameterDiagnosticsText() -> String {
+        let op = ParameterOperationDispatcher.shared.metricsSnapshot()
+        let registry = ParameterNodeRegistry.shared.metricsSnapshot()
+        return "Ops/frame: \(op.operationsProcessedThisFrame) (max \(op.maxOperationsPerFrame)) • Breaches: \(op.frameBudgetBreaches)\nBatch rebuilds: \(registry.batchRebuildCount) • Node lookups: \(registry.nodeLookupCount) in \(String(format: "%.2f", registry.nodeLookupDurationMs))ms"
+    }
+
     /// Capture a screenshot for preset thumbnails
     func captureScreenshot() async -> Data? {
         return await captureScreenshotHandler?()
     }
-    
+
 }
 

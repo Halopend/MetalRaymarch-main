@@ -538,6 +538,8 @@ final class GestureController {
             return
         }
         
+        ParameterOperationDispatcher.shared.beginFrame()
+
         // Track active gesture for HUD display
         var activeDigit = 0
         

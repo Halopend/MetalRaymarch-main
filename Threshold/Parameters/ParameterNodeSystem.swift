@@ -1,5 +1,14 @@
 import Foundation
 
+enum ParameterDebugLogGate {
+    static var isEnabled: Bool = false
+
+    static func log(_ message: @autoclosure () -> String) {
+        guard isEnabled else { return }
+        print("🧭 \(message())")
+    }
+}
+
 // MARK: - Shared Parameter Taxonomy
 
 enum ParameterSection: String, CaseIterable, Codable, Sendable {
@@ -306,18 +315,36 @@ struct ParameterNodeBatch {
 final class ParameterNodeRegistry: @unchecked Sendable {
     static let shared = ParameterNodeRegistry()
 
-    private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
-
-    private init() {
-        rebuildFormulaBatches()
+    struct MetricsSnapshot: Sendable {
+        let batchRebuildCount: Int
+        let nodeLookupCount: Int
+        let nodeLookupDurationMs: Double
     }
 
-    func rebuildFormulaBatches() {
+    private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
+    private var batchRebuildCount: Int = 0
+    private var nodeLookupCount: Int = 0
+    private var nodeLookupDuration: CFTimeInterval = 0
+    private var lastRebuildTimestamp: CFTimeInterval = 0
+    private let minRebuildInterval: CFTimeInterval = 0.25
+
+    private init() {
+        rebuildFormulaBatches(force: true)
+    }
+
+    func rebuildFormulaBatches(force: Bool = false) {
+        let now = CFAbsoluteTimeGetCurrent()
+        if !force, now - lastRebuildTimestamp < minRebuildInterval {
+            ParameterDebugLogGate.log("Skipped formula batch rebuild to avoid per-frame churn.")
+            return
+        }
         var newBatches: [FractalModelType: ParameterNodeBatch] = [:]
         for type in FractalModelType.allCases {
             newBatches[type] = buildFormulaBatch(for: type)
         }
         formulaBatches = newBatches
+        batchRebuildCount += 1
+        lastRebuildTimestamp = now
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
