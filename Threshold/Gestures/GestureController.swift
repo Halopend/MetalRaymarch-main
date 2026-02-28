@@ -549,35 +549,31 @@ final class GestureController {
         // Parameter gestures use processTwoHandGesture(); grab uses processTwoPointGrab().
 
         for digit in 1...4 {
-            let action = settings.actionForDigit(digit)
+            let binding = settings.bindingForDigit(digit)
 
-            if let formulaIndex = action.formulaParamIndex,
-               let node = ParameterNodeRegistry.shared.node(for: settings.fractalType, action: action) {
+            if let mapping = ParameterNodeRegistry.shared.formulaActionMapping(for: settings.fractalType, action: action) {
                 processTwoHandGesture(
                     digit: digit,
                     state: &fingerGestureState[digit]!,
-                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
-                    range: node.range
+                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: mapping.formulaIndex),
+                    range: mapping.node.range
                 ) { newValue in
-                    operationDispatcher.dispatch(
-                        ParameterTransaction(
-                            frameIndex: operationFrameCounter,
-                            operations: [ParameterOperation(
-                                targetID: node.id,
-                                source: .gesture,
-                                value: .absolute(newValue),
-                                frameIndex: operationFrameCounter,
-                                smoothing: .init(easing: "gesture")
-                            )]
-                        ),
-                        settings: settings
-                    )
+                    var current = settings.formulaParams
+                    FormulaCatalog.setParam(&current, index: mapping.formulaIndex, value: newValue)
+                    settings.formulaParams = current
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 if fingerGestureState[digit]!.isActive { activeDigit = digit }
                 continue
             }
-            
+
+            guard case .core(let action) = binding else {
+                if fingerGestureState[digit]?.isActive == true {
+                    fingerGestureState[digit]?.isActive = false
+                }
+                continue
+            }
+
             switch action {
             case .grab:
                 processTwoPointGrab(digit: digit)
@@ -959,7 +955,13 @@ final class GestureController {
             state.startHeight = (leftPos.y + rightPos.y) * 0.5
             
             if HAND_TRACKING_DEBUG {
-                let action = settings.actionForDigit(digit)
+                let binding = settings.bindingForDigit(digit)
+                let action: FingerGestureAction
+                if case .core(let coreAction) = binding {
+                    action = coreAction
+                } else {
+                    action = .none
+                }
                 let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
                 print("🤲 Two-hand \(action.displayName) gesture STARTED on digit \(digit) (\(mode)), startHeight: \(state.startHeight)")
             }
@@ -1021,7 +1023,13 @@ final class GestureController {
         if !bothActive && state.isActive {
             state.isActive = false
             if HAND_TRACKING_DEBUG {
-                let action = settings.actionForDigit(digit)
+                let binding = settings.bindingForDigit(digit)
+                let action: FingerGestureAction
+                if case .core(let coreAction) = binding {
+                    action = coreAction
+                } else {
+                    action = .none
+                }
                 let reason: String
                 if !leftHand.isTracked || !rightHand.isTracked {
                     reason = "hand tracking lost"
@@ -1042,7 +1050,7 @@ final class GestureController {
         let pinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
         
         // Only if NOT doing a two-hand gesture with index fingers
-        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.actionForDigit(1) == .grab) else {
+        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.bindingForDigit(1) == .core(.grab)) else {
             rightIndexDragActive = false
             return
         }

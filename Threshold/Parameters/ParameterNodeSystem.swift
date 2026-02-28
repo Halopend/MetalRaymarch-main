@@ -290,12 +290,16 @@ struct ParameterNodeBatch {
     let nodes: [AnyParameterNodeBase]
     let floatNodes: [FloatParameterNode]
     let boolNodes: [BoolParameterNode]
+    let floatNodeByFormulaIndex: [Int: FloatParameterNode]
 
-    init(fractalType: FractalModelType, nodes: [AnyParameterNodeBase]) {
+    init(fractalType: FractalModelType,
+         nodes: [AnyParameterNodeBase],
+         floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]) {
         self.fractalType = fractalType
         self.nodes = nodes
         self.floatNodes = nodes.compactMap { $0 as? FloatParameterNode }
         self.boolNodes = nodes.compactMap { $0 as? BoolParameterNode }
+        self.floatNodeByFormulaIndex = floatNodeByFormulaIndex
     }
 }
 
@@ -311,20 +315,61 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     func rebuildFormulaBatches() {
         var newBatches: [FractalModelType: ParameterNodeBatch] = [:]
         for type in FractalModelType.allCases {
-            newBatches[type] = ParameterNodeBatch(fractalType: type, nodes: formulaNodes(for: type))
+            newBatches[type] = buildFormulaBatch(for: type)
         }
         formulaBatches = newBatches
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         if let cached = formulaBatches[type] { return cached }
-        let built = ParameterNodeBatch(fractalType: type, nodes: formulaNodes(for: type))
+        let built = buildFormulaBatch(for: type)
         formulaBatches[type] = built
         return built
     }
 
     func node(for type: FractalModelType, formulaIndex: Int) -> FloatParameterNode? {
-        formulaBatch(for: type).floatNodes.first { $0.id.hasPrefix("formula.\(type.rawValue).\(formulaIndex).") }
+        formulaBatch(for: type).floatNodeByFormulaIndex[formulaIndex]
+    }
+
+    func formulaGestureActions(for type: FractalModelType) -> [FingerGestureAction] {
+        formulaBatch(for: type).floatNodes.compactMap { node in
+            guard let formulaIndex = formulaIndex(for: node, type: type) else { return nil }
+            return FingerGestureAction(formulaParamIndex: formulaIndex)
+        }
+    }
+
+    func formulaActionMapping(for type: FractalModelType,
+                              action: FingerGestureAction) -> (formulaIndex: Int, node: FloatParameterNode)? {
+        guard let formulaIndex = action.formulaParamIndex,
+              let node = node(for: type, formulaIndex: formulaIndex) else {
+            return nil
+        }
+        return (formulaIndex, node)
+    }
+
+    func node(for type: FractalModelType, action: FingerGestureAction) -> FloatParameterNode? {
+        formulaActionMapping(for: type, action: action)?.node
+    }
+
+    func gestureBindableParameters(for type: FractalModelType) -> [GestureBindableParameter] {
+        formulaBatch(for: type).floatNodes.map { node in
+            let pieces = node.id.split(separator: ".")
+            let formulaIndex = pieces.count >= 3 ? Int(pieces[2]) : nil
+            return GestureBindableParameter(
+                fractalType: type,
+                parameterNodeID: node.id,
+                formulaIndex: formulaIndex,
+                display: GestureDisplayMetadata(
+                    title: node.name,
+                    subtitle: node.group?.title,
+                    icon: node.icon
+                )
+            )
+        }
+    }
+
+    func node(for binding: GestureBindableParameter) -> FloatParameterNode? {
+        formulaBatch(for: binding.fractalType).floatNodes.first { $0.id == binding.parameterNodeID }
     }
 
     func fractalParameterMappingJSON(prettyPrinted: Bool = true) -> String? {
@@ -353,13 +398,22 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private func formulaNodes(for type: FractalModelType) -> [AnyParameterNodeBase] {
+    private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         guard let descriptor = FormulaCatalog.shared.descriptor(for: type),
-              !(descriptor.usesMandelboxParams ?? false) else { return [] }
+              !(descriptor.usesMandelboxParams ?? false) else {
+            return ParameterNodeBatch(fractalType: type, nodes: [])
+        }
 
         let group = ParameterGroup(id: descriptor.id, title: descriptor.name)
+        var seenFormulaIndices: Set<Int> = []
+        var floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]
 
-        return descriptor.params.map { param in
+        let nodes = descriptor.params.map { param in
+            assert(
+                seenFormulaIndices.insert(param.index).inserted,
+                "Duplicate formula parameter index \(param.index) for fractal type \(type.rawValue)"
+            )
+
             let label = displayLabel(for: param.name)
             let icon = icon(for: param.name)
             let id = "formula.\(type.rawValue).\(param.index).\(param.name)"
@@ -381,7 +435,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 )
             }
 
-            return SmoothedFloatParameterNode(
+            let node = SmoothedFloatParameterNode(
                 id: id,
                 name: label,
                 descriptionText: description,
@@ -397,7 +451,16 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
                 writeValue: { cache, value in cache.pushFormulaParam(index: param.index, value: value) }
             )
+
+            floatNodeByFormulaIndex[param.index] = node
+            return node
         }
+
+        return ParameterNodeBatch(
+            fractalType: type,
+            nodes: nodes,
+            floatNodeByFormulaIndex: floatNodeByFormulaIndex
+        )
     }
 
     private func displayLabel(for rawName: String) -> String {
@@ -428,5 +491,13 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         if name.contains("pre") { return "arrow.right" }
         if name.contains("bubble") { return "circle.grid.3x3" }
         return "slider.horizontal.3"
+    }
+
+    private func formulaIndex(for node: FloatParameterNode, type: FractalModelType) -> Int? {
+        let prefix = "formula.\(type.rawValue)."
+        guard node.id.hasPrefix(prefix) else { return nil }
+        let suffix = node.id.dropFirst(prefix.count)
+        guard let segment = suffix.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true).first else { return nil }
+        return Int(segment)
     }
 }

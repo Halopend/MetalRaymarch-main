@@ -103,11 +103,11 @@ private struct ParameterNodeRow: View {
                     showToggle: false
                 )
 
-                if floatNode.isGestureMappable, let formulaSlot = floatGestureSlot {
+                if floatNode.isGestureMappable, let formulaBinding = floatGestureBinding {
                     Menu {
                         ForEach(FingerPair.allCases, id: \.self) { pair in
                             Button {
-                                cache.setFingerAction(formulaSlot, for: pair)
+                                cache.setFingerBinding(formulaBinding, for: pair)
                             } label: {
                                 Label(pair.displayName, systemImage: pair.icon)
                             }
@@ -128,20 +128,25 @@ private struct ParameterNodeRow: View {
         }
     }
 
-    private var floatGestureSlot: FingerGestureAction? {
+    private var floatGestureBinding: GestureActionBinding? {
         guard let floatNode = node as? FloatParameterNode else { return nil }
         let pieces = floatNode.id.split(separator: ".")
         guard pieces.count >= 3, let index = Int(pieces[2]) else { return nil }
-        return FingerGestureAction(rawValue: Int32(100 + index))
+        return .parameter(GestureBindableParameter(
+            fractalType: cache.fractalType,
+            parameterNodeID: floatNode.id,
+            formulaIndex: index,
+            display: GestureDisplayMetadata(title: floatNode.name, subtitle: floatNode.group?.title, icon: floatNode.icon)
+        ))
     }
 
     private var currentGestureAssignment: FingerPair? {
-        guard let slot = floatGestureSlot else { return nil }
-        return cache.fingerPair(for: slot)
+        guard let binding = floatGestureBinding else { return nil }
+        return cache.fingerPair(for: binding)
     }
 
     private func clearGestureMapping() {
         guard let pair = currentGestureAssignment else { return }
-        cache.setFingerAction(.none, for: pair)
+        cache.setFingerBinding(.core(.none), for: pair)
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-enum FingerGestureAction: Int32, CaseIterable, Codable {
+enum FingerGestureAction: Int32, CaseIterable, Codable, Hashable {
     case none         = 0
     case grab         = 1
     case minDistance  = 2
@@ -8,24 +8,62 @@ enum FingerGestureAction: Int32, CaseIterable, Codable {
     case sphereRadius = 4
     case fractalScale = 5
 
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam0  = 100
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam1  = 101
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam2  = 102
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam3  = 103
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam4  = 104
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam5  = 105
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam6  = 106
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam7  = 107
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam8  = 108
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam9  = 109
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam10 = 110
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam11 = 111
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam12 = 112
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam13 = 113
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam14 = 114
+    @available(*, deprecated, message: "Use GestureBindableParameter-based bindings instead.")
     case formulaParam15 = 115
 
     static let coreCases: [FingerGestureAction] = [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale]
+
+    init?(formulaParamIndex: Int) {
+        switch formulaParamIndex {
+        case 0: self = .formulaParam0
+        case 1: self = .formulaParam1
+        case 2: self = .formulaParam2
+        case 3: self = .formulaParam3
+        case 4: self = .formulaParam4
+        case 5: self = .formulaParam5
+        case 6: self = .formulaParam6
+        case 7: self = .formulaParam7
+        case 8: self = .formulaParam8
+        case 9: self = .formulaParam9
+        case 10: self = .formulaParam10
+        case 11: self = .formulaParam11
+        case 12: self = .formulaParam12
+        case 13: self = .formulaParam13
+        case 14: self = .formulaParam14
+        case 15: self = .formulaParam15
+        default: return nil
+        }
+    }
 
     var formulaParamIndex: Int? {
         switch self {
@@ -72,17 +110,50 @@ enum FingerGestureAction: Int32, CaseIterable, Codable {
         default: return "slider.horizontal.3"
         }
     }
+}
 
-    static func availableActions(for type: FractalModelType) -> [FingerGestureAction] {
-        coreCases + ParameterNodeRegistry.shared.formulaGestureActions(for: type)
+struct GestureDisplayMetadata: Codable, Hashable, Sendable {
+    let title: String
+    let subtitle: String?
+    let icon: String
+}
+
+struct GestureBindableParameter: Codable, Hashable, Sendable {
+    let fractalType: FractalModelType
+    let parameterNodeID: String
+    let formulaIndex: Int?
+    let display: GestureDisplayMetadata
+}
+
+enum GestureActionBinding: Codable, Hashable, Sendable {
+    case core(FingerGestureAction)
+    case parameter(GestureBindableParameter)
+
+    static func availableBindings(for type: FractalModelType) -> [GestureActionBinding] {
+        let core = FingerGestureAction.coreCases.map { GestureActionBinding.core($0) }
+        let params = ParameterNodeRegistry.shared.gestureBindableParameters(for: type).map { GestureActionBinding.parameter($0) }
+        return core + params
     }
 
-    func contextualDisplayName(for type: FractalModelType) -> String {
-        guard formulaParamIndex != nil,
-              let node = ParameterNodeRegistry.shared.node(for: type, action: self) else {
-            return displayName
+    var icon: String {
+        switch self {
+        case .core(let action):
+            return action.icon
+        case .parameter(let descriptor):
+            return descriptor.display.icon
         }
-        return "\(type.displayName): \(node.name)"
+    }
+
+    func contextualDisplayName(for currentType: FractalModelType) -> String {
+        switch self {
+        case .core(let action):
+            return action.displayName
+        case .parameter(let descriptor):
+            if descriptor.fractalType == currentType {
+                return descriptor.display.title
+            }
+            return "\(descriptor.fractalType.displayName): \(descriptor.display.title)"
+        }
     }
 }
 
