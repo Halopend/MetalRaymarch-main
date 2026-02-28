@@ -1825,6 +1825,21 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
+    /// Apply grab-gesture state IMMEDIATELY (no smoothing).
+    /// Sets both current AND target values in one lock, zeroes position velocity.
+    /// This gives 1:1 direct-manipulation feel: the fractal world tracks hands exactly.
+    func applyGrabState(position: SIMD3<Float>, worldRotation: simd_quatf, grabScale: Float) {
+        withLock {
+            _position = position
+            _targetPosition = position
+            _velocityPosition = .zero
+            _worldRotation = worldRotation
+            _targetWorldRotation = worldRotation
+            _grabScale = grabScale
+            _targetGrabScale = grabScale
+        }
+    }
+    
     // === REFINING PARAMETERS ===
     // Over-relaxation multiplier (Keinert 2014)
     var relaxFactor: Float {

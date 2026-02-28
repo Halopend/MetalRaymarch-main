@@ -626,11 +626,16 @@ final class GestureController {
     /// Two-point grab: both hands pinch middle fingers to grab two points in space.
     /// - Pulling hands apart/together → scales the fractal world (grabScale)
     /// - Rotating the axis between hands → rotates the fractal world (worldRotation)
-    /// - Moving the midpoint → translates the fractal world (position)
+    /// - Position is derived so the pivot (hand midpoint) stays "pinned" in world space.
     ///
-    /// The transform is relative: it captures the start state and applies deltas.
-    /// Scale is multiplicative (ratio of current distance / start distance).
-    /// Rotation is computed from the angular change of the axis between hands.
+    /// Pivot-correct transform:
+    ///   newModel = T(currentMid) × R(deltaRot) × S(deltaScale) × T(-startMid) × startModel
+    /// Factored into T × R × R_fixed × S form:
+    ///   newPos       = currentMid + rot(deltaRot, scaleRatio × (startPos - startMid))
+    ///   newUserRot   = deltaRot × startRot
+    ///   newGrabScale = startGrabScale × scaleRatio
+    ///
+    /// This works because uniform scaling commutes with rotation in the model matrix.
     private func processTwoPointGrab() {
         guard let settings = renderSettings else { return }
         
@@ -677,9 +682,12 @@ final class GestureController {
             let axis = rightPos - leftPos
             let axisLen = simd_length(axis)
             grabStartAxis = axisLen > 1e-4 ? axis / axisLen : SIMD3<Float>(1, 0, 0)
-            grabStartRotation = settings.targetWorldRotation
-            grabStartScale = settings.targetGrabScale
-            grabStartPosition = settings.effectiveTargetPosition
+            // Capture CURRENT values (what's visually shown), not targets.
+            // Since applyGrabState snaps current=target, these are the same after
+            // the first gesture. But on the very first grab, we want what's on screen.
+            grabStartRotation = settings.worldRotation
+            grabStartScale = settings.grabScale
+            grabStartPosition = settings.position
             
             if HAND_TRACKING_DEBUG {
                 print("🤲✊ Two-point GRAB started: dist=\(grabStartDistance), mid=\(grabStartMidpoint)")
@@ -695,48 +703,57 @@ final class GestureController {
             
             // 1) SCALE: ratio of current hand distance to start distance
             let scaleRatio = currentDistance / max(grabStartDistance, 0.01)
-            // Apply sensitivity: sqrt makes it less twitchy for small movements
             let adjustedScale = grabStartScale * scaleRatio
             // Clamp to reasonable range (0.05× to 20× of starting scale)
             let clampedScale = max(0.05, min(20.0, adjustedScale))
-            settings.targetGrabScale = clampedScale
             
             // 2) ROTATION: compute quaternion from start axis to current axis
-            //    This gives us the rotation the user applied by moving their hands
             let dot = simd_clamp(simd_dot(grabStartAxis, currentAxisNorm), -1.0, 1.0)
             let cross = simd_cross(grabStartAxis, currentAxisNorm)
             let crossLen = simd_length(cross)
             
             let deltaRotation: simd_quatf
             if crossLen > 1e-6 {
-                // Standard case: axes are not parallel
                 let angle = acos(dot)
                 let rotAxis = cross / crossLen
                 deltaRotation = simd_quatf(angle: angle, axis: rotAxis)
             } else if dot < 0 {
-                // Axes are anti-parallel (180° flip) — pick an arbitrary perpendicular axis
                 let perp: SIMD3<Float> = abs(grabStartAxis.x) < 0.9
                     ? simd_normalize(simd_cross(grabStartAxis, SIMD3<Float>(1, 0, 0)))
                     : simd_normalize(simd_cross(grabStartAxis, SIMD3<Float>(0, 1, 0)))
                 deltaRotation = simd_quatf(angle: .pi, axis: perp)
             } else {
-                // Axes are the same — no rotation
                 deltaRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
             }
             
-            // Apply delta rotation on top of the starting rotation
-            settings.targetWorldRotation = (deltaRotation * grabStartRotation).normalized
+            let newRotation = (deltaRotation * grabStartRotation).normalized
             
-            // 3) TRANSLATION: midpoint drag moves the fractal
-            //    Scale the translation by the sensitivity so it feels like you're
-            //    actually moving the grabbed points.
-            let midpointDelta = currentMidpoint - grabStartMidpoint
-            let translationSensitivity = settings.translationSensitivity
-            let newPosition = grabStartPosition + midpointDelta * translationSensitivity
+            // 3) POSITION: pivot-correct transform
+            //    The world-space point under the hand midpoint stays "pinned" as
+            //    scale and rotation change around it.
+            //    newPos = currentMid + dR.act(scaleRatio × (startPos - startMid))
+            let effectiveScaleRatio = clampedScale / max(grabStartScale, 1e-6)
+            let startOffset = grabStartPosition - grabStartMidpoint
+            let scaledOffset = effectiveScaleRatio * startOffset
+            let rotatedOffset = deltaRotation.act(scaledOffset)
+            let newPosition = currentMidpoint + rotatedOffset
+            
+            // DIRECT APPLICATION: no smoothing for grab gesture.
+            // Sets both current + target in one lock, zeroes velocity.
+            // This gives 1:1 hand-to-world feel — zero lag.
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = newPosition - settings.animationBasePosition
+                // Still need to set rotation/scale directly
+                settings.worldRotation = newRotation
+                settings.targetWorldRotation = newRotation
+                settings.grabScale = clampedScale
+                settings.targetGrabScale = clampedScale
             } else {
-                settings.targetPosition = newPosition
+                settings.applyGrabState(
+                    position: newPosition,
+                    worldRotation: newRotation,
+                    grabScale: clampedScale
+                )
                 accumulatedPosition = newPosition
             }
             
