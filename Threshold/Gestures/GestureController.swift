@@ -538,9 +538,26 @@ final class GestureController {
         // ── DATA-DRIVEN TWO-HAND GESTURE DISPATCH ──────────────────────────
         // Each finger pair reads its assigned action from RenderSettings.
         // Parameter gestures use processTwoHandGesture(); grab uses processTwoPointGrab().
-        
+
         for digit in 1...4 {
             let action = settings.actionForDigit(digit)
+
+            if let formulaIndex = action.formulaParamIndex,
+               let node = ParameterNodeRegistry.shared.node(for: settings.fractalType, formulaIndex: formulaIndex) {
+                processTwoHandGesture(
+                    digit: digit,
+                    state: &fingerGestureState[digit]!,
+                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
+                    range: node.range
+                ) { newValue in
+                    var current = settings.formulaParams
+                    FormulaCatalog.setParam(&current, index: formulaIndex, value: newValue)
+                    settings.formulaParams = current
+                    UsageAnalytics.shared.trackHandGestureUsed()
+                }
+                if fingerGestureState[digit]!.isActive { activeDigit = digit }
+                continue
+            }
             
             switch action {
             case .grab:
@@ -613,6 +630,10 @@ final class GestureController {
                 
             case .none:
                 // Deactivate any stale state for unassigned fingers
+                if fingerGestureState[digit]?.isActive == true {
+                    fingerGestureState[digit]?.isActive = false
+                }
+            default:
                 if fingerGestureState[digit]?.isActive == true {
                     fingerGestureState[digit]?.isActive = false
                 }
