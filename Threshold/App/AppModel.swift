@@ -117,10 +117,17 @@ class AppModel {
     
     // SharePlay session for collaborative fractal exploration
     var shareSession: FractalShareSession?
+
+    var parameterOperationDebugTrace: Bool = false {
+        didSet {
+            gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
+        }
+    }
     
     init() {
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings)
+        gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
         
         // Initialize unified music service
         musicService = MusicService(appleMusic: appleMusicManager, spotify: spotifyManager)

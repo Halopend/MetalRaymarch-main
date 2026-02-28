@@ -44,6 +44,7 @@ struct FormulaParamsEditor: View {
 }
 
 private struct ParameterNodeRow: View {
+    private var operationFrameIndex: UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
     @Bindable var cache: UISettingsCache
     let node: AnyParameterNodeBase
 
@@ -58,7 +59,17 @@ private struct ParameterNodeRow: View {
                 Spacer()
                 Toggle("", isOn: Binding<Bool>(
                     get: { boolNode.readValue(cache) },
-                    set: { boolNode.writeValue(cache, $0) }
+                    set: { value in
+                        cache.dispatchParameterOperation(
+                            ParameterOperation(
+                                targetID: boolNode.id,
+                                source: .slider,
+                                value: .absolute(value ? 1 : 0),
+                                frameIndex: operationFrameIndex,
+                                smoothing: .init(easing: "ui")
+                            )
+                        )
+                    }
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
@@ -74,7 +85,17 @@ private struct ParameterNodeRow: View {
                     label: floatNode.name,
                     value: Binding<Float>(
                         get: { floatNode.readValue(cache) },
-                        set: { floatNode.writeValue(cache, $0) }
+                        set: { value in
+                            cache.dispatchParameterOperation(
+                                ParameterOperation(
+                                    targetID: floatNode.id,
+                                    source: .slider,
+                                    value: .absolute(value),
+                                    frameIndex: operationFrameIndex,
+                                    smoothing: .init(easing: "ui")
+                                )
+                            )
+                        }
                     ),
                     range: floatNode.range,
                     enabled: .constant(true),

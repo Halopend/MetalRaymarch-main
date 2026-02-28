@@ -159,6 +159,8 @@ struct TwoHandGestureState {
 /// - Smoothing prevents jitter and provides natural feel
 @MainActor
 final class GestureController {
+    let operationDispatcher: ParameterOperationDispatcher
+    private var operationFrameCounter: UInt64 = 0
     
     // Smoothing speed for frame-rate independent animation (higher = faster convergence)
     // 12.0 = ~63% convergence in 83ms, feels responsive yet smooth
@@ -282,13 +284,19 @@ final class GestureController {
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
     
-    init(renderSettings: RenderSettings) {
+    init(renderSettings: RenderSettings,
+         operationDispatcher: ParameterOperationDispatcher = ParameterOperationDispatcher()) {
         self.renderSettings = renderSettings
+        self.operationDispatcher = operationDispatcher
         
         // Initialize accumulated position from current settings
         accumulatedPosition = renderSettings.position
     }
     
+    func setDebugTraceEnabled(_ enabled: Bool) {
+        operationDispatcher.debugTraceEnabled = enabled
+    }
+
     /// Sync internal state with current render settings.
     /// Call this after loading a preset to prevent jumps when gestures resume.
     func syncWithSettings() {
@@ -346,6 +354,7 @@ final class GestureController {
     /// - Parameter deltaTime: Time since last hand tracking update (not used for smoothing anymore)
     @available(visionOS 2.0, *)
     func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
+        operationFrameCounter &+= 1
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
         
@@ -550,9 +559,19 @@ final class GestureController {
                     currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
                     range: node.range
                 ) { newValue in
-                    var current = settings.formulaParams
-                    FormulaCatalog.setParam(&current, index: formulaIndex, value: newValue)
-                    settings.formulaParams = current
+                    operationDispatcher.dispatch(
+                        ParameterTransaction(
+                            frameIndex: operationFrameCounter,
+                            operations: [ParameterOperation(
+                                targetID: node.id,
+                                source: .gesture,
+                                value: .absolute(newValue),
+                                frameIndex: operationFrameCounter,
+                                smoothing: .init(easing: "gesture")
+                            )]
+                        ),
+                        settings: settings
+                    )
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 if fingerGestureState[digit]!.isActive { activeDigit = digit }
@@ -574,7 +593,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
                     } else {
-                        settings.targetMinDistance = newValue
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.targetMinDistance",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -590,7 +621,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
                     } else {
-                        settings.targetFoldingLimit = newValue
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.targetFoldingLimit",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -606,7 +649,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
                     } else {
-                        settings.targetSphereRadius = newValue
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.targetSphereRadius",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -622,7 +677,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
                     } else {
-                        settings.fractalScale = newValue
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.fractalScale",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }

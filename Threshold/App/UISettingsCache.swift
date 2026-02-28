@@ -13,6 +13,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class UISettingsCache {
+    let parameterOperationDispatcher = ParameterOperationDispatcher()
     // Fractal parameters
     var fractalType: FractalModelType = .mandelbox
     var fractalScale: Float = 2.0
@@ -191,6 +192,7 @@ final class UISettingsCache {
     private weak var _appModel: AppModel?
     private var syncTimer: Timer?
     private weak var settings: RenderSettings?
+    var renderSettings: RenderSettings? { settings }
     
     func startSync(with settings: RenderSettings, appModel: AppModel) {
         self.settings = settings
@@ -311,6 +313,13 @@ final class UISettingsCache {
     @inline(__always)
     func push<T>(_ keyPath: WritableKeyPath<RenderSettings, T>, value: T) {
         settings?[keyPath: keyPath] = value
+    }
+
+    func dispatchParameterOperation(_ operation: ParameterOperation) {
+        parameterOperationDispatcher.dispatch(
+            ParameterTransaction(frameIndex: operation.frameIndex, operations: [operation]),
+            cache: self
+        )
     }
     
 
