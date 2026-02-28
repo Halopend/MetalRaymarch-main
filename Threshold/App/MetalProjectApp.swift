@@ -87,6 +87,20 @@ struct MetalProjectTestApp: App {
         .defaultSize(width: 500, height: 700)
         .windowResizability(.contentMinSize)
 
+        // Fractal Browser pop-out window (family-focused switcher + historical info)
+        Window("Fractal Browser", id: AppModel.fractalBrowserWindowID) {
+            FractalBrowserWindow()
+                .environment(appModel)
+        }
+        .defaultSize(width: 980, height: 700)
+        .defaultWindowPlacement { _, context in
+            if let menuWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) {
+                return WindowPlacement(.trailing(menuWindow))
+            }
+            return WindowPlacement(.automatic)
+        }
+        .windowResizability(.contentMinSize)
+
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
                 Renderer.startRenderLoop(layerRenderer, appModel: appModel)

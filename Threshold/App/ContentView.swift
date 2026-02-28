@@ -46,6 +46,7 @@ enum SettingsSubTab: String, CaseIterable { case general = "General", advanced =
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.openWindow) private var openWindow
     
     @State private var cache = UISettingsCache()
     @State private var selectedTab: SidebarTab = .fractal
@@ -173,13 +174,17 @@ struct ContentView: View {
     
     private var contentPanel: some View {
         Group {
-            switch selectedTab {
-            case .fractal:  fractalTabContent
-            case .animate:  animateTabContent
-            case .coloring: coloringTabContent
-            case .effects:  effectsTabContent
-            case .music:    MusicTabContent(cache: cache)
-            case .settings: settingsTabContent
+            if appModel.runtimeViewMode == .flame {
+                FlameRuntimeView()
+            } else {
+                switch selectedTab {
+                case .fractal:  fractalTabContent
+                case .animate:  animateTabContent
+                case .coloring: coloringTabContent
+                case .effects:  effectsTabContent
+                case .music:    MusicTabContent(cache: cache)
+                case .settings: settingsTabContent
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -267,6 +272,14 @@ struct ContentView: View {
             HStack {
                 Label("Fractal Type", systemImage: "cube.fill").font(.headline)
                 Spacer()
+                Button {
+                    openWindow(id: AppModel.fractalBrowserWindowID)
+                } label: {
+                    Label("Browser", systemImage: "rectangle.on.rectangle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
                 Picker("Type", selection: $cache.fractalType) {
                     ForEach(FractalModelType.allCases, id: \.self) { type in
                         Label(type.displayName, systemImage: type.icon).tag(type)

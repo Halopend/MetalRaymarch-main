@@ -7,20 +7,28 @@
 
 import SwiftUI
 import ARKit
+import CoreGraphics
 
 @MainActor
 @Observable
 class AppModel {
     let immersiveSpaceID = "ImmersiveSpace"
     let menuWindowID = "MenuWindow"
+    static let fractalBrowserWindowID = "FractalBrowserWindow"
     
     enum ImmersiveSpaceState {
         case closed
         case inTransition
         case open
     }
+
+    enum RuntimeViewMode: String {
+        case raymarch
+        case flame
+    }
     
     var immersiveSpaceState = ImmersiveSpaceState.closed
+    var runtimeViewMode: RuntimeViewMode = .raymarch
 
     // App activity state (used to avoid submitting GPU work while backgrounded)
     // @ObservationIgnored + nonisolated(unsafe) allows cross-thread access without @Observable macro interference
@@ -86,6 +94,12 @@ class AppModel {
     
     // Preset management
     let presetManager = PresetManager()
+
+    // Flame runtime state (shared between browser + main panel)
+    var importedFlame: FlameDocument?
+    var importedFlamePreviewImage: CGImage?
+    var importedFlameStatusText: String = ""
+    var importedFlameErrorText: String?
     
     // Animation/Scene playback manager
     var animationManager: AnimationManager?
