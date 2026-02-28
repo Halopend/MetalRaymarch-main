@@ -13,9 +13,17 @@ enum ParameterDebugLogGate {
 
 enum ParameterSection: String, CaseIterable, Codable, Sendable {
     case fractal
+    case core       // Mandelbox geometry (minDistance, foldingLimit, sphereRadius, fractalScale)
     case gestures
     case effects
     case animation
+}
+
+/// Scope distinguishes built-in engine parameters from formula-specific ones.
+enum ParameterScope: String, Codable, Sendable {
+    case core       // engine-level (minDistance, scale, colorMix, position…)
+    case formula    // fractal formula params (power, bailout, Julia seeds…)
+    case effect     // lighting/color effects (glow, fog, bloom, hue, saturation…)
 }
 
 // High-level bundles describe which conceptual group a parameter belongs to. This allows
@@ -99,6 +107,7 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     let section: ParameterSection
     let group: ParameterGroup?
     let source: ParameterNodeSource
+    let scope: ParameterScope
     let icon: String
     let isGestureMappable: Bool
     let metadata: ParameterMetadata?
@@ -111,6 +120,7 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
          section: ParameterSection,
          group: ParameterGroup?,
          source: ParameterNodeSource,
+         scope: ParameterScope = .formula,
          icon: String,
          isGestureMappable: Bool,
          metadata: ParameterMetadata?) {
@@ -120,6 +130,7 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
         self.section = section
         self.group = group
         self.source = source
+        self.scope = scope
         self.icon = icon
         self.isGestureMappable = isGestureMappable
         self.metadata = metadata
@@ -142,6 +153,7 @@ class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
          section: ParameterSection,
          group: ParameterGroup?,
          source: ParameterNodeSource,
+         scope: ParameterScope = .formula,
          icon: String,
          isGestureMappable: Bool,
          defaultValue: Value,
@@ -155,6 +167,7 @@ class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
             section: section,
             group: group,
             source: source,
+            scope: scope,
             icon: icon,
             isGestureMappable: isGestureMappable,
             metadata: metadata
@@ -178,6 +191,8 @@ class FloatParameterNode: BaseParameterNode<Float> {
          section: ParameterSection,
          group: ParameterGroup?,
          source: ParameterNodeSource,
+         scope: ParameterScope = .formula,
+         bundle: ParameterBundle = .custom,
          icon: String,
          defaultValue: Float,
          range: ClosedRange<Float>,
@@ -197,10 +212,26 @@ class FloatParameterNode: BaseParameterNode<Float> {
                    section: section,
                    group: group,
                    source: source,
+                   scope: scope,
                    icon: icon,
                    isGestureMappable: isGestureMappable,
                    defaultValue: defaultValue,
-                   metadata: ParameterMetadata(range: range, step: step))
+                   metadata: ParameterMetadata(bundle: bundle, range: range, step: step))
+    }
+
+    // MARK: - Cap Queries
+
+    /// True when the resolved value equals the range's lower bound.
+    var isAtMinCap: Bool { abs(currentValue - range.lowerBound) < .ulpOfOne }
+    /// True when the resolved value equals the range's upper bound.
+    var isAtMaxCap: Bool { abs(currentValue - range.upperBound) < .ulpOfOne }
+    /// True when the resolved value sits at either cap.
+    var isAtCap: Bool { isAtMinCap || isAtMaxCap }
+    /// 0-1 normalized position of current value within the range.
+    var normalizedValue: Float {
+        let span = range.upperBound - range.lowerBound
+        guard span > .ulpOfOne else { return 0 }
+        return (currentValue - range.lowerBound) / span
     }
 
     @inline(__always)
@@ -229,6 +260,16 @@ class FloatParameterNode: BaseParameterNode<Float> {
         layerStack.setBaseIfNeeded(value, timestamp: timestamp)
         super.currentValue = layerStack.resolvedValue(at: timestamp)
     }
+
+    /// Clamp direct writes to the node's declared range.
+    override var currentValue: Float {
+        didSet {
+            let clamped = min(range.upperBound, max(range.lowerBound, currentValue))
+            if clamped != currentValue {
+                super.currentValue = clamped
+            }
+        }
+    }
 }
 
 final class BoolParameterNode: BaseParameterNode<Bool> {
@@ -241,6 +282,7 @@ final class BoolParameterNode: BaseParameterNode<Bool> {
          section: ParameterSection,
          group: ParameterGroup?,
          source: ParameterNodeSource,
+         scope: ParameterScope = .formula,
          icon: String,
          defaultValue: Bool,
          isGestureMappable: Bool,
@@ -254,6 +296,7 @@ final class BoolParameterNode: BaseParameterNode<Bool> {
                    section: section,
                    group: group,
                    source: source,
+                   scope: scope,
                    icon: icon,
                    isGestureMappable: isGestureMappable,
                    defaultValue: defaultValue)
@@ -300,6 +343,8 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
          section: ParameterSection,
          group: ParameterGroup?,
          source: ParameterNodeSource,
+         scope: ParameterScope = .formula,
+         bundle: ParameterBundle = .custom,
          icon: String,
          defaultValue: Float,
          range: ClosedRange<Float>,
@@ -317,18 +362,24 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
                    section: section,
                    group: group,
                    source: source,
+                   scope: scope,
+                   bundle: bundle,
                    icon: icon,
                    defaultValue: defaultValue,
                    range: range,
                    step: step,
                    isGestureMappable: isGestureMappable,
                    readValue: readValue,
-                   writeValue: writeValue,
-                   metadata: ParameterMetadata(range: range, step: step, smoothingTime: smoothingTime))
+                   writeValue: writeValue)
     }
 
     override var currentValue: Float {
         didSet {
+            // Enforce range cap (matches FloatParameterNode's guardrail)
+            let clamped = min(range.upperBound, max(range.lowerBound, currentValue))
+            if clamped != currentValue {
+                super.currentValue = clamped
+            }
             delayBuffer.setTarget(currentValue)
             markDirty()
         }
@@ -390,7 +441,8 @@ private struct ParameterLayerEntry {
         }
 
         let dt = max(0, timestamp - lastTimestamp)
-        let alpha = 1 - exp(-dt / max(0.001, smoothingTime))
+        let decay = exp(-dt / max(0.001, Double(smoothingTime)))
+        let alpha = Float(1.0 - decay)
         let resolved = lastResolved + (rawValue - lastResolved) * alpha
         lastResolved = resolved
         lastTimestamp = timestamp
@@ -426,36 +478,59 @@ struct ParameterLayerStack {
                         value: Float,
                         smoothingTime: Float?,
                         timestamp: TimeInterval) -> Float {
-        let entry = ParameterLayerEntry(rawValue: value, smoothingTime: smoothingTime, timestamp: timestamp)
+        // Clamp absolute-valued layers at input. Music is additive (offset from
+        // anchor) so its raw value is intentionally unclamped — the final clamp
+        // in resolvedValue() catches the sum.
+        let clamped: Float
+        if layer == .music {
+            clamped = value
+        } else {
+            clamped = min(range.upperBound, max(range.lowerBound, value))
+        }
+        let entry = ParameterLayerEntry(rawValue: clamped, smoothingTime: smoothingTime, timestamp: timestamp)
         set(entry: entry, for: layer)
         return resolvedValue(at: timestamp)
     }
 
     mutating func resolvedValue(at timestamp: TimeInterval) -> Float {
-        var value = resolve(entry: &ui, at: timestamp) ?? defaultValue
+        // Copy layer entries to locals to avoid overlapping access on self
+        var uiEntry = ui
+        var gestureEntry = gesture
+        var precomputeEntry = precompute
+        var systemEntry = system
+        var musicEntry = music
 
-        if let gesture = resolve(entry: &gesture, at: timestamp) {
-            value = gesture
+        var value = Self.resolve(entry: &uiEntry, at: timestamp) ?? defaultValue
+
+        if let g = Self.resolve(entry: &gestureEntry, at: timestamp) {
+            value = g
         }
 
-        if let precompute = resolve(entry: &precompute, at: timestamp) {
-            value = precompute
+        if let p = Self.resolve(entry: &precomputeEntry, at: timestamp) {
+            value = p
         }
 
-        if let system = resolve(entry: &system, at: timestamp) {
-            value = system
+        if let s = Self.resolve(entry: &systemEntry, at: timestamp) {
+            value = s
         }
 
-        if let music = resolve(entry: &music, at: timestamp) {
-            value += music
+        if let m = Self.resolve(entry: &musicEntry, at: timestamp) {
+            value += m
         }
+
+        // Write back smoothed state
+        ui = uiEntry
+        gesture = gestureEntry
+        precompute = precomputeEntry
+        system = systemEntry
+        music = musicEntry
 
         return min(range.upperBound, max(range.lowerBound, value))
     }
 
     // MARK: - Internal helpers
 
-    private mutating func resolve(entry: inout ParameterLayerEntry?, at timestamp: TimeInterval) -> Float? {
+    private static func resolve(entry: inout ParameterLayerEntry?, at timestamp: TimeInterval) -> Float? {
         guard var entryValue = entry else { return nil }
         let resolved = entryValue.resolvedValue(at: timestamp)
         entry = entryValue
@@ -503,6 +578,11 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     }
 
     private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
+    /// Core parameter nodes (minDistance, foldingLimit, sphereRadius, fractalScale, colorMix).
+    /// Keyed by their targetID string (e.g. "core.targetMinDistance").
+    private(set) var coreNodes: [String: FloatParameterNode] = [:]
+    /// Effect parameter nodes (glow, fog, bloom, hueSpeed, saturation).
+    private(set) var effectNodes: [String: FloatParameterNode] = [:]
     private var batchRebuildCount: Int = 0
     private var nodeLookupCount: Int = 0
     private var nodeLookupDuration: CFTimeInterval = 0
@@ -510,6 +590,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     private let minRebuildInterval: CFTimeInterval = 0.25
 
     private init() {
+        buildCoreAndEffectNodes()
         rebuildFormulaBatches(force: true)
     }
 
@@ -518,6 +599,209 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             batchRebuildCount: batchRebuildCount,
             nodeLookupCount: nodeLookupCount,
             nodeLookupDurationMs: nodeLookupDuration * 1000
+        )
+    }
+
+    // MARK: - Core & Effect Node Registration
+
+    func coreNode(id: String) -> FloatParameterNode? {
+        coreNodes[id]
+    }
+
+    func effectNode(id: String) -> FloatParameterNode? {
+        effectNodes[id]
+    }
+
+    var allCoreAndEffectNodes: [FloatParameterNode] {
+        Array(coreNodes.values) + Array(effectNodes.values)
+    }
+
+    /// One-time build of engine-level parameter nodes for core geometry and effects.
+    /// IDs and ranges mirror the descriptors in ParameterOperationDispatcher.
+    private func buildCoreAndEffectNodes() {
+        let coreGroup = ParameterGroup(id: "core.geometry", title: "Fractal Geometry")
+        let effectGroup = ParameterGroup(id: "effect.postprocess", title: "Post-Processing")
+
+        // --- Core geometry nodes ---
+        coreNodes["core.targetMinDistance"] = FloatParameterNode(
+            id: "core.targetMinDistance",
+            name: "Min Distance",
+            descriptionText: "Minimum ray-march distance estimate",
+            section: .core,
+            group: coreGroup,
+            source: .core,
+            scope: .core,
+            bundle: .fractalCore,
+            icon: "ruler",
+            defaultValue: 0.8,
+            range: -5.0...15.0,
+            step: 0.01,
+            isGestureMappable: true,
+            readValue: { $0.targetMinDistance },
+            writeValue: { cache, v in cache.targetMinDistance = v; cache.push(\.targetMinDistance, value: v) }
+        )
+
+        coreNodes["core.targetFoldingLimit"] = FloatParameterNode(
+            id: "core.targetFoldingLimit",
+            name: "Folding Limit",
+            descriptionText: "Box folding limit for Mandelbox/hybrid",
+            section: .core,
+            group: coreGroup,
+            source: .core,
+            scope: .core,
+            bundle: .fractalCore,
+            icon: "arrow.triangle.branch",
+            defaultValue: 1.0,
+            range: -10.0...30.0,
+            step: 0.01,
+            isGestureMappable: true,
+            readValue: { $0.targetFoldingLimit },
+            writeValue: { cache, v in cache.targetFoldingLimit = v; cache.push(\.targetFoldingLimit, value: v) }
+        )
+
+        coreNodes["core.targetSphereRadius"] = FloatParameterNode(
+            id: "core.targetSphereRadius",
+            name: "Sphere Radius",
+            descriptionText: "Sphere-fold radius",
+            section: .core,
+            group: coreGroup,
+            source: .core,
+            scope: .core,
+            bundle: .fractalCore,
+            icon: "circle.dashed",
+            defaultValue: 0.5,
+            range: -5.0...8.0,
+            step: 0.01,
+            isGestureMappable: true,
+            readValue: { $0.targetSphereRadius },
+            writeValue: { cache, v in cache.targetSphereRadius = v; cache.push(\.targetSphereRadius, value: v) }
+        )
+
+        coreNodes["core.fractalScale"] = FloatParameterNode(
+            id: "core.fractalScale",
+            name: "Fractal Scale",
+            descriptionText: "Global fractal scale multiplier",
+            section: .core,
+            group: coreGroup,
+            source: .core,
+            scope: .core,
+            bundle: .scale,
+            icon: "arrow.up.left.and.arrow.down.right",
+            defaultValue: 2.0,
+            range: -5.0...8.0,
+            step: 0.01,
+            isGestureMappable: true,
+            readValue: { $0.fractalScale },
+            writeValue: { cache, v in cache.fractalScale = v; cache.push(\.fractalScale, value: v) }
+        )
+
+        coreNodes["core.colorMix"] = FloatParameterNode(
+            id: "core.colorMix",
+            name: "Color Mix",
+            descriptionText: "Iteration-based color mix factor",
+            section: .core,
+            group: coreGroup,
+            source: .core,
+            scope: .core,
+            bundle: .color,
+            icon: "paintpalette",
+            defaultValue: 0.5,
+            range: 0.0...1.0,
+            step: 0.01,
+            isGestureMappable: true,
+            readValue: { $0.colorMix },
+            writeValue: { cache, v in cache.colorMix = v; cache.push(\.colorMix, value: v) }
+        )
+
+        // --- Effect nodes ---
+        effectNodes["effect.glow"] = FloatParameterNode(
+            id: "effect.glow",
+            name: "Glow",
+            descriptionText: "Glow effect intensity",
+            section: .core,
+            group: effectGroup,
+            source: .core,
+            scope: .effect,
+            bundle: .lighting,
+            icon: "sun.max",
+            defaultValue: 0.0,
+            range: 0.0...2.0,
+            step: 0.01,
+            isGestureMappable: false,
+            readValue: { $0.glowEffect.intensity },
+            writeValue: { cache, v in cache.glowEffect.intensity = v; cache.push(\.glowEffect, value: cache.glowEffect) }
+        )
+
+        effectNodes["effect.fog"] = FloatParameterNode(
+            id: "effect.fog",
+            name: "Fog",
+            descriptionText: "Fog effect intensity",
+            section: .core,
+            group: effectGroup,
+            source: .core,
+            scope: .effect,
+            bundle: .lighting,
+            icon: "cloud.fog",
+            defaultValue: 0.32,
+            range: 0.0...1.0,
+            step: 0.01,
+            isGestureMappable: false,
+            readValue: { $0.fogEffect.intensity },
+            writeValue: { cache, v in cache.fogEffect.intensity = v; cache.push(\.fogEffect, value: cache.fogEffect) }
+        )
+
+        effectNodes["effect.bloom"] = FloatParameterNode(
+            id: "effect.bloom",
+            name: "Bloom",
+            descriptionText: "Bloom strength",
+            section: .core,
+            group: effectGroup,
+            source: .core,
+            scope: .effect,
+            bundle: .lighting,
+            icon: "sparkle",
+            defaultValue: 0.0,
+            range: 0.0...2.0,
+            step: 0.01,
+            isGestureMappable: false,
+            readValue: { $0.bloomEffect.strength },
+            writeValue: { cache, v in cache.bloomEffect.strength = v; cache.push(\.bloomEffect, value: cache.bloomEffect) }
+        )
+
+        effectNodes["effect.hueSpeed"] = FloatParameterNode(
+            id: "effect.hueSpeed",
+            name: "Hue Speed",
+            descriptionText: "Hue rotation speed",
+            section: .core,
+            group: effectGroup,
+            source: .core,
+            scope: .effect,
+            bundle: .color,
+            icon: "arrow.trianglehead.2.clockwise.rotate.90",
+            defaultValue: 0.0,
+            range: 0.0...0.5,
+            step: 0.001,
+            isGestureMappable: false,
+            readValue: { $0.hueRotationEffect.speed },
+            writeValue: { cache, v in cache.hueRotationEffect.speed = v; cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
+        )
+
+        effectNodes["effect.saturation"] = FloatParameterNode(
+            id: "effect.saturation",
+            name: "Saturation",
+            descriptionText: "Color scheme saturation",
+            section: .core,
+            group: effectGroup,
+            source: .core,
+            scope: .effect,
+            bundle: .color,
+            icon: "drop.halffull",
+            defaultValue: 2.0,
+            range: 0.0...3.0,
+            step: 0.01,
+            isGestureMappable: false,
+            readValue: { $0.colorSchemeSaturation },
+            writeValue: { cache, v in cache.colorSchemeSaturation = v; cache.push(\.colorSchemeSaturation, value: v) }
         )
     }
 
@@ -687,6 +971,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 section: .fractal,
                 group: group,
                 source: .formula,
+                bundle: param.resolvedBundle,
                 icon: icon,
                 defaultValue: param.default,
                 range: param.min...param.max,

@@ -99,7 +99,6 @@ typedef struct
     vector_float3 color3;             // Tertiary color (position-based)
     
     // Alternative palette for colorMix blending - used in legacy mode
-    vector_float3 altColor1;          // Alternative palette base
     vector_float3 altMixFactors;      // Factors for alt color computation (x*c.x, y*c.y, z+w*c.y)
     
     // Post-processing adjustments
@@ -117,8 +116,6 @@ typedef struct
     float hueFrequency;               // Frequency of hue variation (default 3.0)
     float hueOffset;                  // Base hue offset (default 0.0)
     float bandFrequency;              // Distance band frequency for glow rings (default 8.0)
-    float stripeFrequency;            // Iteration stripe frequency (default 6.0)
-    float stripeStrength;             // Stripe intensity (default 0.4)
     float glowSharpness;              // How sharp the bright cores are (default 3.0)
     float saturationPower;            // Power for saturation curve, <1 flattens to 1.0 (default 0.4)
     
@@ -157,15 +154,8 @@ typedef struct
     int bloomEnabled;                 // 0 = off, 1 = on
     float bloomStrength;              // Bloom intensity (0-1)
     
-    // Fog Effect - distance-based atmospheric fog
-    int fogEnabled;                   // 0 = off, 1 = on
-    float fogIntensity;               // Fog density (0-1)
-    
-    // Animation/transition
-    float transitionProgress;         // 0-1: blend from previous to current scheme
-    int previousScheme;               // Previous scheme index for transitions
-    int currentScheme;                // Current scheme index
-    int _padding;                     // Alignment padding
+    // Note: fog is handled entirely by PrecomputedFog — no per-pixel fog fields here.
+    // fogEnabled/fogIntensity live in RenderSettings for CPU precomputation only.
 } ColorSchemeParams;
 
 // === PRECOMPUTED FRACTAL PARAMETERS ===
@@ -210,9 +200,6 @@ typedef struct
     matrix_float4x4 projectionMatrix;
     matrix_float4x4 modelViewMatrix;
     matrix_float4x4 inverseModelViewMatrix;
-    matrix_float4x4 inverseProjectionMatrix;
-    matrix_float4x4 viewMatrix;           // Pure view matrix (no model transform)
-    matrix_float4x4 inverseViewMatrix;    // For world-space ray origin
     float time;
     float minDistance;
     float fractalScale;
@@ -229,35 +216,13 @@ typedef struct
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
-    float gestureSpread;     // Normalized hand spread distance (0-1) for debug visualization
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
-    int lightingMode;        // 0=static, 1=animated, 2=audio-reactive, 3=visualizer
-    float audioLevel;        // Audio level for reactive lighting (0-1)
-    // === PER-BAND AUDIO (expanded for visualizer) ===
-    float bassLevel;         // Bass frequency energy (0-1)
-    float midLevel;          // Mid frequency energy (0-1)
-    float trebleLevel;       // Treble frequency energy (0-1)
-    float beatIntensity;     // Beat onset intensity (0-1, peaks on beats)
-    int visualizerMode;      // 0=off, 1=pulse, 2=waveform, 3=spectrum
-    float visualizerIntensity; // How much audio affects visuals (0-1)
-    float fogIntensity;      // Fog strength (0 = no fog, 1 = full fog)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
-    // Depth pipeline settings (shared across raymarch + upscaling)
-    float maxViewDistance;   // Max ray distance (meters) for raymarch + depth normalization
-    float logDepthScale;     // Log depth scale factor (k in log2(1 + k * depth))
-    float depthMissValue;    // Sentinel depth for "no hit" rays (e.g., 2.0)
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
-    float blendFactor;       // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
-    // === GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA ===
-    // Sub-pixel jitter offset from Halton(2,3) sequence for temporal anti-aliasing.
-    // When geometry is stable, each frame gets a different sub-pixel offset,
-    // providing free temporal supersampling at 90Hz via display persistence.
     vector_float2 jitterOffset; // Sub-pixel jitter in pixels (±0.5 range)
-    int accumulationFrame;      // Frame count since last parameter change (0 = first frame)
-    float pad_gmt;           // Alignment padding
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
@@ -297,21 +262,7 @@ typedef struct
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
     int fractalType;             // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
-    int lightingMode;            // 0=static, 1=animated, 2=audio-reactive, 3=visualizer
-    float audioLevel;            // Audio level for reactive lighting (0-1)
-    // === PER-BAND AUDIO (expanded for visualizer) ===
-    float bassLevel;             // Bass frequency energy (0-1)
-    float midLevel;              // Mid frequency energy (0-1)
-    float trebleLevel;           // Treble frequency energy (0-1)
-    float beatIntensity;         // Beat onset intensity (0-1, peaks on beats)
-    int visualizerMode;          // 0=off, 1=pulse, 2=waveform, 3=spectrum
-    float visualizerIntensity;   // How much audio affects visuals (0-1)
-    float fogIntensity;          // Fog strength (0 = no fog, 1 = full fog)
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
-    // Depth pipeline settings (shared across raymarch + upscaling)
-    float maxViewDistance;       // Max ray distance (meters) for raymarch + depth normalization
-    float logDepthScale;         // Log depth scale factor (k in log2(1 + k * depth))
-    float depthMissValue;        // Sentinel depth for "no hit" rays (e.g., 2.0)
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)

@@ -21,6 +21,11 @@ struct ParameterOperationMetricsSnapshot: Sendable {
     let currentFrameIndex: UInt64
 }
 
+/// Legacy arbitration dispatcher — superseded by `ParameterOperationDispatcher` in
+/// `ParameterOperationSystem.swift` which provides layered value stacks with
+/// per-source priority and smoothing. Retained only for the arbitration policy
+/// UI picker in ContentView; no parameter writes flow through this class.
+@available(*, deprecated, message: "Use ParameterOperationDispatcher instead")
 final class ParameterArbitrationDispatcher: @unchecked Sendable {
     static let shared = ParameterArbitrationDispatcher()
 

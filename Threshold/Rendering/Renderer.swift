@@ -725,6 +725,9 @@ actor Renderer {
 
             if sourceCount > 0 {
                 let inv = 1.0 / sourceCount
+                // Audio state writes: these feed PrecomputedAudio (CPU-side aggregate),
+                // NOT per-pixel shader values. They stay as direct RenderSettings writes
+                // because they aren't scalar parameters eligible for layer-stack dispatch.
                 settings.bassLevel = min(1.0, totalBass * inv * bassSens)
                 settings.midLevel = min(1.0, totalMid * inv * midSens)
                 settings.trebleLevel = min(1.0, totalTreble * inv * trebleSens)
@@ -1097,19 +1100,7 @@ actor Renderer {
             limitFlash: settingsSnapshot.limitFlash,
             fractalType: settingsSnapshot.fractalType.rawValue,
             formulaParams: settingsSnapshot.formulaParams,
-            lightingMode: settingsSnapshot.lightingMode.rawValue,
-            audioLevel: settingsSnapshot.audioLevel,
-            bassLevel: settingsSnapshot.bassLevel,
-            midLevel: settingsSnapshot.midLevel,
-            trebleLevel: settingsSnapshot.trebleLevel,
-            beatIntensity: settingsSnapshot.beatIntensity,
-            visualizerMode: settingsSnapshot.visualizerMode,
-            visualizerIntensity: settingsSnapshot.visualizerIntensity,
-            fogIntensity: settingsSnapshot.colorSchemeParams.fogIntensity,
             lightingSoftness: settingsSnapshot.lightingSoftness,
-            maxViewDistance: RenderSettings.maxViewDistance,
-            logDepthScale: RenderSettings.logDepthScale,
-            depthMissValue: RenderSettings.depthMissValue,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius

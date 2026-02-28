@@ -32,12 +32,14 @@ struct RenderSettingsSnapshot {
     let limitFlash: Float
     let showHUD: Bool
     let activeGestureIndex: Int
-    let gestureSpread: Float
     let safetyBubbleEnabled: Bool
     let safetyBubbleRadius: Float
     let safetyBubbleShape: Float
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
+    
+    // Fog intensity for CPU precomputation (not sent to GPU in ColorSchemeParams)
+    let fogIntensity: Float
     
     // Two-point grab world rotation + scale
     let worldRotation: simd_quatf

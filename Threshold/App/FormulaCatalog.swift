@@ -19,8 +19,14 @@ struct FormulaParamDescriptor: Codable, Identifiable {
     let max: Float
     let step: Float
     var isBool: Bool?
+    /// Optional bundle tag — maps to ParameterBundle for consistent grouping across
+    /// UI, gestures, and modulation layers.  Falls back to `.custom` when absent.
+    var bundle: ParameterBundle?
     
     var id: String { "\(index)-\(name)" }
+
+    /// Resolved bundle, defaulting to `.custom` when the catalog entry omits the field.
+    var resolvedBundle: ParameterBundle { bundle ?? .custom }
 }
 
 /// Full description of a fractal formula loaded from the catalog.

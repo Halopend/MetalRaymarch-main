@@ -1311,7 +1311,6 @@ final class RenderSettings: @unchecked Sendable {
         let color1 = simd_mix(previousPal.color1, currentPal.color1, SIMD3<Float>(repeating: t))
         let color2 = simd_mix(previousPal.color2, currentPal.color2, SIMD3<Float>(repeating: t))
         let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
-        let altColor1 = simd_mix(previousPal.altColor1, currentPal.altColor1, SIMD3<Float>(repeating: t))
         let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
         
         // Interpolate neon intensity (0 for non-neon, 1 for neon)
@@ -1323,8 +1322,6 @@ final class RenderSettings: @unchecked Sendable {
         let hueFreq = previousNeon.hueFreq + (currentNeon.hueFreq - previousNeon.hueFreq) * t
         let hueOffset = previousNeon.hueOffset + (currentNeon.hueOffset - previousNeon.hueOffset) * t
         let bandFreq = previousNeon.bandFreq + (currentNeon.bandFreq - previousNeon.bandFreq) * t
-        let stripeFreq = previousNeon.stripeFreq + (currentNeon.stripeFreq - previousNeon.stripeFreq) * t
-        let stripeStrength = previousNeon.stripeStrength + (currentNeon.stripeStrength - previousNeon.stripeStrength) * t
         let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
         let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
         
@@ -1341,7 +1338,6 @@ final class RenderSettings: @unchecked Sendable {
             color1: color1,
             color2: color2,
             color3: color3,
-            altColor1: altColor1,
             altMixFactors: altMixFactors,
             saturation: _colorSchemeSaturation,
             contrast: _colorSchemeContrast,
@@ -1355,8 +1351,6 @@ final class RenderSettings: @unchecked Sendable {
             hueFrequency: hueFreq,
             hueOffset: hueOffset,
             bandFrequency: bandFreq,
-            stripeFrequency: stripeFreq,
-            stripeStrength: stripeStrength,
             glowSharpness: glowSharpness,
             saturationPower: satPower,
             // === GRADIENT COLORING ===
@@ -1380,13 +1374,7 @@ final class RenderSettings: @unchecked Sendable {
             glowEnabled: _glowEffect.enabled ? 1 : 0,
             glowIntensity: _glowEffect.intensity,
             bloomEnabled: _bloomEffect.enabled ? 1 : 0,
-            bloomStrength: _bloomEffect.strength,
-            fogEnabled: _fogEffect.enabled ? 1 : 0,
-            fogIntensity: _fogEffect.intensity,
-            transitionProgress: t,
-            previousScheme: _colorScheme.rawValue,
-            currentScheme: _targetColorScheme.rawValue,
-            _padding: 0
+            bloomStrength: _bloomEffect.strength
         )
     }
     
@@ -1442,12 +1430,12 @@ final class RenderSettings: @unchecked Sendable {
                 limitFlash: _limitFlash,
                 showHUD: _showHUD,
                 activeGestureIndex: _activeGestureIndex,
-                gestureSpread: _gestureSpread,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
+                fogIntensity: _fogEffect.intensity,
                 worldRotation: _worldRotation,
                 grabScale: _grabScale,
                 geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,

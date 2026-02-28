@@ -259,9 +259,8 @@ class AppModel {
     }
 
     func parameterDiagnosticsText() -> String {
-        let op = ParameterArbitrationDispatcher.shared.metricsSnapshot()
         let registry = ParameterNodeRegistry.shared.metricsSnapshot()
-        return "Ops/frame: \(op.operationsProcessedThisFrame) (max \(op.maxOperationsPerFrame)) • Breaches: \(op.frameBudgetBreaches)\nBatch rebuilds: \(registry.batchRebuildCount) • Node lookups: \(registry.nodeLookupCount) in \(String(format: "%.2f", registry.nodeLookupDurationMs))ms"
+        return "Batch rebuilds: \(registry.batchRebuildCount) • Node lookups: \(registry.nodeLookupCount) in \(String(format: "%.2f", registry.nodeLookupDurationMs))ms"
     }
 
     /// Capture a screenshot for preset thumbnails

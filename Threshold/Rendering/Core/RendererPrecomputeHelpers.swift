@@ -102,10 +102,55 @@ extension Renderer {
 
     /// Precompute fog helpers (inverse intensity avoids divides on GPU).
     static func makePrecomputedFog(from settings: RenderSettingsSnapshot) -> PrecomputedFog {
-        let fogIntensity = settings.colorSchemeParams.fogIntensity
+        let fogIntensity = settings.fogIntensity
         let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
         return PrecomputedFog(
             fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0)
+        )
+    }
+
+    // MARK: - Precompute Layer Emission
+
+    /// Emit parameter operations from the precompute layer.
+    /// Call once per frame after snapshot. Derived values (polar rotation phase,
+    /// gradient cycle offset) are dispatched so they participate in the layer stack.
+    @MainActor
+    static func emitPrecomputeOperations(
+        settings: RenderSettings,
+        deltaTime: Float,
+        frameIndex: UInt64,
+        dispatcher: ParameterOperationDispatcher
+    ) {
+        var ops: [ParameterOperation] = []
+
+        // Polar rotation auto-advance: speed → phase offset delta
+        let polar = settings.polarRotationEffect
+        if polar.enabled, polar.speed > 0 {
+            let phaseAdvance = polar.speed * polar.amplitude * deltaTime
+            ops.append(ParameterOperation(
+                targetID: "core.polarPhaseOffset",
+                source: .precompute,
+                value: .delta(phaseAdvance),
+                frameIndex: frameIndex
+            ))
+        }
+
+        // Gradient cycle auto-advance: speed → gradient offset delta
+        let gradCycle = settings.gradientCycleEffect
+        if gradCycle.enabled, gradCycle.speed > 0 {
+            let offsetAdvance = gradCycle.speed * deltaTime
+            ops.append(ParameterOperation(
+                targetID: "core.gradientOffset",
+                source: .precompute,
+                value: .delta(offsetAdvance),
+                frameIndex: frameIndex
+            ))
+        }
+
+        guard !ops.isEmpty else { return }
+        dispatcher.dispatch(
+            ParameterTransaction(frameIndex: frameIndex, operations: ops),
+            settings: settings
         )
     }
 }

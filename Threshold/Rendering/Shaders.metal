@@ -107,9 +107,6 @@ constant bool FC_SHARE_SHADOWS [[function_constant(10)]];
 // Shadow enable toggle - eliminates entire shadow computation when disabled
 constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
 
-// Visualizer overlay toggle - enables audio-reactive visual overlay
-constant bool FC_VISUALIZER_ENABLED [[function_constant(12)]];
-
 typedef struct
 {
     float3 position [[attribute(VertexAttributePosition)]];
@@ -227,7 +224,7 @@ FORCE_INLINE float4 computeSpotlight(float3 hitPos, float3 spotLightPosition) {
 
 // Apply fog based on distance using CPU-precomputed scalars to avoid divides/branches
 // fog.fog.x = intensity, fog.fog.y = 1 / intensity (0 when disabled)
-FORCE_INLINE half3 applyFog(half3 col, float distance, constant PrecomputedFog& fog) {
+FORCE_INLINE half3 applyFog(half3 col, float distance, PrecomputedFog fog) {
     float fogIntensity = fog.fog.x;
     if (fogIntensity <= 0.0001f) { return col; }
     // exp(-distance * fogIntensity * 2.0 + 1.5) = exp(1.5) * exp(-distance * fogIntensity * 2.0)
@@ -1236,14 +1233,22 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 // =============================================================================
 
 // Post effects with color scheme support and dynamic animation
-// OPTIMIZATION: Now properly skips disabled effects using branches (cleaner than branchless)
-half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half limitFlash = 0.0h, half rayGlow = 0.0h)
+// Consumes precomputed audio aggregates for lightweight audio-reactive modulation.
+half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, PrecomputedAudio audio, half limitFlash = 0.0h, half rayGlow = 0.0h)
 {
+    // Pre-baked audio bands/energy (CPU computed) for reuse
+    half bass = half(audio.bands.x);
+    half mid = half(audio.bands.y);
+    half treble = half(audio.bands.z);
+    half beat = half(audio.bands.w);
+    half audioEnergy = half(audio.energy.y);
+
     // === DYNAMIC HUE CYCLING (OPTIONAL EFFECT WITH INTENSITY CONTROL) ===
     // Only process if enabled - uses YIQ color space rotation
     // Intensity parameter allows blending rotated color back with original to prevent overpowering
     if (scheme.hueRotationEnabled) {
-        float rawAngle = scheme.animTime * scheme.hueRotationSpeed * 6.28318f;
+        float audioHueBoost = fma(float(treble), 0.35f, 1.0f); // Treble excites hue spin
+        float rawAngle = scheme.animTime * scheme.hueRotationSpeed * 6.28318f * audioHueBoost;
         float wrappedAngle = fmod(rawAngle, 6.28318f);
         half hueAngle = half(wrappedAngle);
         half cosH = cos(hueAngle);
@@ -1276,12 +1281,14 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
     if (scheme.pulseEnabled) {
         float rawPulseAngle = scheme.animTime * scheme.pulseSpeed * 6.28318f;
         half pulseWave = 0.5h + 0.5h * sin(half(fmod(rawPulseAngle, 6.28318f)));
-        pulse = 1.0h + half(scheme.pulseAmount) * (pulseWave - 0.5h);
+        // Audio modulates pulse amplitude slightly (beat spikes it)
+        half pulseAudio = 1.0h + audioEnergy * 0.35h + beat * 0.25h;
+        pulse = 1.0h + half(scheme.pulseAmount) * (pulseWave - 0.5h) * pulseAudio;
     }
     
     // === SATURATION WITH PULSE ===
     half luma = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
-    half satMult = half(scheme.saturation) * pulse;
+    half satMult = half(scheme.saturation) * pulse * (1.0h + bass * 0.35h);
     rgb = mix(half3(luma), rgb, satMult);
     
     // === BRIGHTNESS AND CONTRAST (ALWAYS APPLIED) ===
@@ -1311,7 +1318,7 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
     // === VIBRANCE (skip when ~0) ===
     if (abs(scheme.vibrance) > 0.001f) {
         half maxChannel = max(rgb.r, max(rgb.g, rgb.b));
-        half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance);
+        half vibranceBoost = (1.0h - maxChannel) * half(scheme.vibrance) * (1.0h + mid * 0.25h);
         half luma2 = dot(rgb, half3(0.299h, 0.587h, 0.114h));
         rgb = mix(half3(luma2), rgb, 1.0h + vibranceBoost);
     }
@@ -1336,10 +1343,12 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, half 
     rgb *= 0.5h + 0.5h * powr(vignetteBase, 0.2h);
     
     // Limit flash effect - bright edge glow when parameter hits min/max
-    if (limitFlash > 0.01h) {
+    half beatFlash = beat * 0.4h;
+    half combinedFlash = max(limitFlash, beatFlash);
+    if (combinedFlash > 0.01h) {
         half2 edgeDist = abs(xy - 0.5h) * 2.0h;
         half edge = max(edgeDist.x, edgeDist.y);
-        half edgeGlow = powr(edge, 2.0h) * limitFlash;
+        half edgeGlow = powr(edge, 2.0h) * combinedFlash;
         half3 flashColor = half3(1.0h, 0.4h, 0.1h);
         rgb = mix(rgb, flashColor, edgeGlow * 0.8h);
     }
@@ -1738,7 +1747,7 @@ kernel void adaptiveHierarchical8x8(
         col = applyFog(col, kRayMissThreshold + 100.0, uniforms.precomputedFog);
         col = clampColor(col);
         half2 texCoord = half2(pixelCenter / uniforms.resolution);
-        col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash), 0.0h);
+        col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), 0.0h);
         float4 currentColor = float4(float3(col), 1.0);
         outputTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
         curColorTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
@@ -1896,7 +1905,7 @@ kernel void adaptiveHierarchical8x8(
     // (saturation, contrast, vignette, gamma from color scheme)
     // Compute approximate texCoord for vignette (0-1 range)
     half2 texCoord = half2(pixelCenter / uniforms.resolution);
-    col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, half(uniforms.limitFlash), glowH);
+    col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glowH);
     
     // Debug visualization
     // Use function constant to compile out debug code in release builds
@@ -2127,7 +2136,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     col = clampColor(col);
 
     if (quality > kMinQualityForPostFX) {
-        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glow);
+        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
     } else {
         col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
     }
@@ -2310,7 +2319,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     col = applyGlow(col, glowH);
     col = clampColor(col);
     
-    col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, half(uniforms.limitFlash), glowH);
+    col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glowH);
     
     output.color = float4(float3(col), 1.0);
     

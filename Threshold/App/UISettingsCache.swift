@@ -321,6 +321,19 @@ final class UISettingsCache {
             cache: self
         )
     }
+
+    /// Convenience: dispatch a core/effect parameter write through the UI layer.
+    /// Use for slider-driven changes to core.*, effect.* targets.
+    func dispatchCoreWrite(targetID: String, value: Float) {
+        guard let settings else { return }
+        let op = ParameterOperation(
+            targetID: targetID,
+            source: .slider,
+            value: .absolute(value),
+            frameIndex: 0
+        )
+        dispatchParameterOperation(op)
+    }
     
 
     func setFingerBinding(_ binding: GestureActionBinding, for pair: FingerPair) {
@@ -383,17 +396,20 @@ final class UISettingsCache {
     }
     
     /// Update a single formula param slot and push the entire struct to RenderSettings.
+    /// Routes through the parameter operation dispatcher so layer precedence is respected.
     func pushFormulaParam(index: Int, value: Float) {
         guard let settings else { return }
-        ParameterArbitrationDispatcher.shared.applyFloat(
-            parameterID: "formula.\(settings.fractalType.rawValue).\(index)",
-            incomingValue: value,
-            source: .ui,
-            currentValue: FormulaCatalog.getParam(formulaParams, index: index)
-        ) { resolvedValue in
-            FormulaCatalog.setParam(&formulaParams, index: index, value: resolvedValue)
-            settings.formulaParams = formulaParams
-        }
+        let targetID = "formula.\(settings.fractalType.rawValue).\(index)"
+        let op = ParameterOperation(
+            targetID: targetID,
+            source: .slider,
+            value: .absolute(value),
+            frameIndex: 0
+        )
+        parameterOperationDispatcher.dispatch(
+            ParameterTransaction(frameIndex: op.frameIndex, operations: [op]),
+            cache: self
+        )
     }
     
     /// Reset formula params to defaults for the current type and push.

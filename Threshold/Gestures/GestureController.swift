@@ -537,8 +537,6 @@ final class GestureController {
             settings.gestureSpread = 0
             return
         }
-        
-        ParameterArbitrationDispatcher.shared.beginFrame()
 
         // Track active gesture for HUD display
         var activeDigit = 0
@@ -865,9 +863,13 @@ final class GestureController {
             let rotatedOffset = deltaRotation.act(scaledOffset)
             let newPosition = currentMidpoint + rotatedOffset
             
-            // DIRECT APPLICATION: no smoothing for grab gesture.
-            // Sets both current + target in one lock, zeroes velocity.
-            // This gives 1:1 hand-to-world feel — zero lag.
+            // DIRECT APPLICATION (intentional dispatcher bypass):
+            // Position (SIMD3), rotation (quaternion), and grab-scale are set
+            // atomically with no smoothing for 1:1 hand-to-world feel.
+            // These bypass ParameterOperationDispatcher because:
+            //   - Quaternions need slerp, not scalar lerp
+            //   - Grab requires atomic snap (current == target, zeroed velocity)
+            //   - The scalar dispatcher is not designed for vector/quat operations
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = newPosition - settings.animationBasePosition
                 // Still need to set rotation/scale directly
@@ -1173,7 +1175,9 @@ final class GestureController {
                 scaledDelta = .zero
             }
 
-            // Apply translation (world space) to target
+            // Apply translation (world space) to target.
+            // Direct write (intentional dispatcher bypass) — position is a SIMD3 vector,
+            // not a scalar parameter. See grab gesture for rationale.
             accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition

@@ -200,13 +200,12 @@ enum ColorScheme: Int32, CaseIterable, Codable {
     }
     
     // Create shader-compatible ColorSchemeParams with new modular lighting effects
-    func toShaderParams(colorMix: Float, transitionProgress: Float = 1.0, previousScheme: ColorScheme? = nil,
+    func toShaderParams(colorMix: Float,
                         animTime: Float = 0.0, 
                         hueRotation: HueRotationEffect = .off,
                         pulse: PulseEffect = .off,
                         glow: GlowEffect = .off,
-                        bloom: BloomEffect = .off,
-                        fog: FogEffect = .off) -> ColorSchemeParams {
+                        bloom: BloomEffect = .off) -> ColorSchemeParams {
         let pal = palette
         let pp = postProcessing
         let neon = neonParams
@@ -214,7 +213,6 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             color1: pal.color1,
             color2: pal.color2,
             color3: pal.color3,
-            altColor1: pal.altColor1,
             altMixFactors: pal.altMixFactors,
             saturation: pp.saturation,
             contrast: pp.contrast,
@@ -228,8 +226,6 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             hueFrequency: neon.hueFreq,
             hueOffset: neon.hueOffset,
             bandFrequency: neon.bandFreq,
-            stripeFrequency: neon.stripeFreq,
-            stripeStrength: neon.stripeStrength,
             glowSharpness: neon.glowSharpness,
             saturationPower: neon.satPower,
             // === GRADIENT (legacy path — disabled) ===
@@ -256,13 +252,7 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             glowEnabled: glow.enabled ? 1 : 0,
             glowIntensity: glow.intensity,
             bloomEnabled: bloom.enabled ? 1 : 0,
-            bloomStrength: bloom.strength,
-            fogEnabled: fog.enabled ? 1 : 0,
-            fogIntensity: fog.intensity,
-            transitionProgress: transitionProgress,
-            previousScheme: previousScheme?.rawValue ?? self.rawValue,
-            currentScheme: self.rawValue,
-            _padding: 0
+            bloomStrength: bloom.strength
         )
     }
 }

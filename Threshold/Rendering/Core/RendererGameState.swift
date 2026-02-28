@@ -78,21 +78,15 @@ extension Renderer {
             let view = drawable.views[viewIndex]
             let viewMatrix = (deviceTransform * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
-            let inverseProjection = projection.inverse
 
             let modelView = viewMatrix * modelMatrix
-            let inverseModelView = modelView.inverse
-            let inverseView = viewMatrix.inverse
 
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
 
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
-                            inverseModelViewMatrix: inverseModelView,
-                            inverseProjectionMatrix: inverseProjection,
-                            viewMatrix: viewMatrix,
-                            inverseViewMatrix: inverseView,
+                            inverseModelViewMatrix: modelView.inverse,
                             time: frameTime,
                             minDistance: settingsSnapshot.minDistance,
                             fractalScale: settingsSnapshot.fractalScale,
@@ -109,29 +103,13 @@ extension Renderer {
                             limitFlash: settingsSnapshot.limitFlash,
                             showHUD: settingsSnapshot.showHUD ? 1 : 0,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
-                            gestureSpread: settingsSnapshot.gestureSpread,
                             fractalType: settingsSnapshot.fractalType.rawValue,
                             formulaParams: settingsSnapshot.formulaParams,
-                            lightingMode: settingsSnapshot.lightingMode.rawValue,
-                            audioLevel: settingsSnapshot.audioLevel,
-                            bassLevel: settingsSnapshot.bassLevel,
-                            midLevel: settingsSnapshot.midLevel,
-                            trebleLevel: settingsSnapshot.trebleLevel,
-                            beatIntensity: settingsSnapshot.beatIntensity,
-                            visualizerMode: settingsSnapshot.visualizerMode,
-                            visualizerIntensity: settingsSnapshot.visualizerIntensity,
-                            fogIntensity: settingsSnapshot.colorSchemeParams.fogIntensity,
                             lightingSoftness: settingsSnapshot.lightingSoftness,
-                            maxViewDistance: RenderSettings.maxViewDistance,
-                            logDepthScale: RenderSettings.logDepthScale,
-                            depthMissValue: RenderSettings.depthMissValue,
                             // === GMT-FRACTALS OPTIMIZATIONS ===
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
-                            blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
                             jitterOffset: currentJitterOffset(),
-                            accumulationFrame: Int32(accumulationFrameCount),
-                            pad_gmt: 0.0,
                             precomputedFractal: precomputedFractal,
                             precomputedLighting: precomputedLighting,
                             precomputedAudio: precomputedAudio,

@@ -75,8 +75,10 @@ struct ParameterTransaction: Sendable {
     }
 }
 
-@MainActor
-final class ParameterOperationDispatcher {
+// Not @MainActor: instances are owned per-caller (UISettingsCache, GestureController, Renderer).
+// The cache-based dispatch path is @MainActor since it touches MainActor-isolated node closures.
+// The settings-based path only writes through lock-protected RenderSettings.
+final class ParameterOperationDispatcher: @unchecked Sendable {
     struct SourcePolicy: Sendable {
         let priority: [ParameterOperationSource: Int]
 
@@ -176,6 +178,7 @@ final class ParameterOperationDispatcher {
         self.sourcePolicy = sourcePolicy
     }
 
+    @MainActor
     func dispatch(_ transaction: ParameterTransaction, cache: UISettingsCache) {
         resolve(transaction).forEach { resolved in
             apply(resolved, cache: cache)
@@ -216,6 +219,7 @@ final class ParameterOperationDispatcher {
         return resolved
     }
 
+    @MainActor
     private func apply(_ operation: ParameterOperation, cache: UISettingsCache) {
         let timestamp = operation.timestamp
         let layer = layer(for: operation.source)
