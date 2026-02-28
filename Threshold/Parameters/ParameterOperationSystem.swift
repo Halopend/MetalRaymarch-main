@@ -25,14 +25,10 @@ enum ParameterOperationValue: Codable, Sendable {
 }
 
 struct ParameterOperationSmoothing: Codable, Sendable {
-    var easing: String?
     var smoothingTime: Float?
-    var metadata: [String: Float]
 
-    init(easing: String? = nil, smoothingTime: Float? = nil, metadata: [String: Float] = [:]) {
-        self.easing = easing
+    init(smoothingTime: Float? = nil) {
         self.smoothingTime = smoothingTime
-        self.metadata = metadata
     }
 }
 
@@ -48,7 +44,7 @@ struct ParameterOperation: Codable, Sendable, Identifiable {
     init(targetID: String,
          source: ParameterOperationSource,
          value: ParameterOperationValue,
-         timestamp: TimeInterval = Date().timeIntervalSince1970,
+         timestamp: TimeInterval = CFAbsoluteTimeGetCurrent(),
          frameIndex: UInt64,
          smoothing: ParameterOperationSmoothing = .init()) {
         self.id = UUID()
@@ -67,7 +63,7 @@ struct ParameterTransaction: Sendable {
     let operations: [ParameterOperation]
 
     init(frameIndex: UInt64,
-         timestamp: TimeInterval = Date().timeIntervalSince1970,
+         timestamp: TimeInterval = CFAbsoluteTimeGetCurrent(),
          operations: [ParameterOperation]) {
         self.frameIndex = frameIndex
         self.timestamp = timestamp
@@ -279,9 +275,21 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         applyCore(operation, settings: settings, layer: layer)
     }
 
+    /// Core parameters that already have smoothDamp in `interpolateToTargets()`.
+    /// For these, the layer stack resolves priority (which source wins) but does NOT
+    /// add its own exponential lerp — that caused double-smoothing and stall bugs
+    /// where the partially-lerped value froze when operations stopped arriving.
+    private static let smoothDampedCoreIDs: Set<String> = [
+        "core.targetMinDistance",
+        "core.targetFoldingLimit",
+        "core.targetSphereRadius"
+    ]
+
     private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?, layer: ParameterLayer) {
         guard let settings else { return }
         guard let descriptor = coreDescriptors[operation.targetID] else { return }
+
+        let bypassLayerSmoothing = Self.smoothDampedCoreIDs.contains(operation.targetID)
 
         var stack = coreStacks[operation.targetID]
 
@@ -294,12 +302,23 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
         let current = stack?.resolvedValue(at: operation.timestamp) ?? descriptor.read(settings)
         let incoming = operation.value.resolved(from: current)
-        let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: operation.timestamp) ?? incoming
-        descriptor.write(settings, min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved)))
+
+        if bypassLayerSmoothing {
+            // Write rawValue directly — smoothDamp in interpolateToTargets() handles animation.
+            // The stack still tracks layer priority so source arbitration works.
+            // Pass smoothingTime=0 to explicitly disable the layer's exponential lerp
+            // (nil would be replaced with the default 0.08s by the stack).
+            let clamped = min(descriptor.range.upperBound, max(descriptor.range.lowerBound, incoming))
+            let _ = stack?.apply(layer: layer, value: incoming, smoothingTime: 0, timestamp: operation.timestamp)
+            descriptor.write(settings, clamped)
+        } else {
+            let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: operation.timestamp) ?? incoming
+            descriptor.write(settings, min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved)))
+        }
         if let stack { coreStacks[operation.targetID] = stack }
 
         if debugTraceEnabled {
-            print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
+            print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(incoming)")
         }
     }
 

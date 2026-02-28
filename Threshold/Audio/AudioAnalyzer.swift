@@ -110,12 +110,6 @@ class AudioAnalyzer {
         lastUpdateTime = 0
     }
     
-    /// Manually set the audio level (for testing or manual control)
-    func setManualLevel(_ newLevel: Float) {
-        level = max(0, min(1, newLevel))
-        peakLevel = max(peakLevel, level)
-    }
-    
     // MARK: - Private Methods
     
     private func setupFFT() {

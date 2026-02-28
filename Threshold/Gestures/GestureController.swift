@@ -36,13 +36,6 @@ struct HandData {
     var palmPosition: SIMD3<Float> = .zero
     var palmCenter: SIMD3<Float> = .zero  // Center of palm for gesture detection
     
-    // Additional joint positions for advanced gestures
-    var indexKnuckle: SIMD3<Float> = .zero
-    var middleKnuckle: SIMD3<Float> = .zero
-    var ringKnuckle: SIMD3<Float> = .zero
-    var pinkyKnuckle: SIMD3<Float> = .zero
-    var wrist: SIMD3<Float> = .zero
-    
     // Pinch values (0-1, 1 = fully pinched)
     var indexPinch: Float = 0
     var middlePinch: Float = 0
@@ -162,10 +155,6 @@ final class GestureController {
     let operationDispatcher: ParameterOperationDispatcher
     private var operationFrameCounter: UInt64 = 0
     
-    // Smoothing speed for frame-rate independent animation (higher = faster convergence)
-    // 12.0 = ~63% convergence in 83ms, feels responsive yet smooth
-    private let valueSmoothingSpeed: Float = 12.0
-    
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES
     // Each fractal type has different optimal parameter ranges
@@ -248,6 +237,7 @@ final class GestureController {
     // === TWO-POINT GRAB STATE (middle finger, both hands) ===
     // Grabs two points in space; pulling apart scales, rotating rotates the world.
     private var grabActive: Bool = false
+    private var grabEndCooldown: Float = 0  // Prevents drag from stealing gesture after grab ends
     private var grabStartLeftPos: SIMD3<Float> = .zero       // Left pinch position when grab started
     private var grabStartRightPos: SIMD3<Float> = .zero      // Right pinch position when grab started
     private var grabStartDistance: Float = 0                  // Distance between hands at grab start
@@ -306,6 +296,7 @@ final class GestureController {
         // Reset all gesture states to avoid stale data
         for digit in 1...4 { fingerGestureState[digit] = TwoHandGestureState() }
         grabActive = false
+        grabEndCooldown = 0
         rightIndexDragActive = false
         menuToggleActive = false
         menuToggleHoldTimer = 0
@@ -358,9 +349,12 @@ final class GestureController {
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
         
-        // Update cooldown timer
+        // Update cooldown timers
         if menuToggleCooldown > 0 {
             menuToggleCooldown = max(0, menuToggleCooldown - deltaTime)
+        }
+        if grabEndCooldown > 0 {
+            grabEndCooldown = max(0, grabEndCooldown - deltaTime)
         }
         
         // Process all gesture mappings (sets targets on RenderSettings)
@@ -398,13 +392,6 @@ final class GestureController {
         data.middleTip = jointPosition(.middleFingerTip)
         data.ringTip = jointPosition(.ringFingerTip)
         data.pinkyTip = jointPosition(.littleFingerTip)
-        
-        // Knuckle positions for fist detection
-        data.indexKnuckle = jointPosition(.indexFingerKnuckle)
-        data.middleKnuckle = jointPosition(.middleFingerKnuckle)
-        data.ringKnuckle = jointPosition(.ringFingerKnuckle)
-        data.pinkyKnuckle = jointPosition(.littleFingerKnuckle)
-        data.wrist = jointPosition(.wrist)
         
         // Palm position (use wrist or middle metacarpal)
         data.palmPosition = jointPosition(.middleFingerMetacarpal)
@@ -534,7 +521,6 @@ final class GestureController {
             if rightIndexDragActive        { rightIndexDragActive = false }
             settings.activeGestureIndex = 0
             settings.isGeometryGestureActive = false
-            settings.gestureSpread = 0
             return
         }
 
@@ -565,7 +551,7 @@ final class GestureController {
                         source: .gesture,
                         value: .absolute(newValue),
                         frameIndex: operationFrameCounter,
-                        smoothing: .init(easing: "gesture")
+                        smoothing: .init()
                     )
                     operationDispatcher.dispatch(
                         ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
@@ -589,121 +575,16 @@ final class GestureController {
                 processTwoPointGrab(digit: digit)
                 if grabActive { activeDigit = digit }
                 
-            case .minDistance:
-                processTwoHandGesture(
-                    digit: digit,
-                    state: &fingerGestureState[digit]!,
-                    currentTarget: settings.effectiveTargetMinDistance,
-                    range: ranges.minDistance
-                ) { newValue in
-                    let targetValue: Float
-                    if settings.isAnimationPlaying {
-                        targetValue = settings.animationBaseMinDistance + newValue - settings.animationBaseMinDistance
-                        settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
-                    } else {
-                        targetValue = newValue
+            case .minDistance, .foldingLimit, .sphereRadius, .fractalScale:
+                // These are Mandelbox-specific geometry controls. If the current fractal
+                // doesn't use them, deactivate the gesture and skip processing.
+                guard settings.fractalType.usesMandelboxParams else {
+                    if fingerGestureState[digit]?.isActive == true {
+                        fingerGestureState[digit]?.isActive = false
                     }
-                    let op = ParameterOperation(
-                        targetID: "core.targetMinDistance",
-                        source: .gesture,
-                        value: .absolute(targetValue),
-                        frameIndex: operationFrameCounter,
-                        smoothing: .init(easing: "gesture")
-                    )
-                    operationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
-                        settings: settings
-                    )
-                    UsageAnalytics.shared.trackHandGestureUsed()
+                    continue
                 }
-                if fingerGestureState[digit]!.isActive { activeDigit = digit }
-                
-            case .foldingLimit:
-                processTwoHandGesture(
-                    digit: digit,
-                    state: &fingerGestureState[digit]!,
-                    currentTarget: settings.effectiveTargetFoldingLimit,
-                    range: ranges.foldingLimit
-                ) { newValue in
-                    let targetValue: Float
-                    if settings.isAnimationPlaying {
-                        targetValue = newValue
-                        settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
-                    } else {
-                        targetValue = newValue
-                    }
-                    let op = ParameterOperation(
-                        targetID: "core.targetFoldingLimit",
-                        source: .gesture,
-                        value: .absolute(targetValue),
-                        frameIndex: operationFrameCounter,
-                        smoothing: .init(easing: "gesture")
-                    )
-                    operationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
-                        settings: settings
-                    )
-                    UsageAnalytics.shared.trackHandGestureUsed()
-                }
-                if fingerGestureState[digit]!.isActive { activeDigit = digit }
-                
-            case .sphereRadius:
-                processTwoHandGesture(
-                    digit: digit,
-                    state: &fingerGestureState[digit]!,
-                    currentTarget: settings.effectiveTargetSphereRadius,
-                    range: ranges.sphereRadius
-                ) { newValue in
-                    let targetValue: Float
-                    if settings.isAnimationPlaying {
-                        targetValue = newValue
-                        settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
-                    } else {
-                        targetValue = newValue
-                    }
-                    let op = ParameterOperation(
-                        targetID: "core.targetSphereRadius",
-                        source: .gesture,
-                        value: .absolute(targetValue),
-                        frameIndex: operationFrameCounter,
-                        smoothing: .init(easing: "gesture")
-                    )
-                    operationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
-                        settings: settings
-                    )
-                    UsageAnalytics.shared.trackHandGestureUsed()
-                }
-                if fingerGestureState[digit]!.isActive { activeDigit = digit }
-                
-            case .fractalScale:
-                processTwoHandGesture(
-                    digit: digit,
-                    state: &fingerGestureState[digit]!,
-                    currentTarget: settings.effectiveTargetFractalScale,
-                    range: ranges.fractalScale
-                ) { newValue in
-                    let targetValue: Float
-                    if settings.isAnimationPlaying {
-                        targetValue = newValue
-                        settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
-                    } else {
-                        targetValue = newValue
-                    }
-                    let op = ParameterOperation(
-                        targetID: "core.fractalScale",
-                        source: .gesture,
-                        value: .absolute(targetValue),
-                        frameIndex: operationFrameCounter,
-                        smoothing: .init(easing: "gesture")
-                    )
-                    operationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
-                        settings: settings
-                    )
-                    UsageAnalytics.shared.trackHandGestureUsed()
-                }
-                if fingerGestureState[digit]!.isActive { activeDigit = digit }
+                processMandelboxCoreGesture(digit: digit, action: action, ranges: ranges, settings: settings, activeDigit: &activeDigit)
                 
             case .none:
                 // Deactivate any stale state for unassigned fingers
@@ -726,25 +607,74 @@ final class GestureController {
             (1...4).contains(where: { fingerGestureState[$0]?.isActive == true })
         settings.isGeometryGestureActive = anyGeometryGestureActive
         
-        // ═══════════════════════════════════════════════════════════════════════════
-        // DEBUG VISUALIZATION: Calculate hand spread for debug sphere
-        // Normalized 0-1 based on hand distance when gesture is active
-        // ═══════════════════════════════════════════════════════════════════════════
-        if activeDigit > 0 {
-            let leftPos = leftHand.pinchPosition(digit: activeDigit)
-            let rightPos = rightHand.pinchPosition(digit: activeDigit)
-            let currentDistance = simd_length(leftPos - rightPos)
-            let minHandDistance = settings.gestureMinHandDistance
-            let maxHandDistance = max(minHandDistance + 0.05, settings.gestureMaxHandDistance)
-            // Normalize: minHandDistance (5cm) = 0, maxHandDistance (60cm) = 1
-            let normalized = simd_clamp((currentDistance - minHandDistance) / (maxHandDistance - minHandDistance), 0.0, 1.0)
-            settings.gestureSpread = normalized
-        } else {
-            settings.gestureSpread = 0
-        }
-        
         // SINGLE-HAND gesture: Right index pinch drag → translate
         processRightIndexDrag()
+    }
+    
+    // MARK: - Mandelbox Core Gesture Dispatch
+    
+    /// Dispatches a two-hand gesture for Mandelbox-specific core parameters.
+    /// Consolidates the four repetitive cases (minDistance, foldingLimit, sphereRadius, fractalScale)
+    /// into a single method to reduce duplication and ensure consistent handling.
+    private func processMandelboxCoreGesture(
+        digit: Int,
+        action: FingerGestureAction,
+        ranges: FractalParamRanges,
+        settings: RenderSettings,
+        activeDigit: inout Int
+    ) {
+        let (currentTarget, range, targetID): (Float, ClosedRange<Float>, String) = {
+            switch action {
+            case .minDistance:   return (settings.effectiveTargetMinDistance, ranges.minDistance, "core.targetMinDistance")
+            case .foldingLimit:  return (settings.effectiveTargetFoldingLimit, ranges.foldingLimit, "core.targetFoldingLimit")
+            case .sphereRadius:  return (settings.effectiveTargetSphereRadius, ranges.sphereRadius, "core.targetSphereRadius")
+            case .fractalScale:  return (settings.effectiveTargetFractalScale, ranges.fractalScale, "core.fractalScale")
+            default: return (0, 0...1, "")
+            }
+        }()
+        guard !targetID.isEmpty else { return }
+        
+        processTwoHandGesture(
+            digit: digit,
+            state: &fingerGestureState[digit]!,
+            currentTarget: currentTarget,
+            range: range
+        ) { newValue in
+            let targetValue: Float
+            if settings.isAnimationPlaying {
+                switch action {
+                case .minDistance:
+                    targetValue = settings.animationBaseMinDistance + newValue - settings.animationBaseMinDistance
+                    settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
+                case .foldingLimit:
+                    targetValue = newValue
+                    settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
+                case .sphereRadius:
+                    targetValue = newValue
+                    settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
+                case .fractalScale:
+                    targetValue = newValue
+                    settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
+                default:
+                    targetValue = newValue
+                }
+            } else {
+                targetValue = newValue
+            }
+            let op = ParameterOperation(
+                targetID: targetID,
+                source: .gesture,
+                value: .absolute(targetValue),
+                frameIndex: operationFrameCounter,
+                smoothing: .init()
+            )
+            operationDispatcher.dispatch(
+                ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
+                settings: settings
+            )
+            UsageAnalytics.shared.trackHandGestureUsed()
+        }
+        if fingerGestureState[digit]!.isActive { activeDigit = digit }
     }
     
     // MARK: - Two-Point Grab Gesture (Configurable Finger, Both Hands)
@@ -893,6 +823,7 @@ final class GestureController {
         // === GESTURE END ===
         if !bothActive && grabActive {
             grabActive = false
+            grabEndCooldown = 0.15  // 150ms cooldown prevents drag from stealing
             if HAND_TRACKING_DEBUG {
                 let reason: String
                 if !leftHand.isTracked || !rightHand.isTracked {
@@ -1068,7 +999,8 @@ final class GestureController {
         let pinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
         
         // Only if NOT doing a two-hand gesture with index fingers
-        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.bindingForDigit(1) == .core(.grab)) else {
+        // Also block during grab-end cooldown to prevent drag from stealing the gesture
+        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.bindingForDigit(1) == .core(.grab)) && grabEndCooldown <= 0 else {
             rightIndexDragActive = false
             return
         }
@@ -1197,12 +1129,4 @@ final class GestureController {
         }
     }
     
-    // MARK: - Pinch Detection
-    
-    /// Check if pinch is active with hysteresis
-    /// OPTIMIZATION: Inlined for better branch prediction
-    @inline(__always)
-    private func isPinchActive(value: Float, wasActive: Bool, activateThreshold: Float, releaseThreshold: Float) -> Bool {
-        return wasActive ? value >= releaseThreshold : value >= activateThreshold
-    }
 }

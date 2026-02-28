@@ -47,7 +47,18 @@ enum FractalModelType: Int32, Codable, CaseIterable {
     
     /// Whether this type uses the Mandelbox-specific path (FractalParams + box/sphere fold macros)
     var usesMandelboxParams: Bool { self == .mandelbox }
-    
+
+    /// Core gesture actions that are meaningful for this fractal type.
+    /// Mandelbox uses the full set (box fold / sphere fold geometry).
+    /// Other fractals only get grab + none — their parameters are per-formula nodes.
+    var supportedCoreGestureActions: [FingerGestureAction] {
+        if usesMandelboxParams {
+            return [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale]
+        } else {
+            return [.none, .grab]
+        }
+    }
+
     /// Icon name for UI
     var icon: String {
         switch self {

@@ -97,7 +97,6 @@ protocol ParameterNode: AnyObject, Identifiable {
     var isGestureMappable: Bool { get }
     var currentValue: Value { get set }
     var defaultValue: Value { get }
-    func resetToDefault()
 }
 
 class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
@@ -173,14 +172,11 @@ class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
             metadata: metadata
         )
     }
-
-    func resetToDefault() { currentValue = defaultValue }
 }
 
 class FloatParameterNode: BaseParameterNode<Float> {
     let range: ClosedRange<Float>
     let step: Float
-    let gestureAction: FingerGestureAction?
     let readValue: @MainActor (UISettingsCache) -> Float
     let writeValue: @MainActor (UISettingsCache, Float) -> Void
     private var layerStack: ParameterLayerStack
@@ -202,7 +198,6 @@ class FloatParameterNode: BaseParameterNode<Float> {
          writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
         self.range = range
         self.step = step
-        self.gestureAction = nil
         self.readValue = readValue
         self.writeValue = writeValue
         self.layerStack = ParameterLayerStack(defaultValue: defaultValue, range: range)
@@ -217,27 +212,6 @@ class FloatParameterNode: BaseParameterNode<Float> {
                    isGestureMappable: isGestureMappable,
                    defaultValue: defaultValue,
                    metadata: ParameterMetadata(bundle: bundle, range: range, step: step))
-    }
-
-    // MARK: - Cap Queries
-
-    /// True when the resolved value equals the range's lower bound.
-    var isAtMinCap: Bool { abs(currentValue - range.lowerBound) < .ulpOfOne }
-    /// True when the resolved value equals the range's upper bound.
-    var isAtMaxCap: Bool { abs(currentValue - range.upperBound) < .ulpOfOne }
-    /// True when the resolved value sits at either cap.
-    var isAtCap: Bool { isAtMinCap || isAtMaxCap }
-    /// 0-1 normalized position of current value within the range.
-    var normalizedValue: Float {
-        let span = range.upperBound - range.lowerBound
-        guard span > .ulpOfOne else { return 0 }
-        return (currentValue - range.lowerBound) / span
-    }
-
-    @inline(__always)
-    func lerp(from a: Float, to b: Float, t: Float) -> Float {
-        let clamped = max(0, min(1, t))
-        return a + (b - a) * clamped
     }
 
     @discardableResult
@@ -402,12 +376,6 @@ final class SmoothedFloatParameterNode: FloatParameterNode {
         }
     }
 
-    func setSmoothingTime(_ value: Float) {
-        smoothingTime = max(0, value)
-        delayBuffer.setResponseTime(max(0.001, smoothingTime))
-        markDirty()
-    }
-
     func snap(to value: Float) {
         delayBuffer.snap(to: value)
         smoothedValue = value
@@ -451,6 +419,11 @@ private struct ParameterLayerEntry {
 }
 
 struct ParameterLayerStack {
+    /// Default smoothing time (seconds) applied to all non-music parameter changes.
+    /// Provides frame-rate-independent exponential lerp that eliminates jitter/stagger
+    /// from gesture input noise and discrete slider steps.
+    static let defaultSmoothingTime: Float = 0.08
+
     private var ui: ParameterLayerEntry?
     private var gesture: ParameterLayerEntry?
     private var precompute: ParameterLayerEntry?
@@ -466,7 +439,6 @@ struct ParameterLayerStack {
         self.ui = ParameterLayerEntry(rawValue: defaultValue, smoothingTime: nil, timestamp: timestamp)
     }
 
-    var hasBootstrappedBase: Bool { ui != nil }
 
     mutating func setBaseIfNeeded(_ value: Float, timestamp: TimeInterval) {
         guard ui == nil else { return }
@@ -487,8 +459,25 @@ struct ParameterLayerStack {
         } else {
             clamped = min(range.upperBound, max(range.lowerBound, value))
         }
-        let entry = ParameterLayerEntry(rawValue: clamped, smoothingTime: smoothingTime, timestamp: timestamp)
-        set(entry: entry, for: layer)
+
+        // Music bypasses smoothing entirely; all other layers get at least
+        // the default smoothing time so parameter shifts lerp over time.
+        let effectiveSmoothingTime: Float? = (layer == .music)
+            ? smoothingTime
+            : (smoothingTime ?? Self.defaultSmoothingTime)
+
+        // Preserve previous smoothing state (lastResolved / lastTimestamp)
+        // from an existing entry so the exponential lerp carries forward.
+        // Creating a fresh entry each frame was resetting lastResolved = rawValue,
+        // which zeroed out the lerp delta and killed all smoothing.
+        if var existing = get(for: layer) {
+            existing.rawValue = clamped
+            existing.smoothingTime = effectiveSmoothingTime
+            set(entry: existing, for: layer)
+        } else {
+            let entry = ParameterLayerEntry(rawValue: clamped, smoothingTime: effectiveSmoothingTime, timestamp: timestamp)
+            set(entry: entry, for: layer)
+        }
         return resolvedValue(at: timestamp)
     }
 
@@ -529,6 +518,16 @@ struct ParameterLayerStack {
     }
 
     // MARK: - Internal helpers
+
+    private func get(for layer: ParameterLayer) -> ParameterLayerEntry? {
+        switch layer {
+        case .ui: return ui
+        case .gesture: return gesture
+        case .precompute: return precompute
+        case .music: return music
+        case .system: return system
+        }
+    }
 
     private static func resolve(entry: inout ParameterLayerEntry?, at timestamp: TimeInterval) -> Float? {
         guard var entryValue = entry else { return nil }
@@ -610,10 +609,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
 
     func effectNode(id: String) -> FloatParameterNode? {
         effectNodes[id]
-    }
-
-    var allCoreAndEffectNodes: [FloatParameterNode] {
-        Array(coreNodes.values) + Array(effectNodes.values)
     }
 
     /// One-time build of engine-level parameter nodes for core geometry and effects.
@@ -831,26 +826,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         formulaBatch(for: type).floatNodeByFormulaIndex[formulaIndex]
     }
 
-    func formulaGestureActions(for type: FractalModelType) -> [FingerGestureAction] {
-        formulaBatch(for: type).floatNodes.compactMap { node in
-            guard let formulaIndex = formulaIndex(for: node, type: type) else { return nil }
-            return FingerGestureAction(formulaParamIndex: formulaIndex)
-        }
-    }
-
-    func formulaActionMapping(for type: FractalModelType,
-                              action: FingerGestureAction) -> (formulaIndex: Int, node: FloatParameterNode)? {
-        guard let formulaIndex = action.formulaParamIndex,
-              let node = node(for: type, formulaIndex: formulaIndex) else {
-            return nil
-        }
-        return (formulaIndex, node)
-    }
-
-    func node(for type: FractalModelType, action: FingerGestureAction) -> FloatParameterNode? {
-        formulaActionMapping(for: type, action: action)?.node
-    }
-
     func gestureBindableParameters(for type: FractalModelType) -> [GestureBindableParameter] {
         formulaBatch(for: type).floatNodes.map { node in
             let pieces = node.id.split(separator: ".")
@@ -899,32 +874,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             }
         }
         return dirtyIDs
-    }
-
-    func fractalParameterMappingJSON(prettyPrinted: Bool = true) -> String? {
-        struct Mapping: Codable {
-            struct FractalEntry: Codable {
-                let fractalType: Int32
-                let fractalName: String
-                let parameters: [String]
-            }
-            let version: Int
-            let fractals: [FractalEntry]
-        }
-
-        let payload = Mapping(
-            version: 2,
-            fractals: FractalModelType.allCases.map { type in
-                .init(fractalType: type.rawValue,
-                      fractalName: type.displayName,
-                      parameters: formulaBatch(for: type).nodes.map(\.id))
-            }
-        )
-
-        let encoder = JSONEncoder()
-        if prettyPrinted { encoder.outputFormatting = [.prettyPrinted, .sortedKeys] }
-        guard let data = try? encoder.encode(payload) else { return nil }
-        return String(decoding: data, as: UTF8.self)
     }
 
     private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
@@ -1023,11 +972,4 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         return "slider.horizontal.3"
     }
 
-    private func formulaIndex(for node: FloatParameterNode, type: FractalModelType) -> Int? {
-        let prefix = "formula.\(type.rawValue)."
-        guard node.id.hasPrefix(prefix) else { return nil }
-        let suffix = node.id.dropFirst(prefix.count)
-        guard let segment = suffix.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true).first else { return nil }
-        return Int(segment)
-    }
 }

@@ -41,29 +41,12 @@ final class RenderSettings: @unchecked Sendable {
            let decoded = try? JSONDecoder().decode(GestureActionBinding.self, from: data) {
             return decoded
         }
+        // Legacy migration: old Int32 FingerGestureAction raw values
         guard defaults.object(forKey: legacyKey) != nil else { return fallback }
         let legacyRaw = Int32(defaults.integer(forKey: legacyKey))
-        guard let legacy = FingerGestureAction(rawValue: legacyRaw) else { return fallback }
-        return migrateLegacyGestureAction(legacy, fallback: fallback)
-    }
-
-    private static func migrateLegacyGestureAction(_ action: FingerGestureAction,
-                                                   fallback: GestureActionBinding) -> GestureActionBinding {
-        if let formulaIndex = action.formulaParamIndex,
-           let node = ParameterNodeRegistry.shared.node(for: .mandelbox, formulaIndex: formulaIndex) {
-            return .parameter(
-                GestureBindableParameter(
-                    fractalType: .mandelbox,
-                    parameterNodeID: node.id,
-                    formulaIndex: formulaIndex,
-                    display: GestureDisplayMetadata(title: node.name, subtitle: node.group?.title, icon: node.icon)
-                )
-            )
-        }
-        if FingerGestureAction.coreCases.contains(action) {
-            return .core(action)
-        }
-        return fallback
+        guard let legacy = FingerGestureAction(rawValue: legacyRaw),
+              FingerGestureAction.coreCases.contains(legacy) else { return fallback }
+        return .core(legacy)
     }
     
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
@@ -84,7 +67,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _beatIntensity: Float = 0.0         // Beat onset intensity (0-1)
     private var _visualizerMode: Int32 = 0          // 0=off, 1=pulse, 2=waveform, 3=spectrum
     private var _visualizerIntensity: Float = 0.5   // How much audio affects visuals (0-1)
-    private var _audioSource: Int32 = 2              // 0=micOnly, 1=spotifyOnly, 2=both
     private var _bassSensitivity: Float = 1.0        // Multiplier for bass band (0-2)
     private var _midSensitivity: Float = 1.0         // Multiplier for mid band (0-2)
     private var _trebleSensitivity: Float = 1.0      // Multiplier for treble band (0-2)
@@ -120,7 +102,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    private var _gestureSpread: Float = 0            // Normalized hand spread (0-1) for debug visualization
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
     private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
@@ -196,7 +177,6 @@ final class RenderSettings: @unchecked Sendable {
     // Tracks whether geometry parameters have settled for optimization
     private var _geometryState: GeometryState = .dynamic
     private var _isGeometryGestureActive: Bool = false
-    private var _stableGeometryEnabled: Bool = true          // Enable geometry stability tracking
     private var _geometryStableFrameCount: Int = 0           // Frames since geometry settled
     private let geometrySettleThreshold: Float = 0.001       // Threshold for considering parameters settled
     
@@ -389,11 +369,6 @@ final class RenderSettings: @unchecked Sendable {
     var visualizerIntensity: Float {
         get { withLock { _visualizerIntensity } }
         set { withLock { _visualizerIntensity = max(0.0, min(1.0, newValue)) } }
-    }
-    
-    var audioSource: Int32 {
-        get { withLock { _audioSource } }
-        set { withLock { _audioSource = newValue } }
     }
     
     var bassSensitivity: Float {
@@ -607,6 +582,18 @@ final class RenderSettings: @unchecked Sendable {
                 if !newValue.usesMandelboxParams {
                     _formulaParams = newValue.defaultFormulaParams()
                 }
+                // Rebind any gesture fingers assigned to core actions unsupported by
+                // the new fractal type (e.g. fractalScale on non-Mandelbox).
+                let supported = Set(newValue.supportedCoreGestureActions)
+                func sanitize(_ binding: inout GestureActionBinding) {
+                    if case .core(let action) = binding, !supported.contains(action) {
+                        binding = .core(.none)
+                    }
+                }
+                sanitize(&_indexFingerBinding)
+                sanitize(&_middleFingerBinding)
+                sanitize(&_ringFingerBinding)
+                sanitize(&_pinkyFingerBinding)
             }
         }
     }
@@ -669,11 +656,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _activeGestureIndex = newValue } }
     }
     
-    var gestureSpread: Float {
-        get { withLock { _gestureSpread } }
-        set { withLock { _gestureSpread = newValue } }
-    }
-
     var useRelativeGestures: Bool {
         get { withLock { _useRelativeGestures } }
         set { withLock { _useRelativeGestures = newValue } }
@@ -1438,17 +1420,10 @@ final class RenderSettings: @unchecked Sendable {
                 fogIntensity: _fogEffect.intensity,
                 worldRotation: _worldRotation,
                 grabScale: _grabScale,
-                geometryState: _stableGeometryEnabled ? _geometryState : .dynamic,
+                geometryState: _geometryState,
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier
             )
-        }
-    }
-    
-    /// Get shader parameters for the current color scheme state
-    func getColorSchemeParams() -> ColorSchemeParams {
-        return withLock {
-            makeColorSchemeParamsLocked()
         }
     }
     
@@ -1462,21 +1437,6 @@ final class RenderSettings: @unchecked Sendable {
                 _colorSchemeTransitionProgress = 0.0
             }
             syncGradientPresetForColorSchemeLocked(scheme)
-        }
-    }
-    
-    /// Cycle to the next color scheme
-    func nextColorScheme() {
-        withLock {
-            let allSchemes = ColorScheme.allCases
-            let currentIndex = allSchemes.firstIndex(of: _targetColorScheme) ?? 0
-            let nextIndex = (currentIndex + 1) % allSchemes.count
-            let nextScheme = allSchemes[nextIndex]
-            
-            _colorScheme = _targetColorScheme
-            _targetColorScheme = nextScheme
-            _colorSchemeTransitionProgress = 0.0
-            syncGradientPresetForColorSchemeLocked(nextScheme)
         }
     }
     
@@ -1863,24 +1823,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    /// Snap current values immediately to targets (no smoothing)
-    /// Use when loading presets or resetting state
-    func snapToTargets() {
-        withLock {
-            _minDistance = _targetMinDistance
-            _foldingLimit = _targetFoldingLimit
-            _sphereRadius = _targetSphereRadius
-            _position = _targetPosition
-            _worldRotation = _targetWorldRotation
-            _grabScale = _targetGrabScale
-            // Reset velocities when snapping
-            _velocityMinDistance = 0.0
-            _velocityFoldingLimit = 0.0
-            _velocitySphereRadius = 0.0
-            _velocityPosition = .zero
-        }
-    }
-    
     /// When animation stops/pauses, bake manual offsets into targets and clear offsets.
     /// Also zeroes spring velocities to prevent overshoot/ringing.
     func commitAnimationOffsetsToTargets() {
@@ -2013,17 +1955,6 @@ final class RenderSettings: @unchecked Sendable {
             print("[REFINE] earlyTermCount = \(newValue)")
         }
     }
-    
-    // Log all current refining values
-    func logRefiningValues() {
-        print("[REFINE] === Current Refining Values ===")
-        print("[REFINE] relaxFactor = \(relaxFactor)")
-        print("[REFINE] relaxBacktrack = \(relaxBacktrack)")
-        print("[REFINE] sdfScaleCoarse = \(sdfScaleCoarse)")
-        print("[REFINE] sdfScaleSuperCoarse = \(sdfScaleSuperCoarse)")
-        print("[REFINE] earlyTermRatio = \(earlyTermRatio)")
-        print("[REFINE] earlyTermCount = \(earlyTermCount)")
-        print("[REFINE] ================================")
-    }
+
 }
 

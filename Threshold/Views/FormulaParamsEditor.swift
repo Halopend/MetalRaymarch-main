@@ -66,7 +66,7 @@ private struct ParameterNodeRow: View {
                                 source: .slider,
                                 value: .absolute(value ? 1 : 0),
                                 frameIndex: operationFrameIndex,
-                                smoothing: .init(easing: "ui")
+                                smoothing: .init()
                             )
                         )
                     }
@@ -92,7 +92,7 @@ private struct ParameterNodeRow: View {
                                     source: .slider,
                                     value: .absolute(value),
                                     frameIndex: operationFrameIndex,
-                                    smoothing: .init(easing: "ui")
+                                    smoothing: .init()
                                 )
                             )
                         }

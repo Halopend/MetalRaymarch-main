@@ -78,13 +78,6 @@ class AppModel {
         }
     }
 
-    var parameterArbitrationPolicy: ParameterArbitrationPolicy = .gesturePriorityWhileActive {
-        didSet {
-            UserDefaults.standard.set(parameterArbitrationPolicy.rawValue, forKey: "parameterArbitrationPolicy")
-            ParameterArbitrationDispatcher.shared.setArbitrationPolicy(parameterArbitrationPolicy)
-        }
-    }
-
     
     // Gesture controller for mapping hand gestures to parameters
     var gestureController: GestureController?

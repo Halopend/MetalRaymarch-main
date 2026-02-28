@@ -676,6 +676,13 @@ actor Renderer {
                 ParameterNodeRegistry.shared.updateSmoothing(deltaTime: Float(animDelta), for: fractalType)
                 let _ = ParameterNodeRegistry.shared.consumeDirtyNodes(for: fractalType)
             }
+        } else {
+            // Still tick per-node smoothing every frame even without animation/audio,
+            // so formula params animated by gestures or sliders smoothly converge.
+            Task { @MainActor in
+                ParameterNodeRegistry.shared.updateSmoothing(deltaTime: Float(animDelta), for: fractalType)
+                let _ = ParameterNodeRegistry.shared.consumeDirtyNodes(for: fractalType)
+            }
         }
         
         if isAudioMode {

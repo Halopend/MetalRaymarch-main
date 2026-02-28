@@ -174,10 +174,10 @@ final class ParameterNodeRegistryTests: XCTestCase {
         }
     }
 
-    func testAllCoreAndEffectNodesCount() {
+    func testCoreAndEffectNodesCounts() {
         let registry = ParameterNodeRegistry.shared
-        let all = registry.allCoreAndEffectNodes
-        XCTAssertEqual(all.count, 10, "Expected 5 core + 5 effect nodes")
+        XCTAssertEqual(registry.coreNodes.count, 5, "Expected 5 core nodes")
+        XCTAssertEqual(registry.effectNodes.count, 5, "Expected 5 effect nodes")
     }
 
     func testCoreNodeRanges() {
@@ -314,10 +314,6 @@ final class ParameterCapTests: XCTestCase {
         // Node range is 0...1
         XCTAssertEqual(node.range.lowerBound, 0.0)
         XCTAssertEqual(node.range.upperBound, 1.0)
-        // isAtMinCap / isAtMaxCap depend on currentValue
-        // (can't easily set it here without UISettingsCache, so test normalizedValue math)
-        XCTAssertGreaterThanOrEqual(node.normalizedValue, 0.0)
-        XCTAssertLessThanOrEqual(node.normalizedValue, 1.0)
     }
 
     func testCoreNodeRangeMatch() {
