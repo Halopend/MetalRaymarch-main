@@ -424,8 +424,8 @@ struct ContentView: View {
             Label(finger, systemImage: icon).font(.subheadline)
             Spacer()
             Picker(finger, selection: selection) {
-                ForEach(FingerGestureAction.allCases, id: \.self) { action in
-                    Label(action.displayName, systemImage: action.icon).tag(action)
+                ForEach(FingerGestureAction.availableActions(for: cache.fractalType), id: \.self) { action in
+                    Label(action.contextualDisplayName(for: cache.fractalType), systemImage: action.icon).tag(action)
                 }
             }
             .pickerStyle(.menu)
