@@ -123,6 +123,164 @@ enum FlameRenderer {
         return Output(image: image, sampleCount: xs.count)
     }
 
+    /// Fast pseudo-3D realtime frame.
+    /// Creates a depth-warped point cloud from 2D flame samples, rotates it in camera space,
+    /// and projects to screen for an interactive 3D-like flame view.
+    static func renderPseudo3DFrame(
+        flame: FlameDocument,
+        width: Int = 560,
+        height: Int = 560,
+        iterations: Int = 240_000,
+        burnIn: Int = 6_000,
+        phase: Float,
+        yaw: Float,
+        pitch: Float,
+        depthScale: Float = 0.75,
+        perspective: Float = 0.28
+    ) -> Output? {
+        guard !flame.transforms.isEmpty, width > 0, height > 0 else { return nil }
+
+        let transforms = flame.transforms
+        let cumulative = cumulativeWeights(for: transforms)
+        guard let totalWeight = cumulative.last, totalWeight > 0 else { return nil }
+
+        let accepted = max(20_000, iterations - burnIn)
+        var xs = [Float]()
+        var ys = [Float]()
+        var zs = [Float]()
+        var cs = [Float]()
+        xs.reserveCapacity(accepted)
+        ys.reserveCapacity(accepted)
+        zs.reserveCapacity(accepted)
+        cs.reserveCapacity(accepted)
+
+        var rng = LCG(seed: 0xF1A6E3 ^ UInt64(Int(phase * 10_000)))
+        var p = SIMD2<Float>(0, 0)
+        var color: Float = 0.5
+
+        for i in 0..<iterations {
+            let transform = chooseTransform(transforms: transforms, cumulative: cumulative, totalWeight: totalWeight, rng: &rng)
+            p = apply(transform: transform, to: p)
+            color = 0.5 * color + 0.5 * transform.color
+            if i >= burnIn {
+                let z = sin(p.x * 1.73 + p.y * 2.41 + Float(i) * 0.0009 + color * 6.283 + phase) * depthScale
+                xs.append(p.x)
+                ys.append(p.y)
+                zs.append(z)
+                cs.append(color)
+            }
+        }
+
+        guard !xs.isEmpty else { return nil }
+
+        let cy = cos(yaw), sy = sin(yaw)
+        let cp = cos(pitch), sp = sin(pitch)
+
+        var pxs = [Float](repeating: 0, count: xs.count)
+        var pys = [Float](repeating: 0, count: xs.count)
+        var pdepth = [Float](repeating: 0, count: xs.count)
+
+        var minX: Float = .greatestFiniteMagnitude
+        var maxX: Float = -.greatestFiniteMagnitude
+        var minY: Float = .greatestFiniteMagnitude
+        var maxY: Float = -.greatestFiniteMagnitude
+
+        for i in 0..<xs.count {
+            let x = xs[i], y = ys[i], z = zs[i]
+
+            // yaw around vertical axis
+            let xr = cy * x + sy * z
+            let zr = -sy * x + cy * z
+            // pitch for subtle vertical camera tilt
+            let yr = cp * y - sp * zr
+            let zr2 = sp * y + cp * zr
+
+            let persp = 1.0 / max(0.2, 1.0 + zr2 * perspective)
+            let xp = xr * persp
+            let yp = yr * persp
+
+            pxs[i] = xp
+            pys[i] = yp
+            pdepth[i] = zr2
+
+            minX = min(minX, xp); maxX = max(maxX, xp)
+            minY = min(minY, yp); maxY = max(maxY, yp)
+        }
+
+        let spanX = max(1e-4, maxX - minX)
+        let spanY = max(1e-4, maxY - minY)
+        let scale = min(Float(width) / spanX, Float(height) / spanY) * 0.92
+        let centerX = 0.5 * (minX + maxX)
+        let centerY = 0.5 * (minY + maxY)
+
+        let pixelCount = width * height
+        var density = [Float](repeating: 0, count: pixelCount)
+        var rAcc = [Float](repeating: 0, count: pixelCount)
+        var gAcc = [Float](repeating: 0, count: pixelCount)
+        var bAcc = [Float](repeating: 0, count: pixelCount)
+
+        for i in 0..<pxs.count {
+            let x = (pxs[i] - centerX) * scale + Float(width) * 0.5
+            let y = (pys[i] - centerY) * scale + Float(height) * 0.5
+            let ix = Int(x)
+            let iy = Int(y)
+            if ix < 0 || ix >= width || iy < 0 || iy >= height { continue }
+
+            let idx = iy * width + ix
+            density[idx] += 1
+            let rgb = colorFromHue(cs[i])
+            let depthLight = max(0.25, min(1.3, 0.9 - pdepth[i] * 0.18))
+            rAcc[idx] += rgb.x * depthLight
+            gAcc[idx] += rgb.y * depthLight
+            bAcc[idx] += rgb.z * depthLight
+        }
+
+        var maxDensity: Float = 0
+        for d in density where d > maxDensity { maxDensity = d }
+        guard maxDensity > 0 else { return nil }
+
+        let invLogMax = 1.0 / log(1 + maxDensity)
+        let gamma = max(0.1, flame.gamma)
+        let brightness = max(0.01, flame.brightness * 0.7)
+
+        var rgba = [UInt8](repeating: 0, count: pixelCount * 4)
+        for i in 0..<pixelCount {
+            let d = density[i]
+            if d <= 0 { continue }
+
+            let alpha = log(1 + d) * invLogMax
+            let inv = 1.0 / d
+            let r = pow(max(0, rAcc[i] * inv * alpha * brightness), 1.0 / gamma)
+            let g = pow(max(0, gAcc[i] * inv * alpha * brightness), 1.0 / gamma)
+            let b = pow(max(0, bAcc[i] * inv * alpha * brightness), 1.0 / gamma)
+
+            let o = i * 4
+            rgba[o + 0] = UInt8(max(0, min(255, Int(r * 255))))
+            rgba[o + 1] = UInt8(max(0, min(255, Int(g * 255))))
+            rgba[o + 2] = UInt8(max(0, min(255, Int(b * 255))))
+            rgba[o + 3] = 255
+        }
+
+        guard let provider = CGDataProvider(data: Data(rgba) as CFData),
+              let image = CGImage(
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+
+        return Output(image: image, sampleCount: pxs.count)
+    }
+
     private static func cumulativeWeights(for transforms: [FlameTransform]) -> [Float] {
         var out = [Float]()
         out.reserveCapacity(transforms.count)

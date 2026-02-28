@@ -8,6 +8,31 @@ struct FractalVariant: Identifiable, Hashable {
     let formulaOverrides: [(Int, Float)]
     var targetFractalScale: Float?
     var externalURL: String?
+
+    static func == (lhs: FractalVariant, rhs: FractalVariant) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.name == rhs.name &&
+        lhs.summary == rhs.summary &&
+        lhs.targetFractalScale == rhs.targetFractalScale &&
+        lhs.externalURL == rhs.externalURL &&
+        lhs.formulaOverrides.count == rhs.formulaOverrides.count &&
+        zip(lhs.formulaOverrides, rhs.formulaOverrides).allSatisfy { left, right in
+            left.0 == right.0 && left.1 == right.1
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(summary)
+        hasher.combine(targetFractalScale)
+        hasher.combine(externalURL)
+        hasher.combine(formulaOverrides.count)
+        for (index, value) in formulaOverrides {
+            hasher.combine(index)
+            hasher.combine(value)
+        }
+    }
 }
 
 struct FractalTypeBrowserInfo: Identifiable, Hashable {
@@ -104,7 +129,33 @@ enum FractalBrowserCatalog {
     }
 
     static var families: [FractalFamilyInfo] {
-        loadedFamilies ?? builtInFamilies
+        mergeFamilies(base: builtInFamilies, overrides: loadedFamilies)
+    }
+
+    private static func mergeFamilies(base: [FractalFamilyInfo], overrides: [FractalFamilyInfo]?) -> [FractalFamilyInfo] {
+        guard let overrides, !overrides.isEmpty else { return base }
+
+        var mergedByID: [String: FractalFamilyInfo] = [:]
+        for family in base {
+            mergedByID[family.id] = family
+        }
+        for family in overrides {
+            mergedByID[family.id] = family
+        }
+
+        // Preserve built-in ordering first, then append brand-new override families.
+        var ordered: [FractalFamilyInfo] = []
+        for family in base {
+            if let merged = mergedByID.removeValue(forKey: family.id) {
+                ordered.append(merged)
+            }
+        }
+        for family in overrides where mergedByID[family.id] != nil {
+            if let merged = mergedByID.removeValue(forKey: family.id) {
+                ordered.append(merged)
+            }
+        }
+        return ordered
     }
 
     private static let loadedFamilies: [FractalFamilyInfo]? = {
@@ -334,6 +385,15 @@ struct FractalBrowserWindow: View {
     @State private var isRenderingFlame = false
     @State private var flameStatusText = ""
     @State private var flameErrorText: String?
+    @State private var activeFlameRenderToken = UUID()
+
+    private var flameImportTypes: [UTType] {
+        var types: [UTType] = [.xml]
+        if let flam3Type = UTType(filenameExtension: "flam3") {
+            types.append(flam3Type)
+        }
+        return types
+    }
 
     private var selectedFamily: FractalFamilyInfo? {
         FractalBrowserCatalog.families.first { $0.id == selectedFamilyID }
@@ -353,10 +413,16 @@ struct FractalBrowserWindow: View {
             if let family = FractalBrowserCatalog.family(for: currentType) {
                 selectedFamilyID = family.id
             }
+
+            // Rehydrate local preview panel from shared app state when reopening.
+            importedFlame = appModel.importedFlame
+            flamePreviewImage = appModel.importedFlamePreviewImage
+            flameStatusText = appModel.importedFlameStatusText
+            flameErrorText = appModel.importedFlameErrorText
         }
         .fileImporter(
             isPresented: $showFlameImporter,
-            allowedContentTypes: [.xml],
+            allowedContentTypes: flameImportTypes,
             allowsMultipleSelection: false
         ) { result in
             switch result {
@@ -365,6 +431,7 @@ struct FractalBrowserWindow: View {
                 importFlame(from: url)
             case .failure(let error):
                 flameErrorText = error.localizedDescription
+                appModel.importedFlameErrorText = error.localizedDescription
             }
         }
     }
@@ -409,95 +476,125 @@ struct FractalBrowserWindow: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let family = selectedFamily {
-                    Text(family.name)
-                        .font(.title3.bold())
-                    Text(family.historicalInfo)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    if family.id == "flame" {
-                        flameToolsPanel
-                    }
-
-                    Divider()
-
-                    Text("Family Types")
-                        .font(.headline)
-
-                    ForEach(family.types) { info in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 8) {
-                                Label(info.title, systemImage: info.icon)
-                                    .font(.subheadline.bold())
-                                Spacer()
-                                if let type = info.type {
-                                    Button("Load") {
-                                        loadType(type)
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                } else if let externalReferenceURL = info.externalReferenceURL,
-                                          let url = URL(string: externalReferenceURL) {
-                                    Button("Open Reference") {
-                                        openURL(url)
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
-                            }
-
-                            Text(info.subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Text(info.historicalInfo)
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-
-                            if !info.variants.isEmpty {
-                                Divider()
-                                Text("Variants")
-                                    .font(.caption.bold())
-                                ForEach(info.variants) { variant in
-                                    HStack(alignment: .top, spacing: 10) {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(variant.name)
-                                                .font(.caption.weight(.semibold))
-                                            Text(variant.summary)
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        if let type = info.type {
-                                            Button("Load Variant") {
-                                                loadVariant(type: type, variant: variant)
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .controlSize(.small)
-                                        } else if let externalURL = variant.externalURL,
-                                                  let url = URL(string: externalURL) {
-                                            Button("Open") {
-                                                openURL(url)
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .controlSize(.small)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(selectedTypeID == info.id ? Color.blue.opacity(0.10) : .ultraThinMaterial)
-                        )
-                        .onTapGesture {
-                            selectedTypeID = info.id
-                        }
-                    }
+                    familyDetailContent(family)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.leading, 12)
+    }
+
+    @ViewBuilder
+    private func familyDetailContent(_ family: FractalFamilyInfo) -> some View {
+        Text(family.name)
+            .font(.title3.bold())
+        Text(family.historicalInfo)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+        if family.id == "flame" {
+            flameToolsPanel
+        }
+
+        Divider()
+
+        Text("Family Types")
+            .font(.headline)
+
+        ForEach(family.types) { info in
+            familyTypeCard(info)
+        }
+    }
+
+    @ViewBuilder
+    private func familyTypeCard(_ info: FractalTypeBrowserInfo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label(info.title, systemImage: info.icon)
+                    .font(.subheadline.bold())
+                Spacer()
+                familyTypeActionButton(info)
+            }
+
+            Text(info.subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text(info.historicalInfo)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            if !info.variants.isEmpty {
+                Divider()
+                Text("Variants")
+                    .font(.caption.bold())
+                ForEach(info.variants) { variant in
+                    variantRow(info: info, variant: variant)
+                }
+            }
+        }
+        .padding(10)
+        .background {
+            if selectedTypeID == info.id {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.blue.opacity(0.10))
+            } else {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.ultraThinMaterial)
+            }
+        }
+        .onTapGesture {
+            selectedTypeID = info.id
+        }
+    }
+
+    @ViewBuilder
+    private func familyTypeActionButton(_ info: FractalTypeBrowserInfo) -> some View {
+        if let type = info.type {
+            Button("Load") {
+                loadType(type)
+            }
+            .buttonStyle(.borderedProminent)
+        } else if let externalReferenceURL = info.externalReferenceURL,
+                  let url = URL(string: externalReferenceURL) {
+            Button("Open Reference") {
+                openURL(url)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    private func variantRow(info: FractalTypeBrowserInfo, variant: FractalVariant) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(variant.name)
+                    .font(.caption.weight(.semibold))
+                Text(variant.summary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            variantActionButton(info: info, variant: variant)
+        }
+    }
+
+    @ViewBuilder
+    private func variantActionButton(info: FractalTypeBrowserInfo, variant: FractalVariant) -> some View {
+        if let type = info.type {
+            Button("Load Variant") {
+                loadVariant(type: type, variant: variant)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        } else if let externalURL = variant.externalURL,
+                  let url = URL(string: externalURL) {
+            Button("Open") {
+                openURL(url)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
     }
 
     @ViewBuilder
@@ -575,10 +672,14 @@ struct FractalBrowserWindow: View {
     }
 
     private func importFlame(from url: URL) {
+        let renderToken = UUID()
+        activeFlameRenderToken = renderToken
+
         flameErrorText = nil
-        flameStatusText = ""
+        flameStatusText = "Parsing .flam3…"
         isRenderingFlame = true
         appModel.importedFlameErrorText = nil
+        appModel.importedFlameStatusText = flameStatusText
 
         Task {
             do {
@@ -591,7 +692,38 @@ struct FractalBrowserWindow: View {
                 let parser = FlameXMLParser()
                 let flame = try parser.parse(data: data)
 
-                let output = await Task.detached(priority: .userInitiated) {
+                await MainActor.run {
+                    guard activeFlameRenderToken == renderToken else { return }
+                    importedFlame = flame
+                    appModel.importedFlame = flame
+                    flameStatusText = "Rendering quick preview…"
+                    appModel.importedFlameStatusText = flameStatusText
+                }
+
+                let quickOutput = await Task.detached(priority: .userInitiated) {
+                    FlameRenderer.render(
+                        flame: flame,
+                        width: 360,
+                        height: 360,
+                        iterations: 260_000,
+                        burnIn: 8_000
+                    )
+                }.value
+
+                await MainActor.run {
+                    guard activeFlameRenderToken == renderToken else { return }
+                    flamePreviewImage = quickOutput?.image
+                    appModel.importedFlamePreviewImage = quickOutput?.image
+                    if let quickOutput {
+                        flameStatusText = "Quick preview: \(quickOutput.sampleCount) samples • refining…"
+                    } else {
+                        flameStatusText = "Quick preview produced no output • refining…"
+                    }
+                    appModel.importedFlameStatusText = flameStatusText
+                    appModel.runtimeViewMode = .flame
+                }
+
+                let fullOutput = await Task.detached(priority: .userInitiated) {
                     FlameRenderer.render(
                         flame: flame,
                         width: 720,
@@ -602,17 +734,18 @@ struct FractalBrowserWindow: View {
                 }.value
 
                 await MainActor.run {
+                    guard activeFlameRenderToken == renderToken else { return }
                     importedFlame = flame
-                    flamePreviewImage = output?.image
-                    if let output {
-                        flameStatusText = "Rendered \(output.sampleCount) samples"
+                    flamePreviewImage = fullOutput?.image
+                    if let fullOutput {
+                        flameStatusText = "Rendered \(fullOutput.sampleCount) samples"
                     } else {
                         flameStatusText = "Render produced no output"
                     }
 
                     // Promote to global runtime state so Flame can be the active mode.
                     appModel.importedFlame = flame
-                    appModel.importedFlamePreviewImage = output?.image
+                    appModel.importedFlamePreviewImage = fullOutput?.image ?? quickOutput?.image
                     appModel.importedFlameStatusText = flameStatusText
                     appModel.importedFlameErrorText = nil
                     appModel.runtimeViewMode = .flame
@@ -620,6 +753,7 @@ struct FractalBrowserWindow: View {
                 }
             } catch {
                 await MainActor.run {
+                    guard activeFlameRenderToken == renderToken else { return }
                     flameErrorText = error.localizedDescription
                     appModel.importedFlameErrorText = error.localizedDescription
                     isRenderingFlame = false

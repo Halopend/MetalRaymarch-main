@@ -94,10 +94,10 @@ struct MetalProjectTestApp: App {
         }
         .defaultSize(width: 980, height: 700)
         .defaultWindowPlacement { _, context in
-            if let menuWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) {
-                return WindowPlacement(.trailing(menuWindow))
+            if let anchorWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) ?? context.windows.first {
+                return WindowPlacement(.trailing(anchorWindow))
             }
-            return WindowPlacement(.automatic)
+            return WindowPlacement(nil)
         }
         .windowResizability(.contentMinSize)
 

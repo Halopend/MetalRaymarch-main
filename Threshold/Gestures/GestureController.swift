@@ -327,6 +327,15 @@ final class GestureController {
 
         // Reset formula params to catalog defaults (includes Mandelbox now).
         settings.formulaParams = settings.fractalType.defaultFormulaParams()
+
+        // Fractal-specific default orientation.
+        // Mandelbulb: rotate 90° counter-clockwise around Y so the "mouth"
+        // faces the user by default.
+        if settings.fractalType == .mandelbulb {
+            let mandelbulbFacing = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
+            settings.worldRotation = mandelbulbFacing
+            settings.targetWorldRotation = mandelbulbFacing
+        }
         
         // Reset gesture states
         syncWithSettings()
