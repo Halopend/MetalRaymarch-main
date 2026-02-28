@@ -6,10 +6,8 @@
 //
 //  Usage:
 //  - TWO-HAND PINCH: Pinch with both hands simultaneously
-//    * Index fingers = minDistance (pull apart = increase)
-//    * Middle fingers = foldingLimit
-//    * Ring fingers = sphereRadius
-//    * Pinky fingers = fractalScale
+//    Finger-to-action mapping is configurable (see FingerGestureAction).
+//    Default: index=grab, middle=minDistance, ring=fractalScale, pinky=sphereRadius.
 //  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
 //    * Right hand index = translate position
 //  - LEFT HAND FIST: Start/stop parameter recording
@@ -236,10 +234,14 @@ final class GestureController {
     private var leftHand: HandData = .zero
     private var rightHand: HandData = .zero
     
-    // Two-hand gesture states (one per finger pair)
-    private var indexGestureState = TwoHandGestureState()    // minDistance
-    private var ringGestureState = TwoHandGestureState()     // sphereRadius
-    private var pinkyGestureState = TwoHandGestureState()    // fractalScale
+    // Two-hand gesture states — one per finger pair, action-agnostic.
+    // The action each finger performs is read from RenderSettings at dispatch time.
+    private var fingerGestureState: [Int: TwoHandGestureState] = [
+        1: TwoHandGestureState(),   // index
+        2: TwoHandGestureState(),   // middle
+        3: TwoHandGestureState(),   // ring
+        4: TwoHandGestureState(),   // pinky
+    ]
     
     // === TWO-POINT GRAB STATE (middle finger, both hands) ===
     // Grabs two points in space; pulling apart scales, rotating rotates the world.
@@ -294,9 +296,7 @@ final class GestureController {
         accumulatedPosition = settings.effectiveTargetPosition
         
         // Reset all gesture states to avoid stale data
-        indexGestureState = TwoHandGestureState()
-        ringGestureState = TwoHandGestureState()
-        pinkyGestureState = TwoHandGestureState()
+        for digit in 1...4 { fingerGestureState[digit] = TwoHandGestureState() }
         grabActive = false
         rightIndexDragActive = false
         menuToggleActive = false
@@ -518,10 +518,10 @@ final class GestureController {
         // Eye-hover on the window sets this flag; we deactivate any in-flight gestures
         // cleanly so releasing the suppression doesn't cause a jump.
         if suppressParameterGestures {
-            if indexGestureState.isActive  { indexGestureState.isActive = false }
+            for digit in 1...4 {
+                if fingerGestureState[digit]?.isActive == true { fingerGestureState[digit]?.isActive = false }
+            }
             if grabActive                  { grabActive = false }
-            if ringGestureState.isActive   { ringGestureState.isActive = false }
-            if pinkyGestureState.isActive  { pinkyGestureState.isActive = false }
             if rightIndexDragActive        { rightIndexDragActive = false }
             settings.activeGestureIndex = 0
             settings.isGeometryGestureActive = false
@@ -535,69 +535,97 @@ final class GestureController {
         // Get parameter ranges for current fractal type
         let ranges = currentRanges()
         
-        // TWO-HAND gestures - directly set TARGET values on RenderSettings
-        // Renderer handles smoothing in interpolateToTargets()
+        // ── DATA-DRIVEN TWO-HAND GESTURE DISPATCH ──────────────────────────
+        // Each finger pair reads its assigned action from RenderSettings.
+        // Parameter gestures use processTwoHandGesture(); grab uses processTwoPointGrab().
         
-        // INDEX FINGER: minDistance
-        processTwoHandGesture(
-            digit: 1,
-            state: &indexGestureState,
-            currentTarget: settings.effectiveTargetMinDistance,
-            range: ranges.minDistance
-        ) { newValue in
-            if settings.isAnimationPlaying {
-                settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
-            } else {
-                settings.targetMinDistance = newValue
+        for digit in 1...4 {
+            let action = settings.actionForDigit(digit)
+            
+            switch action {
+            case .grab:
+                processTwoPointGrab(digit: digit)
+                if grabActive { activeDigit = digit }
+                
+            case .minDistance:
+                processTwoHandGesture(
+                    digit: digit,
+                    state: &fingerGestureState[digit]!,
+                    currentTarget: settings.effectiveTargetMinDistance,
+                    range: ranges.minDistance
+                ) { newValue in
+                    if settings.isAnimationPlaying {
+                        settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
+                    } else {
+                        settings.targetMinDistance = newValue
+                    }
+                    UsageAnalytics.shared.trackHandGestureUsed()
+                }
+                if fingerGestureState[digit]!.isActive { activeDigit = digit }
+                
+            case .foldingLimit:
+                processTwoHandGesture(
+                    digit: digit,
+                    state: &fingerGestureState[digit]!,
+                    currentTarget: settings.effectiveTargetFoldingLimit,
+                    range: ranges.foldingLimit
+                ) { newValue in
+                    if settings.isAnimationPlaying {
+                        settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
+                    } else {
+                        settings.targetFoldingLimit = newValue
+                    }
+                    UsageAnalytics.shared.trackHandGestureUsed()
+                }
+                if fingerGestureState[digit]!.isActive { activeDigit = digit }
+                
+            case .sphereRadius:
+                processTwoHandGesture(
+                    digit: digit,
+                    state: &fingerGestureState[digit]!,
+                    currentTarget: settings.effectiveTargetSphereRadius,
+                    range: ranges.sphereRadius
+                ) { newValue in
+                    if settings.isAnimationPlaying {
+                        settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
+                    } else {
+                        settings.targetSphereRadius = newValue
+                    }
+                    UsageAnalytics.shared.trackHandGestureUsed()
+                }
+                if fingerGestureState[digit]!.isActive { activeDigit = digit }
+                
+            case .fractalScale:
+                processTwoHandGesture(
+                    digit: digit,
+                    state: &fingerGestureState[digit]!,
+                    currentTarget: settings.effectiveTargetFractalScale,
+                    range: ranges.fractalScale
+                ) { newValue in
+                    if settings.isAnimationPlaying {
+                        settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
+                    } else {
+                        settings.fractalScale = newValue
+                    }
+                    UsageAnalytics.shared.trackHandGestureUsed()
+                }
+                if fingerGestureState[digit]!.isActive { activeDigit = digit }
+                
+            case .none:
+                // Deactivate any stale state for unassigned fingers
+                if fingerGestureState[digit]?.isActive == true {
+                    fingerGestureState[digit]?.isActive = false
+                }
             }
-            // Track hand gesture usage for analytics
-            UsageAnalytics.shared.trackHandGestureUsed()
         }
-        if indexGestureState.isActive { activeDigit = 1 }
-        
-        // MIDDLE FINGER: TWO-POINT GRAB (world scale + rotation + translation)
-        // Both hands pinch middle fingers → grab two points in space.
-        // Pulling apart scales the world. Rotating rotates the world.
-        processTwoPointGrab()
-        if grabActive { activeDigit = 2 }
-        
-        // RING FINGER: sphereRadius (sphere inversion radius)
-        processTwoHandGesture(
-            digit: 3,
-            state: &ringGestureState,
-            currentTarget: settings.effectiveTargetSphereRadius,
-            range: ranges.sphereRadius
-        ) { newValue in
-            if settings.isAnimationPlaying {
-                settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
-            } else {
-                settings.targetSphereRadius = newValue
-            }
-        }
-        if ringGestureState.isActive { activeDigit = 3 }
-
-        // PINKY FINGER: fractalScale
-        processTwoHandGesture(
-            digit: 4,
-            state: &pinkyGestureState,
-            currentTarget: settings.effectiveTargetFractalScale,
-            range: ranges.fractalScale
-        ) { newValue in
-            if settings.isAnimationPlaying {
-                settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
-            } else {
-                settings.fractalScale = newValue
-            }
-        }
-        if pinkyGestureState.isActive { activeDigit = 4 }
         
         // Update active gesture for HUD
         settings.activeGestureIndex = activeDigit
         
         // Wire geometry gesture flag so the state machine and dynamic quality know
         // when a geometry-affecting gesture is in progress.
-        let anyGeometryGestureActive = indexGestureState.isActive || grabActive ||
-                                       ringGestureState.isActive || pinkyGestureState.isActive
+        let anyGeometryGestureActive = grabActive ||
+            (1...4).contains(where: { fingerGestureState[$0]?.isActive == true })
         settings.isGeometryGestureActive = anyGeometryGestureActive
         
         // ═══════════════════════════════════════════════════════════════════════════
@@ -621,9 +649,9 @@ final class GestureController {
         processRightIndexDrag()
     }
     
-    // MARK: - Two-Point Grab Gesture (Middle Finger, Both Hands)
+    // MARK: - Two-Point Grab Gesture (Configurable Finger, Both Hands)
     
-    /// Two-point grab: both hands pinch middle fingers to grab two points in space.
+    /// Two-point grab: both hands pinch the assigned finger to grab two points in space.
     /// - Pulling hands apart/together → scales the fractal world (grabScale)
     /// - Rotating the axis between hands → rotates the fractal world (worldRotation)
     /// - Position is derived so the pivot (hand midpoint) stays "pinned" in world space.
@@ -636,10 +664,9 @@ final class GestureController {
     ///   newGrabScale = startGrabScale × scaleRatio
     ///
     /// This works because uniform scaling commutes with rotation in the model matrix.
-    private func processTwoPointGrab() {
+    private func processTwoPointGrab(digit: Int) {
         guard let settings = renderSettings else { return }
         
-        let digit = 2  // Middle finger
         let leftPinch = leftHand.pinchStrength(digit: digit)
         let rightPinch = rightHand.pinchStrength(digit: digit)
         
@@ -844,10 +871,9 @@ final class GestureController {
             state.startHeight = (leftPos.y + rightPos.y) * 0.5
             
             if HAND_TRACKING_DEBUG {
-                let paramNames = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"]
-                let paramName = paramNames[min(digit, 4)]
+                let action = settings.actionForDigit(digit)
                 let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
-                print("🤲 Two-hand \(paramName) gesture STARTED (\(mode)), startHeight: \(state.startHeight)")
+                print("🤲 Two-hand \(action.displayName) gesture STARTED on digit \(digit) (\(mode)), startHeight: \(state.startHeight)")
             }
         }
         
@@ -907,7 +933,7 @@ final class GestureController {
         if !bothActive && state.isActive {
             state.isActive = false
             if HAND_TRACKING_DEBUG {
-                let paramName = ["", "minDistance", "foldingLimit", "sphereRadius", "fractalScale"][min(digit, 4)]
+                let action = settings.actionForDigit(digit)
                 let reason: String
                 if !leftHand.isTracked || !rightHand.isTracked {
                     reason = "hand tracking lost"
@@ -916,7 +942,7 @@ final class GestureController {
                 } else {
                     reason = "hands too far apart"
                 }
-                print("🤲 Two-hand \(paramName) gesture ENDED (\(reason))")
+                print("🤲 Two-hand \(action.displayName) gesture on digit \(digit) ENDED (\(reason))")
             }
         }
     }
@@ -928,7 +954,7 @@ final class GestureController {
         let pinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
         
         // Only if NOT doing a two-hand gesture with index fingers
-        guard !indexGestureState.isActive else {
+        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.actionForDigit(1) == .grab) else {
             rightIndexDragActive = false
             return
         }

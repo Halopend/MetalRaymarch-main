@@ -228,6 +228,7 @@ struct ContentView: View {
             Button {
                 appModel.renderSettings.targetPosition = .zero
                 appModel.renderSettings.position = .zero
+                appModel.renderSettings.resetGrabTransform()
                 appModel.gestureController?.applyFractalDefaults()
                 cache.loadFromSettings()
             } label: {
@@ -410,7 +411,31 @@ struct ContentView: View {
     private func qualityColor(_ quality: Float) -> Color {
         if quality >= 0.8 { return .green } else if quality >= 0.6 { return .yellow } else { return .orange }
     }
-    
+
+    /// Picker row for assigning a `FingerGestureAction` to a finger pair.
+    @ViewBuilder
+    private func fingerActionPicker(
+        finger: String,
+        icon: String,
+        selection: Binding<FingerGestureAction>,
+        settingsKeyPath: WritableKeyPath<RenderSettings, FingerGestureAction>
+    ) -> some View {
+        HStack {
+            Label(finger, systemImage: icon).font(.subheadline)
+            Spacer()
+            Picker(finger, selection: selection) {
+                ForEach(FingerGestureAction.allCases, id: \.self) { action in
+                    Label(action.displayName, systemImage: action.icon).tag(action)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 220)
+            .onChange(of: selection.wrappedValue) { _, v in
+                cache.push(settingsKeyPath, value: v)
+            }
+        }
+    }
+
     private var qualityIndicator: some View {
         HStack {
             Text("Current Quality:").font(.caption); Spacer()
@@ -1015,6 +1040,39 @@ struct ContentView: View {
                         enabled: .constant(true),
                         onChanged: { cache.push(\.translationSensitivity, value: cache.translationSensitivity) },
                         showToggle: false)
+                    }
+
+                    Divider().padding(.vertical, 2)
+
+                    // ── Finger → Action Assignments ─────────────────────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Finger Assignments", systemImage: "hand.point.up.braille")
+                            .font(.subheadline.weight(.semibold))
+
+                        fingerActionPicker(
+                            finger: "Index",
+                            icon: "1.circle.fill",
+                            selection: $cache.indexFingerAction,
+                            settingsKeyPath: \.indexFingerAction
+                        )
+                        fingerActionPicker(
+                            finger: "Middle",
+                            icon: "2.circle.fill",
+                            selection: $cache.middleFingerAction,
+                            settingsKeyPath: \.middleFingerAction
+                        )
+                        fingerActionPicker(
+                            finger: "Ring",
+                            icon: "3.circle.fill",
+                            selection: $cache.ringFingerAction,
+                            settingsKeyPath: \.ringFingerAction
+                        )
+                        fingerActionPicker(
+                            finger: "Pinky",
+                            icon: "4.circle.fill",
+                            selection: $cache.pinkyFingerAction,
+                            settingsKeyPath: \.pinkyFingerAction
+                        )
                     }
 
                     Divider().padding(.vertical, 2)

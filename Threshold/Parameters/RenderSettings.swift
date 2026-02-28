@@ -98,6 +98,28 @@ final class RenderSettings: @unchecked Sendable {
         let raw = UserDefaults.standard.integer(forKey: key)
         return MenuToggleGestureMode(rawValue: Int32(raw)) ?? .middleAndRingToPalm
     }()
+
+    // ── Configurable finger → gesture action assignments ───────────────────
+    private var _indexFingerAction: FingerGestureAction = {
+        let key = "indexFingerAction"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return .grab }
+        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .grab
+    }()
+    private var _middleFingerAction: FingerGestureAction = {
+        let key = "middleFingerAction"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return .minDistance }
+        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .minDistance
+    }()
+    private var _ringFingerAction: FingerGestureAction = {
+        let key = "ringFingerAction"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return .fractalScale }
+        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .fractalScale
+    }()
+    private var _pinkyFingerAction: FingerGestureAction = {
+        let key = "pinkyFingerAction"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return .sphereRadius }
+        return FingerGestureAction(rawValue: Int32(UserDefaults.standard.integer(forKey: key))) ?? .sphereRadius
+    }()
     private var _menuToggleHoldDuration: Float        = loadFloat("menuToggleHoldDuration", default: 0.06)
     private var _menuToggleCooldown: Float              = loadFloat("menuToggleCooldown", default: 0.35)
     private var _menuToggleActivateThreshold: Float     = loadFloat("menuToggleActivateThreshold", default: 0.48)
@@ -671,6 +693,60 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock { _menuToggleGestureMode = newValue }
             UserDefaults.standard.set(Int(newValue.rawValue), forKey: "menuToggleGestureMode")
+        }
+    }
+
+    // ── Finger → gesture action assignments ────────────────────────────────
+    var indexFingerAction: FingerGestureAction {
+        get { withLock { _indexFingerAction } }
+        set {
+            withLock { _indexFingerAction = newValue }
+            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "indexFingerAction")
+        }
+    }
+    var middleFingerAction: FingerGestureAction {
+        get { withLock { _middleFingerAction } }
+        set {
+            withLock { _middleFingerAction = newValue }
+            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "middleFingerAction")
+        }
+    }
+    var ringFingerAction: FingerGestureAction {
+        get { withLock { _ringFingerAction } }
+        set {
+            withLock { _ringFingerAction = newValue }
+            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "ringFingerAction")
+        }
+    }
+    var pinkyFingerAction: FingerGestureAction {
+        get { withLock { _pinkyFingerAction } }
+        set {
+            withLock { _pinkyFingerAction = newValue }
+            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "pinkyFingerAction")
+        }
+    }
+
+    /// Returns the action assigned to a given finger digit (1=index, 2=middle, 3=ring, 4=pinky).
+    func actionForDigit(_ digit: Int) -> FingerGestureAction {
+        withLock {
+            switch digit {
+            case 1: return _indexFingerAction
+            case 2: return _middleFingerAction
+            case 3: return _ringFingerAction
+            case 4: return _pinkyFingerAction
+            default: return .none
+            }
+        }
+    }
+
+    /// Returns the digit (1-4) assigned to a given action, or nil if unassigned.
+    func digitForAction(_ action: FingerGestureAction) -> Int? {
+        withLock {
+            if _indexFingerAction == action  { return 1 }
+            if _middleFingerAction == action { return 2 }
+            if _ringFingerAction == action   { return 3 }
+            if _pinkyFingerAction == action  { return 4 }
+            return nil
         }
     }
 
@@ -1825,18 +1901,50 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    /// Apply grab-gesture state IMMEDIATELY (no smoothing).
-    /// Sets both current AND target values in one lock, zeroes position velocity.
-    /// This gives 1:1 direct-manipulation feel: the fractal world tracks hands exactly.
+    /// Apply grab-gesture state with lightweight one-pole lerp smoothing.
+    /// Much faster than the full smooth-damp pipeline but takes the edge off
+    /// hand-tracking jitter. Uses an adaptive rate: slower for tiny movements
+    /// (dead-zone on noise), faster for clear intentional motion.
     func applyGrabState(position: SIMD3<Float>, worldRotation: simd_quatf, grabScale: Float) {
         withLock {
-            _position = position
-            _targetPosition = position
+            // Adaptive lerp: base 0.30 (smoother), ramp up to 0.55 for large motions.
+            // This damps hand-tracking micro-jitter while keeping big gestures snappy.
+            let positionDelta = simd_length(position - _position)
+            let scaleDelta = abs(log(max(grabScale, 1e-6)) - log(max(_grabScale, 1e-6)))
+            let motionMag = positionDelta + scaleDelta * 0.5  // rough combined metric
+            let tBase: Float = 0.30
+            let tMax:  Float = 0.55
+            let rampStart: Float = 0.001   // below this → mostly noise
+            let rampEnd:   Float = 0.02    // above this → full response
+            let rampT = simd_clamp((motionMag - rampStart) / (rampEnd - rampStart), 0, 1)
+            let t = tBase + (tMax - tBase) * rampT
+            
+            // Position: lerp current toward new value, keep target = raw input
+            _position = _position + (position - _position) * t
+            _targetPosition = _position  // keep in sync so smooth-damp doesn't fight us
             _velocityPosition = .zero
-            _worldRotation = worldRotation
-            _targetWorldRotation = worldRotation
-            _grabScale = grabScale
-            _targetGrabScale = grabScale
+            
+            // Rotation: slerp current toward new value
+            _worldRotation = simd_slerp(_worldRotation, worldRotation, t)
+            _worldRotation = _worldRotation.normalized
+            _targetWorldRotation = _worldRotation
+            
+            // Scale: exponential lerp (so doubling and halving feel symmetric)
+            let logCurrent = log(max(_grabScale, 1e-6))
+            let logTarget = log(max(grabScale, 1e-6))
+            _grabScale = exp(logCurrent + (logTarget - logCurrent) * t)
+            _targetGrabScale = _grabScale
+        }
+    }
+    
+    /// Reset grab transform to identity (worldRotation = identity, grabScale = 1)
+    func resetGrabTransform() {
+        withLock {
+            let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            _worldRotation = identity
+            _targetWorldRotation = identity
+            _grabScale = 1.0
+            _targetGrabScale = 1.0
         }
     }
     

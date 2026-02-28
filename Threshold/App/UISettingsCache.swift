@@ -151,6 +151,11 @@ final class UISettingsCache {
     var gestureSensitivity: Float = 3.0
     var menuToggleGestureEnabled: Bool = true
     var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
+    // Configurable finger → action assignments
+    var indexFingerAction: FingerGestureAction = .grab
+    var middleFingerAction: FingerGestureAction = .minDistance
+    var ringFingerAction: FingerGestureAction = .fractalScale
+    var pinkyFingerAction: FingerGestureAction = .sphereRadius
     var menuToggleHoldDuration: Float = 0.06
     var menuToggleCooldown: Float = 0.35
     var menuToggleActivateThreshold: Float = 0.48
@@ -279,6 +284,10 @@ final class UISettingsCache {
         gestureSensitivity = settings.gestureSensitivity
         menuToggleGestureEnabled = settings.menuToggleGestureEnabled
         menuToggleGestureMode = settings.menuToggleGestureMode
+        indexFingerAction = settings.indexFingerAction
+        middleFingerAction = settings.middleFingerAction
+        ringFingerAction = settings.ringFingerAction
+        pinkyFingerAction = settings.pinkyFingerAction
         menuToggleHoldDuration = settings.menuToggleHoldDuration
         menuToggleCooldown = settings.menuToggleCooldown
         menuToggleActivateThreshold = settings.menuToggleActivateThreshold
