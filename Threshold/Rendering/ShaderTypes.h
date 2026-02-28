@@ -205,6 +205,7 @@ typedef struct
     float fractalScale;
     int fractalIterations;
     int maxRaySteps;
+    float maxViewDistance;
     float colorMix;
     float glowIntensity;
     float foldingLimit;      // Box folding limit (default 1.0)
@@ -257,6 +258,7 @@ typedef struct
     int fractalIterations;
     int colorIterations;
     int maxRaySteps;
+    float maxViewDistance;
     uint32_t eyeIndex;
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)

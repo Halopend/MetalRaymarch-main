@@ -64,6 +64,8 @@ actor Renderer {
     var cachedPrecomputedAudio: PrecomputedAudio = PrecomputedAudio()
     var cachedPrecomputedFog: PrecomputedFog = PrecomputedFog()
     var cachedModelMatrix: matrix_float4x4 = matrix_identity_float4x4
+    var cachedMaxViewDistance: Float = RenderSettings.maxViewDistance
+    var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     
     // ═══════════════════════════════════════════════════════════════════════════
     // GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA
@@ -1112,6 +1114,7 @@ actor Renderer {
             fractalIterations: Int32(settingsSnapshot.fractalIterations),
             colorIterations: Int32(settingsSnapshot.colorIterations),
             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
+            maxViewDistance: cachedMaxViewDistance,
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
             limitFlash: settingsSnapshot.limitFlash,

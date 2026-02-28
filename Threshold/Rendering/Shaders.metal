@@ -175,7 +175,7 @@ constant half kPowEpsilonHalf = 1e-4h;
 // === NAMED CONSTANTS FOR OPTIMIZATION ===
 // Raymarching thresholds
 constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
-constant float kMaxRayDistance = 12.0f;         // Standard max trace distance
+constant float kMaxRayDistanceDefault = 12.0f;  // Fallback trace distance
 
     // Shading constants (tuned for softer, less harsh lighting)
     constant float kSpecularPower = 50.0f;          // Specular highlight power
@@ -1087,7 +1087,7 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
 // Far-range coarse raymarch (12 steps, max 80 units) - REMOVED (unused)
 // Near-range coarse raymarch (24 steps, max 12 units)
 // Compiler unrolls based on FC_FRACTAL_ITERATIONS when defined
-FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {})
+FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {}, float maxRayDistance = kMaxRayDistanceDefault)
 {
     float t = 0.05f;
     
@@ -1098,7 +1098,7 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     // The 0.6× factor balances speed (fewer iterations) vs. accuracy.
     float coarseIters = float(iterations) * 0.6f;
     
-    for(int j = 0; j < 24 && t <= kMaxRayDistance; j++)
+    for(int j = 0; j < 24 && t <= maxRayDistance; j++)
     {
         float3 p = fma(rD, float3(t), rO);
         float h = MapContinuousUnified(p, params, foldingLimit, coarseIters, fractalType, fp);
@@ -1118,7 +1118,7 @@ struct SceneResult {
 };
 
 // Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -1165,7 +1165,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
             return result;
         }
         
-        if (UNLIKELY(t > kMaxRayDistance)) break;
+        if (UNLIKELY(t > maxRayDistance)) break;
         
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
         // STEP OVER-RELAXATION (GMT-fractals technique)
@@ -1705,7 +1705,7 @@ kernel void adaptiveHierarchical8x8(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
                 marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
-            float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams);
+            float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
             
             if (coarseT >= kRayMissThreshold) {
                 // Coarse pass missed — check center of tile for empty-space skip.
@@ -1780,7 +1780,7 @@ kernel void adaptiveHierarchical8x8(
                                               uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
     } else {
         sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                                     uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier);
+                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
     }
     
     float adjustedDist = sceneResult.distGlow.x;
@@ -2029,7 +2029,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
     
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier);
+    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
 
@@ -2217,7 +2217,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     {
         float leaderCoarseT = 0.05;
         if (quadLaneId == 0) {
-            leaderCoarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, fractalParams, lodIterations, fractalType, uniforms.formulaParams);
+            leaderCoarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, fractalParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
         }
         coarseStartT = quad_broadcast(leaderCoarseT, 0);
     }
@@ -2228,7 +2228,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
     } else {
         // Coarse pass missed — full march needed
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier);
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
     }
     float2 ret = sceneResult.distGlow;
     OrbitCache hitCache = sceneResult.cache;

@@ -19,6 +19,12 @@ extension Renderer {
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
         // Combine base scale with detail scale factor (from grab gesture)
         let effectiveScale = smoothedScale * settingsSnapshot.detailScale
+        let traceScale = max(effectiveScale, 0.15)
+        let targetMaxViewDistance = min(80.0, RenderSettings.maxViewDistance / traceScale)
+        let maxViewDistanceSpeed: Float = (targetMaxViewDistance > smoothedMaxViewDistance) ? 30.0 : 10.0
+        let maxViewDistanceBlend = 1.0 - exp(-maxViewDistanceSpeed * cachedDeltaTime)
+        smoothedMaxViewDistance += (targetMaxViewDistance - smoothedMaxViewDistance) * maxViewDistanceBlend
+        let maxViewDistance = max(4.0, min(80.0, smoothedMaxViewDistance))
         let scaleMatrix = matrix4x4_scale(effectiveScale, effectiveScale, effectiveScale)
 
         let modelMatrix = translationMatrix * combinedRotationMatrix * scaleMatrix
@@ -73,6 +79,7 @@ extension Renderer {
         cachedPrecomputedAudio = precomputedAudio
         cachedPrecomputedFog = precomputedFog
         cachedModelMatrix = modelMatrix
+        cachedMaxViewDistance = maxViewDistance
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -92,6 +99,7 @@ extension Renderer {
                             fractalScale: settingsSnapshot.fractalScale,
                             fractalIterations: Int32(settingsSnapshot.fractalIterations),
                             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
+                            maxViewDistance: maxViewDistance,
                             colorMix: animatedColorMix,
                             glowIntensity: animatedGlow,
                             foldingLimit: settingsSnapshot.foldingLimit,
