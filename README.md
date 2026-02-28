@@ -5,3 +5,6 @@ The renderer actor is from Xcode's VisionOS template for Metal renderer. There i
 Shader source: https://www.shadertoy.com/view/ldfGWn#
 
 Result: https://youtu.be/5fP07N_3S_Q
+
+## Architecture Planning
+- See `PARAMETER_SYSTEM_PHASE_PLAN.md` for the next-phase parameter architecture and migration plan.
