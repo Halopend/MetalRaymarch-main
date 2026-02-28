@@ -417,14 +417,14 @@ struct ContentView: View {
     private func fingerActionPicker(
         finger: String,
         icon: String,
-        selection: Binding<FingerGestureAction>,
-        settingsKeyPath: WritableKeyPath<RenderSettings, FingerGestureAction>
+        selection: Binding<GestureActionBinding>,
+        settingsKeyPath: WritableKeyPath<RenderSettings, GestureActionBinding>
     ) -> some View {
         HStack {
             Label(finger, systemImage: icon).font(.subheadline)
             Spacer()
             Picker(finger, selection: selection) {
-                ForEach(FingerGestureAction.availableActions(for: cache.fractalType), id: \.self) { action in
+                ForEach(GestureActionBinding.availableBindings(for: cache.fractalType), id: \.self) { action in
                     Label(action.contextualDisplayName(for: cache.fractalType), systemImage: action.icon).tag(action)
                 }
             }
@@ -1052,26 +1052,26 @@ struct ContentView: View {
                         fingerActionPicker(
                             finger: "Index",
                             icon: "1.circle.fill",
-                            selection: $cache.indexFingerAction,
-                            settingsKeyPath: \.indexFingerAction
+                            selection: $cache.indexFingerBinding,
+                            settingsKeyPath: \.indexFingerBinding
                         )
                         fingerActionPicker(
                             finger: "Middle",
                             icon: "2.circle.fill",
-                            selection: $cache.middleFingerAction,
-                            settingsKeyPath: \.middleFingerAction
+                            selection: $cache.middleFingerBinding,
+                            settingsKeyPath: \.middleFingerBinding
                         )
                         fingerActionPicker(
                             finger: "Ring",
                             icon: "3.circle.fill",
-                            selection: $cache.ringFingerAction,
-                            settingsKeyPath: \.ringFingerAction
+                            selection: $cache.ringFingerBinding,
+                            settingsKeyPath: \.ringFingerBinding
                         )
                         fingerActionPicker(
                             finger: "Pinky",
                             icon: "4.circle.fill",
-                            selection: $cache.pinkyFingerAction,
-                            settingsKeyPath: \.pinkyFingerAction
+                            selection: $cache.pinkyFingerBinding,
+                            settingsKeyPath: \.pinkyFingerBinding
                         )
                     }
 

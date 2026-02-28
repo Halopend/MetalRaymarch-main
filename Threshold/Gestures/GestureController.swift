@@ -159,6 +159,8 @@ struct TwoHandGestureState {
 /// - Smoothing prevents jitter and provides natural feel
 @MainActor
 final class GestureController {
+    let operationDispatcher: ParameterOperationDispatcher
+    private var operationFrameCounter: UInt64 = 0
     
     // Smoothing speed for frame-rate independent animation (higher = faster convergence)
     // 12.0 = ~63% convergence in 83ms, feels responsive yet smooth
@@ -282,13 +284,19 @@ final class GestureController {
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
     
-    init(renderSettings: RenderSettings) {
+    init(renderSettings: RenderSettings,
+         operationDispatcher: ParameterOperationDispatcher = ParameterOperationDispatcher()) {
         self.renderSettings = renderSettings
+        self.operationDispatcher = operationDispatcher
         
         // Initialize accumulated position from current settings
         accumulatedPosition = renderSettings.position
     }
     
+    func setDebugTraceEnabled(_ enabled: Bool) {
+        operationDispatcher.debugTraceEnabled = enabled
+    }
+
     /// Sync internal state with current render settings.
     /// Call this after loading a preset to prevent jumps when gestures resume.
     func syncWithSettings() {
@@ -346,6 +354,7 @@ final class GestureController {
     /// - Parameter deltaTime: Time since last hand tracking update (not used for smoothing anymore)
     @available(visionOS 2.0, *)
     func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
+        operationFrameCounter &+= 1
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
         
@@ -542,32 +551,31 @@ final class GestureController {
         // Parameter gestures use processTwoHandGesture(); grab uses processTwoPointGrab().
 
         for digit in 1...4 {
-            let action = settings.actionForDigit(digit)
+            let binding = settings.bindingForDigit(digit)
 
-            if let formulaIndex = action.formulaParamIndex,
-               let node = ParameterNodeRegistry.shared.node(for: settings.fractalType, action: action) {
+            if let mapping = ParameterNodeRegistry.shared.formulaActionMapping(for: settings.fractalType, action: action) {
                 processTwoHandGesture(
                     digit: digit,
                     state: &fingerGestureState[digit]!,
-                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
-                    range: node.range
+                    currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: mapping.formulaIndex),
+                    range: mapping.node.range
                 ) { newValue in
                     var current = settings.formulaParams
-                    ParameterOperationDispatcher.shared.applyFloat(
-                        parameterID: "formula.\(settings.fractalType.rawValue).\(formulaIndex)",
-                        incomingValue: newValue,
-                        source: .gesture,
-                        currentValue: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex)
-                    ) { resolvedValue in
-                        FormulaCatalog.setParam(&current, index: formulaIndex, value: resolvedValue)
-                        settings.formulaParams = current
-                    }
+                    FormulaCatalog.setParam(&current, index: mapping.formulaIndex, value: newValue)
+                    settings.formulaParams = current
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 if fingerGestureState[digit]!.isActive { activeDigit = digit }
                 continue
             }
-            
+
+            guard case .core(let action) = binding else {
+                if fingerGestureState[digit]?.isActive == true {
+                    fingerGestureState[digit]?.isActive = false
+                }
+                continue
+            }
+
             switch action {
             case .grab:
                 processTwoPointGrab(digit: digit)
@@ -583,12 +591,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
                     } else {
-                        ParameterOperationDispatcher.shared.applyFloat(
-                            parameterID: "core.targetMinDistance",
-                            incomingValue: newValue,
-                            source: .gesture,
-                            currentValue: settings.targetMinDistance
-                        ) { settings.targetMinDistance = $0 }
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.targetMinDistance",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -604,12 +619,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
                     } else {
-                        ParameterOperationDispatcher.shared.applyFloat(
-                            parameterID: "core.targetFoldingLimit",
-                            incomingValue: newValue,
-                            source: .gesture,
-                            currentValue: settings.targetFoldingLimit
-                        ) { settings.targetFoldingLimit = $0 }
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.targetFoldingLimit",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -625,12 +647,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
                     } else {
-                        ParameterOperationDispatcher.shared.applyFloat(
-                            parameterID: "core.targetSphereRadius",
-                            incomingValue: newValue,
-                            source: .gesture,
-                            currentValue: settings.targetSphereRadius
-                        ) { settings.targetSphereRadius = $0 }
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.targetSphereRadius",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -646,12 +675,19 @@ final class GestureController {
                     if settings.isAnimationPlaying {
                         settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
                     } else {
-                        ParameterOperationDispatcher.shared.applyFloat(
-                            parameterID: "core.fractalScale",
-                            incomingValue: newValue,
-                            source: .gesture,
-                            currentValue: settings.fractalScale
-                        ) { settings.fractalScale = $0 }
+                        operationDispatcher.dispatch(
+                            ParameterTransaction(
+                                frameIndex: operationFrameCounter,
+                                operations: [ParameterOperation(
+                                    targetID: "core.fractalScale",
+                                    source: .gesture,
+                                    value: .absolute(newValue),
+                                    frameIndex: operationFrameCounter,
+                                    smoothing: .init(easing: "gesture")
+                                )]
+                            ),
+                            settings: settings
+                        )
                     }
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
@@ -921,7 +957,13 @@ final class GestureController {
             state.startHeight = (leftPos.y + rightPos.y) * 0.5
             
             if HAND_TRACKING_DEBUG {
-                let action = settings.actionForDigit(digit)
+                let binding = settings.bindingForDigit(digit)
+                let action: FingerGestureAction
+                if case .core(let coreAction) = binding {
+                    action = coreAction
+                } else {
+                    action = .none
+                }
                 let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
                 print("🤲 Two-hand \(action.displayName) gesture STARTED on digit \(digit) (\(mode)), startHeight: \(state.startHeight)")
             }
@@ -983,7 +1025,13 @@ final class GestureController {
         if !bothActive && state.isActive {
             state.isActive = false
             if HAND_TRACKING_DEBUG {
-                let action = settings.actionForDigit(digit)
+                let binding = settings.bindingForDigit(digit)
+                let action: FingerGestureAction
+                if case .core(let coreAction) = binding {
+                    action = coreAction
+                } else {
+                    action = .none
+                }
                 let reason: String
                 if !leftHand.isTracked || !rightHand.isTracked {
                     reason = "hand tracking lost"
@@ -1004,7 +1052,7 @@ final class GestureController {
         let pinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
         
         // Only if NOT doing a two-hand gesture with index fingers
-        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.actionForDigit(1) == .grab) else {
+        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.bindingForDigit(1) == .core(.grab)) else {
             rightIndexDragActive = false
             return
         }

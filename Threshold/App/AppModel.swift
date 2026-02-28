@@ -133,20 +133,17 @@ class AppModel {
     
     // SharePlay session for collaborative fractal exploration
     var shareSession: FractalShareSession?
+
+    var parameterOperationDebugTrace: Bool = false {
+        didSet {
+            gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
+        }
+    }
     
     init() {
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings)
-
-        if let savedPanel = UserDefaults.standard.object(forKey: "showParameterDebugPanel") as? Bool {
-            showParameterDebugPanel = savedPanel
-        }
-        if let savedPolicyRaw = UserDefaults.standard.string(forKey: "parameterArbitrationPolicy"),
-           let savedPolicy = ParameterArbitrationPolicy(rawValue: savedPolicyRaw) {
-            parameterArbitrationPolicy = savedPolicy
-        }
-        ParameterDebugLogGate.isEnabled = showParameterDebugPanel
-        ParameterOperationDispatcher.shared.setArbitrationPolicy(parameterArbitrationPolicy)
+        gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
         
         // Initialize unified music service
         musicService = MusicService(appleMusic: appleMusicManager, spotify: spotifyManager)
