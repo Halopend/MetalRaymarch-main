@@ -320,6 +320,10 @@ final class AnimationManager {
         
         // Ensure pipelines are compiled before playback
         precompilePipelinesForCurrentScene()
+
+        // Signal render loop to tick animation updates every frame.
+        // Renderer gates animationManager.update(...) behind this flag.
+        renderSettings?.isAnimationPlaying = true
         
         playhead.state = .playing
         UsageAnalytics.shared.trackAnimationUsed()
@@ -512,6 +516,10 @@ final class AnimationManager {
         settings.baseFractalIterations = keyframe.baseFractalIterations
         settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
         settings.position = keyframe.position
+        settings.detailScale = keyframe.detailScale
+        settings.targetDetailScale = keyframe.detailScale
+        settings.worldRotation = keyframe.worldRotation
+        settings.targetWorldRotation = keyframe.worldRotation
         
         // Apply formula params for all types (unified path)
         if let vals = keyframe.formulaParamValues {

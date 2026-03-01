@@ -844,7 +844,7 @@ actor Renderer {
         // When in Buddhabrot mode, skip fractal raymarching entirely and instead
         // run the 3D volume accumulation + render pipeline.
         // ═══════════════════════════════════════════════════════════════════════
-        if appModel.runtimeViewMode == .buddhabrot {
+        if appModel.runtimeViewModeForRenderer == .buddhabrot {
             // Lazy-init the Buddhabrot renderer on first use
             if buddhabrotRenderer == nil {
                 buddhabrotRenderer = BuddhabrotRenderer(

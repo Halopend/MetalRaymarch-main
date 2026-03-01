@@ -113,6 +113,7 @@ final class BuddhabrotRenderer {
     private var maxDensityValue: UInt32 = 0
     private var frameCounter: Int = 0
     private var accumulationTime: Float = 0
+    private var warnedAboutMissingPipelines = false
     
     // MARK: - Initialization
     
@@ -134,26 +135,25 @@ final class BuddhabrotRenderer {
         }
         
         do {
+            guard let accumulateFn = library.makeFunction(name: "buddhabrotAccumulate"),
+                  let accumulateRGBFn = library.makeFunction(name: "buddhabrotAccumulateRGB"),
+                  let normalizeFn = library.makeFunction(name: "buddhabrotNormalize"),
+                  let normalizeRGBFn = library.makeFunction(name: "buddhabrotNormalizeRGB"),
+                  let clearFn = library.makeFunction(name: "buddhabrotClearDensity") else {
+                print("❌ BuddhabrotRenderer: Missing one or more required shader functions in default Metal library")
+                return nil
+            }
+
             // Accumulation kernels
-            if let fn = library.makeFunction(name: "buddhabrotAccumulate") {
-                accumulatePipeline = try device.makeComputePipelineState(function: fn)
-            }
-            if let fn = library.makeFunction(name: "buddhabrotAccumulateRGB") {
-                accumulateRGBPipeline = try device.makeComputePipelineState(function: fn)
-            }
-            
+            accumulatePipeline = try device.makeComputePipelineState(function: accumulateFn)
+            accumulateRGBPipeline = try device.makeComputePipelineState(function: accumulateRGBFn)
+
             // Normalization kernels
-            if let fn = library.makeFunction(name: "buddhabrotNormalize") {
-                normalizePipeline = try device.makeComputePipelineState(function: fn)
-            }
-            if let fn = library.makeFunction(name: "buddhabrotNormalizeRGB") {
-                normalizeRGBPipeline = try device.makeComputePipelineState(function: fn)
-            }
-            
+            normalizePipeline = try device.makeComputePipelineState(function: normalizeFn)
+            normalizeRGBPipeline = try device.makeComputePipelineState(function: normalizeRGBFn)
+
             // Clear kernel
-            if let fn = library.makeFunction(name: "buddhabrotClearDensity") {
-                clearDensityPipeline = try device.makeComputePipelineState(function: fn)
-            }
+            clearDensityPipeline = try device.makeComputePipelineState(function: clearFn)
         } catch {
             print("❌ BuddhabrotRenderer: Failed to build compute pipelines: \(error)")
             return nil
@@ -163,18 +163,24 @@ final class BuddhabrotRenderer {
         do {
             let desc = MTLRenderPipelineDescriptor()
             desc.label = "Buddhabrot Volume Ray March"
-            desc.vertexFunction = library.makeFunction(name: "buddhabrotVertex")
-            desc.fragmentFunction = library.makeFunction(name: "buddhabrotFragment")
-            
-            desc.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
+                        guard let vertexFn = library.makeFunction(name: "buddhabrotVertex"),
+                                    let fragmentFn = library.makeFunction(name: "buddhabrotFragment") else {
+                                print("❌ BuddhabrotRenderer: Missing buddhabrotVertex or buddhabrotFragment shader")
+                                return nil
+                        }
+                        desc.vertexFunction = vertexFn
+                        desc.fragmentFunction = fragmentFn
+
+                        // Match compositor layer formats exactly.
+                        desc.colorAttachments[0].pixelFormat = layerRenderer.configuration.colorFormat
             // Premultiplied alpha blending over the pass-through / background
             desc.colorAttachments[0].isBlendingEnabled = true
             desc.colorAttachments[0].sourceRGBBlendFactor = .one
             desc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             desc.colorAttachments[0].sourceAlphaBlendFactor = .one
             desc.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            
-            desc.depthAttachmentPixelFormat = .depth32Float
+
+                        desc.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
             
             // Stereo support via vertex amplification
             desc.maxVertexAmplificationCount = layerRenderer.properties.viewCount
@@ -370,16 +376,21 @@ final class BuddhabrotRenderer {
     
     /// Encodes the stereo volume ray march render pass.
     /// Call this from the main render frame when in Buddhabrot mode.
+    @discardableResult
     func encodeRayMarch(
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
         time: Float
-    ) {
+    ) -> Bool {
         guard let pipeline = rayMarchPipeline,
               let depthState = depthStencilState,
               let volumeTex = volumeTexture,
               let uniformBuffer = rayMarchUniformBuffer else {
-            return
+            if !warnedAboutMissingPipelines {
+                warnedAboutMissingPipelines = true
+                print("⚠️ Buddhabrot: Missing render resources (pipeline/texture/uniforms)")
+            }
+            return false
         }
         
         accumulationTime = time
@@ -479,7 +490,7 @@ final class BuddhabrotRenderer {
         }
         
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
-            return
+            return false
         }
         encoder.label = "Buddhabrot Volume Ray March"
         
@@ -509,6 +520,7 @@ final class BuddhabrotRenderer {
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         
         encoder.endEncoding()
+        return true
     }
     
     // MARK: - Full Frame (Accumulation + Normalize + Ray March)
@@ -526,14 +538,15 @@ final class BuddhabrotRenderer {
         dispatchAccumulation()
         
         // Phase 2a: Normalize density buffer → 3D texture (every N frames)
-        if frameCounter % settings.normalizationInterval == 0 || frameCounter <= 2 {
+        let normalizationEvery = max(1, settings.normalizationInterval)
+        if frameCounter % normalizationEvery == 0 || frameCounter <= 2 {
             encodeNormalization(commandBuffer: commandBuffer)
         }
         
         // Phase 2b: Volume ray march
-        encodeRayMarch(commandBuffer: commandBuffer, drawable: drawable, time: time)
-        
-        return true
+        let drewVolume = encodeRayMarch(commandBuffer: commandBuffer, drawable: drawable, time: time)
+
+        return drewVolume
     }
     
     // MARK: - Density Buffer Utilities

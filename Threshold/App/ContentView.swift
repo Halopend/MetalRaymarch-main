@@ -357,6 +357,15 @@ struct ContentView: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+
+                EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Stretch",
+                    value: Binding(
+                        get: { cache.liveDetailScale },
+                        set: { setDetailScale($0) }
+                    ), range: 0.05...20.0,
+                    enabled: .constant(true),
+                    onChanged: {},
+                    showToggle: false)
                 
                 HStack {
                     Label("Rotation", systemImage: "rotate.3d").font(.caption)
@@ -366,6 +375,45 @@ struct ContentView: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+
+                EffectSliderRow(icon: "arrow.left.and.right", label: "Pitch",
+                    value: Binding(
+                        get: { eulerAngles(from: cache.liveWorldRotation).x },
+                        set: { newValue in
+                            var e = eulerAngles(from: cache.liveWorldRotation)
+                            e.x = newValue
+                            setDetailRotationEuler(e)
+                        }
+                    ), range: -180...180,
+                    enabled: .constant(true),
+                    onChanged: {},
+                    showToggle: false)
+
+                EffectSliderRow(icon: "arrow.clockwise", label: "Yaw",
+                    value: Binding(
+                        get: { eulerAngles(from: cache.liveWorldRotation).y },
+                        set: { newValue in
+                            var e = eulerAngles(from: cache.liveWorldRotation)
+                            e.y = newValue
+                            setDetailRotationEuler(e)
+                        }
+                    ), range: -180...180,
+                    enabled: .constant(true),
+                    onChanged: {},
+                    showToggle: false)
+
+                EffectSliderRow(icon: "arrow.up.and.down", label: "Roll",
+                    value: Binding(
+                        get: { eulerAngles(from: cache.liveWorldRotation).z },
+                        set: { newValue in
+                            var e = eulerAngles(from: cache.liveWorldRotation)
+                            e.z = newValue
+                            setDetailRotationEuler(e)
+                        }
+                    ), range: -180...180,
+                    enabled: .constant(true),
+                    onChanged: {},
+                    showToggle: false)
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
@@ -451,6 +499,20 @@ struct ContentView: View {
     private func qualityColor(_ quality: Float) -> Color {
         if quality >= 0.8 { return .green } else if quality >= 0.6 { return .yellow } else { return .orange }
     }
+
+    private func setDetailScale(_ value: Float) {
+        let clamped = max(0.05, min(20.0, value))
+        appModel.renderSettings.detailScale = clamped
+        appModel.renderSettings.targetDetailScale = clamped
+        cache.liveDetailScale = clamped
+    }
+
+    private func setDetailRotationEuler(_ eulerDegrees: SIMD3<Float>) {
+        let q = quaternionFromEulerDegrees(eulerDegrees)
+        appModel.renderSettings.worldRotation = q
+        appModel.renderSettings.targetWorldRotation = q
+        cache.liveWorldRotation = q
+    }
     
     /// Extract Euler angles (degrees) from a quaternion for display.
     private func eulerAngles(from q: simd_quatf) -> SIMD3<Float> {
@@ -469,6 +531,21 @@ struct ContentView: View {
         let roll = atan2(sinRCosP, cosRCosP)
         let toDeg: Float = 180.0 / .pi
         return SIMD3<Float>(pitch * toDeg, yaw * toDeg, roll * toDeg)
+    }
+
+    /// Build quaternion from Euler angles in degrees using the same convention
+    /// as eulerAngles(from:): x=pitch(Y-axis), y=yaw(Z-axis), z=roll(X-axis).
+    private func quaternionFromEulerDegrees(_ euler: SIMD3<Float>) -> simd_quatf {
+        let toRad: Float = .pi / 180.0
+        let pitchY = euler.x * toRad
+        let yawZ = euler.y * toRad
+        let rollX = euler.z * toRad
+
+        let qx = simd_quatf(angle: rollX, axis: SIMD3<Float>(1, 0, 0))
+        let qy = simd_quatf(angle: pitchY, axis: SIMD3<Float>(0, 1, 0))
+        let qz = simd_quatf(angle: yawZ, axis: SIMD3<Float>(0, 0, 1))
+
+        return (qz * qy * qx).normalized
     }
 
     /// Picker row for assigning a `FingerGestureAction` to a finger pair.

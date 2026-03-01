@@ -74,7 +74,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     var allowedRange: ClosedRange<Float> {
         switch self {
         case .fractalScale: return 1.6...5.2
-        case .foldingLimit: return 0.7...1.7
+        case .foldingLimit: return -10.0...30.0
         case .sphereRadius: return 0.03...1.2
         case .colorMix: return 0.0...1.0
         case .glow: return 0.0...1.0

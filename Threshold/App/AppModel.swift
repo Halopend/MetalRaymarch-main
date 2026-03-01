@@ -29,7 +29,13 @@ class AppModel {
     }
     
     var immersiveSpaceState = ImmersiveSpaceState.closed
-    var runtimeViewMode: RuntimeViewMode = .raymarch
+    var runtimeViewMode: RuntimeViewMode = .raymarch {
+        didSet {
+            runtimeViewModeForRenderer = runtimeViewMode
+        }
+    }
+
+    @ObservationIgnored nonisolated(unsafe) var runtimeViewModeForRenderer: RuntimeViewMode = .raymarch
 
     // App activity state (used to avoid submitting GPU work while backgrounded)
     // @ObservationIgnored + nonisolated(unsafe) allows cross-thread access without @Observable macro interference

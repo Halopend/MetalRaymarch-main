@@ -146,6 +146,13 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     var positionX: Float
     var positionY: Float
     var positionZ: Float
+
+    // Detail transform (two-point grab): extra scale + world rotation
+    var detailScale: Float
+    var worldRotationX: Float
+    var worldRotationY: Float
+    var worldRotationZ: Float
+    var worldRotationW: Float
     
     var position: SIMD3<Float> {
         get { SIMD3<Float>(positionX, positionY, positionZ) }
@@ -153,6 +160,19 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             positionX = newValue.x
             positionY = newValue.y
             positionZ = newValue.z
+        }
+    }
+
+    var worldRotation: simd_quatf {
+        get {
+            simd_quatf(ix: worldRotationX, iy: worldRotationY, iz: worldRotationZ, r: worldRotationW).normalized
+        }
+        set {
+            let q = newValue.normalized
+            worldRotationX = q.imag.x
+            worldRotationY = q.imag.y
+            worldRotationZ = q.imag.z
+            worldRotationW = q.real
         }
     }
     
@@ -193,6 +213,13 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.positionX = settings.position.x
         self.positionY = settings.position.y
         self.positionZ = settings.position.z
+
+        // Capture detail transform
+        self.detailScale = settings.detailScale
+        self.worldRotationX = settings.worldRotation.imag.x
+        self.worldRotationY = settings.worldRotation.imag.y
+        self.worldRotationZ = settings.worldRotation.imag.z
+        self.worldRotationW = settings.worldRotation.real
         
         self.colorScheme = Int(settings.colorScheme.rawValue)
         self.lightingMode = settings.lightingMode
@@ -215,7 +242,10 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     init(id: UUID = UUID(), name: String, duration: TimeInterval,
          minDistance: Float, foldingLimit: Float, sphereRadius: Float, fractalScale: Float,
          baseFractalIterations: Int = 9, baseMaxRaySteps: Int = 64,
-         position: SIMD3<Float>, colorScheme: Int? = nil,
+            position: SIMD3<Float>,
+            detailScale: Float = 1.0,
+            worldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1),
+            colorScheme: Int? = nil,
             lightingMode: LightingMode? = nil,
             lightingPreset: LightingPreset? = nil,
             hueRotationEffect: HueRotationEffect? = nil,
@@ -238,6 +268,11 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.positionX = position.x
         self.positionY = position.y
         self.positionZ = position.z
+        self.detailScale = detailScale
+        self.worldRotationX = worldRotation.imag.x
+        self.worldRotationY = worldRotation.imag.y
+        self.worldRotationZ = worldRotation.imag.z
+        self.worldRotationW = worldRotation.real
         self.colorScheme = colorScheme
         self.lightingMode = lightingMode
         self.lightingPreset = lightingPreset
@@ -328,6 +363,8 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             baseFractalIterations: clampedT < 0.5 ? self.baseFractalIterations : other.baseFractalIterations,
             baseMaxRaySteps: clampedT < 0.5 ? self.baseMaxRaySteps : other.baseMaxRaySteps,
             position: lerp3(self.position, other.position),
+            detailScale: lerp(self.detailScale, other.detailScale),
+            worldRotation: simd_slerp(self.worldRotation, other.worldRotation, clampedT).normalized,
             colorScheme: clampedT < 0.5 ? self.colorScheme : other.colorScheme,
             lightingMode: clampedT < 0.5 ? self.lightingMode : other.lightingMode,
             lightingPreset: clampedT < 0.5 ? self.lightingPreset : other.lightingPreset,
@@ -340,6 +377,89 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         )
         result.formulaParamValues = lerpFormulaParams(self.formulaParamValues, other.formulaParamValues)
         return result
+    }
+
+    // Backward-compatible coding support: old scenes may not contain detail transform keys.
+    enum CodingKeys: String, CodingKey {
+        case id, name, duration
+        case minDistance, foldingLimit, sphereRadius, fractalScale
+        case baseFractalIterations, baseMaxRaySteps
+        case positionX, positionY, positionZ
+        case detailScale
+        case worldRotationX, worldRotationY, worldRotationZ, worldRotationW
+        case colorScheme, lightingMode, lightingPreset
+        case hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
+        case formulaParamValues
+        case easingType, bezierHandle
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.name = try c.decode(String.self, forKey: .name)
+        self.duration = try c.decode(TimeInterval.self, forKey: .duration)
+        self.minDistance = try c.decode(Float.self, forKey: .minDistance)
+        self.foldingLimit = try c.decode(Float.self, forKey: .foldingLimit)
+        self.sphereRadius = try c.decode(Float.self, forKey: .sphereRadius)
+        self.fractalScale = try c.decode(Float.self, forKey: .fractalScale)
+        self.baseFractalIterations = try c.decode(Int.self, forKey: .baseFractalIterations)
+        self.baseMaxRaySteps = try c.decode(Int.self, forKey: .baseMaxRaySteps)
+        self.positionX = try c.decode(Float.self, forKey: .positionX)
+        self.positionY = try c.decode(Float.self, forKey: .positionY)
+        self.positionZ = try c.decode(Float.self, forKey: .positionZ)
+
+        self.detailScale = try c.decodeIfPresent(Float.self, forKey: .detailScale) ?? 1.0
+        self.worldRotationX = try c.decodeIfPresent(Float.self, forKey: .worldRotationX) ?? 0.0
+        self.worldRotationY = try c.decodeIfPresent(Float.self, forKey: .worldRotationY) ?? 0.0
+        self.worldRotationZ = try c.decodeIfPresent(Float.self, forKey: .worldRotationZ) ?? 0.0
+        self.worldRotationW = try c.decodeIfPresent(Float.self, forKey: .worldRotationW) ?? 1.0
+
+        self.colorScheme = try c.decodeIfPresent(Int.self, forKey: .colorScheme)
+        self.lightingMode = try c.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
+        self.lightingPreset = try c.decodeIfPresent(LightingPreset.self, forKey: .lightingPreset)
+        self.hueRotationEffect = try c.decodeIfPresent(HueRotationEffect.self, forKey: .hueRotationEffect)
+        self.pulseEffect = try c.decodeIfPresent(PulseEffect.self, forKey: .pulseEffect)
+        self.glowEffect = try c.decodeIfPresent(GlowEffect.self, forKey: .glowEffect)
+        self.bloomEffect = try c.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
+        self.fogEffect = try c.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
+        self.gradientCycleEffect = try c.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
+        self.formulaParamValues = try c.decodeIfPresent([Float].self, forKey: .formulaParamValues)
+
+        self.easingType = try c.decodeIfPresent(EasingFunction.self, forKey: .easingType) ?? .bezier
+        self.bezierHandle = try c.decodeIfPresent(BezierHandle.self, forKey: .bezierHandle) ?? .easeInOut
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(duration, forKey: .duration)
+        try c.encode(minDistance, forKey: .minDistance)
+        try c.encode(foldingLimit, forKey: .foldingLimit)
+        try c.encode(sphereRadius, forKey: .sphereRadius)
+        try c.encode(fractalScale, forKey: .fractalScale)
+        try c.encode(baseFractalIterations, forKey: .baseFractalIterations)
+        try c.encode(baseMaxRaySteps, forKey: .baseMaxRaySteps)
+        try c.encode(positionX, forKey: .positionX)
+        try c.encode(positionY, forKey: .positionY)
+        try c.encode(positionZ, forKey: .positionZ)
+        try c.encode(detailScale, forKey: .detailScale)
+        try c.encode(worldRotationX, forKey: .worldRotationX)
+        try c.encode(worldRotationY, forKey: .worldRotationY)
+        try c.encode(worldRotationZ, forKey: .worldRotationZ)
+        try c.encode(worldRotationW, forKey: .worldRotationW)
+        try c.encodeIfPresent(colorScheme, forKey: .colorScheme)
+        try c.encodeIfPresent(lightingMode, forKey: .lightingMode)
+        try c.encodeIfPresent(lightingPreset, forKey: .lightingPreset)
+        try c.encodeIfPresent(hueRotationEffect, forKey: .hueRotationEffect)
+        try c.encodeIfPresent(pulseEffect, forKey: .pulseEffect)
+        try c.encodeIfPresent(glowEffect, forKey: .glowEffect)
+        try c.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
+        try c.encodeIfPresent(fogEffect, forKey: .fogEffect)
+        try c.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
+        try c.encodeIfPresent(formulaParamValues, forKey: .formulaParamValues)
+        try c.encode(easingType, forKey: .easingType)
+        try c.encode(bezierHandle, forKey: .bezierHandle)
     }
 }
 
@@ -774,6 +894,8 @@ struct CatmullRomSpline {
             baseFractalIterations: t < 0.5 ? p1.baseFractalIterations : p2.baseFractalIterations,
             baseMaxRaySteps: t < 0.5 ? p1.baseMaxRaySteps : p2.baseMaxRaySteps,
             position: interpolate(p0.position, p1.position, p2.position, p3.position, t: t),
+            detailScale: interpolate(p0.detailScale, p1.detailScale, p2.detailScale, p3.detailScale, t: t),
+            worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized,
             colorScheme: t < 0.5 ? p1.colorScheme : p2.colorScheme
         )
     }
@@ -792,6 +914,8 @@ struct CatmullRomSpline {
             baseFractalIterations: anchor.baseFractalIterations,
             baseMaxRaySteps: anchor.baseMaxRaySteps,
             position: 2 * anchor.position - away.position,
+            detailScale: 2 * anchor.detailScale - away.detailScale,
+            worldRotation: anchor.worldRotation,
             colorScheme: anchor.colorScheme
         )
     }
