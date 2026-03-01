@@ -24,6 +24,7 @@ enum EffectTag: String, Codable, CaseIterable {
     case fog              = "FOG"       // Distance fog — universal
     case gradientCycle    = "GRC"       // Gradient offset animation — universal
     case polarRotation    = "POL"       // Polar/spherical rotation animation — Mandelbulb, Quaternion Julia
+    case beatFlash        = "BTF"       // Music-driven edge flash — universal (requires audio)
 
     var displayName: String {
         switch self {
@@ -34,6 +35,7 @@ enum EffectTag: String, Codable, CaseIterable {
         case .fog:           return "Fog"
         case .gradientCycle: return "Gradient Cycle"
         case .polarRotation: return "Polar Rotation"
+        case .beatFlash:     return "Beat Flash"
         }
     }
 }
@@ -259,6 +261,35 @@ struct PolarRotationEffect: LightingEffect {
 
     static var fast: PolarRotationEffect {
         PolarRotationEffect(enabled: true, speed: 0.4, amplitude: 1.5)
+    }
+}
+
+/// Beat flash effect — music-driven orange-red edge glow that fires on beat detection.
+/// Intensity controls how strongly the flash drives the edge glow (shader mixes beat × intensity).
+struct BeatFlashEffect: LightingEffect {
+    var enabled: Bool = false
+    var intensity: Float = 0.4      // Flash strength (0-1), multiplied by beat level
+
+    var primaryValue: Float {
+        get { intensity }
+        set { intensity = newValue }
+    }
+    static let primaryLabel = "Intensity"
+
+    static var off: BeatFlashEffect {
+        BeatFlashEffect(enabled: false, intensity: 0.0)
+    }
+
+    static var subtle: BeatFlashEffect {
+        BeatFlashEffect(enabled: true, intensity: 0.2)
+    }
+
+    static var medium: BeatFlashEffect {
+        BeatFlashEffect(enabled: true, intensity: 0.4)
+    }
+
+    static var intense: BeatFlashEffect {
+        BeatFlashEffect(enabled: true, intensity: 0.7)
     }
 }
 

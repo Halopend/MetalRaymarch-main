@@ -57,6 +57,7 @@ final class UISettingsCache {
     var fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     var gradientCycleEffect: GradientCycleEffect = .off
     var polarRotationEffect: PolarRotationEffect = .off
+    var beatFlashEffect: BeatFlashEffect = .off
     
     // === SAVED CUSTOM GRADIENTS (persisted via UserDefaults) ===
     var savedCustomGradients: [GradientColorMap] = UISettingsCache.loadSavedGradients()
@@ -266,6 +267,7 @@ final class UISettingsCache {
         fogEffect = settings.fogEffect
         gradientCycleEffect = settings.gradientCycleEffect
         polarRotationEffect = settings.polarRotationEffect
+        beatFlashEffect = settings.beatFlashEffect
         lightingMode = settings.lightingMode
         lightingSoftness = settings.lightingSoftness
         bassSensitivity = settings.bassSensitivity

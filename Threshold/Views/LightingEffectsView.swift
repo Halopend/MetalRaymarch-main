@@ -267,6 +267,32 @@ struct LightingEffectsSection: View {
                 })
             }
             
+            // Beat Flash Effect (music-driven edge glow)
+            LightingEffectCard(
+                title: "Beat Flash",
+                icon: "bolt.fill",
+                enabled: beatFlashEnabledBinding,
+                onToggle: {
+                    cache.push(\.beatFlashEffect, value: cache.beatFlashEffect)
+                }
+            ) {
+                HStack {
+                    Text("Intensity")
+                    Spacer()
+                    Text("\(cache.beatFlashEffect.intensity, specifier: "%.2f")")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Slider(value: beatFlashIntensityBinding, in: 0...1, onEditingChanged: { editing in
+                    if !editing {
+                        cache.push(\.beatFlashEffect, value: cache.beatFlashEffect)
+                    }
+                })
+                Text("Orange edge glow synced to music beat")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
             // Fog Effect
             LightingEffectCard(
                 title: "Atmospheric Fog",
@@ -427,6 +453,22 @@ struct LightingEffectsSection: View {
         Binding(
             get: { cache.bloomEffect.strength },
             set: { cache.bloomEffect.strength = $0 }
+        )
+    }
+    
+    // MARK: - Beat Flash bindings
+
+    private var beatFlashEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { cache.beatFlashEffect.enabled },
+            set: { cache.beatFlashEffect.enabled = $0 }
+        )
+    }
+
+    private var beatFlashIntensityBinding: Binding<Float> {
+        Binding(
+            get: { cache.beatFlashEffect.intensity },
+            set: { cache.beatFlashEffect.intensity = $0 }
         )
     }
     

@@ -154,6 +154,10 @@ typedef struct
     int bloomEnabled;                 // 0 = off, 1 = on
     float bloomStrength;              // Bloom intensity (0-1)
     
+    // Beat Flash Effect - music-driven edge glow
+    int beatFlashEnabled;             // 0 = off, 1 = on
+    float beatFlashIntensity;         // Flash strength (0-1), multiplied by beat level
+    
     // Note: fog is handled entirely by PrecomputedFog — no per-pixel fog fields here.
     // fogEnabled/fogIntensity live in RenderSettings for CPU precomputation only.
 } ColorSchemeParams;

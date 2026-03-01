@@ -229,6 +229,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _gradientCycleEffect: GradientCycleEffect = .off
     private var _polarRotationEffect: PolarRotationEffect = .off
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
+    private var _beatFlashEffect: BeatFlashEffect = .off
     
     // === DOPPELGANGER MODE ===
     private var _doppelgangerEnabled: Bool = false              // Pre-fold mirror creates structural twin
@@ -1323,6 +1324,17 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
     }
+
+    /// Beat flash effect (music-driven edge glow)
+    var beatFlashEffect: BeatFlashEffect {
+        get { withLock { _beatFlashEffect } }
+        set {
+            withLock {
+                _beatFlashEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
+    }
     
     // === DOPPELGANGER MODE ===
     
@@ -1522,7 +1534,9 @@ final class RenderSettings: @unchecked Sendable {
             glowEnabled: _glowEffect.enabled ? 1 : 0,
             glowIntensity: _glowEffect.intensity,
             bloomEnabled: _bloomEffect.enabled ? 1 : 0,
-            bloomStrength: _bloomEffect.strength
+            bloomStrength: _bloomEffect.strength,
+            beatFlashEnabled: _beatFlashEffect.enabled ? 1 : 0,
+            beatFlashIntensity: _beatFlashEffect.intensity
         )
     }
     

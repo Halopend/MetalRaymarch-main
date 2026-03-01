@@ -137,6 +137,17 @@ struct EffectsDynamicView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
 
+            // ── Beat Flash (music-driven) ──
+            VStack(spacing: 4) {
+                EffectSliderRow(icon: "bolt.fill", label: "Beat Flash",
+                    value: Binding(get: { cache.beatFlashEffect.intensity }, set: { cache.beatFlashEffect.intensity = $0 }),
+                    range: 0...1,
+                    enabled: Binding(get: { cache.beatFlashEffect.enabled }, set: { cache.beatFlashEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.beatFlashEffect, value: cache.beatFlashEffect) })
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+
             // ── Polar Rotation (fractal-specific) ──
             if cache.fractalType.supports(.polarRotation) {
                 VStack(spacing: 4) {

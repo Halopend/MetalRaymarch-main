@@ -66,6 +66,7 @@ struct FractalPreset: Codable, Identifiable {
     var bloomEffect: BloomEffect?
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
+    var beatFlashEffect: BeatFlashEffect?
     
     // === DOPPELGANGER MODE ===
     var doppelgangerEnabled: Bool?
@@ -90,7 +91,7 @@ struct FractalPreset: Codable, Identifiable {
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape
         // v2.0 modular lighting effects
-        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
+        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, beatFlashEffect
         // Doppelganger
         case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
         // Color scheme auto-transition
@@ -173,6 +174,7 @@ struct FractalPreset: Codable, Identifiable {
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
+        beatFlashEffect = try container.decodeIfPresent(BeatFlashEffect.self, forKey: .beatFlashEffect)
         
         // Doppelganger
         doppelgangerEnabled = try container.decodeIfPresent(Bool.self, forKey: .doppelgangerEnabled)
@@ -232,6 +234,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
+        try container.encodeIfPresent(beatFlashEffect, forKey: .beatFlashEffect)
         
         // Doppelganger
         try container.encodeIfPresent(doppelgangerEnabled, forKey: .doppelgangerEnabled)
@@ -351,6 +354,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.bloomEffect = settings.bloomEffect
         preset.fogEffect = settings.fogEffect
         preset.gradientCycleEffect = settings.gradientCycleEffect
+        preset.beatFlashEffect = settings.beatFlashEffect
         
         // Doppelganger
         preset.doppelgangerEnabled = settings.doppelgangerEnabled
@@ -463,6 +467,9 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let gradientCycleEffect = gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
+        }
+        if let beatFlashEffect = beatFlashEffect {
+            settings.beatFlashEffect = beatFlashEffect
         }
         
         // Doppelganger

@@ -1343,7 +1343,7 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
     rgb *= 0.5h + 0.5h * powr(vignetteBase, 0.2h);
     
     // Limit flash effect - bright edge glow when parameter hits min/max
-    half beatFlash = beat * 0.4h;
+    half beatFlash = scheme.beatFlashEnabled ? beat * half(scheme.beatFlashIntensity) : 0.0h;
     half combinedFlash = max(limitFlash, beatFlash);
     if (combinedFlash > 0.01h) {
         half2 edgeDist = abs(xy - 0.5h) * 2.0h;
