@@ -287,4 +287,7 @@ typedef struct
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 
+// Include Buddhabrot types so they're visible through the bridging header
+#include "../Buddhabrot/BuddhabrotTypes.h"
+
 #endif /* ShaderTypes_h */

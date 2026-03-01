@@ -141,6 +141,7 @@ final class UISettingsCache {
     var fractalAudioAffectsHueSpeed: Bool = true
     var fractalAudioAffectsSaturation: Bool = true
     var fractalAudioAffectsIterations: Bool = false
+    var musicReactiveMappings: [MusicReactiveMapping] = MusicReactiveMapping.defaultMappings()
     
     // Safety & display
     var showHUD: Bool = true
@@ -149,6 +150,8 @@ final class UISettingsCache {
     var safetyBubbleShape: Float = 0.0
     var useRelativeGestures: Bool = true
     var extendedGestureRange: Bool = true
+    var rotationAutoSnap: Bool = false
+    var rotationSnapWindowDegrees: Float = 6.0
     var gestureSensitivity: Float = 3.0
     var menuToggleGestureEnabled: Bool = true
     var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
@@ -281,12 +284,15 @@ final class UISettingsCache {
         fractalAudioAffectsHueSpeed = settings.fractalAudioAffectsHueSpeed
         fractalAudioAffectsSaturation = settings.fractalAudioAffectsSaturation
         fractalAudioAffectsIterations = settings.fractalAudioAffectsIterations
+        musicReactiveMappings = settings.musicReactiveMappings
         showHUD = settings.showHUD
         safetyBubbleEnabled = settings.safetyBubbleEnabled
         safetyBubbleRadius = settings.safetyBubbleRadius
         safetyBubbleShape = settings.safetyBubbleShape
         useRelativeGestures = settings.useRelativeGestures
         extendedGestureRange = settings.extendedGestureRange
+        rotationAutoSnap = settings.rotationAutoSnap
+        rotationSnapWindowDegrees = settings.rotationSnapWindowDegrees
         gestureSensitivity = settings.gestureSensitivity
         menuToggleGestureEnabled = settings.menuToggleGestureEnabled
         menuToggleGestureMode = settings.menuToggleGestureMode

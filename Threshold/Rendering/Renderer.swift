@@ -136,6 +136,11 @@ actor Renderer {
     // Pipeline profiling trigger
     nonisolated(unsafe) var shouldRunProfiler: Bool = false
 
+    // === BUDDHABROT VOLUME RENDERER ===
+    // Lazy-initialized when the user switches to Buddhabrot mode.
+    // Owns density buffers, 3D volume texture, and stereo ray march pipeline.
+    var buddhabrotRenderer: BuddhabrotRenderer?
+
     let inFlightSemaphore = DispatchSemaphore(value: maxBuffersInFlight)
 
     var uniformBufferOffset = 0
@@ -190,22 +195,7 @@ actor Renderer {
 
     // Music-reactive fractal anchors (prevent parameter drift)
     private var musicFractalAnchorValid: Bool = false
-    private var musicAnchorFractalScale: Float = 2.8
-    private var musicAnchorFoldingLimit: Float = 1.0
-    private var musicAnchorSphereRadius: Float = 0.5
-    private var musicAnchorColorMix: Float = 0.5
-    
-    // Fractal Forge-inspired extended anchors for effects
-    private var musicAnchorGlowIntensity: Float = 0.3
-    private var musicAnchorGlowWasEnabled: Bool = false
-    private var musicAnchorFogIntensity: Float = 0.32
-    private var musicAnchorFogWasEnabled: Bool = true
-    private var musicAnchorBloomStrength: Float = 0.2
-    private var musicAnchorBloomWasEnabled: Bool = false
-    private var musicAnchorHueSpeed: Float = 0.1
-    private var musicAnchorHueWasEnabled: Bool = false
-    private var musicAnchorSaturation: Float = 1.0
-    private var musicAnchorIterations: Int = 9
+    private var musicAnchorByTarget: [MusicReactiveTarget: Float] = [:]
 
     private var parameterOperationFrameIndex: UInt64 = 0
     private let parameterOperationDispatcher = ParameterOperationDispatcher()
@@ -747,28 +737,17 @@ actor Renderer {
             // Music drives fractal geometry AND effects (Fractal Forge-inspired)
             if settings.fractalAudioReactiveEnabled {
                 if !musicFractalAnchorValid {
-                    // Capture geometry anchors from TARGET values so the offset base
-                    // matches the user's intended value, not the in-flight smoothed
-                    // current that may still be interpolating toward it.
-                    musicAnchorFractalScale = settings.targetFractalScale
-                    // Folding / sphere anchors now read from formulaParams (unified path)
                     let anchorFP = settings.formulaParams
-                    musicAnchorFoldingLimit = FormulaCatalog.getParam(anchorFP, index: 1)
-                    musicAnchorSphereRadius = FormulaCatalog.getParam(anchorFP, index: 2)
-                    musicAnchorColorMix = settings.colorMix
-                    
-                    // Capture effect anchors (save original values + enabled state)
-                    musicAnchorGlowIntensity = settings.glowEffect.intensity
-                    musicAnchorGlowWasEnabled = settings.glowEffect.enabled
-                    musicAnchorFogIntensity = settings.fogEffect.intensity
-                    musicAnchorFogWasEnabled = settings.fogEffect.enabled
-                    musicAnchorBloomStrength = settings.bloomEffect.strength
-                    musicAnchorBloomWasEnabled = settings.bloomEffect.enabled
-                    musicAnchorHueSpeed = settings.hueRotationEffect.speed
-                    musicAnchorHueWasEnabled = settings.hueRotationEffect.enabled
-                    musicAnchorSaturation = settings.colorSchemeSaturation
-                    musicAnchorIterations = settings.fractalIterations
-                    
+                    musicAnchorByTarget[.fractalScale] = settings.targetFractalScale
+                    musicAnchorByTarget[.foldingLimit] = FormulaCatalog.getParam(anchorFP, index: 1)
+                    musicAnchorByTarget[.sphereRadius] = FormulaCatalog.getParam(anchorFP, index: 2)
+                    musicAnchorByTarget[.colorMix] = settings.colorMix
+                    musicAnchorByTarget[.glow] = settings.glowEffect.intensity
+                    musicAnchorByTarget[.fog] = settings.fogEffect.intensity
+                    musicAnchorByTarget[.bloom] = settings.bloomEffect.strength
+                    musicAnchorByTarget[.hueSpeed] = settings.hueRotationEffect.speed
+                    musicAnchorByTarget[.saturation] = settings.colorSchemeSaturation
+                    musicAnchorByTarget[.iterations] = Float(settings.fractalIterations)
                     musicFractalAnchorValid = true
                 }
 
@@ -779,7 +758,7 @@ actor Renderer {
                 let amount = settings.fractalAudioAmount
                 let beatPunch = settings.fractalBeatPunch
                 
-                // Composite drives for different modulation types
+                // Composite drives for default source behavior
                 let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
                 let drive = min(1.0, bandDrive * (0.9 * amount) + beat * (0.1 + 0.6 * beatPunch))
 
@@ -787,7 +766,7 @@ actor Renderer {
                 var audioOperations: [ParameterOperation] = []
                 let dampening = max(0.02, 0.08 + (1.0 - amount) * 0.12)
 
-                func enqueue(_ id: String, target: Float, anchor: Float) {
+                func enqueue(_ id: String, target: Float, anchor: Float, smoothingTime: Float?) {
                     let offset = target - anchor
                     audioOperations.append(
                         ParameterOperation(
@@ -795,79 +774,34 @@ actor Renderer {
                             source: .audio,
                             value: .absolute(offset),
                             frameIndex: parameterOperationFrameIndex,
-                            smoothing: .init(smoothingTime: dampening)
+                            smoothing: .init(smoothingTime: smoothingTime ?? dampening)
                         )
                     )
                 }
 
-                if settings.fractalAudioAffectsScale {
-                    // Bass + beat expand/contract fractal scale (universal core param)
-                    let target = max(1.6, min(5.2, musicAnchorFractalScale + (drive - 0.35) * (0.15 + 0.8 * amount)))
-                    enqueue("core.targetFractalScale", target: target, anchor: musicAnchorFractalScale)
-                }
-                if settings.fractalAudioAffectsFolding {
-                    // Bass drives box fold, beats punch it → formula param path
-                    let target = max(0.7, min(1.7, musicAnchorFoldingLimit + (bass - 0.4) * (0.08 + 0.24 * amount) + beat * (0.03 + 0.12 * beatPunch)))
-                    enqueue("formula.0.1.Folding Limit", target: target, anchor: musicAnchorFoldingLimit)
-                }
-                if settings.fractalAudioAffectsRadius {
-                    // Mids modulate sphere radius, beats add punch → formula param path
-                    let target = max(0.03, min(1.2, musicAnchorSphereRadius + mid * (0.05 + 0.20 * amount) + beat * (0.01 + 0.08 * beatPunch)))
-                    enqueue("formula.0.2.Sphere Radius", target: target, anchor: musicAnchorSphereRadius)
-                }
-                if settings.fractalAudioAffectsColorMix {
-                    // Overall drive shifts color palette blend
-                    let target = max(0.0, min(1.0, musicAnchorColorMix * (1.0 - 0.4 * amount) + drive * (0.2 + 0.6 * amount)))
-                    enqueue("core.colorMix", target: target, anchor: musicAnchorColorMix)
-                }
+                let mappings = settings.musicReactiveMappings
+                for mapping in mappings where mapping.isEnabled {
+                    let sourceValue: Float
+                    switch mapping.source {
+                    case .composite: sourceValue = drive
+                    case .bass: sourceValue = bass
+                    case .mid: sourceValue = mid
+                    case .treble: sourceValue = treble
+                    case .beat: sourceValue = beat
+                    case .overall: sourceValue = settings.audioLevel
+                    }
 
-                // ── Effect modulation (Fractal Forge–inspired) ─────────────
+                    let globalGain = 0.25 + amount * 1.5
+                    let scaled = min(1.0, max(0.0, sourceValue * globalGain * abs(mapping.amount)))
+                    let normalized = mapping.amount >= 0 ? scaled : (1.0 - scaled)
 
-                // GLOW ← RMS energy + kick pulses (additive brightness)
-                if settings.fractalAudioAffectsGlow {
-                    let glowDrive = bass * 0.5 + beat * 0.4 + mid * 0.1
-                    let baseGlow = musicAnchorGlowWasEnabled ? musicAnchorGlowIntensity : 0.25
-                    let glowVal = baseGlow + glowDrive * (0.2 + 0.5 * amount)
-                    enqueue("effect.glow", target: glowVal, anchor: musicAnchorGlowIntensity)
-                }
-                
-                // FOG ← INVERSELY mapped to energy (quiet=fog, loud=clear)
-                if settings.fractalAudioAffectsFog {
-                    let energyLevel = bass * 0.4 + mid * 0.3 + beat * 0.3
-                    let baseFog = musicAnchorFogWasEnabled ? musicAnchorFogIntensity : 0.30
-                    let fogVal = max(0.02, baseFog * (1.0 - energyLevel * (0.4 + 0.5 * amount)))
-                    enqueue("effect.fog", target: fogVal, anchor: musicAnchorFogIntensity)
-                }
-                
-                // BLOOM ← beat bloom with fast attack (kick-triggered flash)
-                if settings.fractalAudioAffectsBloom {
-                    let bloomDrive = beat * 0.6 + bass * 0.4
-                    let baseBloom = musicAnchorBloomWasEnabled ? musicAnchorBloomStrength : 0.15
-                    let bloomVal = baseBloom + bloomDrive * (0.15 + 0.4 * amount * beatPunch)
-                    enqueue("effect.bloom", target: bloomVal, anchor: musicAnchorBloomStrength)
-                }
-                
-                // HUE SPEED ← treble + mid (high frequency accelerates color cycling)
-                if settings.fractalAudioAffectsHueSpeed {
-                    let hueDrive = treble * 0.6 + mid * 0.3 + beat * 0.1
-                    let baseHue = musicAnchorHueWasEnabled ? musicAnchorHueSpeed : 0.04
-                    let hueVal = baseHue + hueDrive * (0.08 + 0.25 * amount)
-                    enqueue("effect.hueSpeed", target: hueVal, anchor: musicAnchorHueSpeed)
-                }
-                
-                // SATURATION ← tonal/harmonic energy (richer colors on harmonic content)
-                if settings.fractalAudioAffectsSaturation {
-                    let satDrive = mid * 0.5 + treble * 0.3 + bass * 0.2
-                    let baseSat = musicAnchorSaturation
-                    let satVal = baseSat + satDrive * (0.2 + 0.6 * amount)
-                    enqueue("effect.saturation", target: satVal, anchor: musicAnchorSaturation)
-                }
-                
-                // ITERATIONS ← mid energy adds detail on transients (⚠️ performance)
-                if settings.fractalAudioAffectsIterations {
-                    let iterDrive = mid * 0.6 + treble * 0.4
-                    let extra = Int(iterDrive * amount * 3.0)  // +0 to +3 max
-                    settings.fractalIterations = min(musicAnchorIterations + 3, musicAnchorIterations + extra)
+                    let minValue = min(mapping.rangeMin, mapping.rangeMax)
+                    let maxValue = max(mapping.rangeMin, mapping.rangeMax)
+                    let targetValue = minValue + (maxValue - minValue) * normalized
+
+                    guard let targetID = mapping.target.parameterTargetID else { continue }
+                    let anchor = musicAnchorByTarget[mapping.target] ?? targetValue
+                    enqueue(targetID, target: targetValue, anchor: anchor, smoothingTime: mapping.responseSpeed)
                 }
 
                 if !audioOperations.isEmpty {
@@ -883,12 +817,14 @@ actor Renderer {
                     parameterOperationDispatcher.clearMusicLayers(settings: settings)
                 }
                 musicFractalAnchorValid = false
+                musicAnchorByTarget.removeAll()
             }
         } else {
             if musicFractalAnchorValid {
                 parameterOperationDispatcher.clearMusicLayers(settings: settings)
             }
             musicFractalAnchorValid = false
+            musicAnchorByTarget.removeAll()
         }
         let settingsSnapshot = settings.snapshot()
         
@@ -902,6 +838,39 @@ actor Renderer {
         }
         
         self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // BUDDHABROT VOLUME RENDER PATH
+        // When in Buddhabrot mode, skip fractal raymarching entirely and instead
+        // run the 3D volume accumulation + render pipeline.
+        // ═══════════════════════════════════════════════════════════════════════
+        if appModel.runtimeViewMode == .buddhabrot {
+            // Lazy-init the Buddhabrot renderer on first use
+            if buddhabrotRenderer == nil {
+                buddhabrotRenderer = BuddhabrotRenderer(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    settings: appModel.buddhabrotSettings
+                )
+            }
+            
+            if let bbrot = buddhabrotRenderer {
+                let bbrotTime = cachedFrameTime
+                let rendered = bbrot.renderFrame(
+                    commandBuffer: commandBuffer,
+                    drawable: drawable,
+                    time: bbrotTime
+                )
+                
+                if rendered {
+                    drawable.encodePresent(commandBuffer: commandBuffer)
+                    commandBuffer.commit()
+                    frame.endSubmission()
+                    return
+                }
+            }
+            // Fall through to normal rendering if Buddhabrot failed
+        }
 
         let framePath = selectFramePath(settingsSnapshot: settingsSnapshot)
         let useAdaptiveCompute: Bool

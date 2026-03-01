@@ -22,6 +22,8 @@ struct MusicTabContent: View {
     @State private var libraryScope: LibraryScope = .songs
     @State private var librarySearch = ""
     @State private var libraryShuffle = false
+    @State private var musicPresetName = ""
+    @State private var musicPresets: [MusicReactivePreset] = Self.loadMusicPresets()
 
     private enum LibraryScope: String, CaseIterable {
         case songs = "Songs"
@@ -46,13 +48,16 @@ struct MusicTabContent: View {
                 // 4. Audio Reactivity (the main event)
                 reactivitySection
 
-                // 5. Level meters
+                // 5. Saved music presets
+                musicPresetsSection
+
+                // 6. Level meters
                 levelMeters
 
-                // 6. Service connections (settings)
+                // 7. Service connections (settings)
                 connectionsSection
 
-                // 7. Fallback priority ordering
+                // 8. Fallback priority ordering
                 if appModel.musicService.connectedProviders.count > 1 {
                     servicePrioritySection
                 }
@@ -649,65 +654,150 @@ struct MusicTabContent: View {
                     set: { v in cache.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
                 ), range: 0...1)
 
-                // ── Affects: Geometry ──────────────────────────────────────
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Geometry")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 10) {
-                        compactToggle("Scale",  isOn: Binding(
-                            get: { cache.fractalAudioAffectsScale },
-                            set: { v in cache.fractalAudioAffectsScale = v; cache.push(\.fractalAudioAffectsScale, value: v) }
-                        ))
-                        compactToggle("Fold",   isOn: Binding(
-                            get: { cache.fractalAudioAffectsFolding },
-                            set: { v in cache.fractalAudioAffectsFolding = v; cache.push(\.fractalAudioAffectsFolding, value: v) }
-                        ))
-                        compactToggle("Radius", isOn: Binding(
-                            get: { cache.fractalAudioAffectsRadius },
-                            set: { v in cache.fractalAudioAffectsRadius = v; cache.push(\.fractalAudioAffectsRadius, value: v) }
-                        ))
-                        compactToggle("Color",  isOn: Binding(
-                            get: { cache.fractalAudioAffectsColorMix },
-                            set: { v in cache.fractalAudioAffectsColorMix = v; cache.push(\.fractalAudioAffectsColorMix, value: v) }
-                        ))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Mapped Parameters")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Menu {
+                            ForEach(availableMappingTargetsToAdd, id: \.self) { target in
+                                Button {
+                                    addMapping(target)
+                                } label: {
+                                    Label(target.displayName, systemImage: target.icon)
+                                }
+                            }
+                            if availableMappingTargetsToAdd.isEmpty {
+                                Text("All targets added")
+                            }
+                        } label: {
+                            Label("Add", systemImage: "plus")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
+
+                    ForEach(Array(cache.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                        VStack(spacing: 6) {
+                            HStack(spacing: 8) {
+                                Toggle("", isOn: Binding(
+                                    get: { mappingAt(index)?.isEnabled ?? false },
+                                    set: { newValue in updateMapping(index) { $0.isEnabled = newValue } }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+
+                                Image(systemName: mapping.target.icon)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Text(mapping.target.displayName)
+                                    .font(.caption.bold())
+
+                                Spacer()
+
+                                Button {
+                                    removeMapping(at: index)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption2)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                            }
+
+                            Picker("Source", selection: Binding(
+                                get: { mappingAt(index)?.source ?? .composite },
+                                set: { newValue in updateMapping(index) { $0.source = newValue } }
+                            )) {
+                                ForEach(MusicReactiveSource.allCases, id: \.self) { source in
+                                    Text(source.displayName).tag(source)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            sliderRow(label: "Min", value: Binding(
+                                get: { mappingAt(index)?.rangeMin ?? mapping.target.defaultRange.lowerBound },
+                                set: { newValue in
+                                    updateMapping(index) { m in
+                                        m.rangeMin = newValue
+                                        m.sanitizeInPlace()
+                                    }
+                                }
+                            ), range: mapping.target.allowedRange)
+
+                            sliderRow(label: "Max", value: Binding(
+                                get: { mappingAt(index)?.rangeMax ?? mapping.target.defaultRange.upperBound },
+                                set: { newValue in
+                                    updateMapping(index) { m in
+                                        m.rangeMax = newValue
+                                        m.sanitizeInPlace()
+                                    }
+                                }
+                            ), range: mapping.target.allowedRange)
+
+                            sliderRow(label: "Response", value: Binding(
+                                get: { mappingAt(index)?.responseSpeed ?? 0.12 },
+                                set: { newValue in updateMapping(index) { $0.responseSpeed = newValue; $0.sanitizeInPlace() } }
+                            ), range: 0.01...0.6)
+
+                            sliderRow(label: "Amount", value: Binding(
+                                get: { mappingAt(index)?.amount ?? 1.0 },
+                                set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
+                            ), range: -2...2)
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+                    }
+
                 }
-                
-                // ── Affects: Effects (Fractal Forge–inspired) ─────────────
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Effects")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+    }
 
-                    HStack(spacing: 10) {
-                        compactToggle("Glow",  isOn: Binding(
-                            get: { cache.fractalAudioAffectsGlow },
-                            set: { v in cache.fractalAudioAffectsGlow = v; cache.push(\.fractalAudioAffectsGlow, value: v) }
-                        ))
-                        compactToggle("Fog",   isOn: Binding(
-                            get: { cache.fractalAudioAffectsFog },
-                            set: { v in cache.fractalAudioAffectsFog = v; cache.push(\.fractalAudioAffectsFog, value: v) }
-                        ))
-                        compactToggle("Bloom", isOn: Binding(
-                            get: { cache.fractalAudioAffectsBloom },
-                            set: { v in cache.fractalAudioAffectsBloom = v; cache.push(\.fractalAudioAffectsBloom, value: v) }
-                        ))
-                        compactToggle("Hue",   isOn: Binding(
-                            get: { cache.fractalAudioAffectsHueSpeed },
-                            set: { v in cache.fractalAudioAffectsHueSpeed = v; cache.push(\.fractalAudioAffectsHueSpeed, value: v) }
-                        ))
-                    }
-                    HStack(spacing: 10) {
-                        compactToggle("Saturation", isOn: Binding(
-                            get: { cache.fractalAudioAffectsSaturation },
-                            set: { v in cache.fractalAudioAffectsSaturation = v; cache.push(\.fractalAudioAffectsSaturation, value: v) }
-                        ))
-                        compactToggle("Detail",     isOn: Binding(
-                            get: { cache.fractalAudioAffectsIterations },
-                            set: { v in cache.fractalAudioAffectsIterations = v; cache.push(\.fractalAudioAffectsIterations, value: v) }
-                        ))
+    private var musicPresetsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Music Presets")
+                .font(.subheadline.bold())
+
+            HStack(spacing: 6) {
+                TextField("Preset Name", text: $musicPresetName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") { saveMusicPreset() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if musicPresets.isEmpty {
+                Text("No music presets saved yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(musicPresets) { preset in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(preset.name)
+                                .font(.caption.bold())
+                            Text(preset.createdAt, style: .date)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Load") { loadMusicPreset(preset) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        Button(role: .destructive) { deleteMusicPreset(preset.id) } label: {
+                            Image(systemName: "trash")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
                 }
             }
@@ -732,31 +822,100 @@ struct MusicTabContent: View {
         cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
         cache.push(\.beatSensitivity, value: s.beatSensitivity)
         
-        // Geometry profile
-        let g = preset.geometryProfile
-        cache.fractalAudioAffectsScale = g.scale
-        cache.fractalAudioAffectsFolding = g.folding
-        cache.fractalAudioAffectsRadius = g.radius
-        cache.fractalAudioAffectsColorMix = g.colorMix
-        cache.push(\.fractalAudioAffectsScale, value: g.scale)
-        cache.push(\.fractalAudioAffectsFolding, value: g.folding)
-        cache.push(\.fractalAudioAffectsRadius, value: g.radius)
-        cache.push(\.fractalAudioAffectsColorMix, value: g.colorMix)
-        
-        // Effects profile (Fractal Forge–inspired)
-        let e = preset.effectsProfile
-        cache.fractalAudioAffectsGlow = e.glow
-        cache.fractalAudioAffectsFog = e.fog
-        cache.fractalAudioAffectsBloom = e.bloom
-        cache.fractalAudioAffectsHueSpeed = e.hueSpeed
-        cache.fractalAudioAffectsSaturation = e.saturation
-        cache.fractalAudioAffectsIterations = e.iterations
-        cache.push(\.fractalAudioAffectsGlow, value: e.glow)
-        cache.push(\.fractalAudioAffectsFog, value: e.fog)
-        cache.push(\.fractalAudioAffectsBloom, value: e.bloom)
-        cache.push(\.fractalAudioAffectsHueSpeed, value: e.hueSpeed)
-        cache.push(\.fractalAudioAffectsSaturation, value: e.saturation)
-        cache.push(\.fractalAudioAffectsIterations, value: e.iterations)
+        cache.musicReactiveMappings = preset.defaultMappings
+        cache.push(\.musicReactiveMappings, value: preset.defaultMappings)
+    }
+
+    private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
+        let existing = Set(cache.musicReactiveMappings.map(\.target))
+        return MusicReactiveTarget.allCases.filter { !existing.contains($0) }
+    }
+
+    private func mappingAt(_ index: Int) -> MusicReactiveMapping? {
+        guard cache.musicReactiveMappings.indices.contains(index) else { return nil }
+        return cache.musicReactiveMappings[index]
+    }
+
+    private func updateMapping(_ index: Int, mutate: (inout MusicReactiveMapping) -> Void) {
+        guard cache.musicReactiveMappings.indices.contains(index) else { return }
+        var mappings = cache.musicReactiveMappings
+        mutate(&mappings[index])
+        mappings[index].sanitizeInPlace()
+        cache.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
+    }
+
+    private func addMapping(_ target: MusicReactiveTarget) {
+        var mappings = cache.musicReactiveMappings
+        guard !mappings.contains(where: { $0.target == target }) else { return }
+        mappings.append(target.defaultMapping(enabled: true))
+        cache.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
+    }
+
+    private func removeMapping(at index: Int) {
+        guard cache.musicReactiveMappings.indices.contains(index) else { return }
+        var mappings = cache.musicReactiveMappings
+        mappings.remove(at: index)
+        cache.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
+    }
+
+    private static let musicPresetStorageKey = "musicReactivePresets"
+
+    private static func loadMusicPresets() -> [MusicReactivePreset] {
+        guard let data = UserDefaults.standard.data(forKey: musicPresetStorageKey),
+              let decoded = try? JSONDecoder().decode([MusicReactivePreset].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    private func persistMusicPresets() {
+        if let encoded = try? JSONEncoder().encode(musicPresets) {
+            UserDefaults.standard.set(encoded, forKey: Self.musicPresetStorageKey)
+        }
+    }
+
+    private func saveMusicPreset() {
+        let trimmed = musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let preset = MusicReactivePreset(
+            name: trimmed,
+            audioAmount: cache.fractalAudioAmount,
+            beatPunch: cache.fractalBeatPunch,
+            bassSensitivity: cache.bassSensitivity,
+            midSensitivity: cache.midSensitivity,
+            trebleSensitivity: cache.trebleSensitivity,
+            beatSensitivity: cache.beatSensitivity,
+            mappings: cache.musicReactiveMappings
+        )
+        musicPresets.append(preset)
+        persistMusicPresets()
+        musicPresetName = ""
+    }
+
+    private func loadMusicPreset(_ preset: MusicReactivePreset) {
+        cache.fractalAudioAmount = preset.audioAmount
+        cache.fractalBeatPunch = preset.beatPunch
+        cache.bassSensitivity = preset.bassSensitivity
+        cache.midSensitivity = preset.midSensitivity
+        cache.trebleSensitivity = preset.trebleSensitivity
+        cache.beatSensitivity = preset.beatSensitivity
+        cache.musicReactiveMappings = preset.mappings
+
+        cache.push(\.fractalAudioAmount, value: preset.audioAmount)
+        cache.push(\.fractalBeatPunch, value: preset.beatPunch)
+        cache.push(\.bassSensitivity, value: preset.bassSensitivity)
+        cache.push(\.midSensitivity, value: preset.midSensitivity)
+        cache.push(\.trebleSensitivity, value: preset.trebleSensitivity)
+        cache.push(\.beatSensitivity, value: preset.beatSensitivity)
+        cache.push(\.musicReactiveMappings, value: preset.mappings)
+    }
+
+    private func deleteMusicPreset(_ id: UUID) {
+        musicPresets.removeAll { $0.id == id }
+        persistMusicPresets()
     }
 
     // MARK: - Level Meters

@@ -80,6 +80,7 @@ struct FractalPreset: Codable, Identifiable {
     // === GRADIENT COLORING SYSTEM (v2.1) ===
     var gradientState: GradientState?
     var lightingSoftness: Float?
+    var musicReactiveMappings: [MusicReactiveMapping]?
 
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
@@ -96,6 +97,7 @@ struct FractalPreset: Codable, Identifiable {
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
         case gradientState, lightingSoftness
+        case musicReactiveMappings
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -185,6 +187,7 @@ struct FractalPreset: Codable, Identifiable {
         // v2.1 gradient coloring system
         gradientState = try container.decodeIfPresent(GradientState.self, forKey: .gradientState)
         lightingSoftness = try container.decodeIfPresent(Float.self, forKey: .lightingSoftness)
+        musicReactiveMappings = try container.decodeIfPresent([MusicReactiveMapping].self, forKey: .musicReactiveMappings)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -243,6 +246,7 @@ struct FractalPreset: Codable, Identifiable {
         // v2.1 gradient coloring system
         try container.encodeIfPresent(gradientState, forKey: .gradientState)
         try container.encodeIfPresent(lightingSoftness, forKey: .lightingSoftness)
+        try container.encodeIfPresent(musicReactiveMappings, forKey: .musicReactiveMappings)
     }
     
     // MARK: - Function Constant Derivation
@@ -361,6 +365,7 @@ struct FractalPreset: Codable, Identifiable {
         // v2.1 gradient coloring system
         preset.gradientState = settings.gradientState
         preset.lightingSoftness = settings.lightingSoftness
+        preset.musicReactiveMappings = settings.musicReactiveMappings
         
         return preset
     }
@@ -488,6 +493,9 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let lightingSoftness = lightingSoftness {
             settings.lightingSoftness = lightingSoftness
+        }
+        if let musicReactiveMappings = musicReactiveMappings {
+            settings.musicReactiveMappings = musicReactiveMappings
         }
         
         // Log preset load for debugging

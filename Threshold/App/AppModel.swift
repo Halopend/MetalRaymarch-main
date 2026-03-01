@@ -25,6 +25,7 @@ class AppModel {
     enum RuntimeViewMode: String {
         case raymarch
         case flame
+        case buddhabrot
     }
     
     var immersiveSpaceState = ImmersiveSpaceState.closed
@@ -40,6 +41,9 @@ class AppModel {
     @ObservationIgnored nonisolated(unsafe) var isUsingSpecializedPipeline: Bool = false
     
     nonisolated let renderSettings = RenderSettings()
+    
+    // Buddhabrot volume renderer settings (shared between UI and render loop)
+    nonisolated let buddhabrotSettings = BuddhabrotSettings()
     
     // Audio analyzer for reactive lighting
     let audioAnalyzer = AudioAnalyzer()

@@ -897,6 +897,12 @@ final class GestureController {
         if !bothActive && grabActive {
             grabActive = false
             grabEndCooldown = 0.15  // 150ms cooldown prevents drag from stealing
+
+            // Apply rotation auto-snap on release: sets targetWorldRotation to the
+            // nearest 45° aligned orientation (if within snap window), so the slerp
+            // in interpolateToTargets() animates smoothly to the snapped pose.
+            settings.applyRotationSnap()
+
             if HAND_TRACKING_DEBUG {
                 let reason: String
                 if !leftHand.isTracked || !rightHand.isTracked {

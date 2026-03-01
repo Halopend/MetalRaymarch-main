@@ -48,6 +48,60 @@ final class RenderSettings: @unchecked Sendable {
               FingerGestureAction.coreCases.contains(legacy) else { return fallback }
         return .core(legacy)
     }
+
+    private static func defaultMusicReactiveMappingsFromLegacyToggles() -> [MusicReactiveMapping] {
+        var mappings = MusicReactiveMapping.defaultMappings()
+        let defaults = UserDefaults.standard
+        let legacyToggleByTarget: [(MusicReactiveTarget, String, Bool)] = [
+            (.fractalScale, "fractalAudioAffectsScale", true),
+            (.foldingLimit, "fractalAudioAffectsFolding", true),
+            (.sphereRadius, "fractalAudioAffectsRadius", true),
+            (.colorMix, "fractalAudioAffectsColorMix", true),
+            (.glow, "fractalAudioAffectsGlow", true),
+            (.fog, "fractalAudioAffectsFog", true),
+            (.bloom, "fractalAudioAffectsBloom", true),
+            (.hueSpeed, "fractalAudioAffectsHueSpeed", true),
+            (.saturation, "fractalAudioAffectsSaturation", true),
+            (.iterations, "fractalAudioAffectsIterations", false)
+        ]
+
+        for (target, key, fallback) in legacyToggleByTarget {
+            let enabled: Bool
+            if defaults.object(forKey: key) != nil {
+                enabled = defaults.bool(forKey: key)
+            } else {
+                enabled = fallback
+            }
+            if let index = mappings.firstIndex(where: { $0.target == target }) {
+                mappings[index].isEnabled = enabled
+            }
+        }
+        return mappings
+    }
+
+    private static func loadMusicReactiveMappings(_ key: String) -> [MusicReactiveMapping] {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([MusicReactiveMapping].self, from: data) {
+            return sanitizeMusicReactiveMappings(decoded)
+        }
+        let migrated = defaultMusicReactiveMappingsFromLegacyToggles()
+        if let data = try? JSONEncoder().encode(migrated) {
+            defaults.set(data, forKey: key)
+        }
+        return migrated
+    }
+
+    private static func sanitizeMusicReactiveMappings(_ input: [MusicReactiveMapping]) -> [MusicReactiveMapping] {
+        var uniqueTargets = Set<MusicReactiveTarget>()
+        var cleaned: [MusicReactiveMapping] = []
+        for var mapping in input {
+            guard uniqueTargets.insert(mapping.target).inserted else { continue }
+            mapping.sanitizeInPlace()
+            cleaned.append(mapping)
+        }
+        return cleaned
+    }
     
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
@@ -86,6 +140,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioAffectsHueSpeed: Bool      = loadBool("fractalAudioAffectsHueSpeed", default: true)
     private var _fractalAudioAffectsSaturation: Bool    = loadBool("fractalAudioAffectsSaturation", default: true)
     private var _fractalAudioAffectsIterations: Bool    = loadBool("fractalAudioAffectsIterations", default: false)
+    private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
     
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
@@ -104,6 +159,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
+    private var _rotationAutoSnap: Bool = false       // Snap rotation to nearest 45° multiple within snap window
+    private var _rotationSnapWindowDegrees: Float = 6.0  // ±halfWindow snap threshold per axis (degrees)
     private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
     private var _menuToggleGestureEnabled: Bool        = loadBool("menuToggleGestureEnabled", default: true)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
@@ -421,34 +478,71 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    var fractalAudioAffectsScale: Bool {
-        get { withLock { _fractalAudioAffectsScale } }
+    private func mappingEnabledLocked(_ target: MusicReactiveTarget) -> Bool {
+        _musicReactiveMappings.first(where: { $0.target == target })?.isEnabled ?? false
+    }
+
+    private func setMappingEnabledLocked(_ target: MusicReactiveTarget, enabled: Bool) {
+        if let index = _musicReactiveMappings.firstIndex(where: { $0.target == target }) {
+            _musicReactiveMappings[index].isEnabled = enabled
+        } else if enabled {
+            _musicReactiveMappings.append(target.defaultMapping(enabled: true))
+        }
+        _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(_musicReactiveMappings)
+    }
+
+    var musicReactiveMappings: [MusicReactiveMapping] {
+        get { withLock { _musicReactiveMappings } }
         set {
-            withLock { _fractalAudioAffectsScale = newValue }
+            withLock {
+                _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue)
+            }
+            if let data = try? JSONEncoder().encode(withLock { _musicReactiveMappings }) {
+                UserDefaults.standard.set(data, forKey: "musicReactiveMappings")
+            }
+        }
+    }
+
+    var fractalAudioAffectsScale: Bool {
+        get { withLock { mappingEnabledLocked(.fractalScale) } }
+        set {
+            withLock {
+                _fractalAudioAffectsScale = newValue
+                setMappingEnabledLocked(.fractalScale, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsScale")
         }
     }
 
     var fractalAudioAffectsFolding: Bool {
-        get { withLock { _fractalAudioAffectsFolding } }
+        get { withLock { mappingEnabledLocked(.foldingLimit) } }
         set {
-            withLock { _fractalAudioAffectsFolding = newValue }
+            withLock {
+                _fractalAudioAffectsFolding = newValue
+                setMappingEnabledLocked(.foldingLimit, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFolding")
         }
     }
 
     var fractalAudioAffectsRadius: Bool {
-        get { withLock { _fractalAudioAffectsRadius } }
+        get { withLock { mappingEnabledLocked(.sphereRadius) } }
         set {
-            withLock { _fractalAudioAffectsRadius = newValue }
+            withLock {
+                _fractalAudioAffectsRadius = newValue
+                setMappingEnabledLocked(.sphereRadius, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsRadius")
         }
     }
 
     var fractalAudioAffectsColorMix: Bool {
-        get { withLock { _fractalAudioAffectsColorMix } }
+        get { withLock { mappingEnabledLocked(.colorMix) } }
         set {
-            withLock { _fractalAudioAffectsColorMix = newValue }
+            withLock {
+                _fractalAudioAffectsColorMix = newValue
+                setMappingEnabledLocked(.colorMix, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsColorMix")
         }
     }
@@ -457,54 +551,72 @@ final class RenderSettings: @unchecked Sendable {
     
     /// Glow intensity responds to RMS energy + beat pulses (Fractal Forge: glow)
     var fractalAudioAffectsGlow: Bool {
-        get { withLock { _fractalAudioAffectsGlow } }
+        get { withLock { mappingEnabledLocked(.glow) } }
         set {
-            withLock { _fractalAudioAffectsGlow = newValue }
+            withLock {
+                _fractalAudioAffectsGlow = newValue
+                setMappingEnabledLocked(.glow, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsGlow")
         }
     }
     
     /// Fog clears on loud passages, thickens on quiet (Fractal Forge: inverse energy)
     var fractalAudioAffectsFog: Bool {
-        get { withLock { _fractalAudioAffectsFog } }
+        get { withLock { mappingEnabledLocked(.fog) } }
         set {
-            withLock { _fractalAudioAffectsFog = newValue }
+            withLock {
+                _fractalAudioAffectsFog = newValue
+                setMappingEnabledLocked(.fog, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFog")
         }
     }
     
     /// Bloom strength pulses with beats (Fractal Forge: beat bloom)
     var fractalAudioAffectsBloom: Bool {
-        get { withLock { _fractalAudioAffectsBloom } }
+        get { withLock { mappingEnabledLocked(.bloom) } }
         set {
-            withLock { _fractalAudioAffectsBloom = newValue }
+            withLock {
+                _fractalAudioAffectsBloom = newValue
+                setMappingEnabledLocked(.bloom, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsBloom")
         }
     }
     
     /// Hue rotation speed driven by treble (Fractal Forge: brilliance → color speed)
     var fractalAudioAffectsHueSpeed: Bool {
-        get { withLock { _fractalAudioAffectsHueSpeed } }
+        get { withLock { mappingEnabledLocked(.hueSpeed) } }
         set {
-            withLock { _fractalAudioAffectsHueSpeed = newValue }
+            withLock {
+                _fractalAudioAffectsHueSpeed = newValue
+                setMappingEnabledLocked(.hueSpeed, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsHueSpeed")
         }
     }
     
     /// Color saturation responds to tonal/harmonic energy
     var fractalAudioAffectsSaturation: Bool {
-        get { withLock { _fractalAudioAffectsSaturation } }
+        get { withLock { mappingEnabledLocked(.saturation) } }
         set {
-            withLock { _fractalAudioAffectsSaturation = newValue }
+            withLock {
+                _fractalAudioAffectsSaturation = newValue
+                setMappingEnabledLocked(.saturation, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsSaturation")
         }
     }
     
     /// Fractal iterations increase with mid energy (detail on transients — caution: performance)
     var fractalAudioAffectsIterations: Bool {
-        get { withLock { _fractalAudioAffectsIterations } }
+        get { withLock { mappingEnabledLocked(.iterations) } }
         set {
-            withLock { _fractalAudioAffectsIterations = newValue }
+            withLock {
+                _fractalAudioAffectsIterations = newValue
+                setMappingEnabledLocked(.iterations, enabled: newValue)
+            }
             UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsIterations")
         }
     }
@@ -692,6 +804,18 @@ final class RenderSettings: @unchecked Sendable {
     var extendedGestureRange: Bool {
         get { withLock { _extendedGestureRange } }
         set { withLock { _extendedGestureRange = newValue } }
+    }
+
+    /// Snap world rotation to nearest 45° multiple on each Euler axis when grab gesture ends
+    var rotationAutoSnap: Bool {
+        get { withLock { _rotationAutoSnap } }
+        set { withLock { _rotationAutoSnap = newValue } }
+    }
+
+    /// Half-angle snap window in degrees (±this value). Default 6° → snaps within ±3° of target.
+    var rotationSnapWindowDegrees: Float {
+        get { withLock { _rotationSnapWindowDegrees } }
+        set { withLock { _rotationSnapWindowDegrees = max(1.0, min(30.0, newValue)) } }
     }
 
     /// Gesture sensitivity (1-10, where 1 = 10x slower, 10 = normal speed)
@@ -1968,7 +2092,86 @@ final class RenderSettings: @unchecked Sendable {
             _targetDetailScale = 1.0
         }
     }
-    
+
+    // MARK: - Rotation Auto-Snap
+
+    /// Snap the world rotation target to the nearest 45° multiple on each Euler axis
+    /// if the current angle is within the snap window. The current rotation is NOT changed,
+    /// so `interpolateToTargets()` will slerp smoothly toward the snapped orientation.
+    func applyRotationSnap() {
+        withLock {
+            guard _rotationAutoSnap else { return }
+            let snapped = Self.snapQuaternion(_targetWorldRotation, windowDegrees: _rotationSnapWindowDegrees)
+            _targetWorldRotation = snapped
+        }
+    }
+
+    /// Pure function: decompose a quaternion to ZYX Euler angles, snap each to the nearest
+    /// 45° multiple if within ±halfWindow, and reconstruct.
+    /// Snap targets per axis: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315° (equivalently −180…180).
+    static func snapQuaternion(_ q: simd_quatf, windowDegrees: Float) -> simd_quatf {
+        let halfWindow = windowDegrees * 0.5 * (.pi / 180.0)   // convert half-window to radians
+        let snapInterval: Float = .pi / 4.0                     // 45° in radians
+
+        // Extract ZYX Euler angles (returns radians in −π…π range)
+        var (roll, pitch, yaw) = quaternionToEulerZYX(q)
+
+        roll  = snapAngle(roll,  interval: snapInterval, halfWindow: halfWindow)
+        pitch = snapAngle(pitch, interval: snapInterval, halfWindow: halfWindow)
+        yaw   = snapAngle(yaw,   interval: snapInterval, halfWindow: halfWindow)
+
+        return eulerZYXToQuaternion(roll: roll, pitch: pitch, yaw: yaw)
+    }
+
+    /// Snap a single angle (radians, any range) to the nearest multiple of `interval`
+    /// if the residual is within ±halfWindow. Otherwise return the original angle.
+    private static func snapAngle(_ angle: Float, interval: Float, halfWindow: Float) -> Float {
+        let nearest = (angle / interval).rounded() * interval
+        let delta = abs(angle - nearest)
+        return delta <= halfWindow ? nearest : angle
+    }
+
+    /// Decompose a unit quaternion into ZYX intrinsic Euler angles (roll, pitch, yaw)
+    /// in radians, each in −π…π (pitch clamped to −π/2…π/2 to avoid gimbal ambiguity).
+    private static func quaternionToEulerZYX(_ q: simd_quatf) -> (roll: Float, pitch: Float, yaw: Float) {
+        let x = q.imag.x, y = q.imag.y, z = q.imag.z, w = q.real
+
+        // Roll (X-axis rotation)
+        let sinr_cosp = 2.0 * (w * x + y * z)
+        let cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+        let roll = atan2(sinr_cosp, cosr_cosp)
+
+        // Pitch (Y-axis rotation) — clamped for stability near ±90°
+        let sinp = 2.0 * (w * y - z * x)
+        let pitch: Float
+        if abs(sinp) >= 1.0 {
+            pitch = copysign(.pi / 2.0, sinp)
+        } else {
+            pitch = asin(sinp)
+        }
+
+        // Yaw (Z-axis rotation)
+        let siny_cosp = 2.0 * (w * z + x * y)
+        let cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+        let yaw = atan2(siny_cosp, cosy_cosp)
+
+        return (roll, pitch, yaw)
+    }
+
+    /// Reconstruct a unit quaternion from ZYX intrinsic Euler angles (radians).
+    private static func eulerZYXToQuaternion(roll: Float, pitch: Float, yaw: Float) -> simd_quatf {
+        let cr = cos(roll  * 0.5), sr = sin(roll  * 0.5)
+        let cp = cos(pitch * 0.5), sp = sin(pitch * 0.5)
+        let cy = cos(yaw   * 0.5), sy = sin(yaw   * 0.5)
+
+        return simd_quatf(
+            ix: sr * cp * cy - cr * sp * sy,
+            iy: cr * sp * cy + sr * cp * sy,
+            iz: cr * cp * sy - sr * sp * cy,
+            r:  cr * cp * cy + sr * sp * sy
+        ).normalized
+    }
+
     // === REFINING PARAMETERS ===
     // Over-relaxation multiplier (Keinert 2014)
     var relaxFactor: Float {

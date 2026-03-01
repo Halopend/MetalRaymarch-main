@@ -176,6 +176,8 @@ struct ContentView: View {
         Group {
             if appModel.runtimeViewMode == .flame {
                 FlameRuntimeView()
+            } else if appModel.runtimeViewMode == .buddhabrot {
+                BuddhabrotControlsView()
             } else {
                 switch selectedTab {
                 case .fractal:  fractalTabContent
@@ -237,6 +239,26 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .tint(.orange)
+            
+            // Render mode switcher
+            Menu {
+                Button {
+                    appModel.runtimeViewMode = .raymarch
+                } label: {
+                    Label("Fractal Raymarch", systemImage: "cube.fill")
+                }
+                Button {
+                    appModel.runtimeViewMode = .buddhabrot
+                } label: {
+                    Label("3D Buddhabrot", systemImage: "atom")
+                }
+            } label: {
+                Label(
+                    appModel.runtimeViewMode == .buddhabrot ? "Buddhabrot" : "Raymarch",
+                    systemImage: appModel.runtimeViewMode == .buddhabrot ? "atom" : "cube.fill"
+                )
+            }
+            .menuStyle(.borderlessButton)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -1065,6 +1087,8 @@ struct ContentView: View {
                         .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
                     Toggle("Extended Range", isOn: $cache.extendedGestureRange)
                         .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+                    Toggle("Rotation Auto-Snap", isOn: $cache.rotationAutoSnap)
+                        .onChange(of: cache.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
 
                     EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Global Sensitivity",
                         value: $cache.gestureSensitivity, range: 1...10,
@@ -1077,6 +1101,14 @@ struct ContentView: View {
                         enabled: .constant(true),
                         onChanged: { cache.push(\.translationSensitivity, value: cache.translationSensitivity) },
                         showToggle: false)
+
+                    if cache.rotationAutoSnap {
+                        EffectSliderRow(icon: "rotate.3d", label: "Snap Window (°)",
+                            value: $cache.rotationSnapWindowDegrees, range: 2...30,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.rotationSnapWindowDegrees, value: cache.rotationSnapWindowDegrees) },
+                            showToggle: false)
+                    }
                     }
 
                     Divider().padding(.vertical, 2)

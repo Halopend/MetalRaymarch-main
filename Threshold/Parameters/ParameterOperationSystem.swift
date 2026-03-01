@@ -117,6 +117,12 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             read: { $0.colorMix },
             write: { settings, value in settings.colorMix = value }
         ),
+        "core.fractalIterations": CoreParameterDescriptor(
+            range: 2.0...24.0,
+            bundle: .fractalCore,
+            read: { Float($0.fractalIterations) },
+            write: { settings, value in settings.fractalIterations = max(2, min(24, Int(round(value)))) }
+        ),
         "effect.glow": CoreParameterDescriptor(
             range: 0.0...2.0,
             bundle: .lighting,
