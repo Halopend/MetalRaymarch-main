@@ -114,6 +114,7 @@ final class BuddhabrotRenderer {
     private var frameCounter: Int = 0
     private var accumulationTime: Float = 0
     private var warnedAboutMissingPipelines = false
+    private var currentUseRGBMode: Bool = false
     
     // MARK: - Initialization
     
@@ -184,6 +185,7 @@ final class BuddhabrotRenderer {
             
             // Stereo support via vertex amplification
             desc.maxVertexAmplificationCount = layerRenderer.properties.viewCount
+            desc.inputPrimitiveTopology = .triangle
             
             // Input assembly: full-screen triangle uses vertex_id, no vertex buffer
             // so no vertex descriptor needed.
@@ -221,8 +223,9 @@ final class BuddhabrotRenderer {
     
     /// Reallocates the density buffer and 3D texture when resolution changes.
     func reallocateResources(resolution: Int) {
-        guard resolution != currentResolution else { return }
+        guard resolution != currentResolution || settings.useRGBMode != currentUseRGBMode else { return }
         currentResolution = resolution
+        currentUseRGBMode = settings.useRGBMode
         
         let voxelCount = resolution * resolution * resolution
         let bufferSize = voxelCount * MemoryLayout<UInt32>.size
@@ -238,6 +241,11 @@ final class BuddhabrotRenderer {
             densityBufferG?.label = "Buddhabrot Density G"
             densityBufferB = device.makeBuffer(length: bufferSize, options: .storageModeShared)
             densityBufferB?.label = "Buddhabrot Density B"
+            densityBuffer = nil
+        } else {
+            densityBufferR = nil
+            densityBufferG = nil
+            densityBufferB = nil
         }
         
         // 3D float texture for normalized volume
@@ -268,13 +276,13 @@ final class BuddhabrotRenderer {
     @discardableResult
     func dispatchAccumulation() -> MTLCommandBuffer? {
         // Check if resolution changed
-        if settings.resolution != currentResolution || settings.needsClear {
+        if settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear {
             reallocateResources(resolution: settings.resolution)
             clearDensityBuffers()
             settings.needsClear = false
         }
         
-        guard let pipeline = settings.useRGBMode ? accumulateRGBPipeline : accumulatePipeline,
+          guard let pipeline = settings.useRGBMode ? accumulateRGBPipeline : accumulatePipeline,
               let uniformBuffer = accumulationUniformBuffer else {
             return nil
         }
@@ -325,6 +333,67 @@ final class BuddhabrotRenderer {
         commandBuffer.commit()
         return commandBuffer
     }
+
+    /// In-order accumulation encoded onto the frame command buffer.
+    /// This guarantees normalization sees fresh density data in the same frame.
+    func encodeAccumulation(commandBuffer: MTLCommandBuffer) {
+        if settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear {
+            reallocateResources(resolution: settings.resolution)
+            clearDensityBuffers()
+            settings.needsClear = false
+        }
+
+        guard let pipeline = settings.useRGBMode ? accumulateRGBPipeline : accumulatePipeline else {
+            return
+        }
+
+        let batchSize = max(1, settings.batchSize)
+        let batchesPerFrame = max(1, settings.batchesPerFrame)
+
+        for _ in 0..<batchesPerFrame {
+            guard let encoder = commandBuffer.makeComputeCommandEncoder() else { continue }
+            encoder.label = "Buddhabrot Orbit Batch (In-Frame)"
+            encoder.setComputePipelineState(pipeline)
+
+            var uniforms = BuddhabrotAccumulationUniforms()
+            uniforms.resolution = UInt32(currentResolution)
+            uniforms.maxIterations = UInt32(settings.maxIterations)
+            uniforms.minIterations = 0
+            uniforms.batchSize = UInt32(batchSize)
+            uniforms.seedOffset = seedOffset
+            uniforms.escapeRadius = settings.bailoutRadius * settings.bailoutRadius
+            uniforms.worldExtent = settings.worldExtent
+            uniforms.power = settings.power
+            uniforms.bailoutRadius = settings.bailoutRadius
+
+            encoder.setBytes(&uniforms, length: MemoryLayout<BuddhabrotAccumulationUniforms>.stride, index: 0)
+
+            if settings.useRGBMode {
+                guard let r = densityBufferR, let g = densityBufferG, let b = densityBufferB else {
+                    encoder.endEncoding()
+                    continue
+                }
+                encoder.setBuffer(r, offset: 0, index: 1)
+                encoder.setBuffer(g, offset: 0, index: 2)
+                encoder.setBuffer(b, offset: 0, index: 3)
+            } else {
+                guard let density = densityBuffer else {
+                    encoder.endEncoding()
+                    continue
+                }
+                encoder.setBuffer(density, offset: 0, index: 1)
+            }
+
+            let threadsPerGrid = MTLSize(width: batchSize, height: 1, depth: 1)
+            let threadgroupSize = MTLSize(width: min(256, pipeline.maxTotalThreadsPerThreadgroup), height: 1, depth: 1)
+            encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadgroupSize)
+            encoder.endEncoding()
+
+            seedOffset &+= 1
+        }
+
+        settings.totalSamplesAccumulated += UInt64(batchSize * batchesPerFrame)
+    }
     
     // MARK: - Phase 2a: Normalization
     
@@ -339,6 +408,11 @@ final class BuddhabrotRenderer {
         
         // Scan for max density on CPU (fast enough for 128^3 at normalization interval)
         updateMaxDensity()
+        
+        // Diagnostic: log max density periodically so we can verify accumulation is working
+        if frameCounter <= 5 || frameCounter % 60 == 0 {
+            print("📊 Buddhabrot normalize: frame=\(frameCounter) maxDensity=\(maxDensityValue) totalSamples=\(settings.totalSamplesAccumulated)")
+        }
         
         // Fill normalization uniforms
         let uniforms = uniformBuffer.contents().bindMemory(to: BuddhabrotNormalizationUniforms.self, capacity: 1)
@@ -534,12 +608,13 @@ final class BuddhabrotRenderer {
     ) -> Bool {
         frameCounter += 1
         
-        // Phase 1: Dispatch accumulation (on separate command buffer, non-blocking)
-        dispatchAccumulation()
+        // Phase 1: In-order accumulation in the same command buffer for correctness.
+        // This avoids cross-queue hazards where normalization can sample stale data.
+        encodeAccumulation(commandBuffer: commandBuffer)
         
         // Phase 2a: Normalize density buffer → 3D texture (every N frames)
         let normalizationEvery = max(1, settings.normalizationInterval)
-        if frameCounter % normalizationEvery == 0 || frameCounter <= 2 {
+        if frameCounter <= 120 || frameCounter % normalizationEvery == 0 {
             encodeNormalization(commandBuffer: commandBuffer)
         }
         
@@ -602,10 +677,14 @@ final class BuddhabrotRenderer {
         let ptr = buffer.contents().bindMemory(to: UInt32.self, capacity: voxelCount)
         
         var maxVal: UInt32 = 0
-        // Sample every 64th voxel for speed (good enough for normalization)
-        let sampleStride = max(1, voxelCount / 4096)
+        // In early frames, do a full scan so we can quickly detect real accumulation.
+        // After warmup, fall back to sampling for lower CPU cost.
+        let sampleStride = frameCounter <= 120 ? 1 : max(1, voxelCount / 4096)
         for i in Swift.stride(from: 0, to: voxelCount, by: sampleStride) {
             maxVal = max(maxVal, ptr[i])
+        }
+        if sampleStride > 1 {
+            maxVal = max(maxVal, ptr[voxelCount - 1])
         }
         
         // If RGB mode, also check G and B
@@ -615,6 +694,9 @@ final class BuddhabrotRenderer {
                 let p = b.contents().bindMemory(to: UInt32.self, capacity: voxelCount)
                 for i in Swift.stride(from: 0, to: voxelCount, by: sampleStride) {
                     maxVal = max(maxVal, p[i])
+                }
+                if sampleStride > 1 {
+                    maxVal = max(maxVal, p[voxelCount - 1])
                 }
             }
         }

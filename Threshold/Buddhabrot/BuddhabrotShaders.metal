@@ -294,7 +294,7 @@ kernel void buddhabrotNormalizeRGB(
 struct BuddhabrotVertexOut {
     float4 position [[position]];
     float2 texCoord;
-    uint   viewIndex [[render_target_array_index]]; // Selects eye layer for stereo
+    uint   viewIndex; // Eye index from vertex amplification
 };
 
 vertex BuddhabrotVertexOut buddhabrotVertex(
@@ -317,6 +317,8 @@ vertex BuddhabrotVertexOut buddhabrotVertex(
     BuddhabrotVertexOut out;
     out.position = float4(positions[vertexID], 0.0, 1.0);
     out.texCoord = texCoords[vertexID];
+    // Keep eye selection as a plain varying. Render-target routing is handled by
+    // setVertexAmplificationCount() mappings in the encoder.
     out.viewIndex = ampId;
     return out;
 }
@@ -361,18 +363,22 @@ fragment BuddhabrotFragmentOut buddhabrotFragment(
     float2 ndc = in.texCoord * 2.0f - 1.0f;
     ndc.y = -ndc.y; // Flip Y for Metal's clip space convention
     
-    // Clip space → eye space
-    float4 eyeNear = u.inverseProjectionMatrix * float4(ndc, 0.0f, 1.0f);
-    eyeNear /= eyeNear.w;
-    float4 eyeFar  = u.inverseProjectionMatrix * float4(ndc, 1.0f, 1.0f);
-    eyeFar /= eyeFar.w;
+    // visionOS uses reverse-Z: near plane = z=1, far plane = z=0.
+    // Unprojecting z=0 gives a point at infinity (degenerate).
+    // Instead, derive the camera position from the inverse view matrix
+    // and the ray direction from a near-plane unproject.
+    float3 camPos = float3(u.inverseViewMatrix[3][0],
+                           u.inverseViewMatrix[3][1],
+                           u.inverseViewMatrix[3][2]);
     
-    // Eye space → world space
-    float3 worldNear = (u.inverseViewMatrix * eyeNear).xyz;
-    float3 worldFar  = (u.inverseViewMatrix * eyeFar).xyz;
+    // Unproject a point on the near plane (z=1 in reverse-Z) to get ray direction
+    float4 clipNear = float4(ndc, 1.0f, 1.0f);
+    float4 eyeNear  = u.inverseProjectionMatrix * clipNear;
+    eyeNear.xyz /= eyeNear.w;
+    float3 worldNear = (u.inverseViewMatrix * float4(eyeNear.xyz, 1.0f)).xyz;
     
-    float3 rayOrigin = worldNear;
-    float3 rayDir    = normalize(worldFar - worldNear);
+    float3 rayOrigin = camPos;
+    float3 rayDir    = normalize(worldNear - camPos);
     
     // Transform ray into volume local space
     float3 localOrigin = (u.inverseVolumeWorldMatrix * float4(rayOrigin, 1.0f)).xyz;

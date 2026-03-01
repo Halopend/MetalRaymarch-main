@@ -649,6 +649,7 @@ struct FractalBrowserWindow: View {
     }
 
     private func loadType(_ type: FractalModelType) {
+        appModel.runtimeViewMode = .raymarch
         appModel.renderSettings.fractalType = type
         appModel.gestureController?.applyFractalDefaults()
         appModel.gestureController?.syncWithSettings()
@@ -656,6 +657,7 @@ struct FractalBrowserWindow: View {
     }
 
     private func loadVariant(type: FractalModelType, variant: FractalVariant) {
+        appModel.runtimeViewMode = .raymarch
         appModel.renderSettings.fractalType = type
         appModel.gestureController?.applyFractalDefaults()
 

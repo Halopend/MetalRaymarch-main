@@ -162,6 +162,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _rotationAutoSnap: Bool = false       // Snap rotation to nearest 45° multiple within snap window
     private var _rotationSnapWindowDegrees: Float = 6.0  // ±halfWindow snap threshold per axis (degrees)
     private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
+    private var _gestureSmoothingFactor: Float = {
+        let key = "gestureSmoothingFactor"
+        guard UserDefaults.standard.object(forKey: key) != nil else { return 0.0 }
+        return max(0.0, min(1.0, UserDefaults.standard.float(forKey: key)))
+    }()
     private var _menuToggleGestureEnabled: Bool        = loadBool("menuToggleGestureEnabled", default: true)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
@@ -825,6 +830,16 @@ final class RenderSettings: @unchecked Sendable {
             let clamped = max(1.0, min(10.0, newValue))
             withLock { _gestureSensitivity = clamped }
             UserDefaults.standard.set(clamped, forKey: "gestureSensitivity")
+        }
+    }
+
+    /// Gesture drag smoothing amount (0-1, where higher adds more response latency).
+    var gestureSmoothingFactor: Float {
+        get { withLock { _gestureSmoothingFactor } }
+        set {
+            let clamped = max(0.0, min(1.0, newValue))
+            withLock { _gestureSmoothingFactor = clamped }
+            UserDefaults.standard.set(clamped, forKey: "gestureSmoothingFactor")
         }
     }
 

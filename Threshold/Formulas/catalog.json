@@ -25,6 +25,7 @@
         { "index": 2, "name": "DerivBias",      "default": 1.0,   "min": 0.01,  "max": 4.0,   "step": 0.1  },
         { "index": 3, "name": "AlternateVer",   "default": 0,     "min": 0,     "max": 1,     "step": 1,   "isBool": true },
         { "index": 4, "name": "PolarRotation",  "default": 0,     "min": -3.14, "max": 3.14,  "step": 0.01 },
+        { "index": 5, "name": "PolarRotation2", "default": 0,     "min": -3.14, "max": 3.14,  "step": 0.01 },
         { "index": 8, "name": "Julia",          "default": 0,     "min": 0,     "max": 1,     "step": 1,   "isBool": true },
         { "index": 9, "name": "JuliaC.x",       "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 },
         { "index": 10, "name": "JuliaC.y",      "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 },

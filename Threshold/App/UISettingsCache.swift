@@ -153,6 +153,7 @@ final class UISettingsCache {
     var rotationAutoSnap: Bool = false
     var rotationSnapWindowDegrees: Float = 6.0
     var gestureSensitivity: Float = 3.0
+    var gestureSmoothingFactor: Float = 0.0
     var menuToggleGestureEnabled: Bool = true
     var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
     // Configurable finger → action assignments
@@ -294,6 +295,7 @@ final class UISettingsCache {
         rotationAutoSnap = settings.rotationAutoSnap
         rotationSnapWindowDegrees = settings.rotationSnapWindowDegrees
         gestureSensitivity = settings.gestureSensitivity
+        gestureSmoothingFactor = settings.gestureSmoothingFactor
         menuToggleGestureEnabled = settings.menuToggleGestureEnabled
         menuToggleGestureMode = settings.menuToggleGestureMode
         indexFingerBinding = settings.indexFingerBinding

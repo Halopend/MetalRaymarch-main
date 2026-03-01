@@ -313,6 +313,12 @@ struct ContentView: View {
                 }
             }
 
+            EffectSliderRow(icon: "waveform.path.ecg", label: "Gesture Smoothing",
+                value: $cache.gestureSmoothingFactor, range: 0.0...1.0,
+                enabled: .constant(true),
+                onChanged: { cache.push(\.gestureSmoothingFactor, value: cache.gestureSmoothingFactor) },
+                showToggle: false)
+
             Divider()
 
             // Scale slider with icon
@@ -1171,6 +1177,12 @@ struct ContentView: View {
                         value: $cache.gestureSensitivity, range: 1...10,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "waveform.path.ecg", label: "Gesture Smoothing",
+                        value: $cache.gestureSmoothingFactor, range: 0.0...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.gestureSmoothingFactor, value: cache.gestureSmoothingFactor) },
                         showToggle: false)
 
                     EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",

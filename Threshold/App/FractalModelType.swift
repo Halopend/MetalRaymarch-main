@@ -134,7 +134,7 @@ enum FractalModelType: Int32, Codable, CaseIterable {
         
         switch self {
         case .mandelbulb:
-            // Power=8, Bailout=4, DerivBias=1, Alternate=0, PolarRot=0
+            // Power=8, Bailout=4, DerivBias=1, Alternate=0, PolarRot=0, PolarRot2=0
             fp.params.0 = 8.0; fp.params.1 = 4.0; fp.params.2 = 1.0
         case .menger:
             // Scale=3, Offset=(1,1,1)

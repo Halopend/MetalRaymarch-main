@@ -261,7 +261,6 @@ final class GestureController {
     // drag magnitude. Instant response for deceleration (safety/precision),
     // lerped response for acceleration (prevents jarring speed-ups).
     private var smoothedDragSpeed: Float = 0.0
-    private let dragSpeedIncreaseLerpRate: Float = 40.0  // Higher than GMT's 8.0 for responsive drag
     
     // === MENU TOGGLE GESTURE STATE (Right hand, configurable mode) ===
     private var menuToggleActive: Bool = false
@@ -329,12 +328,16 @@ final class GestureController {
         settings.formulaParams = settings.fractalType.defaultFormulaParams()
 
         // Fractal-specific default orientation.
-        // Mandelbulb: rotate 90° counter-clockwise around Y so the "mouth"
-        // faces the user by default.
+        // Mandelbulb defaults requested: P75 Y180 R180 with detail scale 0.25.
         if settings.fractalType == .mandelbulb {
-            let mandelbulbFacing = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
+            let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))              // R180
+            let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0)) // P75
+            let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))              // Y180
+            let mandelbulbFacing = simd_normalize(qz * qy * qx)
             settings.worldRotation = mandelbulbFacing
             settings.targetWorldRotation = mandelbulbFacing
+            settings.detailScale = 0.25
+            settings.targetDetailScale = 0.25
         }
         
         // Reset gesture states
@@ -1147,7 +1150,9 @@ final class GestureController {
                 smoothedDragSpeed = deltaLength
             } else {
                 // Acceleration: lerp toward target (smooth ramp-up)
-                let lerpFactor = 1.0 - exp(-dragSpeedIncreaseLerpRate * dt)
+                let smoothing = max(0.0, min(1.0, settings.gestureSmoothingFactor))
+                let lerpRate = 40.0 - (36.0 * smoothing) // 40 (snappy) -> 4 (very smooth)
+                let lerpFactor = 1.0 - exp(-lerpRate * dt)
                 smoothedDragSpeed += (deltaLength - smoothedDragSpeed) * lerpFactor
             }
             

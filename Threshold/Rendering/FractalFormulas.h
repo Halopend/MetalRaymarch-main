@@ -80,7 +80,7 @@ struct OrbitData {
 // 1. MANDELBULB
 // ============================================================================
 // params[0]=Power, [1]=Bailout, [2]=DerivBias, [3]=AlternateVer(bool),
-// [4]=PolarRotation, [8]=Julia(bool), [9-11]=JuliaC
+// [4]=PolarRotation, [5]=PolarRotation2, [8]=Julia(bool), [9-11]=JuliaC
 FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
                                  int iterations, int colorIterations,
                                  thread OrbitData& orbit) {
@@ -89,6 +89,7 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     float dBias   = fp.params[2];
     bool  alternate = fp.params[3] > 0.5f;
     float polarRot  = fp.params[4];
+    float polarRot2 = fp.params[5];
     bool  julia     = fp.params[8] > 0.5f;
     float3 juliaC   = float3(fp.params[9], fp.params[10], fp.params[11]);
 
@@ -125,7 +126,9 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
                             cTheta);
         } else {
             // Standard spherical coordinates
-            float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot;
+            // polarRot2 provides a secondary phase offset that can emulate
+            // alternate-like framing without toggling AlternateVer.
+            float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot + polarRot2;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
@@ -168,6 +171,7 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
     float dBias   = fp.params[2];
     bool  alternate = fp.params[3] > 0.5f;
     float polarRot  = fp.params[4];
+    float polarRot2 = fp.params[5];
     bool  julia     = fp.params[8] > 0.5f;
     float3 juliaC   = float3(fp.params[9], fp.params[10], fp.params[11]);
 
@@ -194,7 +198,7 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
                             sTheta * sPhi,
                             cTheta);
         } else {
-            float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot;
+            float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot + polarRot2;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
             dr = rn * power * dr / max(r, kEpsLen) + dBias;
