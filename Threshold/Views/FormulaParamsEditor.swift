@@ -48,6 +48,11 @@ private struct ParameterNodeRow: View {
     @Bindable var cache: UISettingsCache
     let node: AnyParameterNodeBase
 
+    /// When true, shows the sensitivity slider instead of the parameter slider.
+    @State private var isFlipped: Bool = false
+    /// Local copy of this parameter's gesture sensitivity for the slider binding.
+    @State private var sensitivityValue: Float = GestureSensitivityStore.defaultSensitivity
+
     var body: some View {
         if let boolNode = node as? BoolParameterNode {
             HStack(spacing: 8) {
@@ -79,31 +84,56 @@ private struct ParameterNodeRow: View {
         }
 
         if let floatNode = node as? FloatParameterNode {
-            HStack(spacing: 4) {
-                EffectSliderRow(
-                    icon: floatNode.icon,
-                    label: floatNode.name,
-                    value: Binding<Float>(
-                        get: { floatNode.readValue(cache) },
-                        set: { value in
-                            cache.dispatchParameterOperation(
-                                ParameterOperation(
-                                    targetID: floatNode.id,
-                                    source: .slider,
-                                    value: .absolute(value),
-                                    frameIndex: operationFrameIndex,
-                                    smoothing: .init()
-                                )
-                            )
-                        }
-                    ),
-                    range: floatNode.range,
-                    enabled: .constant(true),
-                    onChanged: {},
-                    showToggle: false
-                )
+            ZStack {
+                // ── FRONT: Normal parameter slider ──
+                if !isFlipped {
+                    frontFace(floatNode: floatNode)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                }
 
-                if floatNode.isGestureMappable, let formulaBinding = floatGestureBinding {
+                // ── BACK: Gesture sensitivity slider ──
+                if isFlipped {
+                    backFace(floatNode: floatNode)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: isFlipped)
+            .onAppear {
+                sensitivityValue = GestureSensitivityStore.shared.sensitivity(for: floatNode.id)
+            }
+        }
+    }
+
+    // MARK: - Front Face (Parameter Slider)
+
+    @ViewBuilder
+    private func frontFace(floatNode: FloatParameterNode) -> some View {
+        HStack(spacing: 4) {
+            EffectSliderRow(
+                icon: floatNode.icon,
+                label: floatNode.name,
+                value: Binding<Float>(
+                    get: { floatNode.readValue(cache) },
+                    set: { value in
+                        cache.dispatchParameterOperation(
+                            ParameterOperation(
+                                targetID: floatNode.id,
+                                source: .slider,
+                                value: .absolute(value),
+                                frameIndex: operationFrameIndex,
+                                smoothing: .init()
+                            )
+                        )
+                    }
+                ),
+                range: floatNode.range,
+                enabled: .constant(true),
+                onChanged: {},
+                showToggle: false
+            )
+
+            if floatNode.isGestureMappable {
+                if let formulaBinding = floatGestureBinding {
                     Menu {
                         ForEach(FingerPair.allCases, id: \.self) { pair in
                             Button {
@@ -124,8 +154,88 @@ private struct ParameterNodeRow: View {
                     }
                     .help("Assign hand gesture")
                 }
+
+                // Flip to sensitivity
+                Button {
+                    isFlipped = true
+                } label: {
+                    Image(systemName: sensitivityIsCustom ? "gauge.with.dots.needle.67percent" : "gauge.with.dots.needle.50percent")
+                        .font(.caption)
+                        .foregroundStyle(sensitivityIsCustom ? .orange : .tertiary)
+                        .frame(width: 20)
+                }
+                .buttonStyle(.borderless)
+                .help("Adjust gesture sensitivity")
             }
         }
+    }
+
+    // MARK: - Back Face (Sensitivity Slider)
+
+    @ViewBuilder
+    private func backFace(floatNode: FloatParameterNode) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "gauge.with.dots.needle.67percent")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .frame(width: 16)
+
+            Text("Sensitivity")
+                .font(.subheadline)
+                .foregroundStyle(.orange)
+                .frame(width: 80, alignment: .leading)
+                .lineLimit(1)
+
+            Slider(value: $sensitivityValue,
+                   in: GestureSensitivityStore.range.lowerBound...GestureSensitivityStore.range.upperBound)
+                .tint(.orange)
+                .onChange(of: sensitivityValue) { _, newVal in
+                    GestureSensitivityStore.shared.setSensitivity(newVal, for: floatNode.id)
+                }
+
+            Text(String(format: "%.1fx", sensitivityValue))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36)
+
+            // Reset sensitivity to default
+            Button {
+                sensitivityValue = GestureSensitivityStore.defaultSensitivity
+                GestureSensitivityStore.shared.resetSensitivity(for: floatNode.id)
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+            }
+            .buttonStyle(.borderless)
+            .help("Reset sensitivity to default")
+
+            // Flip back to parameter
+            Button {
+                isFlipped = false
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+            }
+            .buttonStyle(.borderless)
+            .help("Back to parameter")
+        }
+        .frame(height: 32)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.orange.opacity(0.06))
+        )
+    }
+
+    // MARK: - Helpers
+
+    private var sensitivityIsCustom: Bool {
+        abs(GestureSensitivityStore.shared.sensitivity(for: node.id)
+            - GestureSensitivityStore.defaultSensitivity) > 0.01
     }
 
     private var floatGestureBinding: GestureActionBinding? {

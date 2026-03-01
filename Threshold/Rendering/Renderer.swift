@@ -859,7 +859,8 @@ actor Renderer {
                 let rendered = bbrot.renderFrame(
                     commandBuffer: commandBuffer,
                     drawable: drawable,
-                    time: bbrotTime
+                    time: bbrotTime,
+                    settingsSnapshot: settingsSnapshot
                 )
                 
                 if rendered {

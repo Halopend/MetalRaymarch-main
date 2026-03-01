@@ -294,7 +294,9 @@ kernel void buddhabrotNormalizeRGB(
 struct BuddhabrotVertexOut {
     float4 position [[position]];
     float2 texCoord;
-    uint   viewIndex; // Eye index from vertex amplification
+    uint   viewIndex [[flat]];                            // Eye index for uniform selection (not interpolated)
+    uint   viewportIndex [[viewport_array_index]];        // Routes to correct eye viewport
+    uint   renderTargetIndex [[render_target_array_index]]; // Routes to correct eye texture layer
 };
 
 vertex BuddhabrotVertexOut buddhabrotVertex(
@@ -317,9 +319,10 @@ vertex BuddhabrotVertexOut buddhabrotVertex(
     BuddhabrotVertexOut out;
     out.position = float4(positions[vertexID], 0.0, 1.0);
     out.texCoord = texCoords[vertexID];
-    // Keep eye selection as a plain varying. Render-target routing is handled by
-    // setVertexAmplificationCount() mappings in the encoder.
     out.viewIndex = ampId;
+    // Base index 0; vertex amplification mapping offsets route to correct eye
+    out.viewportIndex = 0;
+    out.renderTargetIndex = 0;
     return out;
 }
 

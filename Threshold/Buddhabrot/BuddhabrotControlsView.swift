@@ -52,9 +52,11 @@ struct BuddhabrotControlsView: View {
                                 Text("128³").tag(128)
                                 Text("192³").tag(192)
                                 Text("256³").tag(256)
+                                Text("512³").tag(512)
+                                Text("756³").tag(756)
                             }
-                            .pickerStyle(.segmented)
-                            .frame(width: 240)
+                            .pickerStyle(.menu)
+                            .frame(width: 140)
                         }
                         
                         Button("Clear & Restart") {

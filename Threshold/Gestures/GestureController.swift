@@ -561,7 +561,8 @@ final class GestureController {
                     digit: digit,
                     state: &fingerGestureState[digit]!,
                     currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
-                    range: node.range
+                    range: node.range,
+                    parameterID: node.id
                 ) { newValue in
                     let op = ParameterOperation(
                         targetID: node.id,
@@ -679,7 +680,8 @@ final class GestureController {
             digit: digit,
             state: &fingerGestureState[digit]!,
             currentTarget: currentTarget,
-            range: range
+            range: range,
+            parameterID: node.id
         ) { newValue in
             let targetValue: Float
             if settings.isAnimationPlaying {
@@ -728,7 +730,8 @@ final class GestureController {
             digit: digit,
             state: &fingerGestureState[digit]!,
             currentTarget: settings.effectiveTargetFractalScale,
-            range: ranges.fractalScale
+            range: ranges.fractalScale,
+            parameterID: "core.targetFractalScale"
         ) { newValue in
             let targetValue: Float
             if settings.isAnimationPlaying {
@@ -927,12 +930,15 @@ final class GestureController {
     ///   - state: The gesture state to track
     ///   - currentTarget: The current target value (read from RenderSettings)
     ///   - range: The valid range for the parameter
+    ///   - parameterID: Optional parameter node ID for per-parameter sensitivity lookup.
+    ///     When nil, no per-parameter sensitivity is applied (spatial 1:1 default).
     ///   - setTarget: Closure to set the new target value
     private func processTwoHandGesture(
         digit: Int,
         state: inout TwoHandGestureState,
         currentTarget: Float,
         range: ClosedRange<Float>,
+        parameterID: String? = nil,
         setTarget: (Float) -> Void
     ) {
         guard let settings = renderSettings else { return }
@@ -1019,7 +1025,10 @@ final class GestureController {
                 // Logarithmic scaling: 0m drop = 1x, 0.5m drop = 10x slower, 1m drop = 100x slower
                 let verticalScaleFactor = pow(10.0, -2.0 * normalizedDrop)  // Range: 1.0 down to 0.01
                 
-                let sensitivityMultiplier = baseSensitivityMultiplier * verticalScaleFactor
+                // Per-parameter sensitivity: lets users tune how much this specific
+                // parameter changes per meter of hand separation.
+                let perParamSens = parameterID.map { GestureSensitivityStore.shared.sensitivity(for: $0) } ?? 1.0
+                let sensitivityMultiplier = baseSensitivityMultiplier * verticalScaleFactor * perParamSens
                 
                 let rangeSpan = range.upperBound - range.lowerBound
                 let distSpan = max(maxHandDistance - minHandDistance, 0.001)
@@ -1194,7 +1203,13 @@ final class GestureController {
             // Apply translation (world space) to target.
             // Direct write (intentional dispatcher bypass) — position is a SIMD3 vector,
             // not a scalar parameter. See grab gesture for rationale.
-            accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity
+            //
+            // Auto-scale by 1/detailScale so translation speed stays perceptually
+            // constant regardless of zoom level. When zoomed in (small detailScale)
+            // the fractal features are larger on screen, so hand movement needs to
+            // produce proportionally more world-space translation.
+            let zoomCompensation = 1.0 / max(settings.detailScale, 0.01)
+            accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition
             } else {

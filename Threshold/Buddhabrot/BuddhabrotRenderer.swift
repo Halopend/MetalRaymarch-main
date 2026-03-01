@@ -115,6 +115,10 @@ final class BuddhabrotRenderer {
     private var accumulationTime: Float = 0
     private var warnedAboutMissingPipelines = false
     private var currentUseRGBMode: Bool = false
+    private var volumePlacementAnchorTransform: matrix_float4x4?
+    private var volumePlacementAnchorUserPosition: SIMD3<Float>?
+    private var volumePlacementAnchorWorldRotation: simd_quatf?
+    private var volumePlacementAnchorDetailScale: Float?
     
     // MARK: - Initialization
     
@@ -454,7 +458,8 @@ final class BuddhabrotRenderer {
     func encodeRayMarch(
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
-        time: Float
+        time: Float,
+        settingsSnapshot: RenderSettingsSnapshot
     ) -> Bool {
         guard let pipeline = rayMarchPipeline,
               let depthState = depthStencilState,
@@ -475,18 +480,42 @@ final class BuddhabrotRenderer {
         // Volume world transform (centered in front of user, optionally rotating)
         var volumeWorld = matrix_identity_float4x4
         
-        // Place volume in front of the device anchor
-        let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
-        let forward = -SIMD3<Float>(deviceTransform.columns.2.x, deviceTransform.columns.2.y, deviceTransform.columns.2.z)
-        let devicePos = SIMD3<Float>(deviceTransform.columns.3.x, deviceTransform.columns.3.y, deviceTransform.columns.3.z)
-        let volumeCenter = devicePos + forward * settings.volumeDistance
+        // Use live pose for per-eye view matrices (head-tracked rendering)
+        let liveDeviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+
+        // Anchor volume placement once in world space so it doesn't head-lock.
+        if volumePlacementAnchorTransform == nil, let deviceAnchor = drawable.deviceAnchor {
+            volumePlacementAnchorTransform = deviceAnchor.originFromAnchorTransform
+            volumePlacementAnchorUserPosition = settingsSnapshot.position
+            volumePlacementAnchorWorldRotation = settingsSnapshot.worldRotation
+            volumePlacementAnchorDetailScale = max(settingsSnapshot.detailScale, 1e-6)
+        }
+        let placementAnchor = volumePlacementAnchorTransform ?? liveDeviceTransform
+
+        // Place volume in front of the anchored transform
+        let forward = -SIMD3<Float>(placementAnchor.columns.2.x, placementAnchor.columns.2.y, placementAnchor.columns.2.z)
+        let devicePos = SIMD3<Float>(placementAnchor.columns.3.x, placementAnchor.columns.3.y, placementAnchor.columns.3.z)
+        let baseCenter = devicePos + forward * settings.volumeDistance
+
+        // Apply shared gesture transform as deltas from the anchor state so
+        // switching into Buddhabrot does not inherit an unexpected absolute offset.
+        let anchorPosition = volumePlacementAnchorUserPosition ?? settingsSnapshot.position
+        let positionDelta = settingsSnapshot.position - anchorPosition
+
+        let anchorRotation = volumePlacementAnchorWorldRotation ?? settingsSnapshot.worldRotation
+        let rotationDelta = settingsSnapshot.worldRotation * anchorRotation.inverse
+
+        let anchorDetailScale = volumePlacementAnchorDetailScale ?? max(settingsSnapshot.detailScale, 1e-6)
+        let detailScaleDelta = max(0.05, min(20.0, settingsSnapshot.detailScale / max(anchorDetailScale, 1e-6)))
+
+        let volumeCenter = baseCenter + positionDelta
+        let userRotation = matrix4x4_from_quaternion(rotationDelta)
         
-        // Scale
-        let s = settings.volumeScale
-        volumeWorld.columns.0 = SIMD4<Float>(s, 0, 0, 0)
-        volumeWorld.columns.1 = SIMD4<Float>(0, s, 0, 0)
-        volumeWorld.columns.2 = SIMD4<Float>(0, 0, s, 0)
-        volumeWorld.columns.3 = SIMD4<Float>(volumeCenter.x, volumeCenter.y, volumeCenter.z, 1)
+        // Scale + gesture detail-scale delta + placement
+        let s = settings.volumeScale * detailScaleDelta
+        let translation = matrix4x4_translation(volumeCenter.x, volumeCenter.y, volumeCenter.z)
+        let scale = matrix4x4_scale(s, s, s)
+        volumeWorld = translation * userRotation * scale
         
         // Optional auto-rotation
         if settings.autoRotate {
@@ -504,7 +533,7 @@ final class BuddhabrotRenderer {
         
         for viewIndex in 0..<drawable.views.count {
             let view = drawable.views[viewIndex]
-            let viewTransform = (deviceTransform * view.transform).inverse
+            let viewTransform = (liveDeviceTransform * view.transform).inverse
             let projection = drawable.computeProjection(viewIndex: viewIndex)
             
             var u = BuddhabrotRayMarchUniforms()
@@ -541,26 +570,25 @@ final class BuddhabrotRenderer {
         // Configure render pass to draw into the drawable's color/depth textures
         let renderPassDesc = MTLRenderPassDescriptor()
         
+        renderPassDesc.colorAttachments[0].texture = drawable.colorTextures[0]
+        renderPassDesc.colorAttachments[0].loadAction = .clear
+        renderPassDesc.colorAttachments[0].storeAction = .store
+        renderPassDesc.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        renderPassDesc.depthAttachment.texture = drawable.depthTextures[0]
+        renderPassDesc.depthAttachment.loadAction = .clear
+        renderPassDesc.depthAttachment.storeAction = .store
+        renderPassDesc.depthAttachment.clearDepth = 0.0 // Reverse-Z: near=1, far=0
+        
+        // Apply the system foveated rasterization rate map so the compositor
+        // correctly reconstructs the per-eye images. Without this the pixel
+        // layout doesn't match what the compositor expects and stereo breaks.
+        if let systemRateMap = drawable.rasterizationRateMaps.first {
+            renderPassDesc.rasterizationRateMap = systemRateMap
+        }
+        
         // Use layered rendering for stereo
         if drawable.views.count > 1 {
-            renderPassDesc.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDesc.colorAttachments[0].loadAction = .clear
-            renderPassDesc.colorAttachments[0].storeAction = .store
-            renderPassDesc.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-            renderPassDesc.depthAttachment.texture = drawable.depthTextures[0]
-            renderPassDesc.depthAttachment.loadAction = .clear
-            renderPassDesc.depthAttachment.storeAction = .store
-            renderPassDesc.depthAttachment.clearDepth = 0.0 // Reverse-Z: near=1, far=0
             renderPassDesc.renderTargetArrayLength = drawable.views.count
-        } else {
-            renderPassDesc.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDesc.colorAttachments[0].loadAction = .clear
-            renderPassDesc.colorAttachments[0].storeAction = .store
-            renderPassDesc.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-            renderPassDesc.depthAttachment.texture = drawable.depthTextures[0]
-            renderPassDesc.depthAttachment.loadAction = .clear
-            renderPassDesc.depthAttachment.storeAction = .store
-            renderPassDesc.depthAttachment.clearDepth = 0.0
         }
         
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
@@ -604,7 +632,8 @@ final class BuddhabrotRenderer {
     func renderFrame(
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
-        time: Float
+        time: Float,
+        settingsSnapshot: RenderSettingsSnapshot
     ) -> Bool {
         frameCounter += 1
         
@@ -619,7 +648,12 @@ final class BuddhabrotRenderer {
         }
         
         // Phase 2b: Volume ray march
-        let drewVolume = encodeRayMarch(commandBuffer: commandBuffer, drawable: drawable, time: time)
+        let drewVolume = encodeRayMarch(
+            commandBuffer: commandBuffer,
+            drawable: drawable,
+            time: time,
+            settingsSnapshot: settingsSnapshot
+        )
 
         return drewVolume
     }
