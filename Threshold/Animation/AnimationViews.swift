@@ -1042,6 +1042,7 @@ struct KeyframeEditorView: View {
 /// Compact playback controls to embed in main UI
 struct AnimationPlaybackControls: View {
     @Bindable var animationManager: AnimationManager
+    @State private var editingKeyframe: AnimationKeyframe?
     
     var body: some View {
         VStack(spacing: 8) {
@@ -1056,18 +1057,18 @@ struct AnimationPlaybackControls: View {
                         .foregroundStyle(.secondary)
                 }
                 
-                // Progress bar
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(.secondary.opacity(0.3))
-                        Rectangle()
-                            .fill(.blue)
-                            .frame(width: geo.size.width * progressFraction)
+                // ── Keyframe Timeline ──
+                KeyframeTimelineView(
+                    scene: scene,
+                    playhead: animationManager.playhead,
+                    onEditKeyframe: { keyframe in
+                        editingKeyframe = keyframe
+                    },
+                    onJumpToKeyframe: { index in
+                        animationManager.jumpToKeyframe(index)
                     }
-                }
-                .frame(height: 4)
-                .clipShape(Capsule())
+                )
+                .frame(height: 44)
                 
                 // Controls
                 HStack(spacing: 16) {
@@ -1134,6 +1135,20 @@ struct AnimationPlaybackControls: View {
         .padding()
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .sheet(item: $editingKeyframe) { keyframe in
+            KeyframeEditorView(
+                keyframe: keyframe,
+                onSave: { updated in
+                    if var scene = animationManager.currentScene,
+                       let idx = scene.keyframes.firstIndex(where: { $0.id == keyframe.id }) {
+                        scene.keyframes[idx] = updated
+                        animationManager.updateScene(scene)
+                    }
+                    editingKeyframe = nil
+                },
+                onCancel: { editingKeyframe = nil }
+            )
+        }
     }
     
     private var progressText: String {
@@ -1156,16 +1171,152 @@ struct AnimationPlaybackControls: View {
         return time
     }
     
-    private var progressFraction: CGFloat {
-        guard let scene = animationManager.currentScene,
-              scene.totalDuration > 0 else { return 0 }
-        return CGFloat(currentTime / scene.totalDuration)
-    }
-    
     private func formatTime(_ time: TimeInterval) -> String {
         let seconds = Int(time) % 60
         let tenths = Int((time - Double(Int(time))) * 10)
         return "\(seconds).\(tenths)"
+    }
+}
+
+// MARK: - Keyframe Timeline View
+
+/// Visual timeline showing keyframe markers positioned proportionally along a track.
+/// Supports tap to jump and long-press to edit.
+struct KeyframeTimelineView: View {
+    let scene: AnimationScene
+    let playhead: AnimationPlayhead
+    let onEditKeyframe: (AnimationKeyframe) -> Void
+    let onJumpToKeyframe: (Int) -> Void
+    
+    @State private var longPressKeyframeID: UUID?
+    
+    /// Cumulative time at the start of each keyframe segment
+    private var cumulativeTimes: [TimeInterval] {
+        var times: [TimeInterval] = []
+        var t: TimeInterval = 0
+        for kf in scene.keyframes {
+            times.append(t)
+            t += kf.duration
+        }
+        return times
+    }
+    
+    private var totalDuration: TimeInterval {
+        scene.totalDuration
+    }
+    
+    /// Current playhead position as fraction 0…1
+    private var playheadFraction: CGFloat {
+        guard totalDuration > 0 else { return 0 }
+        var time: TimeInterval = 0
+        let idx = playhead.currentKeyframeIndex
+        for i in 0..<min(idx, scene.keyframes.count) {
+            time += scene.keyframes[i].duration
+        }
+        time += playhead.elapsedInSegment
+        return CGFloat(min(time / totalDuration, 1.0))
+    }
+    
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let trackY = h * 0.58
+            let trackHeight: CGFloat = 4
+            let markerRadius: CGFloat = 7
+            
+            ZStack(alignment: .topLeading) {
+                // ── Track background ──
+                Capsule()
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(height: trackHeight)
+                    .offset(y: trackY - trackHeight / 2)
+                
+                // ── Played portion ──
+                Capsule()
+                    .fill(Color.blue.opacity(0.6))
+                    .frame(width: max(0, w * playheadFraction), height: trackHeight)
+                    .offset(y: trackY - trackHeight / 2)
+                
+                // ── Playhead indicator ──
+                Circle()
+                    .fill(Color.blue)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: .blue.opacity(0.5), radius: 3)
+                    .offset(x: w * playheadFraction - 4, y: trackY - 4)
+                
+                // ── Keyframe markers + labels ──
+                ForEach(Array(scene.keyframes.enumerated()), id: \.element.id) { index, keyframe in
+                    let fraction = totalDuration > 0 ? CGFloat(cumulativeTimes[index] / totalDuration) : CGFloat(index) / CGFloat(max(scene.keyframes.count - 1, 1))
+                    let isActive = index == playhead.currentKeyframeIndex
+                    let isHeld = longPressKeyframeID == keyframe.id
+                    let x = w * fraction
+                    
+                    VStack(spacing: 2) {
+                        // Keyframe name label (above the track)
+                        Text(abbreviatedName(keyframe.name, index: index))
+                            .font(.system(size: 9, weight: isActive ? .bold : .regular))
+                            .foregroundStyle(isActive ? .primary : .secondary)
+                            .lineLimit(1)
+                            .fixedSize()
+                        
+                        // Marker diamond
+                        Image(systemName: "diamond.fill")
+                            .font(.system(size: isHeld ? 14 : (isActive ? 12 : 10)))
+                            .foregroundStyle(
+                                isHeld ? Color.orange :
+                                isActive ? Color.blue :
+                                Color.secondary.opacity(0.7)
+                            )
+                            .scaleEffect(isHeld ? 1.3 : 1.0)
+                            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isHeld)
+                    }
+                    .offset(x: x - 14, y: 0)
+                    .frame(width: 28)
+                    .contentShape(Rectangle().size(width: 32, height: h))
+                    .onTapGesture {
+                        onJumpToKeyframe(index)
+                    }
+                    .onLongPressGesture(minimumDuration: 0.4, pressing: { pressing in
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            longPressKeyframeID = pressing ? keyframe.id : nil
+                        }
+                    }) {
+                        onEditKeyframe(keyframe)
+                    }
+                }
+                
+                // ── Duration labels between markers ──
+                if scene.keyframes.count >= 2 {
+                    ForEach(1..<scene.keyframes.count, id: \.self) { index in
+                        let prevFrac = totalDuration > 0 ? CGFloat(cumulativeTimes[index - 1] / totalDuration) : CGFloat(index - 1) / CGFloat(max(scene.keyframes.count - 1, 1))
+                        let curFrac = totalDuration > 0 ? CGFloat(cumulativeTimes[index] / totalDuration) : CGFloat(index) / CGFloat(max(scene.keyframes.count - 1, 1))
+                        let midX = w * (prevFrac + curFrac) / 2
+                        let segWidth = w * (curFrac - prevFrac)
+                        
+                        if segWidth > 30 {
+                            Text(formatSegmentDuration(scene.keyframes[index].duration))
+                                .font(.system(size: 8))
+                                .foregroundStyle(.tertiary)
+                                .offset(x: midX - 12, y: trackY + 6)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func abbreviatedName(_ name: String, index: Int) -> String {
+        if name.count <= 6 { return name }
+        // Use first word, or truncate
+        let firstWord = name.split(separator: " ").first.map(String.init) ?? name
+        if firstWord.count <= 6 { return firstWord }
+        return String(name.prefix(5)) + "…"
+    }
+    
+    private func formatSegmentDuration(_ d: TimeInterval) -> String {
+        if d < 10 { return String(format: "%.1fs", d) }
+        return String(format: "%.0fs", d)
     }
 }
 

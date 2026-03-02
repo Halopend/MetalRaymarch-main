@@ -234,7 +234,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _bloomEffect: BloomEffect = .off
     private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     private var _gradientCycleEffect: GradientCycleEffect = .off
-    private var _polarRotationEffect: PolarRotationEffect = .off
+    private var _polarRotationEffect: PolarRotationEffect = PolarRotationEffect(direction: .clockwise, speed: 0.2)
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
     private var _beatFlashEffect: BeatFlashEffect = .off
     
@@ -1466,7 +1466,7 @@ final class RenderSettings: @unchecked Sendable {
 
             // Accumulate polar rotation angle when enabled and fractal supports it
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
-                _polarRotationAccum += deltaTime * _polarRotationEffect.speed * _polarRotationEffect.amplitude
+                _polarRotationAccum += deltaTime * _polarRotationEffect.speed * _polarRotationEffect.direction.sign
             }
             
             // Handle ongoing transition
@@ -1881,15 +1881,23 @@ final class RenderSettings: @unchecked Sendable {
                 _velocityPosition = .zero
                 
                 // Safety bubble is NOT driven by animation — still interpolate it
-                _safetyBubbleStrength = smoothDamp(
-                    current: _safetyBubbleStrength,
-                    target: _safetyBubbleStrengthTarget,
-                    velocity: &_safetyBubbleStrengthVelocity,
-                    smoothTime: 0.25,
-                    maxSpeed: 8.0,
-                    deltaTime: clampedDT
-                )
-                _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
+                // OPTIMIZATION: When blend is 100%, snap strength to 1.0 directly.
+                // This ensures the shader gets exactly 1.0 and takes the fast path
+                // (skipping the per-pixel mix in applySafetyBubble, saving ~6fps).
+                if _safetyBubbleEnabled && _safetyBubbleBlend >= 1.0 {
+                    _safetyBubbleStrength = 1.0
+                    _safetyBubbleStrengthVelocity = 0.0
+                } else {
+                    _safetyBubbleStrength = smoothDamp(
+                        current: _safetyBubbleStrength,
+                        target: _safetyBubbleStrengthTarget,
+                        velocity: &_safetyBubbleStrengthVelocity,
+                        smoothTime: 0.25,
+                        maxSpeed: 8.0,
+                        deltaTime: clampedDT
+                    )
+                    _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
+                }
                 
                 // Keep geometry state machine in dynamic mode during animation
                 _geometryState = .dynamic
@@ -2042,15 +2050,23 @@ final class RenderSettings: @unchecked Sendable {
             
             // Safety bubble strength: smooth ramp on enable/disable
             // Uses slower smoothTime for visible temporal fade (~0.3s)
-            _safetyBubbleStrength = smoothDamp(
-                current: _safetyBubbleStrength,
-                target: _safetyBubbleStrengthTarget,
-                velocity: &_safetyBubbleStrengthVelocity,
-                smoothTime: 0.25,
-                maxSpeed: 8.0,
-                deltaTime: clampedDT
-            )
-            _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
+            // OPTIMIZATION: When blend is 100%, snap strength to 1.0 directly.
+            // This ensures the shader gets exactly 1.0 and takes the fast path
+            // (skipping the per-pixel mix in applySafetyBubble, saving ~6fps).
+            if _safetyBubbleEnabled && _safetyBubbleBlend >= 1.0 {
+                _safetyBubbleStrength = 1.0
+                _safetyBubbleStrengthVelocity = 0.0
+            } else {
+                _safetyBubbleStrength = smoothDamp(
+                    current: _safetyBubbleStrength,
+                    target: _safetyBubbleStrengthTarget,
+                    velocity: &_safetyBubbleStrengthVelocity,
+                    smoothTime: 0.25,
+                    maxSpeed: 8.0,
+                    deltaTime: clampedDT
+                )
+                _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
+            }
 
             // Smooth interpolation for world rotation (slerp) and grab scale (exp lerp)
             let rotLerpT = 1.0 - exp(-12.0 * clampedDT)  // Same speed as main smoothing

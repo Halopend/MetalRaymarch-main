@@ -981,226 +981,34 @@ enum DefaultScenes {
         allIDs.contains(id)
     }
     
-    // ─── Scene One ───────────────────────────────────────────────────────
+    // ─── Bundle-loaded default animations ────────────────────────────────
+    // Default scenes are stored as .threshanim JSON files in
+    // Examples/Animations (bundled as app resources). This keeps the
+    // animation data in the same format as user exports and avoids
+    // hardcoding hundreds of lines of keyframe construction in Swift.
     
-    /// A gentle introductory animation that showcases the fractal opening
-    /// and closing through several interesting parameter states.
-    static func sceneOne() -> AnimationScene {
-        var scene = AnimationScene(id: sceneOneID, name: "Scene One")
-        scene.isLooping = true
-        scene.keyframes = [
-            AnimationKeyframe(
-                name: "Origin",
-                duration: 0,
-                minDistance: 0.8,
-                foldingLimit: 1.0,
-                sphereRadius: 0.5,
-                fractalScale: 2.8,
-                position: .zero,
-                easingType: .bezier,
-                bezierHandle: .easeInOut
-            ),
-            AnimationKeyframe(
-                name: "Unfold",
-                duration: 4.0,
-                minDistance: 1.6,
-                foldingLimit: 2.5,
-                sphereRadius: 0.7,
-                fractalScale: 2.4,
-                position: SIMD3<Float>(0.05, 0.02, 0.0),
-                easingType: .bezier,
-                bezierHandle: .easeInOut
-            ),
-            AnimationKeyframe(
-                name: "Deep",
-                duration: 3.5,
-                minDistance: 0.5,
-                foldingLimit: 0.8,
-                sphereRadius: 0.35,
-                fractalScale: 3.0,
-                position: SIMD3<Float>(0.0, 0.04, 0.03),
-                easingType: .bezier,
-                bezierHandle: .easeOut
-            ),
-            AnimationKeyframe(
-                name: "Bloom",
-                duration: 4.0,
-                minDistance: 2.0,
-                foldingLimit: 4.0,
-                sphereRadius: 1.0,
-                fractalScale: 2.2,
-                position: SIMD3<Float>(-0.03, 0.0, 0.02),
-                easingType: .bezier,
-                bezierHandle: .easeInOut
-            ),
-            AnimationKeyframe(
-                name: "Return",
-                duration: 3.5,
-                minDistance: 0.8,
-                foldingLimit: 1.0,
-                sphereRadius: 0.5,
-                fractalScale: 2.8,
-                position: .zero,
-                easingType: .bezier,
-                bezierHandle: .easeIn
-            ),
-        ]
-        return scene
-    }
-    
-    /// All built-in scenes (add more here in the future)
-    private static let cachedScenes: [AnimationScene] = [ambientBlur()]
+    /// All built-in scenes, decoded once from bundled .threshanim files.
+    private static let cachedScenes: [AnimationScene] = {
+        let fileNames = ["Ambient_Blur"]  // Add more default scene filenames here
+        var scenes: [AnimationScene] = []
+        let decoder = JSONDecoder()
+        for name in fileNames {
+            guard let url = Bundle.main.url(forResource: name, withExtension: "threshanim") else {
+                print("⚠️ DefaultScenes: missing bundled file \(name).threshanim")
+                continue
+            }
+            do {
+                let data = try Data(contentsOf: url)
+                let scene = try decoder.decode(AnimationScene.self, from: data)
+                scenes.append(scene)
+            } catch {
+                print("⚠️ DefaultScenes: failed to decode \(name).threshanim — \(error)")
+            }
+        }
+        return scenes
+    }()
 
     static func all() -> [AnimationScene] {
         cachedScenes
-    }
-    
-    // ─── Ambient Blur ────────────────────────────────────────────────────
-    
-    /// A slow, zoomed-in drift through a Mandelbox with soft lighting effects.
-    /// Designed as a calm ambient visual — pairs well with music.
-    static func ambientBlur() -> AnimationScene {
-        let bezier = BezierHandle.easeInOut
-        let bloom = BloomEffect(enabled: true, strength: 0.1)
-        let fog = FogEffect(enabled: true, intensity: 0.05)
-        let glow = GlowEffect(enabled: true, intensity: 0.2)
-        let gradCycle = GradientCycleEffect(enabled: true, speed: 0.13007735, smoothLoop: true)
-        let hueRot = HueRotationEffect(enabled: true, speed: 0.06, intensity: 0.6)
-        let pulse = PulseEffect(enabled: true, speed: 0.46227682, amount: 0.1637325)
-        let lightingMode = LightingMode.animated
-        let lightingPreset = LightingPreset.custom
-        let colorScheme: ColorScheme = .aurora
-        let foldingLimit: Float = 0.5403083
-        let sphereRadius: Float = 0.31832752
-        let fractalScale: Float = 3.0075026
-        let worldRot = simd_quatf(ix: -0.026562719, iy: 0.046736136, iz: 0.0012432374, r: 0.9985532)
-        
-        var scene = AnimationScene(id: ambientBlurID, name: "Ambient Blur")
-        scene.isLooping = true
-        scene.fractalType = .mandelbox
-        scene.colorScheme = .aurora
-        scene.safetyBubbleEnabled = true
-        scene.safetyBubbleRadius = 1.3608453
-        scene.safetyBubbleShape = 0.5
-        scene.safetyBubbleBlend = 0.097609855
-        
-        scene.keyframes = [
-            AnimationKeyframe(
-                name: "Start",
-                duration: 0,
-                minDistance: 12.501993,
-                foldingLimit: foldingLimit,
-                sphereRadius: sphereRadius,
-                fractalScale: fractalScale,
-                position: SIMD3<Float>(0.9354161, 1.3563383, 9.91849),
-                detailScale: 15.154218,
-                worldRotation: worldRot,
-                colorScheme: colorScheme,
-                lightingMode: lightingMode,
-                lightingPreset: lightingPreset,
-                hueRotationEffect: hueRot,
-                pulseEffect: pulse,
-                glowEffect: glow,
-                bloomEffect: bloom,
-                fogEffect: fog,
-                gradientCycleEffect: gradCycle,
-                easingType: .bezier,
-                bezierHandle: bezier,
-                formulaParamValues: [12.501993, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
-            ),
-            AnimationKeyframe(
-                name: "Drift In",
-                duration: 10.0,
-                minDistance: 9.129262,
-                foldingLimit: foldingLimit,
-                sphereRadius: sphereRadius,
-                fractalScale: fractalScale,
-                position: SIMD3<Float>(0.9490332, 1.3042083, 9.905054),
-                detailScale: 15.154218,
-                worldRotation: worldRot,
-                colorScheme: colorScheme,
-                lightingMode: lightingMode,
-                lightingPreset: lightingPreset,
-                hueRotationEffect: hueRot,
-                pulseEffect: pulse,
-                glowEffect: glow,
-                bloomEffect: bloom,
-                fogEffect: fog,
-                gradientCycleEffect: gradCycle,
-                easingType: .bezier,
-                bezierHandle: bezier,
-                formulaParamValues: [9.129262, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
-            ),
-            AnimationKeyframe(
-                name: "Close",
-                duration: 10.0,
-                minDistance: 5.5996447,
-                foldingLimit: foldingLimit,
-                sphereRadius: sphereRadius,
-                fractalScale: fractalScale,
-                position: SIMD3<Float>(0.82181454, 1.2051183, 8.741661),
-                detailScale: 12.866578,
-                worldRotation: worldRot,
-                colorScheme: colorScheme,
-                lightingMode: lightingMode,
-                lightingPreset: lightingPreset,
-                hueRotationEffect: hueRot,
-                pulseEffect: pulse,
-                glowEffect: glow,
-                bloomEffect: bloom,
-                fogEffect: fog,
-                gradientCycleEffect: gradCycle,
-                easingType: .bezier,
-                bezierHandle: bezier,
-                formulaParamValues: [5.5996447, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
-            ),
-            AnimationKeyframe(
-                name: "Intimate",
-                duration: 10.0,
-                minDistance: 5.6121693,
-                foldingLimit: foldingLimit,
-                sphereRadius: sphereRadius,
-                fractalScale: fractalScale,
-                position: SIMD3<Float>(0.32280436, 0.90793455, 3.064736),
-                detailScale: 4.558007,
-                worldRotation: worldRot,
-                colorScheme: colorScheme,
-                lightingMode: lightingMode,
-                lightingPreset: lightingPreset,
-                hueRotationEffect: hueRot,
-                pulseEffect: pulse,
-                glowEffect: glow,
-                bloomEffect: bloom,
-                fogEffect: fog,
-                gradientCycleEffect: gradCycle,
-                easingType: .bezier,
-                bezierHandle: bezier,
-                formulaParamValues: [5.6121693, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
-            ),
-            AnimationKeyframe(
-                name: "Pull Back",
-                duration: 10.0,
-                minDistance: 3.6605718,
-                foldingLimit: foldingLimit,
-                sphereRadius: sphereRadius,
-                fractalScale: fractalScale,
-                position: SIMD3<Float>(0.6036046, 1.1748419, 6.128691),
-                detailScale: 8.68215,
-                worldRotation: worldRot,
-                colorScheme: colorScheme,
-                lightingMode: lightingMode,
-                lightingPreset: lightingPreset,
-                hueRotationEffect: hueRot,
-                pulseEffect: pulse,
-                glowEffect: glow,
-                bloomEffect: bloom,
-                fogEffect: fog,
-                gradientCycleEffect: gradCycle,
-                easingType: .bezier,
-                bezierHandle: bezier,
-                formulaParamValues: [3.6605718, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
-            ),
-        ]
-        return scene
     }
 }

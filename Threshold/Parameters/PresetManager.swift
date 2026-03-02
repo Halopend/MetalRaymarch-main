@@ -420,117 +420,65 @@ class PresetManager {
     }
 }
 
-// MARK: - Default Presets
+// MARK: - Default Presets (loaded from bundled .threshscene JSON files)
 extension PresetManager {
-    /// The default preset loaded when there is no saved state
-    static func metallicPinkPreset() -> FractalPreset {
-        var preset = FractalPreset(name: "Metallic Pink")
-        preset.fractalType = .mandelbox
-        preset.colorScheme = .neonSunset
-        preset.colorSchemeSaturation = 1.5
-        preset.colorSchemeContrast = 1.02
-        preset.colorSchemeGamma = 0.75
-        preset.colorSchemeVibrance = 1.0
-        preset.colorSchemeCurve = -0.2481237
-        preset.colorSchemeShadows = -0.023361081
-        preset.colorSchemeHighlights = 0.3
-        preset.fractalIterations = 7
-        preset.maxRaySteps = 48
-        preset.fractalScale = 3.8917305
-        preset.foldingLimit = 0.98709714
-        preset.sphereRadius = 0.05
-        preset.minDistance = 1.3423144
-        preset.colorIterations = 16
-        preset.colorMix = 0.45099074
-        preset.scale = 1.0
-        preset.position = SIMD3<Float>(0.09840668, 1.4379398, -3.6177335)
-        preset.safetyBubbleEnabled = false
-        preset.safetyBubbleRadius = 1.8
-        // v2.0 modular lighting effects
-        preset.lightingMode = .staticLight
-        preset.lightingPreset = .atmospheric
-        preset.hueRotationEffect = HueRotationEffect(enabled: false, speed: 0.0, intensity: 0.5)
-        preset.pulseEffect = PulseEffect(enabled: true, speed: 0.46227682, amount: 0.1637325)
-        preset.glowEffect = GlowEffect(enabled: true, intensity: 0.18124515)
-        preset.bloomEffect = BloomEffect(enabled: true, strength: 0.7048401)
-        preset.fogEffect = FogEffect(enabled: true, intensity: 0.14822857)
-        return preset
+    
+    // ─── Bundle-loaded default scenes ────────────────────────────────────
+    // Built-in presets are stored as .threshscene JSON files in
+    // Examples/Scenes (bundled as app resources). This keeps the
+    // preset data in the same format as user exports and avoids
+    // hardcoding parameter values in Swift.
+    
+    /// Filenames (without extension) of bundled default scenes.
+    /// Add new defaults here — they will be auto-included on first launch.
+    private static let defaultSceneFiles = [
+        "Metallic_Pink",
+        "Bright_Preset",
+        "Orbit_Density"
+    ]
+    
+    /// Load a single preset from a bundled .threshscene file.
+    private static func loadBundledPreset(named fileName: String) -> FractalPreset? {
+        guard let url = Bundle.main.url(forResource: fileName, withExtension: "threshscene") else {
+            print("⚠️ DefaultPresets: missing bundled file \(fileName).threshscene")
+            return nil
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(FractalPreset.self, from: data)
+        } catch {
+            print("⚠️ DefaultPresets: failed to decode \(fileName).threshscene — \(error)")
+            return nil
+        }
     }
     
-    /// The default preset loaded when there is no saved state
+    /// The fallback preset for when no saved state exists.
+    /// Loaded from Bright_Preset.threshscene; falls back to a minimal inline
+    /// preset if the bundle file is somehow missing.
     static func brightPreset() -> FractalPreset {
+        if let preset = loadBundledPreset(named: "Bright_Preset") {
+            return preset
+        }
+        // Minimal inline fallback (should never be reached)
         var preset = FractalPreset(name: "Bright Preset")
         preset.fractalType = .mandelbox
         preset.colorScheme = .classic
-        preset.colorSchemeSaturation = 1.5
-        preset.colorSchemeContrast = 1.02
-        preset.colorSchemeGamma = 0.75
-        preset.colorSchemeVibrance = 1.0
-        preset.colorSchemeCurve = -0.3
-        preset.colorSchemeShadows = -0.007
-        preset.colorSchemeHighlights = 0.15
-        preset.fractalIterations = 7
-        preset.maxRaySteps = 48
         preset.fractalScale = 2.8
         preset.foldingLimit = 1.1646773
-        preset.sphereRadius = 0.05
         preset.minDistance = 0.8117829
-        preset.colorIterations = 15
-        preset.colorMix = 0.61749166
-        preset.scale = 1.0
         preset.position = SIMD3<Float>(0.10157842, 1.3497616, -3.3686383)
-        preset.safetyBubbleEnabled = false
-        preset.safetyBubbleRadius = 1.8
-        // v2.0 modular lighting effects
-        preset.lightingMode = .staticLight
-        preset.lightingPreset = .subtle
-        preset.hueRotationEffect = HueRotationEffect(enabled: true, speed: 0.059446618, intensity: 0.3)
-        preset.pulseEffect = PulseEffect(enabled: true, speed: 0.46227682, amount: 0.1637325)
-        preset.glowEffect = GlowEffect(enabled: false, intensity: 0.0)
-        preset.bloomEffect = BloomEffect(enabled: true, strength: 0.7048401)
-        preset.fogEffect = FogEffect(enabled: true, intensity: 0.14822857)
         return preset
     }
     
-    /// Add some built-in presets for users to start with
+    /// Add built-in presets from bundled .threshscene files if not already present
     func addBuiltInPresetsIfNeeded() {
-        func ensurePreset(named name: String, build: () -> FractalPreset) {
-            guard !presets.contains(where: { $0.name == name }) else { return }
-            presets.append(build())
+        for fileName in Self.defaultSceneFiles {
+            guard let preset = Self.loadBundledPreset(named: fileName) else { continue }
+            guard !presets.contains(where: { $0.name == preset.name }) else { continue }
+            presets.append(preset)
         }
-        
-        // Metallic Pink - the default launch preset
-        ensurePreset(named: "Metallic Pink") {
-            return PresetManager.metallicPinkPreset()
-        }
-        
-        // Bright Preset - the default launch preset
-        ensurePreset(named: "Bright Preset") {
-            return PresetManager.brightPreset()
-        }
-        
-        // Orbit Density (originally 3D Buddhabrot-style, now Mandelbox)
-        ensurePreset(named: "Orbit Density") {
-            var orbit = FractalPreset(name: "Orbit Density")
-            orbit.fractalType = .mandelbox
-            orbit.colorScheme = .nebula
-            orbit.colorSchemeSaturation = 2.2
-            orbit.colorSchemeContrast = 1.1
-            orbit.colorSchemeGamma = 0.6
-            orbit.fractalIterations = 10
-            orbit.maxRaySteps = 128
-            orbit.fractalScale = 2.4
-            orbit.foldingLimit = 1.1
-            orbit.sphereRadius = 0.6
-            orbit.minDistance = 0.7
-            orbit.colorIterations = 8
-            orbit.colorMix = 0.55
-            orbit.glowEffect = GlowEffect(enabled: true, intensity: 0.45)
-            orbit.scale = 1.0
-            orbit.position = SIMD3<Float>(0.0, 0.0, -1.4)
-            return orbit
-        }
-        
         scheduleSavePresets()
     }
     

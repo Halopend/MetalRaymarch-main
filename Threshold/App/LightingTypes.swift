@@ -237,9 +237,24 @@ struct GradientCycleEffect: LightingEffect {
 /// (Mandelbulb) and rotates the quaternion C-constant plane (Quaternion Julia).
 /// Only meaningful for fractal types that declare `.polarRotation` in their supported tags.
 struct PolarRotationEffect: LightingEffect {
-    var enabled: Bool = false
-    var speed: Float = 0.15         // Rotation speed in radians/second (0–1)
-    var amplitude: Float = 1.0      // Multiplier on the rotation angle (0–2, 1 = full sweep)
+    /// Direction of rotation (off / clockwise / counterclockwise).
+    /// Replaces the old `enabled` bool — `.off` means disabled.
+    var direction: PolarRotationDirection = .off
+    var speed: Float = 0.15         // Rotation speed (0–1)
+
+    /// Backward-compatible enabled accessor (true when direction != .off)
+    var enabled: Bool {
+        get { direction != .off }
+        set { direction = newValue ? .clockwise : .off }
+    }
+
+    /// Legacy amplitude — now derived from direction sign.
+    /// Reading returns 1.0 (cw), -1.0 (ccw), or 0 (off).
+    /// Writing is accepted silently for JSON backward compatibility.
+    var amplitude: Float {
+        get { direction.sign }
+        set { /* ignored — direction drives sign now */ }
+    }
 
     var primaryValue: Float {
         get { speed }
@@ -248,19 +263,90 @@ struct PolarRotationEffect: LightingEffect {
     static let primaryLabel = "Speed"
 
     static var off: PolarRotationEffect {
-        PolarRotationEffect(enabled: false, speed: 0.0, amplitude: 0.0)
+        PolarRotationEffect(direction: .off, speed: 0.0)
     }
 
     static var slow: PolarRotationEffect {
-        PolarRotationEffect(enabled: true, speed: 0.08, amplitude: 0.6)
+        PolarRotationEffect(direction: .clockwise, speed: 0.08)
     }
 
     static var medium: PolarRotationEffect {
-        PolarRotationEffect(enabled: true, speed: 0.15, amplitude: 1.0)
+        PolarRotationEffect(direction: .clockwise, speed: 0.15)
     }
 
     static var fast: PolarRotationEffect {
-        PolarRotationEffect(enabled: true, speed: 0.4, amplitude: 1.5)
+        PolarRotationEffect(direction: .clockwise, speed: 0.4)
+    }
+
+    // ── Codable ──────────────────────────────────────────────────────────
+    // Custom coding so we can read legacy files that have `enabled` + `amplitude`
+    // while writing the new `direction` key.
+
+    enum CodingKeys: String, CodingKey {
+        case direction, speed
+        // Legacy keys for reading old files
+        case enabled, amplitude
+    }
+
+    init(direction: PolarRotationDirection = .off, speed: Float = 0.15) {
+        self.direction = direction
+        self.speed = speed
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        speed = try c.decodeIfPresent(Float.self, forKey: .speed) ?? 0.15
+
+        // Prefer new `direction` key; fall back to legacy `enabled` + `amplitude`
+        if let dir = try c.decodeIfPresent(PolarRotationDirection.self, forKey: .direction) {
+            direction = dir
+        } else {
+            let wasEnabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+            let amp = try c.decodeIfPresent(Float.self, forKey: .amplitude) ?? 1.0
+            if !wasEnabled {
+                direction = .off
+            } else {
+                direction = amp < 0 ? .counterclockwise : .clockwise
+            }
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(direction, forKey: .direction)
+        try c.encode(speed, forKey: .speed)
+    }
+}
+
+/// Rotation direction for `PolarRotationEffect`.
+enum PolarRotationDirection: String, Codable, CaseIterable, Equatable {
+    case off              = "off"
+    case clockwise        = "clockwise"
+    case counterclockwise = "counterclockwise"
+
+    /// Multiplier applied to the rotation accumulator.
+    var sign: Float {
+        switch self {
+        case .off:              return 0
+        case .clockwise:        return 1
+        case .counterclockwise: return -1
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .off:              return "stop.fill"
+        case .clockwise:        return "arrow.clockwise"
+        case .counterclockwise: return "arrow.counterclockwise"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .off:              return "Off"
+        case .clockwise:        return "CW"
+        case .counterclockwise: return "CCW"
+        }
     }
 }
 

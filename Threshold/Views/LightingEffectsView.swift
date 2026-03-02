@@ -352,31 +352,39 @@ struct LightingEffectsSection: View {
                     }
                 ) {
                     VStack(spacing: 6) {
+                        // Direction picker (Off / CW / CCW)
                         HStack {
-                            Text("Speed")
+                            Text("Direction")
                             Spacer()
-                            Text("\(cache.polarRotationEffect.speed, specifier: "%.2f")")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(value: polarRotationSpeedBinding, in: 0...1, onEditingChanged: { editing in
-                            if !editing {
-                                cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                            Picker("", selection: Binding(
+                                get: { cache.polarRotationEffect.direction },
+                                set: { newDir in
+                                    cache.polarRotationEffect.direction = newDir
+                                    cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                                }
+                            )) {
+                                ForEach(PolarRotationDirection.allCases, id: \.self) { dir in
+                                    Label(dir.label, systemImage: dir.icon).tag(dir)
+                                }
                             }
-                        })
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: 180)
+                        }
 
-                        HStack {
-                            Text("Amplitude")
-                            Spacer()
-                            Text("\(cache.polarRotationEffect.amplitude, specifier: "%.2f")")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(value: polarRotationAmplitudeBinding, in: 0...2, onEditingChanged: { editing in
-                            if !editing {
-                                cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                        if cache.polarRotationEffect.enabled {
+                            HStack {
+                                Text("Speed")
+                                Spacer()
+                                Text("\(cache.polarRotationEffect.speed, specifier: "%.2f")")
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
                             }
-                        })
+                            Slider(value: polarRotationSpeedBinding, in: 0...1, onEditingChanged: { editing in
+                                if !editing {
+                                    cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                                }
+                            })
+                        }
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -513,13 +521,6 @@ struct LightingEffectsSection: View {
         Binding(
             get: { cache.polarRotationEffect.speed },
             set: { cache.polarRotationEffect.speed = $0 }
-        )
-    }
-
-    private var polarRotationAmplitudeBinding: Binding<Float> {
-        Binding(
-            get: { cache.polarRotationEffect.amplitude },
-            set: { cache.polarRotationEffect.amplitude = $0 }
         )
     }
 }

@@ -45,10 +45,6 @@ enum FractalModelType: Int32, CaseIterable {
         }
     }
     
-    /// Deprecated — Mandelbox now uses the unified formula-param path.
-    /// Kept only so the fractalType setter can migrate legacy core gesture bindings.
-    var usesMandelboxParams: Bool { false }
-
     /// Core gesture actions that are meaningful for this fractal type.
     /// Mandelbox keeps the legacy shape-param actions (.minDistance, .foldingLimit,
     /// .sphereRadius) so existing gesture bindings serialise correctly; they are

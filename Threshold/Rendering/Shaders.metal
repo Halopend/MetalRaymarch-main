@@ -373,6 +373,11 @@ FORCE_INLINE float applySafetyBubble(float d, float3 pos, FractalParams params) 
         // Hard edge: standard CSG subtraction
         dBubbled = max(d, -bubbleDist);
     }
+    // OPTIMIZATION: When strength is at full (blend slider = 100%), skip the temporal
+    // blend entirely. Since bubbleStrength comes from a uniform buffer, ALL GPU threads
+    // take the same branch — no divergence cost. Saves the mix in the hottest path
+    // (Map is called 50-100+ times per pixel per eye at 90Hz).
+    if (params.bubbleStrength >= 1.0f) return dBubbled;
     // Temporal blend: lerp between original and bubble-applied distance
     // When strength < 1, the bubble partially fades in via the temporal accumulation system
     return mix(d, dBubbled, params.bubbleStrength);
@@ -1107,7 +1112,6 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
     }
 }
 
-// Far-range coarse raymarch (12 steps, max 80 units) - REMOVED (unused)
 // Near-range coarse raymarch (24 steps, max 12 units)
 // Compiler unrolls based on FC_FRACTAL_ITERATIONS when defined
 FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {}, float maxRayDistance = kMaxRayDistanceDefault)
