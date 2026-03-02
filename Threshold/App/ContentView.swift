@@ -435,27 +435,14 @@ struct ContentView: View {
                     
                     Divider()
                     
-                    // Fade toggle
-                    HStack {
-                        Label("Faded Edge", systemImage: "circle.dotted").font(.subheadline)
-                        Spacer()
-                        Toggle("", isOn: $cache.safetyBubbleFadeEnabled)
-                            .labelsHidden()
-                            .onChange(of: cache.safetyBubbleFadeEnabled) { _, val in
-                                cache.push(\.safetyBubbleFadeEnabled, value: val)
-                            }
-                    }
-                    Text("Smoothly blends fractal geometry at the bubble boundary instead of a hard cutoff.")
+                    EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
+                        value: $cache.safetyBubbleBlend, range: 0.0...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubbleBlend) },
+                        showToggle: false)
+                    Text("Controls how strongly the bubble masks fractal geometry (0 = transparent, 1 = fully active).")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    
-                    if cache.safetyBubbleFadeEnabled {
-                        EffectSliderRow(icon: "circle.righthalf.filled", label: "Fade Width",
-                            value: $cache.safetyBubbleFadeWidth, range: 0.1...2.0,
-                            enabled: .constant(true),
-                            onChanged: { cache.push(\.safetyBubbleFadeWidth, value: cache.safetyBubbleFadeWidth) },
-                            showToggle: false)
-                    }
                 }
             }
             .padding(10)
@@ -1176,6 +1163,16 @@ struct ContentView: View {
                         .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
                     Toggle("Rotation Auto-Snap", isOn: $cache.rotationAutoSnap)
                         .onChange(of: cache.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
+                    if cache.rotationAutoSnap {
+                        EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Breakaway Angle (°)",
+                            value: $cache.rotationBreakawayDegrees, range: 0...45,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.rotationBreakawayDegrees, value: cache.rotationBreakawayDegrees) },
+                            showToggle: false)
+                        Text("Rotation stays locked until your hands rotate past this angle, then engages smoothly.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
 
                     EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Global Sensitivity",
                         value: $cache.gestureSensitivity, range: 1...10,

@@ -200,6 +200,19 @@ class AppModel {
         
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
+
+        // Load default flame from bundled library
+        loadDefaultFlame()
+    }
+
+    /// Load the first flame in the bundled library as the default flame.
+    private func loadDefaultFlame() {
+        let library = FlameLibrary.shared
+        library.loadIfNeeded()
+        if let flame = library.defaultFlame {
+            importedFlame = flame
+            importedFlameStatusText = "Loaded bundled flame: \(flame.name)"
+        }
     }
     
     /// Save current state for restore on next launch

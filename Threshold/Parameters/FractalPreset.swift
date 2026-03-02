@@ -55,8 +55,7 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
     var safetyBubbleShape: Float?
-    var safetyBubbleFadeEnabled: Bool?
-    var safetyBubbleFadeWidth: Float?
+    var safetyBubbleBlend: Float?
     
     // === MODULAR LIGHTING EFFECTS (v2.0) ===
     // Card-based lighting system with presets
@@ -91,7 +90,7 @@ struct FractalPreset: Codable, Identifiable {
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
-        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleFadeEnabled, safetyBubbleFadeWidth
+        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, beatFlashEffect
         // Doppelganger
@@ -166,8 +165,7 @@ struct FractalPreset: Codable, Identifiable {
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         safetyBubbleShape = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
-        safetyBubbleFadeEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleFadeEnabled)
-        safetyBubbleFadeWidth = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleFadeWidth)
+        safetyBubbleBlend = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
         
         // v2.0 modular lighting effects
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
@@ -228,8 +226,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
         try container.encodeIfPresent(safetyBubbleShape, forKey: .safetyBubbleShape)
-        try container.encodeIfPresent(safetyBubbleFadeEnabled, forKey: .safetyBubbleFadeEnabled)
-        try container.encodeIfPresent(safetyBubbleFadeWidth, forKey: .safetyBubbleFadeWidth)
+        try container.encodeIfPresent(safetyBubbleBlend, forKey: .safetyBubbleBlend)
         
         // v2.0 modular lighting effects
         try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
@@ -350,8 +347,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
         preset.safetyBubbleShape = settings.safetyBubbleShape
-        preset.safetyBubbleFadeEnabled = settings.safetyBubbleFadeEnabled
-        preset.safetyBubbleFadeWidth = settings.safetyBubbleFadeWidth
+        preset.safetyBubbleBlend = settings.safetyBubbleBlend
         
         // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
@@ -450,11 +446,8 @@ struct FractalPreset: Codable, Identifiable {
         if let safetyBubbleShape = safetyBubbleShape {
             settings.safetyBubbleShape = safetyBubbleShape
         }
-        if let safetyBubbleFadeEnabled = safetyBubbleFadeEnabled {
-            settings.safetyBubbleFadeEnabled = safetyBubbleFadeEnabled
-        }
-        if let safetyBubbleFadeWidth = safetyBubbleFadeWidth {
-            settings.safetyBubbleFadeWidth = safetyBubbleFadeWidth
+        if let safetyBubbleBlend = safetyBubbleBlend {
+            settings.safetyBubbleBlend = safetyBubbleBlend
         }
         
         // v2.0 modular lighting effects

@@ -246,6 +246,11 @@ final class GestureController {
     private var grabStartRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // World rotation when grab started
     private var detailStartScale: Float = 1.0                  // detailScale when gesture started
     private var grabStartPosition: SIMD3<Float> = .zero      // World position when gesture started
+
+    // Rotation breakaway state: rotation is suppressed until the hand delta exceeds the breakaway angle.
+    // Once broken away, rotation tracks hands 1:1. Resets on each new grab.
+    private var rotationBrokenAway: Bool = false
+    private var breakawayBaseAxis: SIMD3<Float> = .zero      // Hand axis when breakaway occurred (for rebasing delta)
     
     // Single-hand drag state
     private var rightIndexDragActive: Bool = false
@@ -822,6 +827,8 @@ final class GestureController {
             grabStartRotation = settings.worldRotation
             detailStartScale = settings.detailScale
             grabStartPosition = settings.position
+            rotationBrokenAway = !settings.rotationAutoSnap  // If snap disabled, act as if already broken away
+            breakawayBaseAxis = .zero
             
             if HAND_TRACKING_DEBUG {
                 print("🤲✊ Two-point GRAB started: dist=\(grabStartDistance), mid=\(grabStartMidpoint)")
@@ -860,7 +867,43 @@ final class GestureController {
                 deltaRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
             }
             
-            let newRotation = (deltaRotation * grabStartRotation).normalized
+            // 2b) BREAKAWAY GATE: suppress rotation until hand delta exceeds breakaway angle
+            let effectiveRotation: simd_quatf
+            if !rotationBrokenAway {
+                // Measure angle between start axis and current axis
+                let breakawayAngleRad = acos(simd_clamp(dot, -1.0, 1.0))
+                let breakawayThresholdRad = settings.rotationBreakawayDegrees * (.pi / 180.0)
+                if breakawayAngleRad >= breakawayThresholdRad {
+                    // Broken away! Rebase so rotation starts from current hand position
+                    rotationBrokenAway = true
+                    breakawayBaseAxis = currentAxisNorm
+                    grabStartRotation = settings.worldRotation
+                    effectiveRotation = grabStartRotation  // No jump on the first frame
+                } else {
+                    effectiveRotation = grabStartRotation  // Hold at start rotation
+                }
+            } else if breakawayBaseAxis != .zero {
+                // Recompute delta from the breakaway axis instead of the original grab axis
+                let rebDot = simd_clamp(simd_dot(breakawayBaseAxis, currentAxisNorm), -1.0, 1.0)
+                let rebCross = simd_cross(breakawayBaseAxis, currentAxisNorm)
+                let rebCrossLen = simd_length(rebCross)
+                let rebDelta: simd_quatf
+                if rebCrossLen > 1e-6 {
+                    rebDelta = simd_quatf(angle: acos(rebDot), axis: rebCross / rebCrossLen)
+                } else if rebDot < 0 {
+                    let perp: SIMD3<Float> = abs(breakawayBaseAxis.x) < 0.9
+                        ? simd_normalize(simd_cross(breakawayBaseAxis, SIMD3<Float>(1, 0, 0)))
+                        : simd_normalize(simd_cross(breakawayBaseAxis, SIMD3<Float>(0, 1, 0)))
+                    rebDelta = simd_quatf(angle: .pi, axis: perp)
+                } else {
+                    rebDelta = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+                }
+                effectiveRotation = (rebDelta * grabStartRotation).normalized
+            } else {
+                effectiveRotation = (deltaRotation * grabStartRotation).normalized
+            }
+            
+            let newRotation = effectiveRotation
             
             // 3) POSITION: pivot-correct transform
             //    The world-space point under the hand midpoint stays "pinned" as

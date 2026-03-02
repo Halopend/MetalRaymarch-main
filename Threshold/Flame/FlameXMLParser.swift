@@ -5,10 +5,17 @@ final class FlameXMLParser: NSObject, XMLParserDelegate {
     private var currentTransforms: [FlameTransform] = []
     private var foundFlameNode = false
 
+    // Multi-flame parsing state
+    private var allFlames: [FlameDocument] = []
+    private var parseAllMode = false
+
+    /// Parse a single flame from data (returns the first `<flame>` found).
     func parse(data: Data) throws -> FlameDocument {
         parsedFlame = nil
         currentTransforms = []
         foundFlameNode = false
+        allFlames = []
+        parseAllMode = false
 
         let parser = XMLParser(data: data)
         parser.delegate = self
@@ -28,6 +35,45 @@ final class FlameXMLParser: NSObject, XMLParserDelegate {
         return flame
     }
 
+    /// Parse ALL `<flame>` nodes from a multi-flame file (e.g. Apophysis .flame collections).
+    /// Returns an array of FlameDocument, one per `<flame>` element with at least one transform.
+    func parseAll(data: Data) throws -> [FlameDocument] {
+        parsedFlame = nil
+        currentTransforms = []
+        foundFlameNode = false
+        allFlames = []
+        parseAllMode = true
+
+        let parser = XMLParser(data: data)
+        parser.delegate = self
+        guard parser.parse() else {
+            throw FlameParseError.invalidXML
+        }
+
+        // Finalize any in-progress flame
+        finalizeCurrentFlame()
+
+        guard !allFlames.isEmpty else {
+            throw FlameParseError.noFlameNode
+        }
+        return allFlames
+    }
+
+    /// Finalize the current flame-in-progress and append to allFlames if valid.
+    private func finalizeCurrentFlame() {
+        guard var flame = parsedFlame else { return }
+        let validTransforms = currentTransforms.filter { $0.weight > 0 }
+        guard !validTransforms.isEmpty else {
+            parsedFlame = nil
+            currentTransforms = []
+            return
+        }
+        flame.transforms = validTransforms
+        allFlames.append(flame)
+        parsedFlame = nil
+        currentTransforms = []
+    }
+
     func parser(_ parser: XMLParser,
                 didStartElement elementName: String,
                 namespaceURI: String?,
@@ -35,6 +81,11 @@ final class FlameXMLParser: NSObject, XMLParserDelegate {
                 attributes attributeDict: [String: String] = [:]) {
         switch elementName.lowercased() {
         case "flame":
+            // In parseAll mode, finalize any prior flame before starting a new one
+            if parseAllMode {
+                finalizeCurrentFlame()
+            }
+
             foundFlameNode = true
             let name = attributeDict["name"] ?? "Imported Flame"
             let width = Int(attributeDict["size"]?.split(separator: " ").first ?? "0") ?? 1024
@@ -54,6 +105,7 @@ final class FlameXMLParser: NSObject, XMLParserDelegate {
                 brightness: max(0.01, brightness),
                 transforms: []
             )
+            currentTransforms = []
 
         case "xform", "finalxform":
             guard foundFlameNode else { return }

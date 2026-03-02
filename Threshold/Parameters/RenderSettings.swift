@@ -159,7 +159,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
-    private var _rotationAutoSnap: Bool = false       // Snap rotation to nearest 45° multiple within snap window
+    private var _rotationAutoSnap: Bool = true        // Snap rotation to nearest 45° multiple within snap window
+    private var _rotationBreakawayDegrees: Float = 15.0  // Initial breakaway angle before rotation engages (degrees)
     private var _rotationSnapWindowDegrees: Float = 6.0  // ±halfWindow snap threshold per axis (degrees)
     private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
     private var _gestureSmoothingFactor: Float = {
@@ -198,9 +199,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
-    private var _safetyBubbleFadeEnabled: Bool = false  // Smooth fade transition instead of hard edge
+    private var _safetyBubbleFadeEnabled: Bool = true   // Always use smooth fade transition (polynomial smooth-max)
     private var _safetyBubbleFadeWidth: Float = 0.5     // Width of fade region beyond inner radius (meters)
-    private var _safetyBubbleStrength: Float = 0.0      // Current strength (0=off, 1=fully active) — smoothDamped for temporal fade
+    private var _safetyBubbleBlend: Float = 1.0         // User-facing blend strength (0=transparent, 1=fully active)
+    private var _safetyBubbleStrength: Float = 0.0      // Current strength (0=off, 1=fully active) — smoothDamped toward blend target
     private var _safetyBubbleStrengthTarget: Float = 0.0 // Target strength (set by safetyBubbleEnabled toggle)
     private var _safetyBubbleStrengthVelocity: Float = 0.0 // Spring velocity for smoothDamp
     
@@ -823,6 +825,13 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _rotationAutoSnap = newValue } }
     }
 
+    /// Initial breakaway angle in degrees. Rotation doesn't engage until the hand
+    /// rotation exceeds this threshold from the grab-start orientation. Default 15°.
+    var rotationBreakawayDegrees: Float {
+        get { withLock { _rotationBreakawayDegrees } }
+        set { withLock { _rotationBreakawayDegrees = max(0.0, min(45.0, newValue)) } }
+    }
+
     /// Half-angle snap window in degrees (±this value). Default 6° → snaps within ±3° of target.
     var rotationSnapWindowDegrees: Float {
         get { withLock { _rotationSnapWindowDegrees } }
@@ -1052,7 +1061,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _safetyBubbleEnabled = newValue
-                _safetyBubbleStrengthTarget = newValue ? 1.0 : 0.0
+                _safetyBubbleStrengthTarget = newValue ? _safetyBubbleBlend : 0.0
             }
         }
     }
@@ -1076,16 +1085,28 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
     }
 
-    /// Enable smooth fade transition for safety bubble (instead of hard edge)
-    var safetyBubbleFadeEnabled: Bool {
-        get { withLock { _safetyBubbleFadeEnabled } }
-        set { withLock { _safetyBubbleFadeEnabled = newValue } }
+    /// User-facing blend amount for the safety bubble (0 = transparent, 1 = fully active)
+    /// When the bubble is enabled, the smoothDamp target = this value. When disabled, target = 0.
+    var safetyBubbleBlend: Float {
+        get { withLock { _safetyBubbleBlend } }
+        set {
+            withLock {
+                _safetyBubbleBlend = max(0.0, min(1.0, newValue))
+                if _safetyBubbleEnabled {
+                    _safetyBubbleStrengthTarget = _safetyBubbleBlend
+                }
+            }
+        }
     }
 
-    /// Width of fade region beyond inner radius (0.1 - 2.0 meters)
+    /// Smooth fade always enabled (internal — no longer user-facing)
+    var safetyBubbleFadeEnabled: Bool {
+        get { withLock { _safetyBubbleFadeEnabled } }
+    }
+
+    /// Width of fade region (internal — no longer user-facing, fixed at 0.5m)
     var safetyBubbleFadeWidth: Float {
         get { withLock { _safetyBubbleFadeWidth } }
-        set { withLock { _safetyBubbleFadeWidth = max(0.1, min(2.0, newValue)) } }
     }
     
     // === COLOR SCHEME SETTINGS ===

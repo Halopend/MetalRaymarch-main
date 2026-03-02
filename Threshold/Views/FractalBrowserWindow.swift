@@ -395,6 +395,7 @@ struct FractalBrowserWindow: View {
     @State private var flameStatusText = ""
     @State private var flameErrorText: String?
     @State private var activeFlameRenderToken = UUID()
+    @StateObject private var flameLibrary = FlameLibrary.shared
 
     private var flameImportTypes: [UTType] {
         var types: [UTType] = [.xml]
@@ -653,9 +654,58 @@ struct FractalBrowserWindow: View {
                     .font(.caption2)
                     .foregroundStyle(.red)
             }
+
+            // ── Flame Library ─────────────────────────────────────────────
+            if !flameLibrary.entries.isEmpty {
+                Divider()
+                Text("Flame Library")
+                    .font(.subheadline.bold())
+                Text("Bundled reference flames — tap to load and render.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                let columns = [GridItem(.adaptive(minimum: 130), spacing: 8)]
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(flameLibrary.entries) { entry in
+                        Button {
+                            loadLibraryFlame(entry.flame)
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: "flame.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(.orange.gradient)
+                                Text(entry.flame.name)
+                                    .font(.caption2)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Text("\(entry.flame.transforms.count) xforms")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(importedFlame?.name == entry.flame.name
+                                          ? Color.orange.opacity(0.18)
+                                          : Color.clear)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(.quaternary)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(.ultraThinMaterial))
+        .onAppear {
+            flameLibrary.loadIfNeeded()
+        }
     }
 
     private var buddhabrotToolsPanel: some View {
@@ -702,6 +752,71 @@ struct FractalBrowserWindow: View {
 
         appModel.gestureController?.syncWithSettings()
         selectedTypeID = "native-\(type.rawValue)"
+    }
+
+    /// Load a flame from the built-in library and start rendering + realtime mode.
+    private func loadLibraryFlame(_ flame: FlameDocument) {
+        let renderToken = UUID()
+        activeFlameRenderToken = renderToken
+
+        importedFlame = flame
+        appModel.importedFlame = flame
+        flameErrorText = nil
+        flameStatusText = "Rendering quick preview…"
+        appModel.importedFlameErrorText = nil
+        appModel.importedFlameStatusText = flameStatusText
+        isRenderingFlame = true
+
+        Task {
+            let quickOutput = await Task.detached(priority: .userInitiated) {
+                FlameRenderer.render(
+                    flame: flame,
+                    width: 360,
+                    height: 360,
+                    iterations: 260_000,
+                    burnIn: 8_000
+                )
+            }.value
+
+            await MainActor.run {
+                guard activeFlameRenderToken == renderToken else { return }
+                flamePreviewImage = quickOutput?.image
+                appModel.importedFlamePreviewImage = quickOutput?.image
+                if let quickOutput {
+                    flameStatusText = "Quick preview: \(quickOutput.sampleCount) samples • refining…"
+                } else {
+                    flameStatusText = "Quick preview produced no output • refining…"
+                }
+                appModel.importedFlameStatusText = flameStatusText
+                appModel.runtimeViewMode = .flame
+            }
+
+            let fullOutput = await Task.detached(priority: .userInitiated) {
+                FlameRenderer.render(
+                    flame: flame,
+                    width: 720,
+                    height: 720,
+                    iterations: 1_200_000,
+                    burnIn: 18_000
+                )
+            }.value
+
+            await MainActor.run {
+                guard activeFlameRenderToken == renderToken else { return }
+                flamePreviewImage = fullOutput?.image
+                if let fullOutput {
+                    flameStatusText = "Rendered \(fullOutput.sampleCount) samples"
+                } else {
+                    flameStatusText = "Render produced no output"
+                }
+                appModel.importedFlame = flame
+                appModel.importedFlamePreviewImage = fullOutput?.image ?? quickOutput?.image
+                appModel.importedFlameStatusText = flameStatusText
+                appModel.importedFlameErrorText = nil
+                appModel.runtimeViewMode = .flame
+                isRenderingFlame = false
+            }
+        }
     }
 
     private func importFlame(from url: URL) {

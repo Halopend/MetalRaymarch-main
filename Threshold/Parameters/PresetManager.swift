@@ -255,8 +255,7 @@ class PresetManager {
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
         preset.safetyBubbleShape = settings.safetyBubbleShape
-        preset.safetyBubbleFadeEnabled = settings.safetyBubbleFadeEnabled
-        preset.safetyBubbleFadeWidth = settings.safetyBubbleFadeWidth
+        preset.safetyBubbleBlend = settings.safetyBubbleBlend
         
         // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
@@ -370,8 +369,7 @@ class PresetManager {
             newPreset.safetyBubbleEnabled = importedPreset.safetyBubbleEnabled
             newPreset.safetyBubbleRadius = importedPreset.safetyBubbleRadius
             newPreset.safetyBubbleShape = importedPreset.safetyBubbleShape
-            newPreset.safetyBubbleFadeEnabled = importedPreset.safetyBubbleFadeEnabled
-            newPreset.safetyBubbleFadeWidth = importedPreset.safetyBubbleFadeWidth
+            newPreset.safetyBubbleBlend = importedPreset.safetyBubbleBlend
             newPreset.fractalType = importedPreset.fractalType
             newPreset.colorScheme = importedPreset.colorScheme
             newPreset.colorSchemeSaturation = importedPreset.colorSchemeSaturation
