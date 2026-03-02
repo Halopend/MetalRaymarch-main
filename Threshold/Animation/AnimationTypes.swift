@@ -974,7 +974,7 @@ enum DefaultScenes {
     static let ambientBlurID = UUID(uuidString: "00000000-0002-0000-0000-000000000002")!
     
     /// All default scene IDs for easy lookup
-    static let allIDs: Set<UUID> = [sceneOneID, ambientBlurID]
+    static let allIDs: Set<UUID> = [ambientBlurID]
     
     /// Check whether a scene ID belongs to a built-in default
     static func isDefault(_ id: UUID) -> Bool {
@@ -1049,7 +1049,7 @@ enum DefaultScenes {
     }
     
     /// All built-in scenes (add more here in the future)
-    private static let cachedScenes: [AnimationScene] = [sceneOne(), ambientBlur()]
+    private static let cachedScenes: [AnimationScene] = [ambientBlur()]
 
     static func all() -> [AnimationScene] {
         cachedScenes
