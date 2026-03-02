@@ -105,6 +105,9 @@ class AppModel {
     // Preset management
     let presetManager = PresetManager()
 
+    // Error reporting for transient banners
+    let errorReporter = ErrorReporter()
+
     // Flame runtime state (shared between browser + main panel)
     var importedFlame: FlameDocument?
     var importedFlamePreviewImage: CGImage?

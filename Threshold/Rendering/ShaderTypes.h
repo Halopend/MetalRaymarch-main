@@ -217,6 +217,9 @@ typedef struct
     float safetyBubbleRadius; // Safety bubble radius (meters)
     int safetyBubbleEnabled;  // Enable safety bubble (0/1)
     float safetyBubbleShape;  // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
+    int safetyBubbleFadeEnabled;  // Enable smooth fade transition (0/1)
+    float safetyBubbleFadeWidth;  // Width of fade region beyond inner radius
+    float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int showHUD;             // Show in-world HUD overlay (0/1)
@@ -256,6 +259,9 @@ typedef struct
     float safetyBubbleRadius; // Safety bubble radius (meters)
     int safetyBubbleEnabled;  // Enable safety bubble (0/1)
     float safetyBubbleShape;  // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
+    int safetyBubbleFadeEnabled;  // Enable smooth fade transition (0/1)
+    float safetyBubbleFadeWidth;  // Width of fade region beyond inner radius
+    float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
     float foldingLimit;
     float glowIntensity;
     float colorMix;

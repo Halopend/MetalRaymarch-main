@@ -323,17 +323,17 @@ enum FractalBrowserCatalog {
             ]
         ),
         FractalFamilyInfo(
-            id: "flame",
-            name: "Flame (Draves)",
-            summary: "2D/2.5D iterated function systems driven by weighted non-linear variations.",
-            historicalInfo: "Fractal Flames were introduced by Scott Draves and Erik Reckase (early 2000s) and popularized via flam3 and Electric Sheep.",
+            id: "experimental",
+            name: "Experimental",
+            summary: "Alternative rendering techniques and work-in-progress fractal systems.",
+            historicalInfo: "These renderers use fundamentally different approaches — Flame uses 2D IFS with non-linear variations, Buddhabrot uses orbit density histograms. Both are experimental and may have limited feature support.",
             types: [
                 FractalTypeBrowserInfo(
                     id: "flam3-core",
                     title: "Fractal Flame (flam3)",
                     icon: "flame.fill",
-                    subtitle: "Reference implementation and XML ecosystem",
-                    historicalInfo: "flam3 defines transform sets, variation weights, affine coefficients, and rendering metadata in XML to produce high-detail flame images.",
+                    subtitle: "2D/2.5D IFS with weighted non-linear variations",
+                    historicalInfo: "Fractal Flames were introduced by Scott Draves and Erik Reckase (early 2000s). flam3 defines transform sets, variation weights, affine coefficients, and rendering metadata in XML.",
                     variants: [
                         FractalVariant(
                             id: "flam3-repo",
@@ -361,6 +361,15 @@ enum FractalBrowserCatalog {
                         )
                     ],
                     externalReferenceURL: "https://github.com/scottdraves/flam3"
+                ),
+                FractalTypeBrowserInfo(
+                    id: "buddhabrot-3d",
+                    title: "3D Buddhabrot",
+                    icon: "atom",
+                    subtitle: "Orbit density histogram rendering",
+                    historicalInfo: "The Buddhabrot technique, named by Melinda Green (1993), visualizes Mandelbrot escape orbits as density maps. The 3D extension renders orbit density in volumetric space.",
+                    variants: [],
+                    externalReferenceURL: "https://en.wikipedia.org/wiki/Buddhabrot"
                 )
             ]
         )
@@ -492,8 +501,9 @@ struct FractalBrowserWindow: View {
             .font(.subheadline)
             .foregroundStyle(.secondary)
 
-        if family.id == "flame" {
+        if family.id == "experimental" {
             flameToolsPanel
+            buddhabrotToolsPanel
         }
 
         Divider()
@@ -643,6 +653,27 @@ struct FractalBrowserWindow: View {
                     .font(.caption2)
                     .foregroundStyle(.red)
             }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.ultraThinMaterial))
+    }
+
+    private var buddhabrotToolsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("3D Buddhabrot", systemImage: "atom")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    appModel.runtimeViewMode = .buddhabrot
+                } label: {
+                    Label("Launch Buddhabrot", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            Text("Orbit density histogram rendering. Switches to the Buddhabrot renderer — a fundamentally different rendering technique from raymarching.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(.ultraThinMaterial))

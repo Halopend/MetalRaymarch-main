@@ -35,6 +35,9 @@ struct RenderSettingsSnapshot {
     let safetyBubbleEnabled: Bool
     let safetyBubbleRadius: Float
     let safetyBubbleShape: Float
+    let safetyBubbleFadeEnabled: Bool
+    let safetyBubbleFadeWidth: Float
+    let safetyBubbleStrength: Float
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
     

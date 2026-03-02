@@ -149,6 +149,8 @@ final class UISettingsCache {
     var safetyBubbleEnabled: Bool = false
     var safetyBubbleRadius: Float = 1.8
     var safetyBubbleShape: Float = 0.0
+    var safetyBubbleFadeEnabled: Bool = false
+    var safetyBubbleFadeWidth: Float = 0.5
     var useRelativeGestures: Bool = true
     var extendedGestureRange: Bool = true
     var rotationAutoSnap: Bool = false
@@ -292,6 +294,8 @@ final class UISettingsCache {
         safetyBubbleEnabled = settings.safetyBubbleEnabled
         safetyBubbleRadius = settings.safetyBubbleRadius
         safetyBubbleShape = settings.safetyBubbleShape
+        safetyBubbleFadeEnabled = settings.safetyBubbleFadeEnabled
+        safetyBubbleFadeWidth = settings.safetyBubbleFadeWidth
         useRelativeGestures = settings.useRelativeGestures
         extendedGestureRange = settings.extendedGestureRange
         rotationAutoSnap = settings.rotationAutoSnap

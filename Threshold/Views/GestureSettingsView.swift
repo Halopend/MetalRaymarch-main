@@ -54,7 +54,7 @@ struct GestureSettingsView: View {
                 set: { appModel.handTrackingEnabled = $0 }
             ))
 
-            Group {
+            VStack(alignment: .leading, spacing: 0) {
                 // ── Core Behavior (always visible) ───────────────────────
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Core Behavior", systemImage: "slider.horizontal.3")
@@ -92,17 +92,17 @@ struct GestureSettingsView: View {
                         .font(.subheadline.weight(.semibold))
 
                     fingerActionPicker(finger: "Index",  icon: "1.circle.fill",
-                                       selection: Binding(get: { cache.indexFingerAction }, set: { cache.indexFingerAction = $0 }),
-                                       settingsKeyPath: \.indexFingerAction)
+                                       selection: Binding(get: { cache.indexFingerBinding }, set: { cache.indexFingerBinding = $0 }),
+                                       settingsKeyPath: \.indexFingerBinding)
                     fingerActionPicker(finger: "Middle", icon: "2.circle.fill",
-                                       selection: Binding(get: { cache.middleFingerAction }, set: { cache.middleFingerAction = $0 }),
-                                       settingsKeyPath: \.middleFingerAction)
+                                       selection: Binding(get: { cache.middleFingerBinding }, set: { cache.middleFingerBinding = $0 }),
+                                       settingsKeyPath: \.middleFingerBinding)
                     fingerActionPicker(finger: "Ring",   icon: "3.circle.fill",
-                                       selection: Binding(get: { cache.ringFingerAction }, set: { cache.ringFingerAction = $0 }),
-                                       settingsKeyPath: \.ringFingerAction)
+                                       selection: Binding(get: { cache.ringFingerBinding }, set: { cache.ringFingerBinding = $0 }),
+                                       settingsKeyPath: \.ringFingerBinding)
                     fingerActionPicker(finger: "Pinky",  icon: "4.circle.fill",
-                                       selection: Binding(get: { cache.pinkyFingerAction }, set: { cache.pinkyFingerAction = $0 }),
-                                       settingsKeyPath: \.pinkyFingerAction)
+                                       selection: Binding(get: { cache.pinkyFingerBinding }, set: { cache.pinkyFingerBinding = $0 }),
+                                       settingsKeyPath: \.pinkyFingerBinding)
                 }
 
                 Divider().padding(.vertical, 2)
@@ -263,15 +263,16 @@ struct GestureSettingsView: View {
     private func fingerActionPicker(
         finger: String,
         icon: String,
-        selection: Binding<FingerGestureAction>,
-        settingsKeyPath: WritableKeyPath<RenderSettings, FingerGestureAction>
+        selection: Binding<GestureActionBinding>,
+        settingsKeyPath: WritableKeyPath<RenderSettings, GestureActionBinding>
     ) -> some View {
+        let bindings = GestureActionBinding.availableBindings(for: cache.fractalType)
         HStack {
             Label(finger, systemImage: icon).font(.subheadline)
             Spacer()
             Picker(finger, selection: selection) {
-                ForEach(FingerGestureAction.allCases, id: \.self) { action in
-                    Label(action.displayName, systemImage: action.icon).tag(action)
+                ForEach(bindings, id: \.self) { binding in
+                    Label(binding.contextualDisplayName(for: cache.fractalType), systemImage: binding.icon).tag(binding)
                 }
             }
             .pickerStyle(.menu)

@@ -239,26 +239,6 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .tint(.orange)
-            
-            // Render mode switcher
-            Menu {
-                Button {
-                    appModel.runtimeViewMode = .raymarch
-                } label: {
-                    Label("Fractal Raymarch", systemImage: "cube.fill")
-                }
-                Button {
-                    appModel.runtimeViewMode = .buddhabrot
-                } label: {
-                    Label("3D Buddhabrot", systemImage: "atom")
-                }
-            } label: {
-                Label(
-                    appModel.runtimeViewMode == .buddhabrot ? "Buddhabrot" : "Raymarch",
-                    systemImage: appModel.runtimeViewMode == .buddhabrot ? "atom" : "cube.fill"
-                )
-            }
-            .menuStyle(.borderlessButton)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -435,11 +415,11 @@ struct ContentView: View {
                             cache.push(\.safetyBubbleEnabled, value: val)
                         }
                 }
-                Text("Prevents the camera from entering the fractal geometry.")
+                Text("Prevents the camera from entering the fractal geometry. Works with all fractal types.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 if cache.safetyBubbleEnabled {
-                    EffectSliderRow(icon: "circle.dashed", label: "Radius",
+                    EffectSliderRow(icon: "circle.dashed", label: "Inner Radius",
                         value: $cache.safetyBubbleRadius, range: 0.5...2.5,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) },
@@ -451,6 +431,30 @@ struct ContentView: View {
                             set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
                         )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
                         .pickerStyle(.segmented).frame(maxWidth: 160)
+                    }
+                    
+                    Divider()
+                    
+                    // Fade toggle
+                    HStack {
+                        Label("Faded Edge", systemImage: "circle.dotted").font(.subheadline)
+                        Spacer()
+                        Toggle("", isOn: $cache.safetyBubbleFadeEnabled)
+                            .labelsHidden()
+                            .onChange(of: cache.safetyBubbleFadeEnabled) { _, val in
+                                cache.push(\.safetyBubbleFadeEnabled, value: val)
+                            }
+                    }
+                    Text("Smoothly blends fractal geometry at the bubble boundary instead of a hard cutoff.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    
+                    if cache.safetyBubbleFadeEnabled {
+                        EffectSliderRow(icon: "circle.righthalf.filled", label: "Fade Width",
+                            value: $cache.safetyBubbleFadeWidth, range: 0.1...2.0,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.safetyBubbleFadeWidth, value: cache.safetyBubbleFadeWidth) },
+                            showToggle: false)
                     }
                 }
             }

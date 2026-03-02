@@ -198,6 +198,11 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
+    private var _safetyBubbleFadeEnabled: Bool = false  // Smooth fade transition instead of hard edge
+    private var _safetyBubbleFadeWidth: Float = 0.5     // Width of fade region beyond inner radius (meters)
+    private var _safetyBubbleStrength: Float = 0.0      // Current strength (0=off, 1=fully active) — smoothDamped for temporal fade
+    private var _safetyBubbleStrengthTarget: Float = 0.0 // Target strength (set by safetyBubbleEnabled toggle)
+    private var _safetyBubbleStrengthVelocity: Float = 0.0 // Spring velocity for smoothDamp
     
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -1044,7 +1049,18 @@ final class RenderSettings: @unchecked Sendable {
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry
     var safetyBubbleEnabled: Bool {
         get { withLock { _safetyBubbleEnabled } }
-        set { withLock { _safetyBubbleEnabled = newValue } }
+        set {
+            withLock {
+                _safetyBubbleEnabled = newValue
+                _safetyBubbleStrengthTarget = newValue ? 1.0 : 0.0
+            }
+        }
+    }
+
+    /// Current interpolated bubble strength (0 = fully off, 1 = fully active)
+    /// Read-only: driven by smoothDamp toward safetyBubbleEnabled target
+    var safetyBubbleStrength: Float {
+        get { withLock { _safetyBubbleStrength } }
     }
 
     /// Radius of the safety bubble in meters (0.05 - 2.5)
@@ -1058,6 +1074,18 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleShape: Float {
         get { withLock { _safetyBubbleShape } }
         set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
+    }
+
+    /// Enable smooth fade transition for safety bubble (instead of hard edge)
+    var safetyBubbleFadeEnabled: Bool {
+        get { withLock { _safetyBubbleFadeEnabled } }
+        set { withLock { _safetyBubbleFadeEnabled = newValue } }
+    }
+
+    /// Width of fade region beyond inner radius (0.1 - 2.0 meters)
+    var safetyBubbleFadeWidth: Float {
+        get { withLock { _safetyBubbleFadeWidth } }
+        set { withLock { _safetyBubbleFadeWidth = max(0.1, min(2.0, newValue)) } }
     }
     
     // === COLOR SCHEME SETTINGS ===
@@ -1595,6 +1623,9 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
+                safetyBubbleFadeEnabled: _safetyBubbleFadeEnabled,
+                safetyBubbleFadeWidth: _safetyBubbleFadeWidth,
+                safetyBubbleStrength: _safetyBubbleStrength,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogIntensity: _fogEffect.intensity,
@@ -1951,6 +1982,18 @@ final class RenderSettings: @unchecked Sendable {
                 deltaTime: clampedDT
             )
             
+            // Safety bubble strength: smooth ramp on enable/disable
+            // Uses slower smoothTime for visible temporal fade (~0.3s)
+            _safetyBubbleStrength = smoothDamp(
+                current: _safetyBubbleStrength,
+                target: _safetyBubbleStrengthTarget,
+                velocity: &_safetyBubbleStrengthVelocity,
+                smoothTime: 0.25,
+                maxSpeed: 8.0,
+                deltaTime: clampedDT
+            )
+            _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
+
             // Smooth interpolation for world rotation (slerp) and grab scale (exp lerp)
             let rotLerpT = 1.0 - exp(-12.0 * clampedDT)  // Same speed as main smoothing
             _worldRotation = simd_slerp(_worldRotation, _targetWorldRotation, rotLerpT)

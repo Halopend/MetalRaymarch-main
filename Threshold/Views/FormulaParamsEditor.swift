@@ -161,7 +161,7 @@ private struct ParameterNodeRow: View {
                 } label: {
                     Image(systemName: sensitivityIsCustom ? "gauge.with.dots.needle.67percent" : "gauge.with.dots.needle.50percent")
                         .font(.caption)
-                        .foregroundStyle(sensitivityIsCustom ? .orange : .tertiary)
+                        .foregroundStyle(sensitivityIsCustom ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
                         .frame(width: 20)
                 }
                 .buttonStyle(.borderless)

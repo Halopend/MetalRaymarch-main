@@ -90,6 +90,11 @@ extension Renderer {
 
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
 
+            // Scale-relative safety bubble: divide radius by effectiveScale so it stays
+            // constant in user/world space regardless of detail zoom level.
+            let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(effectiveScale, 0.001)
+            let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
+
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
@@ -104,9 +109,12 @@ extension Renderer {
                             glowIntensity: animatedGlow,
                             foldingLimit: settingsSnapshot.foldingLimit,
                             sphereRadius: settingsSnapshot.sphereRadius,
-                            safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
+                            safetyBubbleRadius: scaleCorrectedBubbleRadius,
                             safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
                             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
+                            safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
+                            safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
+                            safetyBubbleStrength: settingsSnapshot.safetyBubbleStrength,
                             colorIterations: settingsSnapshot.colorIterations,
                             limitFlash: settingsSnapshot.limitFlash,
                             showHUD: settingsSnapshot.showHUD ? 1 : 0,

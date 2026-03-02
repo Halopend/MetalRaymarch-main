@@ -321,6 +321,9 @@ struct FractalParams {
     float bubbleRadius;
     int bubbleEnabled;
     float bubbleShape;      // 0 = sphere, 1 = cube, intermediate = morph
+    int bubbleFadeEnabled;  // Enable smooth fade transition
+    float bubbleFadeWidth;  // Width of fade region beyond inner radius
+    float bubbleStrength;   // Temporal fade (0=off, 1=fully active)
 };
 
 // === SAFETY BUBBLE DISTANCE FUNCTION ===
@@ -341,12 +344,47 @@ FORCE_INLINE float safetyBubbleDistance(float3 pos, float3 bubbleCenter, float b
     return mix(sphereDist, cubeDist, bubbleShape);
 }
 
+// === SAFETY BUBBLE CSG APPLICATION ===
+// Applies safety bubble as CSG subtraction with optional smooth fade.
+// Hard mode:  d = max(d, -bubbleDist)  — sharp edge at bubble boundary
+// Faded mode: smooth polynomial max for gradual geometry transition
+//   Inner radius: geometry fully carved out (safe zone)
+//   Outer radius (inner + fadeWidth): geometry fully visible
+//   Between: smooth blend using polynomial smooth-max
+FORCE_INLINE float applySafetyBubble(float d, float3 pos, FractalParams params) {
+    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED)
+        ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
+    if (!bubbleEnabled) return d;
+    // Temporal fade: skip work when strength is near zero
+    if (params.bubbleStrength < 0.001f) return d;
+
+    float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
+
+    float dBubbled;
+    if (params.bubbleFadeEnabled != 0 && params.bubbleFadeWidth > 0.001f) {
+        // Smooth polynomial max: smax(d, -bubbleDist, k)
+        // k = fadeWidth controls transition zone width
+        float a = d;
+        float b = -bubbleDist;
+        float k = params.bubbleFadeWidth;
+        float h = saturate(0.5f + 0.5f * (b - a) / k);
+        dBubbled = mix(a, b, h) + k * h * (1.0f - h);
+    } else {
+        // Hard edge: standard CSG subtraction
+        dBubbled = max(d, -bubbleDist);
+    }
+    // Temporal blend: lerp between original and bubble-applied distance
+    // When strength < 1, the bubble partially fades in via the temporal accumulation system
+    return mix(d, dBubbled, params.bubbleStrength);
+}
+
 // OPTIMIZED: Use precomputed values from CPU to avoid per-pixel powr() and division
 // This version is preferred when PrecomputedFractalParams is available in uniforms
 FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     PrecomputedFractalParams precomputed,
     float minRad2Val,
-    float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape)
+    float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape,
+    int bubbleFadeEnabled, float bubbleFadeWidth, float bubbleStrength)
 {
     FractalParams params;
     // Use precomputed values (expensive powr() and divisions done on CPU)
@@ -359,6 +397,9 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.bubbleRadius = bubbleRadius;
     params.bubbleEnabled = bubbleEnabled;
     params.bubbleShape = bubbleShape;
+    params.bubbleFadeEnabled = bubbleFadeEnabled;
+    params.bubbleFadeWidth = bubbleFadeWidth;
+    params.bubbleStrength = bubbleStrength;
     return params;
 }
 
@@ -388,11 +429,7 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
     // Safety bubble: carve out a shape around the camera to prevent clipping
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
+    d = applySafetyBubble(d, pos, params);
     return d;
 }
 
@@ -418,11 +455,7 @@ FORCE_INLINE float MapHalf(float3 pos, FractalParams params, float foldingLimit,
     // Final distance estimate in float for precision
     float d = (length(float3(p.xyz)) - params.absScalem1) / float(p.w) - params.absScalePow;
     
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
+    d = applySafetyBubble(d, pos, params);
     return d;
 }
 
@@ -449,11 +482,7 @@ FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLi
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
     // Safety bubble check (compile-time eliminated when disabled)
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
+    d = applySafetyBubble(d, pos, params);
     return d;
 }
 
@@ -502,11 +531,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     
     // If fractional part is negligible, skip the extra iteration
     if (frac < 0.01f) {
-        const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-        if (bubbleEnabled) {
-            float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-            dFloor = max(dFloor, -bubbleDist);
-        }
+        dFloor = applySafetyBubble(dFloor, pos, params);
         return dFloor;
     }
     
@@ -517,11 +542,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     // Smooth interpolation between floor and ceil distance estimates
     float d = mix(dFloor, dCeil, frac);
     
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
+    d = applySafetyBubble(d, pos, params);
     return d;
 }
 
@@ -531,33 +552,36 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
 // The branching strategy is zero-overhead for Mandelbox:
 //   fractalType == 0 compiles to a perfectly-predicted branch (Mandelbox fast path)
 //   fractalType != 0 dispatches through FractalDE_Dispatch (FractalFormulas.h)
-// Safety bubble is only applied for Mandelbox (formulas have their own geometry).
+// Safety bubble is now applied to ALL fractal types via applySafetyBubble().
 
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit,
                                int iterations, int fractalType, FormulaParams fp) {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     if (type == FractalTypeMandelbox) {
-        return Map(pos, params, foldingLimit, iterations);
+        return Map(pos, params, foldingLimit, iterations);  // bubble applied inside Map()
     }
-    return FractalDE_Dispatch(pos, type, fp, iterations);
+    float d = FractalDE_Dispatch(pos, type, fp, iterations);
+    return applySafetyBubble(d, pos, params);
 }
 
 FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float foldingLimit,
                                        int iterations, int fractalType, FormulaParams fp) {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     if (type == FractalTypeMandelbox) {
-        return MapDistOnly(pos, params, foldingLimit, iterations);
+        return MapDistOnly(pos, params, foldingLimit, iterations);  // bubble applied inside
     }
-    return FractalDE_Dispatch(pos, type, fp, iterations);
+    float d = FractalDE_Dispatch(pos, type, fp, iterations);
+    return applySafetyBubble(d, pos, params);
 }
 
 FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float foldingLimit,
                                          float fractionalIterations, int fractalType, FormulaParams fp) {
     int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     if (type == FractalTypeMandelbox) {
-        return MapContinuous(pos, params, foldingLimit, fractionalIterations);
+        return MapContinuous(pos, params, foldingLimit, fractionalIterations);  // bubble applied inside
     }
-    return FractalDE_Dispatch(pos, type, fp, int(fractionalIterations));
+    float d = FractalDE_Dispatch(pos, type, fp, int(fractionalIterations));
+    return applySafetyBubble(d, pos, params);
 }
 
 // =============================================================================
@@ -978,11 +1002,7 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
     
-    const bool bubbleEnabled = is_function_constant_defined(FC_SAFETY_BUBBLE_ENABLED) ? FC_SAFETY_BUBBLE_ENABLED : (params.bubbleEnabled != 0);
-    if (bubbleEnabled) {
-        float bubbleDist = safetyBubbleDistance(pos, params.bubbleCenter, params.bubbleRadius, params.bubbleShape);
-        d = max(d, -bubbleDist);
-    }
+    d = applySafetyBubble(d, pos, params);
     
     cache.p = p;
     cache.p0 = pos;
@@ -1010,6 +1030,9 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
     // Non-Mandelbox: use formula orbit tracking
     OrbitData orbit;
     float d = FractalDE_WithOrbit(pos, fractalType, fp, iterations, colorIterations, orbit);
+    
+    // Apply safety bubble to non-Mandelbox fractals
+    d = applySafetyBubble(d, pos, params);
     
     // Populate OrbitCache from OrbitData for compatibility with coloring/normals
     cache.p = float4(orbit.finalP, 1.0f);
@@ -1576,7 +1599,7 @@ kernel void adaptiveHierarchical8x8(
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
 
     float gTime = uniforms.time * 0.01 + 15.00;
     
@@ -1704,7 +1727,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
             float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
             
             if (coarseT >= kRayMissThreshold) {
@@ -1853,7 +1876,7 @@ kernel void adaptiveHierarchical8x8(
                 FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                     uniforms.precomputedFractal,
                     uniforms.minDistance,
-                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
                 
                 tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
                 tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
@@ -1865,7 +1888,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
         }
@@ -2023,7 +2046,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
 
     half3 col = half3(0.0h);
     float2 ret;
@@ -2074,7 +2097,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
 
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
@@ -2207,7 +2230,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
 
     // === QUAD-SHARED COARSE PASS: Leader finds approximate start distance ===
     // Lane 0 does a cheap coarse raymarch, then broadcasts the result.
@@ -2255,7 +2278,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         FractalParams shadowParams = makeFractalParamsFromPrecomputed(
             uniforms.precomputedFractal,
             uniforms.minDistance,
-            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape);
+            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
         
         // Use precomputed lighting from CPU with helper function
         float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);

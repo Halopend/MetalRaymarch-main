@@ -252,7 +252,9 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             glowEnabled: glow.enabled ? 1 : 0,
             glowIntensity: glow.intensity,
             bloomEnabled: bloom.enabled ? 1 : 0,
-            bloomStrength: bloom.strength
+            bloomStrength: bloom.strength,
+            beatFlashEnabled: 0,
+            beatFlashIntensity: 0.0
         )
     }
 }

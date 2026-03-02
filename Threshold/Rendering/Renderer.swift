@@ -1058,6 +1058,12 @@ actor Renderer {
         // Get color scheme parameters
         let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
+        // Scale-relative safety bubble: divide radius/fadeWidth by effectiveScale so it stays
+        // constant in user/world space regardless of detail zoom level.
+        let tileEffectiveScale = max(smoothedScale * settingsSnapshot.detailScale, 0.001)
+        let tileScaledBubbleRadius = settingsSnapshot.safetyBubbleRadius / tileEffectiveScale
+        let tileScaledFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / tileEffectiveScale
+        
         // === REUSE PRECOMPUTED VALUES from updateGameState() ===
         // These are frame-uniform (identical for both eyes), computed once per frame.
         let computePrecomputedFractal = cachedPrecomputedFractal
@@ -1075,9 +1081,12 @@ actor Renderer {
             minDistance: settingsSnapshot.minDistance,
             fractalScale: settingsSnapshot.fractalScale,
             sphereRadius: settingsSnapshot.sphereRadius,
-            safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
+            safetyBubbleRadius: tileScaledBubbleRadius,
             safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
+            safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
+            safetyBubbleFadeWidth: tileScaledFadeWidth,
+            safetyBubbleStrength: settingsSnapshot.safetyBubbleStrength,
             foldingLimit: settingsSnapshot.foldingLimit,
             glowIntensity: settingsSnapshot.colorSchemeParams.glowIntensity,
             colorMix: settingsSnapshot.colorMix,
