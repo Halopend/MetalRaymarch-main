@@ -208,6 +208,19 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let timestamp = operation.timestamp
         let layer = layer(for: operation.source)
 
+        // During animation playback, block non-animation writes to
+        // Mandelbox shape params (formula indices 0-2) to prevent flicker.
+        if let settings = cache.renderSettings, settings.isAnimationPlaying && operation.source != .animation {
+            let pieces = operation.targetID.split(separator: ".")
+            if pieces.count >= 4, pieces[0] == "formula",
+               let fractalRaw = Int(pieces[1]),
+               let formulaIndex = Int(pieces[2]),
+               FractalModelType(rawValue: Int32(fractalRaw)) == .mandelbox,
+               formulaIndex <= 2 {
+                return
+            }
+        }
+
         let formulaBatch = ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
         if let node = formulaBatch.floatNodes.first(where: { $0.id == operation.targetID }) {
             node.bootstrapBaseIfNeeded(from: node.readValue(cache), timestamp: timestamp)
@@ -243,6 +256,15 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
            let fractalRaw = Int(pieces[1]),
            let formulaIndex = Int(pieces[2]),
            let fractalType = FractalModelType(rawValue: Int32(fractalRaw)) {
+            // During animation playback, block non-animation writes to Mandelbox
+            // shape params (indices 0-2) that the animation system controls.
+            // These would otherwise overwrite the animation's values via the
+            // Mandelbox bridge, causing frame-to-frame flicker.
+            if settings.isAnimationPlaying && operation.source != .animation {
+                if fractalType == .mandelbox && formulaIndex <= 2 {
+                    return
+                }
+            }
             var params = settings.formulaParams
             let current = FormulaCatalog.getParam(params, index: formulaIndex)
             let nodeRange: ClosedRange<Float> = ParameterNodeRegistry.shared
@@ -276,9 +298,26 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         "core.targetFractalScale"
     ]
 
+    /// IDs of core parameters that the animation system drives directly.
+    /// During animation playback, non-animation sources are blocked from writing
+    /// these to prevent flicker from competing writes.
+    private static let animationControlledCoreIDs: Set<String> = [
+        "core.targetFractalScale"
+    ]
+
     private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?, layer: ParameterLayer) {
         guard let settings else { return }
         guard let descriptor = coreDescriptors[operation.targetID] else { return }
+
+        // During animation playback, block non-animation writes to parameters
+        // the animation system controls. This prevents the tug-of-war flicker
+        // where a slider/gesture overwrites a target that the animation is
+        // actively driving each frame.
+        if settings.isAnimationPlaying && operation.source != .animation {
+            if Self.animationControlledCoreIDs.contains(operation.targetID) {
+                return
+            }
+        }
 
         let bypassLayerSmoothing = Self.smoothDampedCoreIDs.contains(operation.targetID)
 

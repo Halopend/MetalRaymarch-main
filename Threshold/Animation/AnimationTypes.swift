@@ -142,6 +142,9 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     var baseFractalIterations: Int
     var baseMaxRaySteps: Int
     
+    // Base scale factor
+    var scale: Float
+    
     // Position in 3D space
     var positionX: Float
     var positionY: Float
@@ -180,7 +183,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     // OPTIONAL: Visual parameters (can be animated too)
     // ═══════════════════════════════════════════════════════════════════════════
     
-    var colorScheme: Int?  // nil = don't change color scheme during animation
+    var colorScheme: ColorScheme?  // nil = don't change color scheme during animation
     var lightingMode: LightingMode?
     var lightingPreset: LightingPreset?
     var hueRotationEffect: HueRotationEffect?
@@ -209,6 +212,9 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.baseFractalIterations = settings.baseFractalIterations
         self.baseMaxRaySteps = settings.baseMaxRaySteps
         
+        // Capture base scale
+        self.scale = settings.scale
+        
         // Capture position
         self.positionX = settings.position.x
         self.positionY = settings.position.y
@@ -221,7 +227,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.worldRotationZ = settings.worldRotation.imag.z
         self.worldRotationW = settings.worldRotation.real
         
-        self.colorScheme = Int(settings.colorScheme.rawValue)
+        self.colorScheme = settings.colorScheme
         self.lightingMode = settings.lightingMode
         self.lightingPreset = settings.lightingPreset
         self.hueRotationEffect = settings.hueRotationEffect
@@ -242,10 +248,11 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     init(id: UUID = UUID(), name: String, duration: TimeInterval,
          minDistance: Float, foldingLimit: Float, sphereRadius: Float, fractalScale: Float,
          baseFractalIterations: Int = 9, baseMaxRaySteps: Int = 64,
+            scale: Float = 1.0,
             position: SIMD3<Float>,
             detailScale: Float = 1.0,
             worldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1),
-            colorScheme: Int? = nil,
+            colorScheme: ColorScheme? = nil,
             lightingMode: LightingMode? = nil,
             lightingPreset: LightingPreset? = nil,
             hueRotationEffect: HueRotationEffect? = nil,
@@ -265,6 +272,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.fractalScale = fractalScale
         self.baseFractalIterations = baseFractalIterations
         self.baseMaxRaySteps = baseMaxRaySteps
+        self.scale = scale
         self.positionX = position.x
         self.positionY = position.y
         self.positionZ = position.z
@@ -362,6 +370,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             fractalScale: lerp(self.fractalScale, other.fractalScale),
             baseFractalIterations: clampedT < 0.5 ? self.baseFractalIterations : other.baseFractalIterations,
             baseMaxRaySteps: clampedT < 0.5 ? self.baseMaxRaySteps : other.baseMaxRaySteps,
+            scale: lerp(self.scale, other.scale),
             position: lerp3(self.position, other.position),
             detailScale: lerp(self.detailScale, other.detailScale),
             worldRotation: simd_slerp(self.worldRotation, other.worldRotation, clampedT).normalized,
@@ -384,6 +393,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         case id, name, duration
         case minDistance, foldingLimit, sphereRadius, fractalScale
         case baseFractalIterations, baseMaxRaySteps
+        case scale
         case positionX, positionY, positionZ
         case detailScale
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW
@@ -404,6 +414,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.fractalScale = try c.decode(Float.self, forKey: .fractalScale)
         self.baseFractalIterations = try c.decode(Int.self, forKey: .baseFractalIterations)
         self.baseMaxRaySteps = try c.decode(Int.self, forKey: .baseMaxRaySteps)
+        self.scale = try c.decodeIfPresent(Float.self, forKey: .scale) ?? 1.0
         self.positionX = try c.decode(Float.self, forKey: .positionX)
         self.positionY = try c.decode(Float.self, forKey: .positionY)
         self.positionZ = try c.decode(Float.self, forKey: .positionZ)
@@ -414,7 +425,16 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.worldRotationZ = try c.decodeIfPresent(Float.self, forKey: .worldRotationZ) ?? 0.0
         self.worldRotationW = try c.decodeIfPresent(Float.self, forKey: .worldRotationW) ?? 1.0
 
-        self.colorScheme = try c.decodeIfPresent(Int.self, forKey: .colorScheme)
+        // Decode colorScheme: try ColorScheme (new string format) first,
+        // fall back to raw Int (legacy integer format)
+        if let scheme = try? c.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) {
+            self.colorScheme = scheme
+        } else if let rawInt = try? c.decodeIfPresent(Int.self, forKey: .colorScheme),
+                  let scheme = ColorScheme(rawValue: Int32(rawInt)) {
+            self.colorScheme = scheme
+        } else {
+            self.colorScheme = nil
+        }
         self.lightingMode = try c.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
         self.lightingPreset = try c.decodeIfPresent(LightingPreset.self, forKey: .lightingPreset)
         self.hueRotationEffect = try c.decodeIfPresent(HueRotationEffect.self, forKey: .hueRotationEffect)
@@ -440,6 +460,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         try c.encode(fractalScale, forKey: .fractalScale)
         try c.encode(baseFractalIterations, forKey: .baseFractalIterations)
         try c.encode(baseMaxRaySteps, forKey: .baseMaxRaySteps)
+        try c.encode(scale, forKey: .scale)
         try c.encode(positionX, forKey: .positionX)
         try c.encode(positionY, forKey: .positionY)
         try c.encode(positionZ, forKey: .positionZ)
@@ -625,6 +646,23 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     var createdAt: Date
     var modifiedAt: Date
     
+    /// The fractal type this scene was authored for.
+    /// Restored on playback so the scene always renders with the correct fractal.
+    var fractalType: FractalModelType?
+    
+    /// The color scheme this scene was authored for.
+    /// Restored on playback so the scene always starts with the correct palette.
+    var colorScheme: ColorScheme?
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SAFETY BUBBLE / BLEND WINDOW — scene-level settings
+    // These are applied once when the scene starts playing, not interpolated.
+    // ═══════════════════════════════════════════════════════════════════════════
+    var safetyBubbleEnabled: Bool?
+    var safetyBubbleRadius: Float?
+    var safetyBubbleShape: Float?
+    var safetyBubbleBlend: Float?
+    
     /// Optional song that auto-plays when this scene starts
     var attachedSong: SongAttachment?
     
@@ -654,13 +692,14 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     }
     
     /// Create scene with initial keyframe from current settings
-    init(name: String, initialKeyframe: AnimationKeyframe) {
+    init(name: String, initialKeyframe: AnimationKeyframe, fractalType: FractalModelType? = nil) {
         self.id = UUID()
         self.name = name
         self.keyframes = [initialKeyframe]
         self.isLooping = true
         self.createdAt = Date()
         self.modifiedAt = Date()
+        self.fractalType = fractalType
     }
     
     /// Add a keyframe from current settings
@@ -893,6 +932,7 @@ struct CatmullRomSpline {
             fractalScale: interpolate(p0.fractalScale, p1.fractalScale, p2.fractalScale, p3.fractalScale, t: t),
             baseFractalIterations: t < 0.5 ? p1.baseFractalIterations : p2.baseFractalIterations,
             baseMaxRaySteps: t < 0.5 ? p1.baseMaxRaySteps : p2.baseMaxRaySteps,
+            scale: interpolate(p0.scale, p1.scale, p2.scale, p3.scale, t: t),
             position: interpolate(p0.position, p1.position, p2.position, p3.position, t: t),
             detailScale: interpolate(p0.detailScale, p1.detailScale, p2.detailScale, p3.detailScale, t: t),
             worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized,
@@ -913,6 +953,7 @@ struct CatmullRomSpline {
             fractalScale: 2 * anchor.fractalScale - away.fractalScale,
             baseFractalIterations: anchor.baseFractalIterations,
             baseMaxRaySteps: anchor.baseMaxRaySteps,
+            scale: 2 * anchor.scale - away.scale,
             position: 2 * anchor.position - away.position,
             detailScale: 2 * anchor.detailScale - away.detailScale,
             worldRotation: anchor.worldRotation,
@@ -930,9 +971,10 @@ enum DefaultScenes {
     
     /// Stable UUID so we can always identify the built-in scene across launches.
     static let sceneOneID = UUID(uuidString: "00000000-0001-0000-0000-000000000001")!
+    static let ambientBlurID = UUID(uuidString: "00000000-0002-0000-0000-000000000002")!
     
     /// All default scene IDs for easy lookup
-    static let allIDs: Set<UUID> = [sceneOneID]
+    static let allIDs: Set<UUID> = [sceneOneID, ambientBlurID]
     
     /// Check whether a scene ID belongs to a built-in default
     static func isDefault(_ id: UUID) -> Bool {
@@ -1007,9 +1049,158 @@ enum DefaultScenes {
     }
     
     /// All built-in scenes (add more here in the future)
-    private static let cachedScenes: [AnimationScene] = [sceneOne()]
+    private static let cachedScenes: [AnimationScene] = [sceneOne(), ambientBlur()]
 
     static func all() -> [AnimationScene] {
         cachedScenes
+    }
+    
+    // ─── Ambient Blur ────────────────────────────────────────────────────
+    
+    /// A slow, zoomed-in drift through a Mandelbox with soft lighting effects.
+    /// Designed as a calm ambient visual — pairs well with music.
+    static func ambientBlur() -> AnimationScene {
+        let bezier = BezierHandle.easeInOut
+        let bloom = BloomEffect(enabled: true, strength: 0.1)
+        let fog = FogEffect(enabled: true, intensity: 0.05)
+        let glow = GlowEffect(enabled: true, intensity: 0.2)
+        let gradCycle = GradientCycleEffect(enabled: true, speed: 0.13007735, smoothLoop: true)
+        let hueRot = HueRotationEffect(enabled: true, speed: 0.06, intensity: 0.6)
+        let pulse = PulseEffect(enabled: true, speed: 0.46227682, amount: 0.1637325)
+        let lightingMode = LightingMode.animated
+        let lightingPreset = LightingPreset.custom
+        let colorScheme: ColorScheme = .aurora
+        let foldingLimit: Float = 0.5403083
+        let sphereRadius: Float = 0.31832752
+        let fractalScale: Float = 3.0075026
+        let worldRot = simd_quatf(ix: -0.026562719, iy: 0.046736136, iz: 0.0012432374, r: 0.9985532)
+        
+        var scene = AnimationScene(id: ambientBlurID, name: "Ambient Blur")
+        scene.isLooping = true
+        scene.fractalType = .mandelbox
+        scene.colorScheme = .aurora
+        scene.safetyBubbleEnabled = true
+        scene.safetyBubbleRadius = 1.3608453
+        scene.safetyBubbleShape = 0.5
+        scene.safetyBubbleBlend = 0.097609855
+        
+        scene.keyframes = [
+            AnimationKeyframe(
+                name: "Start",
+                duration: 0,
+                minDistance: 12.501993,
+                foldingLimit: foldingLimit,
+                sphereRadius: sphereRadius,
+                fractalScale: fractalScale,
+                position: SIMD3<Float>(0.9354161, 1.3563383, 9.91849),
+                detailScale: 15.154218,
+                worldRotation: worldRot,
+                colorScheme: colorScheme,
+                lightingMode: lightingMode,
+                lightingPreset: lightingPreset,
+                hueRotationEffect: hueRot,
+                pulseEffect: pulse,
+                glowEffect: glow,
+                bloomEffect: bloom,
+                fogEffect: fog,
+                gradientCycleEffect: gradCycle,
+                easingType: .bezier,
+                bezierHandle: bezier,
+                formulaParamValues: [12.501993, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
+            ),
+            AnimationKeyframe(
+                name: "Drift In",
+                duration: 10.0,
+                minDistance: 9.129262,
+                foldingLimit: foldingLimit,
+                sphereRadius: sphereRadius,
+                fractalScale: fractalScale,
+                position: SIMD3<Float>(0.9490332, 1.3042083, 9.905054),
+                detailScale: 15.154218,
+                worldRotation: worldRot,
+                colorScheme: colorScheme,
+                lightingMode: lightingMode,
+                lightingPreset: lightingPreset,
+                hueRotationEffect: hueRot,
+                pulseEffect: pulse,
+                glowEffect: glow,
+                bloomEffect: bloom,
+                fogEffect: fog,
+                gradientCycleEffect: gradCycle,
+                easingType: .bezier,
+                bezierHandle: bezier,
+                formulaParamValues: [9.129262, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
+            ),
+            AnimationKeyframe(
+                name: "Close",
+                duration: 10.0,
+                minDistance: 5.5996447,
+                foldingLimit: foldingLimit,
+                sphereRadius: sphereRadius,
+                fractalScale: fractalScale,
+                position: SIMD3<Float>(0.82181454, 1.2051183, 8.741661),
+                detailScale: 12.866578,
+                worldRotation: worldRot,
+                colorScheme: colorScheme,
+                lightingMode: lightingMode,
+                lightingPreset: lightingPreset,
+                hueRotationEffect: hueRot,
+                pulseEffect: pulse,
+                glowEffect: glow,
+                bloomEffect: bloom,
+                fogEffect: fog,
+                gradientCycleEffect: gradCycle,
+                easingType: .bezier,
+                bezierHandle: bezier,
+                formulaParamValues: [5.5996447, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
+            ),
+            AnimationKeyframe(
+                name: "Intimate",
+                duration: 10.0,
+                minDistance: 5.6121693,
+                foldingLimit: foldingLimit,
+                sphereRadius: sphereRadius,
+                fractalScale: fractalScale,
+                position: SIMD3<Float>(0.32280436, 0.90793455, 3.064736),
+                detailScale: 4.558007,
+                worldRotation: worldRot,
+                colorScheme: colorScheme,
+                lightingMode: lightingMode,
+                lightingPreset: lightingPreset,
+                hueRotationEffect: hueRot,
+                pulseEffect: pulse,
+                glowEffect: glow,
+                bloomEffect: bloom,
+                fogEffect: fog,
+                gradientCycleEffect: gradCycle,
+                easingType: .bezier,
+                bezierHandle: bezier,
+                formulaParamValues: [5.6121693, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
+            ),
+            AnimationKeyframe(
+                name: "Pull Back",
+                duration: 10.0,
+                minDistance: 3.6605718,
+                foldingLimit: foldingLimit,
+                sphereRadius: sphereRadius,
+                fractalScale: fractalScale,
+                position: SIMD3<Float>(0.6036046, 1.1748419, 6.128691),
+                detailScale: 8.68215,
+                worldRotation: worldRot,
+                colorScheme: colorScheme,
+                lightingMode: lightingMode,
+                lightingPreset: lightingPreset,
+                hueRotationEffect: hueRot,
+                pulseEffect: pulse,
+                glowEffect: glow,
+                bloomEffect: bloom,
+                fogEffect: fog,
+                gradientCycleEffect: gradCycle,
+                easingType: .bezier,
+                bezierHandle: bezier,
+                formulaParamValues: [3.6605718, foldingLimit, sphereRadius, 0,0,0,0,0,0,0,0,0,0,0,0,0]
+            ),
+        ]
+        return scene
     }
 }

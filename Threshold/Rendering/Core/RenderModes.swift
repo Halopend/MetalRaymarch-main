@@ -15,7 +15,7 @@ enum GeometryState: Int, CaseIterable {
 }
 
 // Lighting mode controls animated light movement and audio reactivity
-enum LightingMode: Int32, CaseIterable, Codable {
+enum LightingMode: Int32, CaseIterable {
     case staticLight = 0    // Lights stay fixed (no wobble, no animation)
     case animated = 1       // Original animated lighting (pulsing, moving spotlight)
     case audioReactive = 2  // Lights respond to audio/music input
@@ -28,5 +28,43 @@ enum LightingMode: Int32, CaseIterable, Codable {
         case .audioReactive: return "Audio Reactive"
         case .visualizer: return "Visualizer"
         }
+    }
+}
+
+// MARK: - Human-Readable Codable
+
+extension LightingMode: Codable {
+    private var codableString: String {
+        switch self {
+        case .staticLight:  return "staticLight"
+        case .animated:     return "animated"
+        case .audioReactive: return "audioReactive"
+        case .visualizer:   return "visualizer"
+        }
+    }
+
+    private static let stringMap: [String: LightingMode] = {
+        var map: [String: LightingMode] = [:]
+        for c in LightingMode.allCases { map[c.codableString] = c }
+        return map
+    }()
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let str = try? container.decode(String.self),
+           let value = Self.stringMap[str] {
+            self = value
+        } else if let raw = try? container.decode(Int32.self),
+                  let value = LightingMode(rawValue: raw) {
+            self = value
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "Invalid LightingMode value")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(codableString)
     }
 }

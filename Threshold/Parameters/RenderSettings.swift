@@ -1863,6 +1863,43 @@ final class RenderSettings: @unchecked Sendable {
             }
             
             // ═══════════════════════════════════════════════════════════════════════════
+            // ANIMATION GATE: Skip smoothDamp when animation is driving parameters
+            // AnimationManager.applyKeyframe() sets immediate values directly each frame.
+            // Running smoothDamp on top of those values causes a tug-of-war flicker
+            // because: (a) residual spring velocities push values away from the
+            // animation's intended position, and (b) applyKeyframe writes properties
+            // with individual lock acquisitions while interpolateToTargets reads them
+            // atomically, creating partial-state races on the render thread.
+            // Zero velocities so there's no accumulated overshoot when animation stops.
+            // ═══════════════════════════════════════════════════════════════════════════
+            if _isAnimationPlaying {
+                // Kill spring velocities — animation handles its own interpolation
+                _velocityMinDistance = 0.0
+                _velocityFoldingLimit = 0.0
+                _velocitySphereRadius = 0.0
+                _velocityFractalScale = 0.0
+                _velocityPosition = .zero
+                
+                // Safety bubble is NOT driven by animation — still interpolate it
+                _safetyBubbleStrength = smoothDamp(
+                    current: _safetyBubbleStrength,
+                    target: _safetyBubbleStrengthTarget,
+                    velocity: &_safetyBubbleStrengthVelocity,
+                    smoothTime: 0.25,
+                    maxSpeed: 8.0,
+                    deltaTime: clampedDT
+                )
+                _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
+                
+                // Keep geometry state machine in dynamic mode during animation
+                _geometryState = .dynamic
+                _geometryStableFrameCount = 0
+                _stepMultiplier += (1.0 - _stepMultiplier) * 0.1
+                
+                return
+            }
+            
+            // ═══════════════════════════════════════════════════════════════════════════
             // GMT-FRACTALS PATTERN: Convergence Lock
             // Like VirtualSpace.updateSmoothing which skips computation when distSq < 1e-21,
             // skip the expensive smoothDamp calls when all parameters have converged AND

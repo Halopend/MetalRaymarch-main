@@ -178,8 +178,15 @@ final class AnimationManager {
         var initialKeyframe = AnimationKeyframe(from: settings, name: "Start", duration: 0)
         initialKeyframe.duration = 0  // First keyframe is the starting point
         
-        let scene = AnimationScene(name: name, initialKeyframe: initialKeyframe)
-        userScenes.append(scene)
+        let scene = AnimationScene(name: name, initialKeyframe: initialKeyframe, fractalType: settings.fractalType)
+        // Capture current safety bubble / blend window settings into the scene
+        var sceneWithBubble = scene
+        sceneWithBubble.colorScheme = settings.colorScheme
+        sceneWithBubble.safetyBubbleEnabled = settings.safetyBubbleEnabled
+        sceneWithBubble.safetyBubbleRadius = settings.safetyBubbleRadius
+        sceneWithBubble.safetyBubbleShape = settings.safetyBubbleShape
+        sceneWithBubble.safetyBubbleBlend = settings.safetyBubbleBlend
+        userScenes.append(sceneWithBubble)
         saveScenes()
         
         print("🎬 Created scene '\(name)' with initial keyframe")
@@ -320,6 +327,38 @@ final class AnimationManager {
         
         // Ensure pipelines are compiled before playback
         precompilePipelinesForCurrentScene()
+
+        // Restore the fractal type the scene was authored for
+        if let sceneFractalType = currentScene?.fractalType,
+           let settings = renderSettings,
+           settings.fractalType != sceneFractalType {
+            settings.fractalType = sceneFractalType
+            print("🎬 Restored fractal type to \(sceneFractalType) for scene playback")
+        }
+
+        // Restore the color scheme the scene was authored for
+        if let sceneColorScheme = currentScene?.colorScheme,
+           let settings = renderSettings,
+           settings.colorScheme != sceneColorScheme {
+            settings.transitionToColorScheme(sceneColorScheme)
+            print("🎬 Restored color scheme to \(sceneColorScheme) for scene playback")
+        }
+
+        // Apply scene-level safety bubble / blend window settings
+        if let settings = renderSettings, let scene = currentScene {
+            if let enabled = scene.safetyBubbleEnabled {
+                settings.safetyBubbleEnabled = enabled
+            }
+            if let radius = scene.safetyBubbleRadius {
+                settings.safetyBubbleRadius = radius
+            }
+            if let shape = scene.safetyBubbleShape {
+                settings.safetyBubbleShape = shape
+            }
+            if let blend = scene.safetyBubbleBlend {
+                settings.safetyBubbleBlend = blend
+            }
+        }
 
         // Signal render loop to tick animation updates every frame.
         // Renderer gates animationManager.update(...) behind this flag.
@@ -515,6 +554,7 @@ final class AnimationManager {
         settings.fractalScale = keyframe.fractalScale
         settings.baseFractalIterations = keyframe.baseFractalIterations
         settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
+        settings.scale = keyframe.scale
         settings.position = keyframe.position
         settings.detailScale = keyframe.detailScale
         settings.targetDetailScale = keyframe.detailScale
@@ -531,8 +571,7 @@ final class AnimationManager {
         }
 
           // Apply optional color scheme from keyframe (also syncs gradient preset)
-        if let rawScheme = keyframe.colorScheme,
-              let scheme = ColorScheme(rawValue: Int32(rawScheme)),
+        if let scheme = keyframe.colorScheme,
               settings.colorScheme != scheme {
             settings.transitionToColorScheme(scheme)
         }
@@ -654,7 +693,9 @@ final class AnimationManager {
     /// Export a scene to a shareable file URL
     func exportSceneToFile(_ scene: AnimationScene) -> URL? {
         let sanitizedName = scene.name.replacingOccurrences(of: " ", with: "_")
-        let fileName = "\(sanitizedName).animscene"
+        // Use .threshanimv for scenes with attached music, .threshanim otherwise
+        let ext = scene.attachedSong != nil ? "threshanimv" : "threshanim"
+        let fileName = "\(sanitizedName).\(ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         do {
@@ -674,8 +715,9 @@ final class AnimationManager {
         do {
             var scene = try sceneDecoder.decode(AnimationScene.self, from: data)
             
-            // Capture all keyframes before re-creating with new ID
+            // Capture all keyframes and fractal type before re-creating with new ID
             let originalKeyframes = scene.keyframes
+            let originalFractalType = scene.fractalType
             
             // Give it a new ID to avoid conflicts
             scene = AnimationScene(
@@ -688,7 +730,8 @@ final class AnimationManager {
                     sphereRadius: 0.5,
                     fractalScale: 2.8,
                     position: .zero
-                )
+                ),
+                fractalType: originalFractalType
             )
             
             // Append remaining keyframes from the original
@@ -705,7 +748,7 @@ final class AnimationManager {
         }
     }
 
-    /// Import a scene from a previously exported .animscene file URL
+    /// Import a scene from a previously exported .threshanim file URL
     func importScene(from url: URL) -> AnimationScene? {
         do {
             let data = try Data(contentsOf: url)

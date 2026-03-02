@@ -8,7 +8,7 @@
 import Foundation
 import simd
 
-enum FractalModelType: Int32, Codable, CaseIterable {
+enum FractalModelType: Int32, CaseIterable {
     case mandelbox         = 0
     case mandelbulb        = 1
     case menger            = 2
@@ -186,5 +186,54 @@ enum FractalModelType: Int32, Codable, CaseIterable {
         }
         
         return fp
+    }
+}
+
+// MARK: - Human-Readable Codable
+
+extension FractalModelType: Codable {
+    private var codableString: String {
+        switch self {
+        case .mandelbox:       return "mandelbox"
+        case .mandelbulb:      return "mandelbulb"
+        case .menger:          return "menger"
+        case .sierpinski:      return "sierpinski"
+        case .dodecahedron:    return "dodecahedron"
+        case .pseudoKleinian:  return "pseudoKleinian"
+        case .quaternionJulia: return "quaternionJulia"
+        case .amazingSurface:  return "amazingSurface"
+        case .pseudoKnightyan: return "pseudoKnightyan"
+        case .mandalayBox:     return "mandalayBox"
+        case .sphereSponge:    return "sphereSponge"
+        case .octahedron:      return "octahedron"
+        case .icosahedron:     return "icosahedron"
+        case .surfaceKIFS:     return "surfaceKIFS"
+        case .mengerSphere:    return "mengerSphere"
+        }
+    }
+
+    private static let stringMap: [String: FractalModelType] = {
+        var map: [String: FractalModelType] = [:]
+        for c in FractalModelType.allCases { map[c.codableString] = c }
+        return map
+    }()
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let str = try? container.decode(String.self),
+           let value = Self.stringMap[str] {
+            self = value
+        } else if let raw = try? container.decode(Int32.self),
+                  let value = FractalModelType(rawValue: raw) {
+            self = value
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "Invalid FractalModelType value")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(codableString)
     }
 }

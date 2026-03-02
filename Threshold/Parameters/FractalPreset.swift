@@ -79,6 +79,10 @@ struct FractalPreset: Codable, Identifiable {
     var colorSchemeAutoInterval: Float?
     var colorSchemeTransitionDuration: Float?
     
+    // === DETAIL TRANSFORM (grab gesture orientation/scale) ===
+    var worldRotation: simd_quatf?
+    var detailScale: Float?
+    
     // === GRADIENT COLORING SYSTEM (v2.1) ===
     var gradientState: GradientState?
     var lightingSoftness: Float?
@@ -97,6 +101,8 @@ struct FractalPreset: Codable, Identifiable {
         case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
         // Color scheme auto-transition
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
+        // Detail transform
+        case worldRotation, detailScale
         // v2.1 gradient coloring system
         case gradientState, lightingSoftness
         case musicReactiveMappings
@@ -188,6 +194,14 @@ struct FractalPreset: Codable, Identifiable {
         colorSchemeAutoInterval = try container.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval)
         colorSchemeTransitionDuration = try container.decodeIfPresent(Float.self, forKey: .colorSchemeTransitionDuration)
         
+        // Detail transform
+        if let wrComponents = try container.decodeIfPresent([Float].self, forKey: .worldRotation), wrComponents.count == 4 {
+            worldRotation = simd_quatf(ix: wrComponents[0], iy: wrComponents[1], iz: wrComponents[2], r: wrComponents[3])
+        } else {
+            worldRotation = nil
+        }
+        detailScale = try container.decodeIfPresent(Float.self, forKey: .detailScale)
+        
         // v2.1 gradient coloring system
         gradientState = try container.decodeIfPresent(GradientState.self, forKey: .gradientState)
         lightingSoftness = try container.decodeIfPresent(Float.self, forKey: .lightingSoftness)
@@ -248,6 +262,12 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(colorSchemeAutoTransition, forKey: .colorSchemeAutoTransition)
         try container.encodeIfPresent(colorSchemeAutoInterval, forKey: .colorSchemeAutoInterval)
         try container.encodeIfPresent(colorSchemeTransitionDuration, forKey: .colorSchemeTransitionDuration)
+        
+        // Detail transform
+        if let wr = worldRotation {
+            try container.encode([wr.imag.x, wr.imag.y, wr.imag.z, wr.real], forKey: .worldRotation)
+        }
+        try container.encodeIfPresent(detailScale, forKey: .detailScale)
         
         // v2.1 gradient coloring system
         try container.encodeIfPresent(gradientState, forKey: .gradientState)
@@ -370,6 +390,10 @@ struct FractalPreset: Codable, Identifiable {
         preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
         preset.colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
         
+        // Detail transform (grab gesture orientation/scale)
+        preset.worldRotation = settings.worldRotation
+        preset.detailScale = settings.detailScale
+        
         // v2.1 gradient coloring system
         preset.gradientState = settings.gradientState
         preset.lightingSoftness = settings.lightingSoftness
@@ -421,12 +445,14 @@ struct FractalPreset: Codable, Identifiable {
             position: position
         )
         
-        // Reset detail transform to identity when loading a preset
-        let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-        settings.worldRotation = identity
-        settings.targetWorldRotation = identity
-        settings.detailScale = 1.0
-        settings.targetDetailScale = 1.0
+        // Restore detail transform (grab gesture orientation/scale)
+        // Falls back to identity/1.0 for presets saved before this field existed
+        let wr = worldRotation ?? simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        settings.worldRotation = wr
+        settings.targetWorldRotation = wr
+        let ds = detailScale ?? 1.0
+        settings.detailScale = ds
+        settings.targetDetailScale = ds
         
         if includePerformance {
             if let resolutionScale = resolutionScale {

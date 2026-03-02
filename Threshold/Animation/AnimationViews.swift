@@ -433,6 +433,68 @@ struct SceneEditorView: View {
             
             Divider()
             
+            // Safety bubble / blend window
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Safety Bubble")
+                    .font(.subheadline.bold())
+                
+                Toggle("Enabled", isOn: Binding(
+                    get: { scene.safetyBubbleEnabled ?? true },
+                    set: { scene.safetyBubbleEnabled = $0 }
+                ))
+                .font(.subheadline)
+                
+                if scene.safetyBubbleEnabled ?? true {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Radius").font(.caption)
+                            Slider(value: Binding(
+                                get: { scene.safetyBubbleRadius ?? 0.5 },
+                                set: { scene.safetyBubbleRadius = $0 }
+                            ), in: 0.1...2.0, step: 0.05)
+                            Text(String(format: "%.2f", scene.safetyBubbleRadius ?? 0.5))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 34, alignment: .trailing)
+                        }
+                        HStack {
+                            Text("Shape").font(.caption)
+                            Slider(value: Binding(
+                                get: { scene.safetyBubbleShape ?? 0.5 },
+                                set: { scene.safetyBubbleShape = $0 }
+                            ), in: 0.0...1.0, step: 0.05)
+                            Text(String(format: "%.2f", scene.safetyBubbleShape ?? 0.5))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 34, alignment: .trailing)
+                        }
+                        HStack {
+                            Text("Blend").font(.caption)
+                            Slider(value: Binding(
+                                get: { scene.safetyBubbleBlend ?? 0.5 },
+                                set: { scene.safetyBubbleBlend = $0 }
+                            ), in: 0.0...1.0, step: 0.05)
+                            Text(String(format: "%.2f", scene.safetyBubbleBlend ?? 0.5))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 34, alignment: .trailing)
+                        }
+                    }
+                }
+                
+                Button {
+                    let settings = appModel.renderSettings
+                    scene.safetyBubbleEnabled = settings.safetyBubbleEnabled
+                    scene.safetyBubbleRadius = settings.safetyBubbleRadius
+                    scene.safetyBubbleShape = settings.safetyBubbleShape
+                    scene.safetyBubbleBlend = settings.safetyBubbleBlend
+                } label: {
+                    Label("Capture Current Settings", systemImage: "camera.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            
+            Divider()
+            
             // Attached song
             VStack(alignment: .leading, spacing: 6) {
                 Text("Attached Song")

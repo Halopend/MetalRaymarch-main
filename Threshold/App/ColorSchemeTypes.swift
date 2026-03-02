@@ -9,7 +9,7 @@
 import Foundation
 import simd
 
-enum ColorScheme: Int32, CaseIterable, Codable {
+enum ColorScheme: Int32, CaseIterable {
     case classic = 0        // Original Mandelbox colors (red/gray/gold)
     case ocean = 1          // Deep blues and teals
     case fire = 2           // Warm oranges and reds
@@ -256,5 +256,55 @@ enum ColorScheme: Int32, CaseIterable, Codable {
             beatFlashEnabled: 0,
             beatFlashIntensity: 0.0
         )
+    }
+}
+
+// MARK: - Human-Readable Codable
+
+extension ColorScheme: Codable {
+    /// The string key used in JSON instead of a raw Int32.
+    private var codableString: String {
+        switch self {
+        case .classic:    return "classic"
+        case .ocean:      return "ocean"
+        case .fire:       return "fire"
+        case .forest:     return "forest"
+        case .nebula:     return "nebula"
+        case .mono:       return "mono"
+        case .aurora:     return "aurora"
+        case .volcanic:   return "volcanic"
+        case .neonCyber:  return "neonCyber"
+        case .neonSunset: return "neonSunset"
+        case .neonMatrix: return "neonMatrix"
+        }
+    }
+
+    private static let stringMap: [String: ColorScheme] = {
+        var map: [String: ColorScheme] = [:]
+        for c in ColorScheme.allCases { map[c.codableString] = c }
+        return map
+    }()
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        // Try string first (new format)
+        if let str = try? container.decode(String.self),
+           let value = Self.stringMap[str] {
+            self = value
+        }
+        // Fall back to Int32 (legacy format)
+        else if let raw = try? container.decode(Int32.self),
+                let value = ColorScheme(rawValue: raw) {
+            self = value
+        }
+        else {
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "Invalid ColorScheme value")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(codableString)
     }
 }

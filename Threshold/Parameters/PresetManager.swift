@@ -321,13 +321,17 @@ class PresetManager {
     }
     
     /// Export a preset to a file URL
+    /// Uses `.threshmp` for presets with music-reactive mappings, `.threshscene` otherwise.
     func exportPreset(_ preset: FractalPreset) -> URL? {
-        let fileName = "\(preset.name.replacingOccurrences(of: " ", with: "_")).fractal"
+        let hasMusicMappings = preset.musicReactiveMappings != nil && !(preset.musicReactiveMappings?.isEmpty ?? true)
+        let ext = hasMusicMappings ? "threshmp" : "threshscene"
+        let fileName = "\(preset.name.replacingOccurrences(of: " ", with: "_")).\(ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(preset)
             try data.write(to: tempURL)
             return tempURL

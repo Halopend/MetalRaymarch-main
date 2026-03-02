@@ -38,7 +38,7 @@ enum FractalSubTab: String, CaseIterable { case shape = "Shape", space = "Space"
 enum AnimateSubTab: String, CaseIterable { case play = "Play", edit = "Edit" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
-enum SettingsSubTab: String, CaseIterable { case general = "General", advanced = "Advanced" }
+enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", advanced = "Advanced" }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - ContentView
@@ -1091,8 +1091,9 @@ struct ContentView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
                     switch settingsSubTab {
-                    case .general:   settingsGeneralContent
-                    case .advanced:  settingsAdvancedContent
+                    case .general:     settingsGeneralContent
+                    case .exportShare: settingsExportContent
+                    case .advanced:    settingsAdvancedContent
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -1401,6 +1402,155 @@ struct ContentView: View {
         // Use cache.liveFPS for the settings panel to avoid @Observable invalidation from appModel.fps
         let fps = cache.liveFPS
         if fps >= 85 { return .green }; if fps >= 60 { return .yellow }; return .red
+    }
+
+    // MARK: - Export & Share Tab
+
+    @State private var exportShareURL: URL?
+    @State private var showExportShare = false
+
+    private var settingsExportContent: some View {
+        VStack(spacing: 12) {
+            // ── Current Preset Export ────────────────────────────────────
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Current Preset", systemImage: "square.and.arrow.up")
+                        .font(.headline)
+                    Spacer()
+                }
+                Text("Export the current render settings as a shareable preset file.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 10) {
+                    Button {
+                        let preset = FractalPreset.fromSettings(appModel.renderSettings, name: "Export")
+                        if let url = appModel.presetManager.exportPreset(preset) {
+                            exportShareURL = url
+                            showExportShare = true
+                        }
+                    } label: {
+                        Label("Export Preset (.threshscene)", systemImage: "doc.badge.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(themeColor)
+                }
+
+                let hasMusicMappings = !(appModel.renderSettings.musicReactiveMappings.isEmpty)
+                if hasMusicMappings {
+                    Button {
+                        var preset = FractalPreset.fromSettings(appModel.renderSettings, name: "Music Export")
+                        preset.musicReactiveMappings = appModel.renderSettings.musicReactiveMappings
+                        if let url = appModel.presetManager.exportPreset(preset) {
+                            exportShareURL = url
+                            showExportShare = true
+                        }
+                    } label: {
+                        Label("Export Music Preset (.threshmp)", systemImage: "music.note.list")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(themeColor.opacity(0.06)))
+
+            // ── Animation Scene Export ───────────────────────────────────
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Animation Scenes", systemImage: "film.stack")
+                        .font(.headline)
+                    Spacer()
+                }
+                Text("Export animation scenes. Scenes with attached songs export as music videos.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let mgr = appModel.animationManager {
+                    if mgr.scenes.isEmpty {
+                        Text("No scenes available.")
+                            .foregroundStyle(.tertiary)
+                            .font(.subheadline)
+                            .padding(.vertical, 4)
+                    } else {
+                        ForEach(mgr.scenes) { scene in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(scene.name).font(.subheadline.weight(.medium))
+                                    HStack(spacing: 6) {
+                                        Text("\(scene.keyframes.count) keyframes")
+                                        if scene.attachedSong != nil {
+                                            Label("Music", systemImage: "music.note")
+                                        }
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    if let url = mgr.exportSceneToFile(scene) {
+                                        exportShareURL = url
+                                        showExportShare = true
+                                    }
+                                } label: {
+                                    Image(systemName: "square.and.arrow.up")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                } else {
+                    Text("Animation manager not available.")
+                        .foregroundStyle(.tertiary)
+                        .font(.subheadline)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
+
+            // ── File Format Reference ───────────────────────────────────
+            VStack(spacing: 8) {
+                HStack {
+                    Label("File Formats", systemImage: "doc.text")
+                        .font(.headline)
+                    Spacer()
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    formatRow(ext: ".threshscene", desc: "Fractal preset (settings snapshot)")
+                    formatRow(ext: ".threshanim", desc: "Animation scene (keyframe sequence)")
+                    formatRow(ext: ".threshanimv", desc: "Animation + music (music video)")
+                    formatRow(ext: ".threshmp", desc: "Music-reactive preset (audio mappings)")
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
+        }
+        .sheet(isPresented: $showExportShare) {
+            if let url = exportShareURL {
+                ShareLink(item: url) {
+                    Label("Share File", systemImage: "square.and.arrow.up")
+                }
+                .padding()
+            }
+        }
+    }
+
+    private func formatRow(ext: String, desc: String) -> some View {
+        HStack(spacing: 8) {
+            Text(ext)
+                .font(.caption.monospaced().weight(.semibold))
+                .foregroundStyle(themeColor)
+                .frame(width: 110, alignment: .leading)
+            Text(desc)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
     }
     
     private var settingsAdvancedContent: some View {
