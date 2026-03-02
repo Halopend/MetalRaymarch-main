@@ -1151,7 +1151,11 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     result.cache = makeEmptyOrbitCache();
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
-    float t = 0.05 + dither;
+    // Mandelbulb DE returns much smaller values near the surface compared to
+    // box-fold fractals.  Start closer to the camera and use a finer hit
+    // threshold so thin surface detail is not clipped.
+    bool isMandelbulb = (fractalType == FractalTypeMandelbulb);
+    float t = (isMandelbulb ? 0.005 : 0.05) + dither;
     
     // === BOUNDING SPHERE PRE-TEST (GMT-fractals technique) ===
     // Skip empty space before the fractal's bounding volume.
@@ -1176,7 +1180,10 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     
     for(int j = 0; j < maxSteps; j++)
     {
-        float threshold = fma(t, 0.0008, 0.0005) + (1.0 - quality) * 0.003;
+        // Mandelbulb needs ~4x finer threshold (its DE returns much smaller values).
+        float threshold = isMandelbulb
+            ? fma(t, 0.0002f, 0.00012f) + (1.0f - quality) * 0.001f
+            : fma(t, 0.0008f, 0.0005f)  + (1.0f - quality) * 0.003f;
         
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
@@ -1213,7 +1220,8 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     result.cache = makeEmptyOrbitCache();
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
-    float t = max(0.01, startT - 0.3) + dither;
+    bool isMandelbulb = (fractalType == FractalTypeMandelbulb);
+    float t = max(isMandelbulb ? 0.002 : 0.01, startT - 0.3) + dither;
     
     float glow = 0.0;
     // Compiler specializes per FC_MAX_RAY_STEPS value
@@ -1231,7 +1239,9 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     
     for(int j = 0; j < maxSteps; j++)
     {
-        float threshold = fma(t, 0.0006, 0.0005);
+        float threshold = isMandelbulb
+            ? fma(t, 0.00015f, 0.00012f)
+            : fma(t, 0.0006f, 0.0005f);
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, fractalType, fp);

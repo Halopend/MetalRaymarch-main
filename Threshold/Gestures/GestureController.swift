@@ -343,6 +343,15 @@ final class GestureController {
             settings.targetWorldRotation = mandelbulbFacing
             settings.detailScale = 0.25
             settings.targetDetailScale = 0.25
+
+            // Center the Mandelbulb in front of the user by resetting position
+            // to the initial default (prevents carry-over from previous fractal).
+            let defaultPos = SIMD3<Float>(0.1, 0.1, 0.1)
+            settings.position = defaultPos
+            settings.targetPosition = defaultPos
+
+            // Safety bubble clashes with the Mandelbulb surface — disable it.
+            settings.safetyBubbleEnabled = false
         }
         
         // Reset gesture states
@@ -1247,11 +1256,11 @@ final class GestureController {
             // Direct write (intentional dispatcher bypass) — position is a SIMD3 vector,
             // not a scalar parameter. See grab gesture for rationale.
             //
-            // Auto-scale by 1/detailScale so translation speed stays perceptually
-            // constant regardless of zoom level. When zoomed in (small detailScale)
-            // the fractal features are larger on screen, so hand movement needs to
-            // produce proportionally more world-space translation.
-            let zoomCompensation = 1.0 / max(settings.detailScale, 0.01)
+            // Scale inversely with detailScale so translation feels consistent:
+            // - Zoomed in (large detailScale)  -> slower translation (more precision)
+            // - Zoomed out (small detailScale) -> faster translation (more coverage)
+            // Clamp range to avoid extreme behavior at very small/large scales.
+            let zoomCompensation = simd_clamp(1.0 / max(settings.detailScale, 0.01), 0.2, 5.0)
             accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition
