@@ -53,14 +53,11 @@ class AppModel {
     
     // Audio analyzer for reactive lighting
     let audioAnalyzer = AudioAnalyzer()
-    
-    // Spotify integration for music visualizer
-    let spotifyManager = SpotifyManager()
 
     // Apple Music integration for music visualizer
     let appleMusicManager = AppleMusicManager()
     
-    // Unified music service (wraps Apple Music + Spotify)
+    // Unified music service (wraps Apple Music)
     private(set) var musicService: MusicService!
     
     // Hand tracking state
@@ -166,7 +163,7 @@ class AppModel {
         gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
         
         // Initialize unified music service
-        musicService = MusicService(appleMusic: appleMusicManager, spotify: spotifyManager)
+        musicService = MusicService(appleMusic: appleMusicManager)
         
         // Initialize animation manager
         animationManager = AnimationManager(renderSettings: renderSettings)

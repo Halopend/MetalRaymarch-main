@@ -69,11 +69,6 @@ struct FractalPreset: Codable, Identifiable {
     var gradientCycleEffect: GradientCycleEffect?
     var beatFlashEffect: BeatFlashEffect?
     
-    // === DOPPELGANGER MODE ===
-    var doppelgangerEnabled: Bool?
-    var doppelgangerPlane: SIMD3<Float>?
-    var doppelgangerOffset: Float?
-    
     // === COLOR SCHEME AUTO-TRANSITION ===
     var colorSchemeAutoTransition: Bool?
     var colorSchemeAutoInterval: Float?
@@ -97,8 +92,6 @@ struct FractalPreset: Codable, Identifiable {
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, beatFlashEffect
-        // Doppelganger
-        case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
         // Color scheme auto-transition
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // Detail transform
@@ -184,11 +177,6 @@ struct FractalPreset: Codable, Identifiable {
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
         beatFlashEffect = try container.decodeIfPresent(BeatFlashEffect.self, forKey: .beatFlashEffect)
         
-        // Doppelganger
-        doppelgangerEnabled = try container.decodeIfPresent(Bool.self, forKey: .doppelgangerEnabled)
-        doppelgangerPlane = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .doppelgangerPlane)
-        doppelgangerOffset = try container.decodeIfPresent(Float.self, forKey: .doppelgangerOffset)
-        
         // Color scheme auto-transition
         colorSchemeAutoTransition = try container.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition)
         colorSchemeAutoInterval = try container.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval)
@@ -252,11 +240,6 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
         try container.encodeIfPresent(beatFlashEffect, forKey: .beatFlashEffect)
-        
-        // Doppelganger
-        try container.encodeIfPresent(doppelgangerEnabled, forKey: .doppelgangerEnabled)
-        try container.encodeIfPresent(doppelgangerPlane, forKey: .doppelgangerPlane)
-        try container.encodeIfPresent(doppelgangerOffset, forKey: .doppelgangerOffset)
         
         // Color scheme auto-transition
         try container.encodeIfPresent(colorSchemeAutoTransition, forKey: .colorSchemeAutoTransition)
@@ -380,11 +363,6 @@ struct FractalPreset: Codable, Identifiable {
         preset.gradientCycleEffect = settings.gradientCycleEffect
         preset.beatFlashEffect = settings.beatFlashEffect
         
-        // Doppelganger
-        preset.doppelgangerEnabled = settings.doppelgangerEnabled
-        preset.doppelgangerPlane = settings.doppelgangerPlane
-        preset.doppelgangerOffset = settings.doppelgangerOffset
-        
         // Color scheme auto-transition
         preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
         preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
@@ -503,17 +481,6 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let beatFlashEffect = beatFlashEffect {
             settings.beatFlashEffect = beatFlashEffect
-        }
-        
-        // Doppelganger
-        if let doppelgangerEnabled = doppelgangerEnabled {
-            settings.doppelgangerEnabled = doppelgangerEnabled
-        }
-        if let doppelgangerPlane = doppelgangerPlane {
-            settings.doppelgangerPlane = doppelgangerPlane
-        }
-        if let doppelgangerOffset = doppelgangerOffset {
-            settings.doppelgangerOffset = doppelgangerOffset
         }
         
         // Color scheme auto-transition

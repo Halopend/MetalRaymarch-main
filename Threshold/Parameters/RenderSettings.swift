@@ -238,11 +238,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
     private var _beatFlashEffect: BeatFlashEffect = .off
     
-    // === DOPPELGANGER MODE ===
-    private var _doppelgangerEnabled: Bool = false              // Pre-fold mirror creates structural twin
-    private var _doppelgangerPlane: SIMD3<Float> = SIMD3<Float>(1, 0, 0)  // Mirror plane normal (x-axis default)
-    private var _doppelgangerOffset: Float = 0.0               // Mirror plane distance from origin
-    
     // === GEOMETRY STABILITY STATE ===
     // Tracks whether geometry parameters have settled for optimization
     private var _geometryState: GeometryState = .dynamic
@@ -312,15 +307,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _velocitySphereRadius: Float = 0.0
     private var _velocityFractalScale: Float = 0.0
     private var _velocityPosition: SIMD3<Float> = .zero
-    
-    // === REFINING PARAMETERS (Polychronakis 2024 / Keinert 2014) ===
-    // These control the sphere tracing optimization thresholds
-    private var _relaxFactor: Float = 1.6            // Over-relaxation multiplier (1.0-2.0)
-    private var _relaxBacktrack: Float = 0.7         // Backtrack factor when overshooting (0.5-1.0)
-    private var _sdfScaleCoarse: Float = 1.3         // SDF scaling for coarse pass (1.0-2.0)
-    private var _sdfScaleSuperCoarse: Float = 1.5    // SDF scaling for super-coarse pass (1.0-2.5)
-    private var _earlyTermRatio: Float = 0.3         // Early termination convergence ratio (0.1-0.5)
-    private var _earlyTermCount: Int = 3             // Steps before early termination (1-5)
 
     var minDistance: Float {
         get { withLock { _minDistance } }
@@ -1385,26 +1371,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    // === DOPPELGANGER MODE ===
-    
-    /// Enable doppelganger pre-fold (creates structural twin)
-    var doppelgangerEnabled: Bool {
-        get { withLock { _doppelgangerEnabled } }
-        set { withLock { _doppelgangerEnabled = newValue } }
-    }
-    
-    /// Mirror plane normal (normalized direction vector)
-    var doppelgangerPlane: SIMD3<Float> {
-        get { withLock { _doppelgangerPlane } }
-        set { withLock { _doppelgangerPlane = simd_normalize(newValue) } }
-    }
-    
-    /// Mirror plane offset from origin along the plane normal
-    var doppelgangerOffset: Float {
-        get { withLock { _doppelgangerOffset } }
-        set { withLock { _doppelgangerOffset = newValue } }
-    }
-    
     // === GMT-FRACTALS: HALTON JITTER TEMPORAL AA ===
     
     /// Enable Halton sub-pixel jitter for temporal anti-aliasing when geometry is stable.
@@ -2316,61 +2282,6 @@ final class RenderSettings: @unchecked Sendable {
             iz: cr * cp * sy - sr * sp * cy,
             r:  cr * cp * cy + sr * sp * sy
         ).normalized
-    }
-
-    // === REFINING PARAMETERS ===
-    // Over-relaxation multiplier (Keinert 2014)
-    var relaxFactor: Float {
-        get { withLock { _relaxFactor } }
-        set { 
-            withLock { _relaxFactor = newValue }
-            print("[REFINE] relaxFactor = \(newValue)")
-        }
-    }
-    
-    // Backtrack factor when overshooting
-    var relaxBacktrack: Float {
-        get { withLock { _relaxBacktrack } }
-        set { 
-            withLock { _relaxBacktrack = newValue }
-            print("[REFINE] relaxBacktrack = \(newValue)")
-        }
-    }
-    
-    // SDF scaling for coarse pass (Polychronakis 2024)
-    var sdfScaleCoarse: Float {
-        get { withLock { _sdfScaleCoarse } }
-        set { 
-            withLock { _sdfScaleCoarse = newValue }
-            print("[REFINE] sdfScaleCoarse = \(newValue)")
-        }
-    }
-    
-    // SDF scaling for super-coarse pass
-    var sdfScaleSuperCoarse: Float {
-        get { withLock { _sdfScaleSuperCoarse } }
-        set { 
-            withLock { _sdfScaleSuperCoarse = newValue }
-            print("[REFINE] sdfScaleSuperCoarse = \(newValue)")
-        }
-    }
-    
-    // Early termination convergence ratio
-    var earlyTermRatio: Float {
-        get { withLock { _earlyTermRatio } }
-        set { 
-            withLock { _earlyTermRatio = newValue }
-            print("[REFINE] earlyTermRatio = \(newValue)")
-        }
-    }
-    
-    // Steps before early termination
-    var earlyTermCount: Int {
-        get { withLock { _earlyTermCount } }
-        set { 
-            withLock { _earlyTermCount = newValue }
-            print("[REFINE] earlyTermCount = \(newValue)")
-        }
     }
 
 }

@@ -577,13 +577,11 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
 /// A song linked to a scene so it auto-plays when the animation starts.
 enum SongSource: String, Codable, Equatable {
     case appleMusic
-    case spotify
 
     /// Map from a MusicServiceProvider.serviceID.
     init?(serviceID: String) {
         switch serviceID {
         case "appleMusic": self = .appleMusic
-        case "spotify":    self = .spotify
         default:           return nil
         }
     }
@@ -599,9 +597,6 @@ enum SongSource: String, Codable, Equatable {
 /// capture service; the rest are cross-matched alternatives. On playback
 /// the system walks this list (reordered by the user's service priority)
 /// until one succeeds.
-///
-/// Legacy fields `appleMusicID` and `spotifyURI` are kept for
-/// backward-compatible decoding of scenes saved before the unification layer.
 struct SongAttachment: Codable, Equatable {
     var source: SongSource
     var title: String
@@ -619,9 +614,8 @@ struct SongAttachment: Codable, Equatable {
     /// All service IDs that have an identifier for this song.
     var availableServiceIDs: [String] { trackIDs.map(\.serviceID) }
 
-    // ── Legacy fields (backward compat) ──────────────────────────────────
+    // ── Legacy field (backward compat decoding only) ─────────────────────
     var appleMusicID: String?
-    var spotifyURI: String?
 
     // ── Primary initializer (multi-service) ──────────────────────────────
     init(trackIDs: [UnifiedTrackID], title: String, artist: String) {
@@ -630,46 +624,15 @@ struct SongAttachment: Codable, Equatable {
         self.source = SongSource(serviceID: trackIDs[0].serviceID) ?? .appleMusic
         self.title = title
         self.artist = artist
-        // Populate legacy fields for round-trip safety
+        // Populate legacy field for round-trip safety
         for tid in trackIDs {
-            switch tid.serviceID {
-            case "appleMusic": self.appleMusicID = tid.nativeID
-            case "spotify":    self.spotifyURI   = tid.nativeID
-            default: break
-            }
+            if tid.serviceID == "appleMusic" { self.appleMusicID = tid.nativeID }
         }
     }
 
     /// Convenience: single-ID initializer (delegates to multi-ID).
     init(trackID: UnifiedTrackID, title: String, artist: String) {
         self.init(trackIDs: [trackID], title: title, artist: artist)
-    }
-
-    // ── Legacy initializer (kept for existing callers) ────────────────
-    init(source: SongSource, title: String, artist: String,
-         appleMusicID: String?, spotifyURI: String?) {
-        self.source = source
-        self.title = title
-        self.artist = artist
-        self.appleMusicID = appleMusicID
-        self.spotifyURI = spotifyURI
-        // Build trackIDs from legacy fields
-        var ids: [UnifiedTrackID] = []
-        switch source {
-        case .appleMusic:
-            ids.append(UnifiedTrackID(serviceID: "appleMusic",
-                                      nativeID: appleMusicID ?? ""))
-            if let uri = spotifyURI, !uri.isEmpty {
-                ids.append(UnifiedTrackID(serviceID: "spotify", nativeID: uri))
-            }
-        case .spotify:
-            ids.append(UnifiedTrackID(serviceID: "spotify",
-                                      nativeID: spotifyURI ?? ""))
-            if let amid = appleMusicID, !amid.isEmpty {
-                ids.append(UnifiedTrackID(serviceID: "appleMusic", nativeID: amid))
-            }
-        }
-        self.trackIDs = ids
     }
 
     // ── Custom Codable for backward compatibility ──────────────────────
@@ -680,32 +643,30 @@ struct SongAttachment: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        source = try c.decode(SongSource.self, forKey: .source)
+        // Decode source, falling back to .appleMusic for old Spotify entries
+        if let rawSource = try? c.decode(SongSource.self, forKey: .source) {
+            source = rawSource
+        } else {
+            source = .appleMusic
+        }
         title  = try c.decode(String.self, forKey: .title)
         artist = try c.decode(String.self, forKey: .artist)
         appleMusicID = try c.decodeIfPresent(String.self, forKey: .appleMusicID)
-        spotifyURI   = try c.decodeIfPresent(String.self, forKey: .spotifyURI)
 
         // 1) Prefer trackIDs array if present (new format)
         if let ids = try? c.decode([UnifiedTrackID].self, forKey: .trackIDs), !ids.isEmpty {
-            trackIDs = ids
+            // Filter out any Spotify entries from old saved data
+            let filtered = ids.filter { $0.serviceID != "spotify" }
+            trackIDs = filtered.isEmpty ? [UnifiedTrackID(serviceID: "appleMusic", nativeID: appleMusicID ?? "")] : filtered
         }
         // 2) Fall back to single trackID (previous format)
-        else if let tid = try? c.decode(UnifiedTrackID.self, forKey: .trackID) {
+        else if let tid = try? c.decode(UnifiedTrackID.self, forKey: .trackID), tid.serviceID != "spotify" {
             trackIDs = [tid]
         }
         // 3) Synthesize from legacy fields (oldest format)
         else {
-            var ids: [UnifiedTrackID] = []
-            switch source {
-            case .appleMusic:
-                ids.append(UnifiedTrackID(serviceID: "appleMusic",
-                                          nativeID: appleMusicID ?? ""))
-            case .spotify:
-                ids.append(UnifiedTrackID(serviceID: "spotify",
-                                          nativeID: spotifyURI ?? ""))
-            }
-            trackIDs = ids
+            trackIDs = [UnifiedTrackID(serviceID: "appleMusic",
+                                       nativeID: appleMusicID ?? "")]
         }
     }
 
@@ -718,7 +679,6 @@ struct SongAttachment: Codable, Equatable {
         // Also write single trackID for forward compat with older builds
         try c.encode(trackID, forKey: .trackID)
         try c.encodeIfPresent(appleMusicID, forKey: .appleMusicID)
-        try c.encodeIfPresent(spotifyURI, forKey: .spotifyURI)
     }
 }
 

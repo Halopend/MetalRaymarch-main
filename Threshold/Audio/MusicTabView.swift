@@ -145,12 +145,12 @@ struct MusicTabContent: View {
                         AsyncImage(url: artURL) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
-                            artPlaceholder(for: track.source)
+                            artPlaceholder()
                         }
                         .frame(width: 56, height: 56)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
-                        artPlaceholder(for: track.source)
+                        artPlaceholder()
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -227,12 +227,12 @@ struct MusicTabContent: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
     }
 
-    private func artPlaceholder(for source: SongSource) -> some View {
+    private func artPlaceholder() -> some View {
         RoundedRectangle(cornerRadius: 8)
             .fill(.quaternary)
             .overlay(
-                Image(systemName: source == .appleMusic ? "apple.logo" : "music.note")
-                    .foregroundStyle(source == .appleMusic ? .pink.opacity(0.6) : .secondary)
+                Image(systemName: "apple.logo")
+                    .foregroundStyle(.pink.opacity(0.6))
             )
             .frame(width: 56, height: 56)
     }

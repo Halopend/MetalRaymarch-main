@@ -647,7 +647,7 @@ actor Renderer {
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
         
         // === AUDIO PIPELINE ===
-        // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
+        // Auto-detect active sources: use mic FFT and/or
         // Apple Music BPM-based synthesis — blend whatever is available.
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
         
@@ -661,7 +661,6 @@ actor Renderer {
                     self.appModel.animationManager?.update(deltaTime: animDelta)
                 }
                 if isAudioMode {
-                    self.appModel.spotifyManager.updateFrame()
                     self.appModel.appleMusicManager.updateFrame()
                 }
                 // Advance per-node smoothing and consume dirty flags
@@ -679,11 +678,9 @@ actor Renderer {
         
         if isAudioMode {
             let mic = appModel.audioAnalyzer
-            let spotifyManager = appModel.spotifyManager
             let appleMusicManager = appModel.appleMusicManager
             // Auto-detect: use whatever sources are currently active
             let micActive = mic.isCapturing
-            let spotifyActive = spotifyManager.beatSyncActive
             let appleMusicActive = appleMusicManager.isActive
             
             // Sensitivity multipliers from user settings
@@ -703,14 +700,6 @@ actor Renderer {
                 totalTreble += mic.trebleLevel
                 totalBeat = max(totalBeat, mic.peakLevel * 0.7)
                 totalLevel += mic.level
-                sourceCount += 1
-            }
-            if spotifyActive {
-                totalBass += spotifyManager.bassLevel
-                totalMid += spotifyManager.midLevel
-                totalTreble += spotifyManager.trebleLevel
-                totalBeat = max(totalBeat, spotifyManager.beatIntensity)
-                totalLevel += spotifyManager.overallLevel
                 sourceCount += 1
             }
             if appleMusicActive {

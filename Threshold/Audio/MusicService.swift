@@ -17,14 +17,11 @@ import SwiftUI
 // MARK: - Unified Track (legacy compat)
 
 /// A source-agnostic representation of a playing track.
-/// Kept for backward compatibility with existing code that uses MusicTrack.
 struct MusicTrack: Equatable {
-    let source: SongSource
     let title: String
     let artist: String
-    /// Apple Music persistent ID (as String) or Spotify track URI
+    /// Apple Music persistent ID
     let identifier: String
-    /// Spotify album art URL (nil for Apple Music)
     let artworkURL: URL?
 }
 
@@ -114,42 +111,35 @@ final class MusicService {
     // BACKWARD-COMPATIBLE ACCESSORS
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Direct access to backing managers (for code that still needs them).
+    /// Direct access to backing manager.
     let appleMusic: AppleMusicManager
-    let spotify: SpotifyManager
 
     /// Typed adapter access when needed.
     private(set) var appleMusicAdapter: AppleMusicServiceAdapter!
-    private(set) var spotifyAdapter: SpotifyServiceAdapter!
 
-    init(appleMusic: AppleMusicManager, spotify: SpotifyManager) {
+    init(appleMusic: AppleMusicManager) {
         self.appleMusic = appleMusic
-        self.spotify = spotify
 
-        // Build and register adapters
+        // Build and register adapter
         let amAdapter = AppleMusicServiceAdapter(manager: appleMusic)
-        let spAdapter = SpotifyServiceAdapter(manager: spotify)
         self.appleMusicAdapter = amAdapter
-        self.spotifyAdapter = spAdapter
         register(amAdapter)
-        register(spAdapter)
     }
 
     // ══════════════════════════════════════════════════════════════════════
     // NOW PLAYING (delegated to active provider)
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Which backend is currently the active source (legacy enum).
+    /// Which backend is currently the active source.
     var activeSource: SongSource? {
-        guard let p = activeProvider else { return nil }
-        return songSource(for: p.serviceID)
+        guard activeProvider != nil else { return nil }
+        return .appleMusic
     }
 
     /// Unified now-playing track (nil when nothing is loaded).
     var nowPlaying: MusicTrack? {
         guard let p = activeProvider, let track = p.nowPlaying else { return nil }
         return MusicTrack(
-            source: songSource(for: p.serviceID) ?? .appleMusic,
             title: track.title,
             artist: track.artist,
             identifier: track.id,
@@ -270,7 +260,7 @@ final class MusicService {
 
     /// User-configured service priority for fallback playback.
     /// Persisted in UserDefaults as a JSON array of service IDs.
-    /// Example: `["spotify", "appleMusic"]` — try Spotify first, then Apple Music.
+    /// Example: `["appleMusic"]`.
     /// If empty/nil, uses the default provider registration order.
     var servicePriority: [String] {
         get {
@@ -398,7 +388,6 @@ final class MusicService {
     // ══════════════════════════════════════════════════════════════════════
 
     var isAppleMusicConnected: Bool { appleMusic.isAuthorized }
-    var isSpotifyConnected: Bool { spotify.isConnected }
 
     /// At least one music service is available.
     var hasAnyConnection: Bool {
@@ -413,13 +402,4 @@ final class MusicService {
     // ══════════════════════════════════════════════════════════════════════
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════════════════
-
-    /// Map a serviceID to the legacy `SongSource` enum.
-    private func songSource(for serviceID: String) -> SongSource? {
-        switch serviceID {
-        case "appleMusic": return .appleMusic
-        case "spotify":    return .spotify
-        default:           return nil
-        }
-    }
 }

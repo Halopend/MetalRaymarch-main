@@ -267,11 +267,6 @@ class PresetManager {
         preset.fogEffect = settings.fogEffect
         preset.gradientCycleEffect = settings.gradientCycleEffect
         
-        // Doppelganger
-        preset.doppelgangerEnabled = settings.doppelgangerEnabled
-        preset.doppelgangerPlane = settings.doppelgangerPlane
-        preset.doppelgangerOffset = settings.doppelgangerOffset
-        
         // Color scheme auto-transition
         preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
         preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
@@ -394,11 +389,6 @@ class PresetManager {
             newPreset.bloomEffect = importedPreset.bloomEffect
             newPreset.fogEffect = importedPreset.fogEffect
             newPreset.gradientCycleEffect = importedPreset.gradientCycleEffect
-
-            // Doppelganger
-            newPreset.doppelgangerEnabled = importedPreset.doppelgangerEnabled
-            newPreset.doppelgangerPlane = importedPreset.doppelgangerPlane
-            newPreset.doppelgangerOffset = importedPreset.doppelgangerOffset
 
             // Color scheme auto-transition
             newPreset.colorSchemeAutoTransition = importedPreset.colorSchemeAutoTransition
