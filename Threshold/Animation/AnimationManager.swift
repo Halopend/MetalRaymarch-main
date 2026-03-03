@@ -358,6 +358,49 @@ final class AnimationManager {
             if let blend = scene.safetyBubbleBlend {
                 settings.safetyBubbleBlend = blend
             }
+            
+            // ── Apply scene-level gradient / color settings ──────────────
+            // Gradient preset overrides the legacy colorScheme gradient sync
+            if let preset = scene.gradientPreset {
+                settings.applyGradientPreset(preset)
+                print("🎬 Restored gradient preset to \(preset) for scene playback")
+            }
+            if let mode = scene.colorMappingMode {
+                settings.colorMappingMode = mode
+            }
+            if let rep = scene.gradientRepeat {
+                settings.gradientRepeat = rep
+            }
+            if let off = scene.gradientOffset {
+                settings.gradientOffset = off
+            }
+            if let sm = scene.gradientSmoothing {
+                settings.gradientSmoothing = sm
+            }
+            if let sat = scene.colorSchemeSaturation {
+                settings.colorSchemeSaturation = sat
+            }
+            if let con = scene.colorSchemeContrast {
+                settings.colorSchemeContrast = con
+            }
+            if let gam = scene.colorSchemeGamma {
+                settings.colorSchemeGamma = gam
+            }
+            if let vib = scene.colorSchemeVibrance {
+                settings.colorSchemeVibrance = vib
+            }
+            if let cur = scene.colorSchemeCurve {
+                settings.colorSchemeCurve = cur
+            }
+            if let shd = scene.colorSchemeShadows {
+                settings.colorSchemeShadows = shd
+            }
+            if let hlt = scene.colorSchemeHighlights {
+                settings.colorSchemeHighlights = hlt
+            }
+            if let soft = scene.lightingSoftness {
+                settings.lightingSoftness = soft
+            }
         }
 
         // Signal render loop to tick animation updates every frame.
@@ -607,6 +650,48 @@ final class AnimationManager {
           if let gradientCycleEffect = keyframe.gradientCycleEffect,
               settings.gradientCycleEffect != gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
+        }
+        
+        // ── Per-keyframe color overrides ─────────────────────────────────
+        if let preset = keyframe.gradientPreset,
+           settings.gradientPreset != preset {
+            settings.applyGradientPreset(preset)
+        }
+        if let mode = keyframe.colorMappingMode {
+            settings.colorMappingMode = mode
+        }
+        if let rep = keyframe.gradientRepeat {
+            settings.gradientRepeat = rep
+        }
+        if let off = keyframe.gradientOffset {
+            settings.gradientOffset = off
+        }
+        if let sm = keyframe.gradientSmoothing {
+            settings.gradientSmoothing = sm
+        }
+        if let sat = keyframe.colorSchemeSaturation {
+            settings.colorSchemeSaturation = sat
+        }
+        if let con = keyframe.colorSchemeContrast {
+            settings.colorSchemeContrast = con
+        }
+        if let gam = keyframe.colorSchemeGamma {
+            settings.colorSchemeGamma = gam
+        }
+        if let vib = keyframe.colorSchemeVibrance {
+            settings.colorSchemeVibrance = vib
+        }
+        if let cur = keyframe.colorSchemeCurve {
+            settings.colorSchemeCurve = cur
+        }
+        if let shd = keyframe.colorSchemeShadows {
+            settings.colorSchemeShadows = shd
+        }
+        if let hlt = keyframe.colorSchemeHighlights {
+            settings.colorSchemeHighlights = hlt
+        }
+        if let soft = keyframe.lightingSoftness {
+            settings.lightingSoftness = soft
         }
         
         // Also set TARGETS so they're in sync when animation stops

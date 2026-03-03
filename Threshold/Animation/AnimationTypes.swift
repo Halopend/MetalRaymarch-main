@@ -193,6 +193,24 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // OPTIONAL: Per-keyframe color overrides (nil = use scene-level default)
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    var colorMappingMode: ColorMappingMode?
+    var gradientRepeat: Float?
+    var gradientOffset: Float?
+    var gradientSmoothing: Float?
+    var colorSchemeSaturation: Float?
+    var colorSchemeContrast: Float?
+    var colorSchemeGamma: Float?
+    var colorSchemeVibrance: Float?
+    var colorSchemeCurve: Float?
+    var colorSchemeShadows: Float?
+    var colorSchemeHighlights: Float?
+    var lightingSoftness: Float?
+    var gradientPreset: GradientPreset?
+    
     // Formula parameters for non-Mandelbox types (16 float slots)
     var formulaParamValues: [Float]?
     
@@ -236,6 +254,21 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.bloomEffect = settings.bloomEffect
         self.fogEffect = settings.fogEffect
         self.gradientCycleEffect = settings.gradientCycleEffect
+        
+        // Capture color / gradient settings
+        self.colorMappingMode = settings.colorMappingMode
+        self.gradientRepeat = settings.gradientRepeat
+        self.gradientOffset = settings.gradientOffset
+        self.gradientSmoothing = settings.gradientSmoothing
+        self.colorSchemeSaturation = settings.colorSchemeSaturation
+        self.colorSchemeContrast = settings.colorSchemeContrast
+        self.colorSchemeGamma = settings.colorSchemeGamma
+        self.colorSchemeVibrance = settings.colorSchemeVibrance
+        self.colorSchemeCurve = settings.colorSchemeCurve
+        self.colorSchemeShadows = settings.colorSchemeShadows
+        self.colorSchemeHighlights = settings.colorSchemeHighlights
+        self.lightingSoftness = settings.lightingSoftness
+        self.gradientPreset = settings.gradientPreset
         
         // Capture formula params for all types (unified path)
         let fp = settings.formulaParams
@@ -385,6 +418,25 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             gradientCycleEffect: lerpGradientCycle(self.gradientCycleEffect, other.gradientCycleEffect)
         )
         result.formulaParamValues = lerpFormulaParams(self.formulaParamValues, other.formulaParamValues)
+        
+        // Lerp per-keyframe color overrides (Float? fields)
+        func lerpOpt(_ a: Float?, _ b: Float?) -> Float? {
+            guard let a, let b else { return pickDiscrete(a, b) }
+            return lerp(a, b)
+        }
+        result.colorMappingMode = pickDiscrete(self.colorMappingMode, other.colorMappingMode)
+        result.gradientRepeat = lerpOpt(self.gradientRepeat, other.gradientRepeat)
+        result.gradientOffset = lerpOpt(self.gradientOffset, other.gradientOffset)
+        result.gradientSmoothing = lerpOpt(self.gradientSmoothing, other.gradientSmoothing)
+        result.colorSchemeSaturation = lerpOpt(self.colorSchemeSaturation, other.colorSchemeSaturation)
+        result.colorSchemeContrast = lerpOpt(self.colorSchemeContrast, other.colorSchemeContrast)
+        result.colorSchemeGamma = lerpOpt(self.colorSchemeGamma, other.colorSchemeGamma)
+        result.colorSchemeVibrance = lerpOpt(self.colorSchemeVibrance, other.colorSchemeVibrance)
+        result.colorSchemeCurve = lerpOpt(self.colorSchemeCurve, other.colorSchemeCurve)
+        result.colorSchemeShadows = lerpOpt(self.colorSchemeShadows, other.colorSchemeShadows)
+        result.colorSchemeHighlights = lerpOpt(self.colorSchemeHighlights, other.colorSchemeHighlights)
+        result.lightingSoftness = lerpOpt(self.lightingSoftness, other.lightingSoftness)
+        result.gradientPreset = pickDiscrete(self.gradientPreset, other.gradientPreset)
         return result
     }
 
@@ -399,6 +451,14 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW
         case colorScheme, lightingMode, lightingPreset
         case hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
+        case colorMappingMode = "colorMappingMode"
+        case gradientRepeat = "gradientRepeat"
+        case gradientOffset = "gradientOffset"
+        case gradientSmoothing = "gradientSmoothing"
+        case colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
+        case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
+        case lightingSoftness
+        case gradientPreset = "gradientPreset"
         case formulaParamValues
         case easingType, bezierHandle
     }
@@ -443,6 +503,19 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.bloomEffect = try c.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
         self.fogEffect = try c.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         self.gradientCycleEffect = try c.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
+        self.colorMappingMode = try c.decodeIfPresent(ColorMappingMode.self, forKey: .colorMappingMode)
+        self.gradientRepeat = try c.decodeIfPresent(Float.self, forKey: .gradientRepeat)
+        self.gradientOffset = try c.decodeIfPresent(Float.self, forKey: .gradientOffset)
+        self.gradientSmoothing = try c.decodeIfPresent(Float.self, forKey: .gradientSmoothing)
+        self.colorSchemeSaturation = try c.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation)
+        self.colorSchemeContrast = try c.decodeIfPresent(Float.self, forKey: .colorSchemeContrast)
+        self.colorSchemeGamma = try c.decodeIfPresent(Float.self, forKey: .colorSchemeGamma)
+        self.colorSchemeVibrance = try c.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance)
+        self.colorSchemeCurve = try c.decodeIfPresent(Float.self, forKey: .colorSchemeCurve)
+        self.colorSchemeShadows = try c.decodeIfPresent(Float.self, forKey: .colorSchemeShadows)
+        self.colorSchemeHighlights = try c.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights)
+        self.lightingSoftness = try c.decodeIfPresent(Float.self, forKey: .lightingSoftness)
+        self.gradientPreset = try c.decodeIfPresent(GradientPreset.self, forKey: .gradientPreset)
         self.formulaParamValues = try c.decodeIfPresent([Float].self, forKey: .formulaParamValues)
 
         self.easingType = try c.decodeIfPresent(EasingFunction.self, forKey: .easingType) ?? .bezier
@@ -478,6 +551,19 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         try c.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
         try c.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try c.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
+        try c.encodeIfPresent(colorMappingMode, forKey: .colorMappingMode)
+        try c.encodeIfPresent(gradientRepeat, forKey: .gradientRepeat)
+        try c.encodeIfPresent(gradientOffset, forKey: .gradientOffset)
+        try c.encodeIfPresent(gradientSmoothing, forKey: .gradientSmoothing)
+        try c.encodeIfPresent(colorSchemeSaturation, forKey: .colorSchemeSaturation)
+        try c.encodeIfPresent(colorSchemeContrast, forKey: .colorSchemeContrast)
+        try c.encodeIfPresent(colorSchemeGamma, forKey: .colorSchemeGamma)
+        try c.encodeIfPresent(colorSchemeVibrance, forKey: .colorSchemeVibrance)
+        try c.encodeIfPresent(colorSchemeCurve, forKey: .colorSchemeCurve)
+        try c.encodeIfPresent(colorSchemeShadows, forKey: .colorSchemeShadows)
+        try c.encodeIfPresent(colorSchemeHighlights, forKey: .colorSchemeHighlights)
+        try c.encodeIfPresent(lightingSoftness, forKey: .lightingSoftness)
+        try c.encodeIfPresent(gradientPreset, forKey: .gradientPreset)
         try c.encodeIfPresent(formulaParamValues, forKey: .formulaParamValues)
         try c.encode(easingType, forKey: .easingType)
         try c.encode(bezierHandle, forKey: .bezierHandle)
@@ -654,6 +740,24 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// Restored on playback so the scene always starts with the correct palette.
     var colorScheme: ColorScheme?
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // COLOR / GRADIENT — scene-level defaults (applied once at start)
+    // Per-keyframe overrides can override these for individual segments.
+    // ═══════════════════════════════════════════════════════════════════════════
+    var gradientPreset: GradientPreset?
+    var colorMappingMode: ColorMappingMode?
+    var gradientRepeat: Float?
+    var gradientOffset: Float?
+    var gradientSmoothing: Float?
+    var colorSchemeSaturation: Float?
+    var colorSchemeContrast: Float?
+    var colorSchemeGamma: Float?
+    var colorSchemeVibrance: Float?
+    var colorSchemeCurve: Float?
+    var colorSchemeShadows: Float?
+    var colorSchemeHighlights: Float?
+    var lightingSoftness: Float?
+
     // ═══════════════════════════════════════════════════════════════════════════
     // SAFETY BUBBLE / BLEND WINDOW — scene-level settings
     // These are applied once when the scene starts playing, not interpolated.
