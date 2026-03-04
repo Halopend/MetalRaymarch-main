@@ -260,17 +260,28 @@ final class GestureController {
     
     // Accumulated position from drag gestures (target position)
     private var accumulatedPosition: SIMD3<Float> = .zero
+
+    // Left hand tracking stability: prevents two-hand gesture false triggers when
+    // the left hand briefly enters ARKit's tracking field without the user intending
+    // to perform a two-hand gesture.  The left hand must be continuously tracked
+    // for a minimum number of frames before it can participate.
+    private var leftHandStableFrames: Int = 0
+    private var leftHandWasTracked: Bool = false
+    /// Minimum frames left hand must be continuously tracked before two-hand gestures activate (~0.33s at 90Hz)
+    private static let leftHandStabilityThreshold: Int = 30
     
     // === GMT-FRACTALS: Asymmetric Smoothed Gesture Speed ===
-    // Like CameraController.ts's smoothedDistEstimate, but applied to gesture
-    // drag magnitude. Instant response for deceleration (safety/precision),
-    // lerped response for acceleration (prevents jarring speed-ups).
-    private var smoothedDragSpeed: Float = 0.0
-    
     // === MENU TOGGLE GESTURE STATE (Right hand, configurable mode) ===
     private var menuToggleActive: Bool = false
     private var menuToggleHoldTimer: Float = 0
     private var menuToggleCooldown: Float = 0  // Prevent rapid toggling
+    
+    /// True when the left hand has been continuously tracked long enough to
+    /// participate in two-hand gestures.  This prevents false triggers when the
+    /// hand briefly enters ARKit's field of view.
+    private var leftHandStable: Bool {
+        leftHandStableFrames >= Self.leftHandStabilityThreshold
+    }
     
     // Gesture callbacks
     var onMenuToggle: (() -> Void)?
@@ -379,6 +390,18 @@ final class GestureController {
         operationFrameCounter &+= 1
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
+        
+        // Track left hand stability: count continuous frames of tracking.
+        // Resets when the left hand disappears from tracking.
+        if leftHand.isTracked {
+            if !leftHandWasTracked {
+                leftHandStableFrames = 0  // Just appeared — reset counter
+            }
+            leftHandStableFrames = min(leftHandStableFrames + 1, Self.leftHandStabilityThreshold + 1)
+        } else {
+            leftHandStableFrames = 0
+        }
+        leftHandWasTracked = leftHand.isTracked
         
         // Update cooldown timers
         if menuToggleCooldown > 0 {
@@ -807,13 +830,16 @@ final class GestureController {
         // Check if both hands are pinching
         let bothActive: Bool
         if grabActive {
+            // Already active — use release thresholds, no stability requirement
             bothActive = leftHand.isTracked && rightHand.isTracked &&
                          leftPosValid && rightPosValid &&
                          currentDistance <= maxActiveHandDistance &&
                          leftPinch >= releaseThresh &&
                          rightPinch >= releaseThresh
         } else {
-            bothActive = leftHand.isTracked && rightHand.isTracked &&
+            // Not active — require left hand to be stably tracked to prevent
+            // false triggers when the left hand briefly enters the FOV.
+            bothActive = leftHandStable && rightHand.isTracked &&
                          leftPosValid && rightPosValid &&
                          currentDistance <= maxStartHandDistance &&
                          leftPinch >= activateThresh &&
@@ -1027,8 +1053,9 @@ final class GestureController {
                          leftPinch >= releaseThresh &&
                          rightPinch >= releaseThresh
         } else {
-            // Not active - require hands to be reasonably close to start
-            bothActive = leftHand.isTracked && rightHand.isTracked &&
+            // Not active - require left hand to be stably tracked (prevents
+            // false triggers when it briefly enters ARKit's FOV).
+            bothActive = leftHandStable && rightHand.isTracked &&
                          leftPosValid && rightPosValid &&
                          currentDistance <= maxStartHandDistance &&
                          leftPinch >= activateThresh &&
@@ -1174,7 +1201,6 @@ final class GestureController {
             rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
             rightIndexPrevPalm = rightHand.palmPosition
             accumulatedPosition = settings.effectiveTargetPosition
-            smoothedDragSpeed = 0.0  // Reset asymmetric smoothing on new gesture
             #if DEBUG
             print("👆 Right index drag STARTED")
             #endif
@@ -1195,58 +1221,17 @@ final class GestureController {
             let rawDelta = currentPos - previousPos
             let deltaLength = simd_length(rawDelta)
             
-            // === GMT-FRACTALS PATTERN: Asymmetric Smoothed Speed ===
-            // Like CameraController.ts's smoothedDistEstimate (L34):
-            // - Instant response when DECELERATING (user wants precision/stop)
-            // - Lerped response when ACCELERATING (prevents jarring speed-ups)
-            // This gives snappy stops with smooth speed ramp-ups.
-            // NOTE: On gesture start, smoothedDragSpeed is 0 — initialize directly
-            // from the first movement to avoid a dead-feeling cold-start ramp.
-            let dt: Float = 1.0 / 90.0  // Approximate frame time at 90Hz
-            if smoothedDragSpeed < 1e-8 {
-                // First active frame after gesture start: seed from actual movement
-                smoothedDragSpeed = deltaLength
-            } else if deltaLength < smoothedDragSpeed {
-                // Deceleration: instant response (safety, precision)
-                smoothedDragSpeed = deltaLength
-            } else {
-                // Acceleration: lerp toward target (smooth ramp-up)
-                let smoothing = max(0.0, min(1.0, settings.gestureSmoothingFactor))
-                let lerpRate = 40.0 - (36.0 * smoothing) // 40 (snappy) -> 4 (very smooth)
-                let lerpFactor = 1.0 - exp(-lerpRate * dt)
-                smoothedDragSpeed += (deltaLength - smoothedDragSpeed) * lerpFactor
-            }
-            
-            // Non-linear velocity response for flicking:
-            // - Slow movements (< threshold): linear with base multiplier
-            // - Fast movements: exponential boost for responsive flicking
-            // Uses smoothedDragSpeed for the magnitude scaling (asymmetric smoothed)
-            let slowThreshold: Float = 0.002  // 2mm/frame threshold
+            // Direct, immediate response with no deadzone.
+            // All movements are scaled uniformly — no slow/fast threshold split.
+            // A single multiplier provides consistent sensitivity, and the maxStep
+            // cap prevents runaway translation from tracking glitches.
             let maxStep: Float = 0.30         // 30cm per frame cap
-            let baseMultiplier: Float = 2.0   // Even slow movements get 2x boost
+            let baseMultiplier: Float = 3.0   // Uniform sensitivity boost
             
             var scaledDelta: SIMD3<Float>
             if deltaLength > 0 {
                 let direction = rawDelta / deltaLength
-                var scaledLength: Float
-                
-                // Use smoothedDragSpeed for the magnitude curve (asymmetric smoothing)
-                // but keep the direction from rawDelta (no direction smoothing)
-                let effectiveSpeed = smoothedDragSpeed
-                
-                if effectiveSpeed <= slowThreshold {
-                    // Slow movement: boosted linear response
-                    scaledLength = effectiveSpeed * baseMultiplier
-                } else {
-                    // Fast movement: apply acceleration curve
-                    let excess = effectiveSpeed - slowThreshold
-                    let boost: Float = 8.0   // Higher amplification
-                    let power: Float = 1.1   // Gentler curve so it kicks in sooner
-                    scaledLength = (slowThreshold * baseMultiplier) + pow(excess, power) * boost
-                }
-                
-                // Cap at maximum
-                scaledLength = min(scaledLength, maxStep)
+                let scaledLength = min(deltaLength * baseMultiplier, maxStep)
                 scaledDelta = direction * scaledLength
             } else {
                 scaledDelta = .zero

@@ -130,6 +130,17 @@ enum FractalBrowserCatalog {
 
     static var families: [FractalFamilyInfo] {
         mergeFamilies(base: builtInFamilies, overrides: loadedFamilies)
+            .compactMap { family in
+                let filteredTypes = family.types.filter { $0.type != .pseudoKnightyan }
+                guard !filteredTypes.isEmpty else { return nil }
+                return FractalFamilyInfo(
+                    id: family.id,
+                    name: family.name,
+                    summary: family.summary,
+                    historicalInfo: family.historicalInfo,
+                    types: filteredTypes
+                )
+            }
     }
 
     private static func mergeFamilies(base: [FractalFamilyInfo], overrides: [FractalFamilyInfo]?) -> [FractalFamilyInfo] {
@@ -317,7 +328,7 @@ enum FractalBrowserCatalog {
             historicalInfo: "Julia-box style distance estimators emerged from practical experimentation in shader communities.",
             types: [
                 FractalTypeBrowserInfo(type: .pseudoKleinian, subtitle: "Pseudo-Kleinian lattice", historicalInfo: "Pseudo-Kleinian formulas are practical approximations inspired by Kleinian group aesthetics.", variants: []),
-                FractalTypeBrowserInfo(type: .pseudoKnightyan, subtitle: "Conditional fold lattice with twist", historicalInfo: "Pseudo-Knightyan variants are community-discovered fold combinations tuned for rich cavities.", variants: []),
+                FractalTypeBrowserInfo(type: .theliPseudoKleinian, subtitle: "Julia-box fold + Menger base hybrid", historicalInfo: "Theli-at style hybrid combining a scale-1 Julia-box operator with a Menger-like base DE.", variants: []),
                 FractalTypeBrowserInfo(type: .sphereSponge, subtitle: "Recursive sphere inversion sponge", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: []),
                 FractalTypeBrowserInfo(type: .surfaceKIFS, subtitle: "KIFS with rotation controls", historicalInfo: "Surface KIFS formulas expanded artist control via explicit rotational parameterization.", variants: [])
             ]
@@ -735,6 +746,7 @@ struct FractalBrowserWindow: View {
         appModel.gestureController?.applyFractalDefaults()
         appModel.gestureController?.syncWithSettings()
         selectedTypeID = "native-\(type.rawValue)"
+        NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
     }
 
     private func loadVariant(type: FractalModelType, variant: FractalVariant) {
@@ -752,6 +764,7 @@ struct FractalBrowserWindow: View {
 
         appModel.gestureController?.syncWithSettings()
         selectedTypeID = "native-\(type.rawValue)"
+        NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
     }
 
     /// Load a flame from the built-in library and start rendering + realtime mode.

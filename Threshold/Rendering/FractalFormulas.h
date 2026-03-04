@@ -79,14 +79,15 @@ struct OrbitData {
 // ============================================================================
 // 1. MANDELBULB
 // ============================================================================
-// params[0]=Power, [1]=Bailout, [2]=DerivBias, [3]=AlternateVer(bool),
+// params[0]=Power, [1]=Bailout, [2]=DerivBias (DE multiplier for resolution),
+// [3]=AlternateVer(bool),
 // [4]=PolarRotation, [5]=PolarRotation2, [8]=Julia(bool), [9-11]=JuliaC
 FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
                                  int iterations, int colorIterations,
                                  thread OrbitData& orbit) {
     float power   = fp.params[0];
     float bailout = fp.params[1];
-    float dBias   = fp.params[2];
+    float dBias   = max(fp.params[2], 0.01f);  // Clamp minimum for safety
     bool  alternate = fp.params[3] > 0.5f;
     float polarRot  = fp.params[4];
     float polarRot2 = fp.params[5];
@@ -112,7 +113,7 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
             float theta = acos(clamp11(z.z / max(r, kEpsLen))) + polarRot;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + dBias;
+            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
             
             float thetaP = theta * power;
             float sTheta = sin(thetaP);
@@ -131,7 +132,7 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
             float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot + polarRot2;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + dBias;
+            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
             
             float thetaP = theta * power;
             float sTheta = sin(thetaP);
@@ -161,14 +162,17 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     orbit.finalP = z;
     orbit.iterationsUsed = i;
 
-    return 0.5f * r * log2(max(r, 1e-30f)) / max(dr, kEpsLen) * kLn2;
+    // dBias acts as a DE multiplier: <1 = finer surface detail, >1 = coarser/faster.
+    // The additive bias in the loop is fixed at 1.0 for numerical stability;
+    // dBias scales the final result for user-controllable resolution.
+    return dBias * 0.5f * r * log2(max(r, 1e-30f)) / max(dr, kEpsLen) * kLn2;
 }
 
 // Lean distance-only: no orbit tracking, no struct writes.
 FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
     float power   = fp.params[0];
     float bailout2 = fp.params[1] * fp.params[1];
-    float dBias   = fp.params[2];
+    float dBias   = max(fp.params[2], 0.01f);  // Clamp minimum for safety
     bool  alternate = fp.params[3] > 0.5f;
     float polarRot  = fp.params[4];
     float polarRot2 = fp.params[5];
@@ -187,7 +191,7 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
             float theta = acos(clamp11(z.z / max(r, kEpsLen))) + polarRot;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + dBias;
+            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
             float thetaP = theta * power;
             float sTheta = sin(thetaP);
             float cTheta = cos(thetaP);
@@ -201,7 +205,7 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
             float theta = asin(clamp11(z.z / max(r, kEpsLen))) + polarRot + polarRot2;
             float phi   = atan2(z.y, z.x);
             float rn    = exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + dBias;
+            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
             float thetaP = theta * power;
             float sTheta = sin(thetaP);
             float cTheta = cos(thetaP);
@@ -218,7 +222,8 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
         r  = sqrt(r2);
     }
 
-    return 0.5f * r * log2(max(r, 1e-30f)) / max(dr, kEpsLen) * kLn2;
+    // dBias as final DE multiplier for resolution control
+    return dBias * 0.5f * r * log2(max(r, 1e-30f)) / max(dr, kEpsLen) * kLn2;
 }
 
 // ============================================================================
@@ -1276,6 +1281,122 @@ FORCE_INLINE float DE_MengerSphere_Dist(float3 pos, FormulaParams fp, float3x3 r
 }
 
 // ============================================================================
+// 15. THELI-AT STYLE PSEUDO KLEINIAN HYBRID
+// ============================================================================
+// Scale-1 Julia-box style fold + embedded Menger-like base shape.
+// params[0]=Size, [1-3]=CSize, [4-6]=C,
+// params[7]=DEoffset, [8-10]=Offset,
+// params[11]=MnIterations, [12]=MnScale, [13-15]=MnOffset
+FORCE_INLINE float DE_TheliHybridMengerShape(float3 z, int mnIterations, float mnScale, float3 mnOffset) {
+    // Initial fold
+    z = abs(z);
+    if (z.x < z.y) z.xy = z.yx;
+    if (z.x < z.z) z.xz = z.zx;
+    if (z.y < z.z) z.yz = z.zy;
+    if (z.z < (1.0f / 3.0f)) z.z -= 2.0f * (z.z - (1.0f / 3.0f));
+
+    int n = 0;
+    for (; n < mnIterations && dot(z, z) < 100.0f; ++n) {
+        z = mnScale * (z - mnOffset) + mnOffset;
+
+        z = abs(z);
+        if (z.x < z.y) z.xy = z.yx;
+        if (z.x < z.z) z.xz = z.zx;
+        if (z.y < z.z) z.yz = z.zy;
+        float zFold = (1.0f / 3.0f) * mnOffset.z;
+        if (z.z < zFold) z.z -= 2.0f * (z.z - zFold);
+    }
+
+    float invScalePow = safePow(max(abs(mnScale), 1e-4f), -float(n));
+    return (z.x - mnOffset.x) * invScalePow;
+}
+
+FORCE_INLINE float DE_TheliPseudoKleinian(float3 pos, FormulaParams fp, float3x3 rot,
+                                          int iterations, int colorIterations,
+                                          thread OrbitData& orbit) {
+    float size = max(fp.params[0], 0.0f);
+    float3 cSize = max(float3(fp.params[1], fp.params[2], fp.params[3]), float3(1e-4f));
+    float3 c = float3(fp.params[4], fp.params[5], fp.params[6]);
+    float deOffset = fp.params[7];
+    float3 offset = float3(fp.params[8], fp.params[9], fp.params[10]);
+    int mnIterations = clamp(int(fp.params[11]), 0, 20);
+    float mnScale = fp.params[12];
+    float3 mnOffset = float3(fp.params[13], fp.params[14], fp.params[15]);
+
+    float3 z = pos;
+    float deFactor = 1.0f;
+
+    float trap = 1e20f;
+    int trapIter = 0;
+    float3 trapPos = z;
+    int i = 0;
+
+    float3 az = abs(z);
+    float r2Inf = max(az.x, max(az.y, az.z));
+
+    for (; i < iterations && r2Inf < 60.0f; ++i) {
+        z = rot * z;
+        z = 2.0f * clamp(z, -cSize, cSize) - z;
+
+        float r2 = dot(z, z);
+        float k = max(size / max(r2, 1e-6f), 1.0f);
+        z *= k;
+        deFactor *= k;
+
+        z += c;
+
+        az = abs(z);
+        r2Inf = max(az.x, max(az.y, az.z));
+        UpdateTrapMinR2(trap, trapIter, trapPos, dot(z, z), i, colorIterations, z);
+    }
+
+    float baseShape = DE_TheliHybridMengerShape(z - offset, mnIterations, mnScale, mnOffset);
+    float de = abs(0.5f * baseShape / max(deFactor, 1e-6f) - deOffset);
+
+    orbit.trap = trap;
+    orbit.trapIteration = trapIter;
+    orbit.trapPosition = trapPos;
+    orbit.finalP = z;
+    orbit.iterationsUsed = i;
+
+    return de;
+}
+
+FORCE_INLINE float DE_TheliPseudoKleinian_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
+    float size = max(fp.params[0], 0.0f);
+    float3 cSize = max(float3(fp.params[1], fp.params[2], fp.params[3]), float3(1e-4f));
+    float3 c = float3(fp.params[4], fp.params[5], fp.params[6]);
+    float deOffset = fp.params[7];
+    float3 offset = float3(fp.params[8], fp.params[9], fp.params[10]);
+    int mnIterations = clamp(int(fp.params[11]), 0, 20);
+    float mnScale = fp.params[12];
+    float3 mnOffset = float3(fp.params[13], fp.params[14], fp.params[15]);
+
+    float3 z = pos;
+    float deFactor = 1.0f;
+
+    float3 az = abs(z);
+    float r2Inf = max(az.x, max(az.y, az.z));
+
+    for (int i = 0; i < iterations && r2Inf < 60.0f; ++i) {
+        z = rot * z;
+        z = 2.0f * clamp(z, -cSize, cSize) - z;
+
+        float r2 = dot(z, z);
+        float k = max(size / max(r2, 1e-6f), 1.0f);
+        z *= k;
+        deFactor *= k;
+
+        z += c;
+        az = abs(z);
+        r2Inf = max(az.x, max(az.y, az.z));
+    }
+
+    float baseShape = DE_TheliHybridMengerShape(z - offset, mnIterations, mnScale, mnOffset);
+    return abs(0.5f * baseShape / max(deFactor, 1e-6f) - deOffset);
+}
+
+// ============================================================================
 // DISPATCH — distance only
 // ============================================================================
 FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams fp, int iterations) {
@@ -1308,6 +1429,8 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_SurfaceKIFS_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeMengerSphere:
             return DE_MengerSphere_Dist(pos, fp, fp.rotMatrix1, iterations);
+        case FractalTypeTheliPseudoKleinian:
+            return DE_TheliPseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         default:
             return 1e10f; // Unknown type — far away
     }
@@ -1348,6 +1471,8 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_SurfaceKIFS(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeMengerSphere:
             return DE_MengerSphere(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
+        case FractalTypeTheliPseudoKleinian:
+            return DE_TheliPseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         default:
             orbit.trap = 1e20f;
             orbit.trapIteration = 0;

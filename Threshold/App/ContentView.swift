@@ -56,6 +56,7 @@ struct ContentView: View {
     @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
+    @State private var showFractalTypePopover = false
     @State private var editingScene: AnimationScene?
     
     // Developer state
@@ -92,6 +93,9 @@ struct ContentView: View {
         }
         .onAppear { cache.startSync(with: appModel.renderSettings, appModel: appModel) }
         .onDisappear { cache.stopSync() }
+        .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
+            cache.loadFromSettings()
+        }
     }
     
     // MARK: - Pre-Immersive Layout
@@ -282,14 +286,53 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                Picker("Type", selection: $cache.fractalType) {
-                    ForEach(FractalModelType.allCases, id: \.self) { type in
-                        Label(type.displayName, systemImage: type.icon).tag(type)
+                Button {
+                    showFractalTypePopover.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: cache.fractalType.icon)
+                        Text(cache.fractalType.displayName)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.menu).frame(maxWidth: 180)
-                .onChange(of: cache.fractalType) { _, newValue in
-                    cache.pushFractalType(newValue, gestureController: appModel.gestureController)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .popover(isPresented: $showFractalTypePopover, arrowEdge: .top) {
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(FractalModelType.selectableCases, id: \.self) { type in
+                                Button {
+                                    cache.fractalType = type
+                                    cache.pushFractalType(type, gestureController: appModel.gestureController)
+                                    showFractalTypePopover = false
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: type.icon)
+                                        Text(type.displayName)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        if type == cache.fractalType {
+                                            Image(systemName: "checkmark")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                }
+                                .buttonStyle(.plain)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(type == cache.fractalType ? Color.blue.opacity(0.14) : Color.clear)
+                                )
+                            }
+                        }
+                        .padding(8)
+                    }
+                    .frame(width: 280, height: 320)
                 }
             }
 
@@ -317,6 +360,50 @@ struct ContentView: View {
     
     private var fractalSpaceContent: some View {
         VStack(spacing: 12) {
+            // ── Safety Bubble ────────────────────────────────────────────────
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Safety Bubble", systemImage: "shield.lefthalf.filled").font(.headline)
+                    Spacer()
+                    Toggle("", isOn: $cache.safetyBubbleEnabled)
+                        .labelsHidden()
+                        .onChange(of: cache.safetyBubbleEnabled) { _, val in
+                            cache.push(\.safetyBubbleEnabled, value: val)
+                        }
+                }
+                Text("Prevents the camera from entering the fractal geometry. Works with all fractal types.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if cache.safetyBubbleEnabled {
+                    EffectSliderRow(icon: "circle.dashed", label: "Inner Radius",
+                        value: $cache.safetyBubbleRadius, range: 0.5...2.5,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) },
+                        showToggle: false)
+                    HStack {
+                        Text("Shape"); Spacer()
+                        Picker("Shape", selection: Binding<Int>(
+                            get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
+                            set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
+                        )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
+                        .pickerStyle(.segmented).frame(maxWidth: 160)
+                    }
+                    
+                    Divider()
+                    
+                    EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
+                        value: $cache.safetyBubbleBlend, range: 0.0...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubbleBlend) },
+                        showToggle: false)
+                    Text("Controls how strongly the bubble masks fractal geometry (0 = transparent, 1 = fully active).")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
+
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {
                 HStack {
@@ -403,50 +490,6 @@ struct ContentView: View {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
-            
-            // ── Safety Bubble ────────────────────────────────────────────────
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Safety Bubble", systemImage: "shield.lefthalf.filled").font(.headline)
-                    Spacer()
-                    Toggle("", isOn: $cache.safetyBubbleEnabled)
-                        .labelsHidden()
-                        .onChange(of: cache.safetyBubbleEnabled) { _, val in
-                            cache.push(\.safetyBubbleEnabled, value: val)
-                        }
-                }
-                Text("Prevents the camera from entering the fractal geometry. Works with all fractal types.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                if cache.safetyBubbleEnabled {
-                    EffectSliderRow(icon: "circle.dashed", label: "Inner Radius",
-                        value: $cache.safetyBubbleRadius, range: 0.5...2.5,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) },
-                        showToggle: false)
-                    HStack {
-                        Text("Shape"); Spacer()
-                        Picker("Shape", selection: Binding<Int>(
-                            get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
-                            set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
-                        )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
-                        .pickerStyle(.segmented).frame(maxWidth: 160)
-                    }
-                    
-                    Divider()
-                    
-                    EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
-                        value: $cache.safetyBubbleBlend, range: 0.0...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubbleBlend) },
-                        showToggle: false)
-                    Text("Controls how strongly the bubble masks fractal geometry (0 = transparent, 1 = fully active).")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
         }
     }
     

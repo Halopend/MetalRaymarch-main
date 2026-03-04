@@ -77,6 +77,13 @@ struct FractalPreset: Codable, Identifiable {
     var lightingSoftness: Float?
     var musicReactiveMappings: [MusicReactiveMapping]?
 
+    // === GESTURE BINDINGS (v2.2) ===
+    // Per-fractal finger-to-action assignments, restored when loading a preset.
+    var indexFingerBinding: GestureActionBinding?
+    var middleFingerBinding: GestureActionBinding?
+    var ringFingerBinding: GestureActionBinding?
+    var pinkyFingerBinding: GestureActionBinding?
+
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
@@ -91,6 +98,8 @@ struct FractalPreset: Codable, Identifiable {
         // v2.1 gradient coloring system
         case gradientState, lightingSoftness
         case musicReactiveMappings
+        // v2.2 gesture bindings
+        case indexFingerBinding, middleFingerBinding, ringFingerBinding, pinkyFingerBinding
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -179,6 +188,12 @@ struct FractalPreset: Codable, Identifiable {
         gradientState = try container.decodeIfPresent(GradientState.self, forKey: .gradientState)
         lightingSoftness = try container.decodeIfPresent(Float.self, forKey: .lightingSoftness)
         musicReactiveMappings = try container.decodeIfPresent([MusicReactiveMapping].self, forKey: .musicReactiveMappings)
+
+        // v2.2 gesture bindings
+        indexFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .indexFingerBinding)
+        middleFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .middleFingerBinding)
+        ringFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .ringFingerBinding)
+        pinkyFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .pinkyFingerBinding)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -235,6 +250,12 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(gradientState, forKey: .gradientState)
         try container.encodeIfPresent(lightingSoftness, forKey: .lightingSoftness)
         try container.encodeIfPresent(musicReactiveMappings, forKey: .musicReactiveMappings)
+
+        // v2.2 gesture bindings
+        try container.encodeIfPresent(indexFingerBinding, forKey: .indexFingerBinding)
+        try container.encodeIfPresent(middleFingerBinding, forKey: .middleFingerBinding)
+        try container.encodeIfPresent(ringFingerBinding, forKey: .ringFingerBinding)
+        try container.encodeIfPresent(pinkyFingerBinding, forKey: .pinkyFingerBinding)
     }
     
     // MARK: - Function Constant Derivation
@@ -349,6 +370,12 @@ struct FractalPreset: Codable, Identifiable {
         preset.gradientState = settings.gradientState
         preset.lightingSoftness = settings.lightingSoftness
         preset.musicReactiveMappings = settings.musicReactiveMappings
+
+        // v2.2 gesture bindings
+        preset.indexFingerBinding = settings.indexFingerBinding
+        preset.middleFingerBinding = settings.middleFingerBinding
+        preset.ringFingerBinding = settings.ringFingerBinding
+        preset.pinkyFingerBinding = settings.pinkyFingerBinding
         
         return preset
     }
@@ -465,6 +492,12 @@ struct FractalPreset: Codable, Identifiable {
         if let musicReactiveMappings = musicReactiveMappings {
             settings.musicReactiveMappings = musicReactiveMappings
         }
+
+        // v2.2 gesture bindings — restore per-fractal finger assignments
+        if let b = indexFingerBinding  { settings.indexFingerBinding = b }
+        if let b = middleFingerBinding { settings.middleFingerBinding = b }
+        if let b = ringFingerBinding   { settings.ringFingerBinding = b }
+        if let b = pinkyFingerBinding  { settings.pinkyFingerBinding = b }
         
         // Log preset load for debugging
         print("""

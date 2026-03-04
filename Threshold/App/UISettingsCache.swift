@@ -203,6 +203,10 @@ final class UISettingsCache {
     
     private func syncLiveStats() {
         guard let settings else { return }
+        if fractalType != settings.fractalType {
+            loadFromSettings()
+            return
+        }
         currentRenderQuality = settings.currentRenderQuality
         liveFractalIterations = settings.fractalIterations
         liveMaxRaySteps = settings.maxRaySteps

@@ -2,7 +2,7 @@
 //  FractalModelType.swift
 //  Threshold
 //
-//  Fractal type enum matching ShaderTypes.h FractalType enum (15 values)
+//  Fractal type enum matching ShaderTypes.h FractalType enum
 //
 
 import Foundation
@@ -24,6 +24,7 @@ enum FractalModelType: Int32, CaseIterable {
     case icosahedron       = 12
     case surfaceKIFS       = 13
     case mengerSphere      = 14
+    case theliPseudoKleinian = 15
     
     var displayName: String {
         switch self {
@@ -42,6 +43,7 @@ enum FractalModelType: Int32, CaseIterable {
         case .icosahedron:     return "Icosahedron"
         case .surfaceKIFS:     return "Surface KIFS"
         case .mengerSphere:    return "Menger Sphere"
+        case .theliPseudoKleinian: return "Theli Pseudo Kleinian"
         }
     }
     
@@ -77,6 +79,7 @@ enum FractalModelType: Int32, CaseIterable {
         case .icosahedron:     return "seal"
         case .surfaceKIFS:     return "tree"
         case .mengerSphere:    return "circle.grid.cross"
+        case .theliPseudoKleinian: return "cube"
         }
     }
     
@@ -89,7 +92,7 @@ enum FractalModelType: Int32, CaseIterable {
             return "Power / Quaternion"
         case .menger, .sierpinski, .dodecahedron, .octahedron, .icosahedron, .mengerSphere:
             return "Kaleidoscopic IFS"
-        case .pseudoKleinian, .pseudoKnightyan, .sphereSponge, .surfaceKIFS:
+        case .pseudoKleinian, .pseudoKnightyan, .sphereSponge, .surfaceKIFS, .theliPseudoKleinian:
             return "Julia Box"
         }
     }
@@ -176,12 +179,27 @@ enum FractalModelType: Int32, CaseIterable {
         case .mengerSphere:
             // Scale=3, Offset=(1,1,1), Spherify=0
             fp.params.0 = 3.0; fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
+        case .theliPseudoKleinian:
+            // Size=1, CSize=(1,1,1), C=(0,0,0), DEoffset=0, Offset=(0,0,0),
+            // MnIterations=2, MnScale=3, MnOffset=(1,1,1)
+            fp.params.0 = 1.0
+            fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
+            fp.params.7 = 0.0
+            fp.params.11 = 2.0
+            fp.params.12 = 3.0
+            fp.params.13 = 1.0; fp.params.14 = 1.0; fp.params.15 = 1.0
         case .mandelbox:
             // Min Distance=0.8, Folding Limit=1.0, Sphere Radius=0.5
             fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
         }
         
         return fp
+    }
+}
+
+extension FractalModelType {
+    static var selectableCases: [FractalModelType] {
+        allCases.filter { $0 != .pseudoKnightyan }
     }
 }
 
@@ -205,6 +223,7 @@ extension FractalModelType: Codable {
         case .icosahedron:     return "icosahedron"
         case .surfaceKIFS:     return "surfaceKIFS"
         case .mengerSphere:    return "mengerSphere"
+        case .theliPseudoKleinian: return "theliPseudoKleinian"
         }
     }
 
@@ -216,16 +235,28 @@ extension FractalModelType: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self.stringMap[str] {
-            self = value
-        } else if let raw = try? container.decode(Int32.self),
-                  let value = FractalModelType(rawValue: raw) {
-            self = value
-        } else {
-            throw DecodingError.dataCorruptedError(
-                in: container, debugDescription: "Invalid FractalModelType value")
+        if let str = try? container.decode(String.self) {
+            if str == "apollonianGasket" || str == "apollonianLight" {
+                self = .theliPseudoKleinian
+                return
+            }
+            if let value = Self.stringMap[str] {
+                self = value
+                return
+            }
         }
+        if let raw = try? container.decode(Int32.self) {
+            if raw == 16 {
+                self = .theliPseudoKleinian
+                return
+            }
+            if let value = FractalModelType(rawValue: raw) {
+                self = value
+                return
+            }
+        }
+        throw DecodingError.dataCorruptedError(
+            in: container, debugDescription: "Invalid FractalModelType value")
     }
 
     func encode(to encoder: Encoder) throws {

@@ -15,6 +15,7 @@ class AppModel {
     let immersiveSpaceID = "ImmersiveSpace"
     let menuWindowID = "MenuWindow"
     static let fractalBrowserWindowID = "FractalBrowserWindow"
+    static let fractalSettingsDidChangeNotification = Notification.Name("AppModel.fractalSettingsDidChange")
     
     enum ImmersiveSpaceState {
         case closed
