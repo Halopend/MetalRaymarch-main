@@ -1384,19 +1384,23 @@ struct ContentView: View {
     }
     
     private var themeColor: Color {
-        // Read from cache instead of appModel.renderSettings to avoid lock contention
-        switch cache.colorScheme {
-        case .classic: return Color(red: 0.8, green: 0.5, blue: 0.2)
-        case .ocean: return Color(red: 0.1, green: 0.5, blue: 0.9)
-        case .fire: return Color(red: 1.0, green: 0.4, blue: 0.1)
-        case .forest: return Color(red: 0.2, green: 0.7, blue: 0.3)
-        case .nebula: return Color(red: 0.6, green: 0.3, blue: 0.9)
-        case .mono: return Color(red: 0.5, green: 0.5, blue: 0.55)
-        case .aurora: return Color(red: 0.2, green: 0.9, blue: 0.6)
-        case .volcanic: return Color(red: 0.9, green: 0.3, blue: 0.1)
-        case .neonCyber: return Color(red: 1.0, green: 0.2, blue: 0.8)
+        // Derive theme color from the current gradient preset
+        switch cache.gradientPreset {
+        case .classic:    return Color(red: 0.8, green: 0.5, blue: 0.2)
+        case .ocean:      return Color(red: 0.1, green: 0.5, blue: 0.9)
+        case .fire:       return Color(red: 1.0, green: 0.4, blue: 0.1)
+        case .forest:     return Color(red: 0.2, green: 0.7, blue: 0.3)
+        case .nebula:     return Color(red: 0.6, green: 0.3, blue: 0.9)
+        case .mono:       return Color(red: 0.5, green: 0.5, blue: 0.55)
+        case .aurora:     return Color(red: 0.2, green: 0.9, blue: 0.6)
+        case .volcanic:   return Color(red: 0.9, green: 0.3, blue: 0.1)
+        case .neonCyber:  return Color(red: 1.0, green: 0.2, blue: 0.8)
         case .neonSunset: return Color(red: 1.0, green: 0.5, blue: 0.3)
         case .neonMatrix: return Color(red: 0.0, green: 1.0, blue: 0.4)
+        case .rainbow:    return Color(red: 0.9, green: 0.4, blue: 0.5)
+        case .infrared:   return Color(red: 0.8, green: 0.2, blue: 0.2)
+        case .twilight:   return Color(red: 0.5, green: 0.3, blue: 0.7)
+        case .none:       return Color(red: 0.6, green: 0.3, blue: 0.9)  // default nebula
         }
     }
 

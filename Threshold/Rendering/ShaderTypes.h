@@ -93,14 +93,6 @@ typedef struct
 // Allows full customization of the fractal coloring
 typedef struct
 {
-    // Primary color palette (3 colors for gradient mixing) - used in legacy mode
-    vector_float3 color1;             // Primary color (trap-based)
-    vector_float3 color2;             // Secondary color (trap-based)
-    vector_float3 color3;             // Tertiary color (position-based)
-    
-    // Alternative palette for colorMix blending - used in legacy mode
-    vector_float3 altMixFactors;      // Factors for alt color computation (x*c.x, y*c.y, z+w*c.y)
-    
     // Post-processing adjustments
     float saturation;                 // Color saturation multiplier (default 1.5)
     float contrast;                   // Contrast adjustment (default 1.05)
@@ -127,7 +119,6 @@ typedef struct
     int colorMappingMode;             // 0=orbitTrap, 1=iterations, 2=zDepth, 3=angle, 4=normal, 5=blended
     float gradientRepeat;             // How many times gradient repeats (default 1.0)
     float gradientOffset;             // Shifts gradient start (0-1)
-    int useGradientColoring;          // 0 = legacy palette, 1 = gradient system
     float gradientSmoothing;          // 0 = sharp, 1 = smooth transitions (default 1.0)
     int gradientLoopSmooth;           // 0 = hard cut at edges, 1 = smooth wrap (last stop blends to first)
     float _gradPad[1];                // Alignment padding for gradient section

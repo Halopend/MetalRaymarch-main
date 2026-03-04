@@ -551,7 +551,7 @@ struct SceneEditorView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(appModel.musicService.nowPlaying == nil)
+                .disabled(appModel.musicService.nowPlayingUnified == nil)
             }
         }
         .padding(16)

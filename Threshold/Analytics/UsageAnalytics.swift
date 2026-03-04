@@ -83,8 +83,8 @@ struct UsageSnapshot: Codable {
     // Quality settings distribution (percentage of time at each level)
     var qualityDistribution: [String: Float]  // e.g., ["iter6": 0.2, "iter9": 0.8]
     
-    // Color scheme usage (percentage of time)
-    var colorSchemeDistribution: [String: Float]
+    // Gradient preset usage (percentage of time)
+    var gradientPresetUsageDistribution: [String: Float]
     
     // Parameter averages (weighted by time spent)
     var avgFractalScale: Float
@@ -144,7 +144,7 @@ class UsageAnalytics: ObservableObject {
     
     // Weighted accumulators (value * time)
     private var qualityTimeAccum: [String: TimeInterval] = [:]
-    private var colorSchemeTimeAccum: [String: TimeInterval] = [:]
+    private var gradientPresetUsageAccum: [String: TimeInterval] = [:]
     private var fractalScaleAccum: Float = 0
     private var foldingLimitAccum: Float = 0
     private var sphereRadiusAccum: Float = 0
@@ -238,7 +238,7 @@ class UsageAnalytics: ObservableObject {
         let durationF = Float(max(duration, 1.0))
 
         let qualityDist = distributionPercentages(qualityTimeAccum, duration: duration)
-        let schemeDist = distributionPercentages(colorSchemeTimeAccum, duration: duration)
+        let gradientPresetUsageDist = distributionPercentages(gradientPresetUsageAccum, duration: duration)
         let fractalTypeDist = distributionPercentages(fractalTypeTimeAccum, duration: duration)
         let gradientPresetDist = distributionPercentages(gradientPresetTimeAccum, duration: duration)
         let lightingPresetDist = distributionPercentages(lightingPresetTimeAccum, duration: duration)
@@ -247,7 +247,7 @@ class UsageAnalytics: ObservableObject {
             timestamp: Date(),
             sessionDuration: duration,
             qualityDistribution: qualityDist,
-            colorSchemeDistribution: schemeDist,
+            gradientPresetUsageDistribution: gradientPresetUsageDist,
             avgFractalScale: fractalScaleAccum / durationF,
             avgFoldingLimit: foldingLimitAccum / durationF,
             avgSphereRadius: sphereRadiusAccum / durationF,
@@ -295,9 +295,9 @@ class UsageAnalytics: ObservableObject {
         // Accumulate quality time
         qualityTimeAccum[currentQuality, default: 0] += dt
         
-        // Accumulate color scheme time
-        let schemeName = settings.colorScheme.displayName
-        colorSchemeTimeAccum[schemeName, default: 0] += dt
+        // Accumulate gradient preset time
+        let presetName = settings.gradientPreset?.rawValue ?? "custom"
+        gradientPresetUsageAccum[presetName, default: 0] += dt
         
         // Accumulate parameter values (for averaging)
         let dtf = Float(dt)
@@ -417,7 +417,7 @@ class UsageAnalytics: ObservableObject {
         // These let you filter/sort in CloudKit Console without parsing JSON
         
         // Color & style
-        record["colorScheme"] = preset.colorScheme.displayName
+        record["gradientPreset"] = preset.gradientState?.gradientPreset?.rawValue ?? "custom"
         record["colorSchemeVibrance"] = (preset.colorSchemeVibrance ?? 0.0) as NSNumber
         record["colorSchemeSaturation"] = preset.colorSchemeSaturation as NSNumber
         record["colorSchemeContrast"] = preset.colorSchemeContrast as NSNumber
@@ -490,8 +490,8 @@ class UsageAnalytics: ObservableObject {
             record["qualityDistribution"] = qualityString
         }
         
-        if let schemeString = jsonString(from: snapshot.colorSchemeDistribution) {
-            record["colorSchemeDistribution"] = schemeString
+        if let presetString = jsonString(from: snapshot.gradientPresetUsageDistribution) {
+            record["gradientPresetDistribution"] = presetString
         }
         
         // Parameter averages
@@ -601,7 +601,7 @@ class UsageAnalytics: ObservableObject {
         lastSampleTime = Date()
         totalSessionTime = 0
         qualityTimeAccum = [:]
-        colorSchemeTimeAccum = [:]
+        gradientPresetUsageAccum = [:]
         fractalTypeTimeAccum = [:]
         gradientPresetTimeAccum = [:]
         lightingPresetTimeAccum = [:]

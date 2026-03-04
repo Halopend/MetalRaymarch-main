@@ -25,12 +25,8 @@ final class UISettingsCache {
     var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
     
     // Color & effects
-    var colorScheme: ColorScheme = .nebula
     var colorMix: Float = 0.5
     var colorIterations: Float = 8.0
-    var colorSchemeAutoTransition: Bool = false
-    var colorSchemeAutoInterval: Float = 30.0
-    var colorSchemeTransitionDuration: Float = 2.0
     var colorSchemeSaturation: Float = 2.0
     var colorSchemeContrast: Float = 1.05
     var colorSchemeGamma: Float = 0.5
@@ -130,18 +126,6 @@ final class UISettingsCache {
     var fractalAudioReactiveEnabled: Bool = true
     var fractalAudioAmount: Float = 0.6
     var fractalBeatPunch: Float = 0.7
-    var fractalAudioAffectsScale: Bool = true
-    var fractalAudioAffectsFolding: Bool = true
-    var fractalAudioAffectsRadius: Bool = true
-    var fractalAudioAffectsColorMix: Bool = true
-    
-    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
-    var fractalAudioAffectsGlow: Bool = true
-    var fractalAudioAffectsFog: Bool = true
-    var fractalAudioAffectsBloom: Bool = true
-    var fractalAudioAffectsHueSpeed: Bool = true
-    var fractalAudioAffectsSaturation: Bool = true
-    var fractalAudioAffectsIterations: Bool = false
     var musicReactiveMappings: [MusicReactiveMapping] = MusicReactiveMapping.defaultMappings()
     
     // Safety & display
@@ -241,12 +225,8 @@ final class UISettingsCache {
         targetSphereRadius = settings.targetSphereRadius
         baseFractalIterations = settings.baseFractalIterations
         baseMaxRaySteps = settings.baseMaxRaySteps
-        colorScheme = settings.colorScheme
         colorMix = settings.colorMix
         colorIterations = settings.colorIterations
-        colorSchemeAutoTransition = settings.colorSchemeAutoTransition
-        colorSchemeAutoInterval = settings.colorSchemeAutoInterval
-        colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
         colorSchemeSaturation = settings.colorSchemeSaturation
         colorSchemeContrast = settings.colorSchemeContrast
         colorSchemeGamma = settings.colorSchemeGamma
@@ -279,16 +259,6 @@ final class UISettingsCache {
         fractalAudioReactiveEnabled = settings.fractalAudioReactiveEnabled
         fractalAudioAmount = settings.fractalAudioAmount
         fractalBeatPunch = settings.fractalBeatPunch
-        fractalAudioAffectsScale = settings.fractalAudioAffectsScale
-        fractalAudioAffectsFolding = settings.fractalAudioAffectsFolding
-        fractalAudioAffectsRadius = settings.fractalAudioAffectsRadius
-        fractalAudioAffectsColorMix = settings.fractalAudioAffectsColorMix
-        fractalAudioAffectsGlow = settings.fractalAudioAffectsGlow
-        fractalAudioAffectsFog = settings.fractalAudioAffectsFog
-        fractalAudioAffectsBloom = settings.fractalAudioAffectsBloom
-        fractalAudioAffectsHueSpeed = settings.fractalAudioAffectsHueSpeed
-        fractalAudioAffectsSaturation = settings.fractalAudioAffectsSaturation
-        fractalAudioAffectsIterations = settings.fractalAudioAffectsIterations
         musicReactiveMappings = settings.musicReactiveMappings
         showHUD = settings.showHUD
         safetyBubbleEnabled = settings.safetyBubbleEnabled
@@ -389,11 +359,6 @@ final class UISettingsCache {
             gestureController?.applyFractalDefaults()
             loadFromSettings()
         }
-    }
-    
-    func pushColorScheme(_ scheme: ColorScheme) {
-        settings?.transitionToColorScheme(scheme)
-        colorScheme = scheme
     }
     
     func pushGradientEnabled(_ enabled: Bool) {

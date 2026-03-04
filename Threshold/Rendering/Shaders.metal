@@ -720,34 +720,28 @@ FORCE_INLINE float computeColorMapping(int mode, float trap, int trapIter, int t
 // trapMin: distance to orbit trap (0 = close, 1 = far)
 // trapIter: normalized iteration depth
 // trapAngle: angle-based variation
-// OPTIMIZATION: Branchless color blending using smoothstep transitions
+// Generates procedural neon colors from hue frequency/offset (no palette needed)
 FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAngle, ColorSchemeParams scheme)
 {
     half d = saturate(trapMin);
     half it = saturate(trapIter);
     
-    // Get scheme palette colors - these define the neon look
-    half3 col1 = half3(scheme.color1);  // Primary neon color
-    half3 col2 = half3(scheme.color2);  // Secondary neon color  
-    half3 col3 = half3(scheme.color3);  // Tertiary neon color
-    
     // Brightness: sharp glow falloff from trap surface
     half glow = pow(1.0h - d, half(scheme.glowSharpness));
     
-    // Color mixing based on iteration depth (creates radial color zones)
-    // BRANCHLESS: Use smoothstep blending instead of if/else cascade
+    // Generate neon colors procedurally from hue cycling
     half colorPhase = fract(it * half(scheme.hueFrequency) * 0.5h + half(scheme.hueOffset));
     
-    // Smooth transitions at phase boundaries (0.33, 0.66)
-    // t1: 0->1 as phase goes 0->0.33, t2: 0->1 as phase goes 0.33->0.66, t3: 0->1 as phase goes 0.66->1
-    half t1 = saturate(colorPhase * 3.0h);                    // Blend col1->col2
-    half t2 = saturate((colorPhase - 0.33h) * 3.0h);          // Blend col2->col3
-    half t3 = saturate((colorPhase - 0.66h) * 3.0h);          // Blend col3->col1
-    
-    // Combine blends: col1 -> col2 -> col3 -> col1
-    half3 baseColor = mix(col1, col2, t1);           // Phase 0-0.33: col1->col2
-    baseColor = mix(baseColor, col3, t2);            // Phase 0.33-0.66: blend toward col3
-    baseColor = mix(baseColor, col1, t3);            // Phase 0.66-1: blend back toward col1
+    // Convert hue phase to RGB via HSV (saturation=1, value=1)
+    half hue = colorPhase * 6.0h;
+    half x = 1.0h - abs(fmod(hue, 2.0h) - 1.0h);
+    half3 baseColor;
+    if (hue < 1.0h)      baseColor = half3(1.0h, x, 0.0h);
+    else if (hue < 2.0h) baseColor = half3(x, 1.0h, 0.0h);
+    else if (hue < 3.0h) baseColor = half3(0.0h, 1.0h, x);
+    else if (hue < 4.0h) baseColor = half3(0.0h, x, 1.0h);
+    else if (hue < 5.0h) baseColor = half3(x, 0.0h, 1.0h);
+    else                  baseColor = half3(1.0h, 0.0h, x);
     
     // Optional soft banding - branchless multiply
     half bandActive = step(0.1h, half(scheme.bandFrequency));
@@ -757,7 +751,7 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
     // Saturation boost for neon effect
     half sat = pow(0.9h, half(scheme.saturationPower));
     
-    // Final color: base palette color * glow * banding
+    // Final color: base color * glow * banding
     half3 rgb = baseColor * glow * bandEffect;
     
     // Boost saturation by pushing away from gray
@@ -770,24 +764,6 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
 // =============================================================================
 // ADDITIONAL COLOR SCHEME FUNCTIONS
 // =============================================================================
-
-// Apply color scheme to base color values (c.x = log-based, c.y = trap-based)
-FORCE_INLINE half3 applyColorScheme(half2 c, float colorMix, ColorSchemeParams scheme)
-{
-    // Extract colors from scheme
-    half3 col1 = half3(scheme.color1);
-    half3 col2 = half3(scheme.color2);
-    half3 col3 = half3(scheme.color3);
-    
-    // Primary color from palette blending
-    half3 finalColor = mix(mix(col1, col2, c.y), col3, c.x);
-    
-    // Alternative color using mix factors
-    half3 altFactors = half3(scheme.altMixFactors);
-    half3 altColor = half3(c.x * altFactors.x, c.y * altFactors.y, altFactors.z + 0.3h * c.y);
-    
-    return mix(finalColor, altColor, half(colorMix));
-}
 
 // =============================================================================
 // ORBIT CACHE SYSTEM - Dramatic reduction in redundant Map() calls
@@ -907,9 +883,7 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
         : (scheme.neonIntensity > 0.01f);
     
     // === GRADIENT COLORING SYSTEM ===
-    // When useGradientColoring is enabled, use the gradient stop array
-    // instead of the legacy 3-color palette system.
-    if (scheme.useGradientColoring && scheme.gradientStopCount > 0) {
+    if (scheme.gradientStopCount > 0) {
         // Compute the gradient mapping value based on the selected mode
         // Note: normal is approximated from trap position for this path
         float3 approxNormal = normalize(trapPos);
@@ -936,26 +910,8 @@ half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, fl
         return gradColor;
     }
     
-    // === LEGACY COLORING PATH ===
-    if (neonEnabled && scheme.neonIntensity > 0.01f) {
-        // Compute neon orbit trap metrics
-        half trapMin = half(sqrt(trap));
-        half trapIterNorm = half(float(trapIter) / float(steps));
-        half trapAngle = half(atan2(trapPos.y, trapPos.x) * 0.15915494f + 0.5f); // Normalized to 0-1
-        
-        half3 neonColor = applyNeonColorScheme(trapMin, trapIterNorm, trapAngle, scheme);
-        
-        // If neonIntensity < 1, blend with standard coloring
-        if (scheme.neonIntensity < 0.99f) {
-            half2 c = saturate(half2(0.3333h * log(half(dot(p.xyz,p.xyz))) - 1.0h, sqrt(half(trap))));
-            half3 standardColor = applyColorScheme(c, colorMix, scheme);
-            return mix(standardColor, neonColor, half(scheme.neonIntensity));
-        }
-        return neonColor;
-    }
-    
-    half2 c = saturate(half2(0.3333h * log(half(dot(p.xyz,p.xyz))) - 1.0h, sqrt(half(trap))));
-    return applyColorScheme(c, colorMix, scheme);
+    // Fallback: no gradient stops available — return white
+    return half3(1.0h);
 }
 
 // === MapWithOrbitCache ===

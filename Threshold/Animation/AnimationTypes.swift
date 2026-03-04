@@ -183,7 +183,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     // OPTIONAL: Visual parameters (can be animated too)
     // ═══════════════════════════════════════════════════════════════════════════
     
-    var colorScheme: ColorScheme?  // nil = don't change color scheme during animation
     var lightingMode: LightingMode?
     var lightingPreset: LightingPreset?
     var hueRotationEffect: HueRotationEffect?
@@ -245,7 +244,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.worldRotationZ = settings.worldRotation.imag.z
         self.worldRotationW = settings.worldRotation.real
         
-        self.colorScheme = settings.colorScheme
         self.lightingMode = settings.lightingMode
         self.lightingPreset = settings.lightingPreset
         self.hueRotationEffect = settings.hueRotationEffect
@@ -285,7 +283,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             position: SIMD3<Float>,
             detailScale: Float = 1.0,
             worldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1),
-            colorScheme: ColorScheme? = nil,
             lightingMode: LightingMode? = nil,
             lightingPreset: LightingPreset? = nil,
             hueRotationEffect: HueRotationEffect? = nil,
@@ -314,7 +311,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.worldRotationY = worldRotation.imag.y
         self.worldRotationZ = worldRotation.imag.z
         self.worldRotationW = worldRotation.real
-        self.colorScheme = colorScheme
         self.lightingMode = lightingMode
         self.lightingPreset = lightingPreset
         self.hueRotationEffect = hueRotationEffect
@@ -407,7 +403,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             position: lerp3(self.position, other.position),
             detailScale: lerp(self.detailScale, other.detailScale),
             worldRotation: simd_slerp(self.worldRotation, other.worldRotation, clampedT).normalized,
-            colorScheme: clampedT < 0.5 ? self.colorScheme : other.colorScheme,
             lightingMode: clampedT < 0.5 ? self.lightingMode : other.lightingMode,
             lightingPreset: clampedT < 0.5 ? self.lightingPreset : other.lightingPreset,
             hueRotationEffect: lerpHue(self.hueRotationEffect, other.hueRotationEffect),
@@ -449,7 +444,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         case positionX, positionY, positionZ
         case detailScale
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW
-        case colorScheme, lightingMode, lightingPreset
+        case lightingMode, lightingPreset
         case hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
         case colorMappingMode = "colorMappingMode"
         case gradientRepeat = "gradientRepeat"
@@ -485,16 +480,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.worldRotationZ = try c.decodeIfPresent(Float.self, forKey: .worldRotationZ) ?? 0.0
         self.worldRotationW = try c.decodeIfPresent(Float.self, forKey: .worldRotationW) ?? 1.0
 
-        // Decode colorScheme: try ColorScheme (new string format) first,
-        // fall back to raw Int (legacy integer format)
-        if let scheme = try? c.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) {
-            self.colorScheme = scheme
-        } else if let rawInt = try? c.decodeIfPresent(Int.self, forKey: .colorScheme),
-                  let scheme = ColorScheme(rawValue: Int32(rawInt)) {
-            self.colorScheme = scheme
-        } else {
-            self.colorScheme = nil
-        }
         self.lightingMode = try c.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
         self.lightingPreset = try c.decodeIfPresent(LightingPreset.self, forKey: .lightingPreset)
         self.hueRotationEffect = try c.decodeIfPresent(HueRotationEffect.self, forKey: .hueRotationEffect)
@@ -542,7 +527,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         try c.encode(worldRotationY, forKey: .worldRotationY)
         try c.encode(worldRotationZ, forKey: .worldRotationZ)
         try c.encode(worldRotationW, forKey: .worldRotationW)
-        try c.encodeIfPresent(colorScheme, forKey: .colorScheme)
         try c.encodeIfPresent(lightingMode, forKey: .lightingMode)
         try c.encodeIfPresent(lightingPreset, forKey: .lightingPreset)
         try c.encodeIfPresent(hueRotationEffect, forKey: .hueRotationEffect)
@@ -638,7 +622,7 @@ struct SongAttachment: Codable, Equatable {
     // ── Custom Codable for backward compatibility ──────────────────────
     enum CodingKeys: String, CodingKey {
         case source, title, artist, trackID, trackIDs
-        case appleMusicID, spotifyURI
+        case appleMusicID
     }
 
     init(from decoder: Decoder) throws {
@@ -655,12 +639,10 @@ struct SongAttachment: Codable, Equatable {
 
         // 1) Prefer trackIDs array if present (new format)
         if let ids = try? c.decode([UnifiedTrackID].self, forKey: .trackIDs), !ids.isEmpty {
-            // Filter out any Spotify entries from old saved data
-            let filtered = ids.filter { $0.serviceID != "spotify" }
-            trackIDs = filtered.isEmpty ? [UnifiedTrackID(serviceID: "appleMusic", nativeID: appleMusicID ?? "")] : filtered
+            trackIDs = ids
         }
         // 2) Fall back to single trackID (previous format)
-        else if let tid = try? c.decode(UnifiedTrackID.self, forKey: .trackID), tid.serviceID != "spotify" {
+        else if let tid = try? c.decode(UnifiedTrackID.self, forKey: .trackID) {
             trackIDs = [tid]
         }
         // 3) Synthesize from legacy fields (oldest format)
@@ -695,10 +677,6 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// The fractal type this scene was authored for.
     /// Restored on playback so the scene always renders with the correct fractal.
     var fractalType: FractalModelType?
-    
-    /// The color scheme this scene was authored for.
-    /// Restored on playback so the scene always starts with the correct palette.
-    var colorScheme: ColorScheme?
     
     // ═══════════════════════════════════════════════════════════════════════════
     // COLOR / GRADIENT — scene-level defaults (applied once at start)
@@ -999,8 +977,7 @@ struct CatmullRomSpline {
             scale: interpolate(p0.scale, p1.scale, p2.scale, p3.scale, t: t),
             position: interpolate(p0.position, p1.position, p2.position, p3.position, t: t),
             detailScale: interpolate(p0.detailScale, p1.detailScale, p2.detailScale, p3.detailScale, t: t),
-            worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized,
-            colorScheme: t < 0.5 ? p1.colorScheme : p2.colorScheme
+            worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized
         )
     }
     
@@ -1020,8 +997,7 @@ struct CatmullRomSpline {
             scale: 2 * anchor.scale - away.scale,
             position: 2 * anchor.position - away.position,
             detailScale: 2 * anchor.detailScale - away.detailScale,
-            worldRotation: anchor.worldRotation,
-            colorScheme: anchor.colorScheme
+            worldRotation: anchor.worldRotation
         )
     }
 }

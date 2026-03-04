@@ -210,23 +210,6 @@ enum GradientPreset: String, CaseIterable, Codable {
         }
     }
 
-    /// Map legacy ColorScheme values to their equivalent gradient preset.
-    static func fromColorScheme(_ scheme: ColorScheme) -> GradientPreset? {
-        switch scheme {
-        case .classic: return .classic
-        case .ocean: return .ocean
-        case .fire: return .fire
-        case .forest: return .forest
-        case .nebula: return .nebula
-        case .mono: return .mono
-        case .aurora: return .aurora
-        case .volcanic: return .volcanic
-        case .neonCyber: return .neonCyber
-        case .neonSunset: return .neonSunset
-        case .neonMatrix: return .neonMatrix
-        }
-    }
-    
     /// Whether this preset should enable neon mode in the shader
     var isNeonMode: Bool {
         switch self {
@@ -378,24 +361,6 @@ enum GradientPreset: String, CaseIterable, Codable {
             ])
         }
     }
-    
-    /// Get the matching old ColorScheme for backward compatibility during transition
-    var legacyColorScheme: ColorScheme? {
-        switch self {
-        case .classic:    return .classic
-        case .ocean:      return .ocean
-        case .fire:       return .fire
-        case .forest:     return .forest
-        case .nebula:     return .nebula
-        case .mono:       return .mono
-        case .aurora:     return .aurora
-        case .volcanic:   return .volcanic
-        case .neonCyber:  return .neonCyber
-        case .neonSunset: return .neonSunset
-        case .neonMatrix: return .neonMatrix
-        default:          return nil
-        }
-    }
 }
 
 // MARK: - Gradient Manager
@@ -404,7 +369,7 @@ enum GradientPreset: String, CaseIterable, Codable {
 /// Owned by RenderSettings for thread-safe access.
 struct GradientState: Codable, Equatable {
     var gradient: GradientColorMap
-    var useGradientColoring: Bool    // true = new gradient system, false = legacy palette
+    var useGradientColoring: Bool    // Always true (kept for struct layout compatibility)
     var gradientPreset: GradientPreset?  // Which preset this came from (nil if custom)
     
     init() {

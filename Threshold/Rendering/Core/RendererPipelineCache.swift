@@ -40,9 +40,8 @@ extension Renderer {
     func getPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool = false) -> MTLRenderPipelineState {
         // Build cache key matching the preset format
         let colorIters = appModel.renderSettings.colorIterations  // Direct read (own lock) — avoids full snapshot
-        let colorScheme = appModel.renderSettings.colorScheme  // Read directly - not in snapshot
         let fractalType = appModel.renderSettings.fractalType
-        let neon = colorScheme.rawValue >= 8 ? 1 : 0  // neonCyber, neonSunset, neonMatrix
+        let neon = (appModel.renderSettings.gradientPreset?.isNeonMode ?? false) ? 1 : 0
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
 

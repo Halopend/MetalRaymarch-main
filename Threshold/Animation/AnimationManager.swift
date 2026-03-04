@@ -181,7 +181,6 @@ final class AnimationManager {
         let scene = AnimationScene(name: name, initialKeyframe: initialKeyframe, fractalType: settings.fractalType)
         // Capture current safety bubble / blend window settings into the scene
         var sceneWithBubble = scene
-        sceneWithBubble.colorScheme = settings.colorScheme
         sceneWithBubble.safetyBubbleEnabled = settings.safetyBubbleEnabled
         sceneWithBubble.safetyBubbleRadius = settings.safetyBubbleRadius
         sceneWithBubble.safetyBubbleShape = settings.safetyBubbleShape
@@ -336,14 +335,6 @@ final class AnimationManager {
             print("🎬 Restored fractal type to \(sceneFractalType) for scene playback")
         }
 
-        // Restore the color scheme the scene was authored for
-        if let sceneColorScheme = currentScene?.colorScheme,
-           let settings = renderSettings,
-           settings.colorScheme != sceneColorScheme {
-            settings.transitionToColorScheme(sceneColorScheme)
-            print("🎬 Restored color scheme to \(sceneColorScheme) for scene playback")
-        }
-
         // Apply scene-level safety bubble / blend window settings
         if let settings = renderSettings, let scene = currentScene {
             if let enabled = scene.safetyBubbleEnabled {
@@ -360,7 +351,6 @@ final class AnimationManager {
             }
             
             // ── Apply scene-level gradient / color settings ──────────────
-            // Gradient preset overrides the legacy colorScheme gradient sync
             if let preset = scene.gradientPreset {
                 settings.applyGradientPreset(preset)
                 print("🎬 Restored gradient preset to \(preset) for scene playback")
@@ -611,12 +601,6 @@ final class AnimationManager {
                 FormulaCatalog.setParam(&fp, index: i, value: vals[i])
             }
             settings.formulaParams = fp
-        }
-
-          // Apply optional color scheme from keyframe (also syncs gradient preset)
-        if let scheme = keyframe.colorScheme,
-              settings.colorScheme != scheme {
-            settings.transitionToColorScheme(scheme)
         }
 
           if let lightingMode = keyframe.lightingMode,

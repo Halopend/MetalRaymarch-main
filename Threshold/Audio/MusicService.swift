@@ -14,17 +14,6 @@
 
 import SwiftUI
 
-// MARK: - Unified Track (legacy compat)
-
-/// A source-agnostic representation of a playing track.
-struct MusicTrack: Equatable {
-    let title: String
-    let artist: String
-    /// Apple Music persistent ID
-    let identifier: String
-    let artworkURL: URL?
-}
-
 // MARK: - Music Service
 
 @MainActor
@@ -129,23 +118,6 @@ final class MusicService {
     // ══════════════════════════════════════════════════════════════════════
     // NOW PLAYING (delegated to active provider)
     // ══════════════════════════════════════════════════════════════════════
-
-    /// Which backend is currently the active source.
-    var activeSource: SongSource? {
-        guard activeProvider != nil else { return nil }
-        return .appleMusic
-    }
-
-    /// Unified now-playing track (nil when nothing is loaded).
-    var nowPlaying: MusicTrack? {
-        guard let p = activeProvider, let track = p.nowPlaying else { return nil }
-        return MusicTrack(
-            title: track.title,
-            artist: track.artist,
-            identifier: track.id,
-            artworkURL: track.artworkURL
-        )
-    }
 
     /// Unified now-playing as `UnifiedTrack`.
     var nowPlayingUnified: UnifiedTrack? {
@@ -386,8 +358,6 @@ final class MusicService {
     // ══════════════════════════════════════════════════════════════════════
     // CONNECTION STATUS
     // ══════════════════════════════════════════════════════════════════════
-
-    var isAppleMusicConnected: Bool { appleMusic.isAuthorized }
 
     /// At least one music service is available.
     var hasAnyConnection: Bool {

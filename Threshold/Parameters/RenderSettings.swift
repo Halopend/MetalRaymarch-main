@@ -128,18 +128,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioReactiveEnabled: Bool = loadBool("fractalAudioReactiveEnabled", default: true)
     private var _fractalAudioAmount: Float              = loadFloat("fractalAudioAmount", default: 0.6)
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
-    private var _fractalAudioAffectsScale: Bool         = loadBool("fractalAudioAffectsScale", default: true)
-    private var _fractalAudioAffectsFolding: Bool       = loadBool("fractalAudioAffectsFolding", default: true)
-    private var _fractalAudioAffectsRadius: Bool        = loadBool("fractalAudioAffectsRadius", default: true)
-    private var _fractalAudioAffectsColorMix: Bool      = loadBool("fractalAudioAffectsColorMix", default: true)
-    
-    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
-    private var _fractalAudioAffectsGlow: Bool          = loadBool("fractalAudioAffectsGlow", default: true)
-    private var _fractalAudioAffectsFog: Bool           = loadBool("fractalAudioAffectsFog", default: true)
-    private var _fractalAudioAffectsBloom: Bool         = loadBool("fractalAudioAffectsBloom", default: true)
-    private var _fractalAudioAffectsHueSpeed: Bool      = loadBool("fractalAudioAffectsHueSpeed", default: true)
-    private var _fractalAudioAffectsSaturation: Bool    = loadBool("fractalAudioAffectsSaturation", default: true)
-    private var _fractalAudioAffectsIterations: Bool    = loadBool("fractalAudioAffectsIterations", default: false)
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
     
     private var _foldingLimit: Float = 1.0
@@ -206,15 +194,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleStrengthTarget: Float = 0.0 // Target strength (set by safetyBubbleEnabled toggle)
     private var _safetyBubbleStrengthVelocity: Float = 0.0 // Spring velocity for smoothDamp
     
-    // === COLOR SCHEME ===
-    // Controls the color palette and post-processing for fractal coloring
-    private var _colorScheme: ColorScheme = .nebula      // Current color scheme
-    private var _targetColorScheme: ColorScheme = .nebula // Target for transitions
-    private var _colorSchemeTransitionProgress: Float = 1.0 // 0 = previous, 1 = current (complete)
-    private var _colorSchemeTransitionDuration: Float = 2.0 // Seconds to transition between schemes
-    private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes
-    private var _colorSchemeAutoInterval: Float = 30.0      // Seconds between auto-transitions
-    private var _colorSchemeAutoTimer: Float = 0.0          // Timer for auto-transitions
+    // === COLOR POST-PROCESSING ===
+    // Post-processing overrides for fractal coloring (independent of gradient preset)
     private var _colorSchemeSaturation: Float = 1.5         // Color saturation override
     private var _colorSchemeContrast: Float = 1.02          // Contrast override (subtle)
     private var _colorSchemeGamma: Float = 0.75             // Gamma override (lower = brighter, 1.0 = linear)
@@ -499,124 +480,6 @@ final class RenderSettings: @unchecked Sendable {
             if let data = try? JSONEncoder().encode(withLock { _musicReactiveMappings }) {
                 UserDefaults.standard.set(data, forKey: "musicReactiveMappings")
             }
-        }
-    }
-
-    var fractalAudioAffectsScale: Bool {
-        get { withLock { mappingEnabledLocked(.fractalScale) } }
-        set {
-            withLock {
-                _fractalAudioAffectsScale = newValue
-                setMappingEnabledLocked(.fractalScale, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsScale")
-        }
-    }
-
-    var fractalAudioAffectsFolding: Bool {
-        get { withLock { mappingEnabledLocked(.foldingLimit) } }
-        set {
-            withLock {
-                _fractalAudioAffectsFolding = newValue
-                setMappingEnabledLocked(.foldingLimit, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFolding")
-        }
-    }
-
-    var fractalAudioAffectsRadius: Bool {
-        get { withLock { mappingEnabledLocked(.sphereRadius) } }
-        set {
-            withLock {
-                _fractalAudioAffectsRadius = newValue
-                setMappingEnabledLocked(.sphereRadius, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsRadius")
-        }
-    }
-
-    var fractalAudioAffectsColorMix: Bool {
-        get { withLock { mappingEnabledLocked(.colorMix) } }
-        set {
-            withLock {
-                _fractalAudioAffectsColorMix = newValue
-                setMappingEnabledLocked(.colorMix, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsColorMix")
-        }
-    }
-    
-    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
-    
-    /// Glow intensity responds to RMS energy + beat pulses (Fractal Forge: glow)
-    var fractalAudioAffectsGlow: Bool {
-        get { withLock { mappingEnabledLocked(.glow) } }
-        set {
-            withLock {
-                _fractalAudioAffectsGlow = newValue
-                setMappingEnabledLocked(.glow, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsGlow")
-        }
-    }
-    
-    /// Fog clears on loud passages, thickens on quiet (Fractal Forge: inverse energy)
-    var fractalAudioAffectsFog: Bool {
-        get { withLock { mappingEnabledLocked(.fog) } }
-        set {
-            withLock {
-                _fractalAudioAffectsFog = newValue
-                setMappingEnabledLocked(.fog, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFog")
-        }
-    }
-    
-    /// Bloom strength pulses with beats (Fractal Forge: beat bloom)
-    var fractalAudioAffectsBloom: Bool {
-        get { withLock { mappingEnabledLocked(.bloom) } }
-        set {
-            withLock {
-                _fractalAudioAffectsBloom = newValue
-                setMappingEnabledLocked(.bloom, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsBloom")
-        }
-    }
-    
-    /// Hue rotation speed driven by treble (Fractal Forge: brilliance → color speed)
-    var fractalAudioAffectsHueSpeed: Bool {
-        get { withLock { mappingEnabledLocked(.hueSpeed) } }
-        set {
-            withLock {
-                _fractalAudioAffectsHueSpeed = newValue
-                setMappingEnabledLocked(.hueSpeed, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsHueSpeed")
-        }
-    }
-    
-    /// Color saturation responds to tonal/harmonic energy
-    var fractalAudioAffectsSaturation: Bool {
-        get { withLock { mappingEnabledLocked(.saturation) } }
-        set {
-            withLock {
-                _fractalAudioAffectsSaturation = newValue
-                setMappingEnabledLocked(.saturation, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsSaturation")
-        }
-    }
-    
-    /// Fractal iterations increase with mid energy (detail on transients — caution: performance)
-    var fractalAudioAffectsIterations: Bool {
-        get { withLock { mappingEnabledLocked(.iterations) } }
-        set {
-            withLock {
-                _fractalAudioAffectsIterations = newValue
-                setMappingEnabledLocked(.iterations, enabled: newValue)
-            }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsIterations")
         }
     }
     
@@ -1095,53 +958,9 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _safetyBubbleFadeWidth } }
     }
     
-    // === COLOR SCHEME SETTINGS ===
-    // Controls the color palette and transitions for fractal coloring
+    // === COLOR POST-PROCESSING SETTINGS ===
     
-    /// Current color scheme (or target when transitioning)
-    var colorScheme: ColorScheme {
-        get { withLock { _colorScheme } }
-        set { 
-            withLock { 
-                if _targetColorScheme != newValue {
-                    _targetColorScheme = newValue
-                    _colorSchemeTransitionProgress = 0.0
-                }
-                syncGradientPresetForColorSchemeLocked(newValue)
-            } 
-        }
-    }
-    
-    /// Previous color scheme (for transitions)
-    var previousColorScheme: ColorScheme {
-        get { withLock { _colorScheme } }
-    }
-    
-    /// Transition progress (0 = start, 1 = complete)
-    var colorSchemeTransitionProgress: Float {
-        get { withLock { _colorSchemeTransitionProgress } }
-        set { withLock { _colorSchemeTransitionProgress = max(0.0, min(1.0, newValue)) } }
-    }
-    
-    /// Duration of color scheme transitions in seconds
-    var colorSchemeTransitionDuration: Float {
-        get { withLock { _colorSchemeTransitionDuration } }
-        set { withLock { _colorSchemeTransitionDuration = max(0.1, min(10.0, newValue)) } }
-    }
-    
-    /// Enable auto-cycling through color schemes
-    var colorSchemeAutoTransition: Bool {
-        get { withLock { _colorSchemeAutoTransition } }
-        set { withLock { _colorSchemeAutoTransition = newValue } }
-    }
-    
-    /// Seconds between auto-transitions
-    var colorSchemeAutoInterval: Float {
-        get { withLock { _colorSchemeAutoInterval } }
-        set { withLock { _colorSchemeAutoInterval = max(5.0, min(120.0, newValue)) } }
-    }
-    
-    /// Saturation override (independent of scheme default)
+    /// Saturation override (independent of gradient preset)
     var colorSchemeSaturation: Float {
         get { withLock { _colorSchemeSaturation } }
         set { withLock { _colorSchemeSaturation = max(0.0, min(3.0, newValue)) } }
@@ -1424,7 +1243,7 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _currentRenderQuality = newValue } }
     }
     
-    /// Update color scheme transitions and animation time. Call once per frame.
+    /// Update animation time and polar rotation. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
         withLock {
             // Update animation time
@@ -1434,71 +1253,14 @@ final class RenderSettings: @unchecked Sendable {
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
                 _polarRotationAccum += deltaTime * _polarRotationEffect.speed * _polarRotationEffect.direction.sign
             }
-            
-            // Handle ongoing transition
-            if _colorSchemeTransitionProgress < 1.0 {
-                let step = deltaTime / _colorSchemeTransitionDuration
-                _colorSchemeTransitionProgress = min(1.0, _colorSchemeTransitionProgress + step)
-                
-                // When transition completes, update current scheme
-                if _colorSchemeTransitionProgress >= 1.0 {
-                    _colorScheme = _targetColorScheme
-                }
-            }
-            
-            // Handle auto-cycling
-            // OPTIMIZATION: Use rawValue arithmetic instead of allCases iteration
-            if _colorSchemeAutoTransition && _colorSchemeTransitionProgress >= 1.0 {
-                _colorSchemeAutoTimer += deltaTime
-                if _colorSchemeAutoTimer >= _colorSchemeAutoInterval {
-                    _colorSchemeAutoTimer = 0.0
-                    // Transition to next scheme using rawValue arithmetic (faster than allCases lookup)
-                    let currentRaw = _targetColorScheme.rawValue
-                    let nextRaw = (currentRaw + 1) % Int32(ColorScheme.allCases.count)
-                    if let nextScheme = ColorScheme(rawValue: nextRaw) {
-                        _colorScheme = _targetColorScheme
-                        _targetColorScheme = nextScheme
-                        _colorSchemeTransitionProgress = 0.0
-                        syncGradientPresetForColorSchemeLocked(nextScheme)
-                    }
-                }
-            }
         }
     }
 
-    @inline(__always)
-    private func syncGradientPresetForColorSchemeLocked(_ scheme: ColorScheme) {
-        guard let preset = GradientPreset.fromColorScheme(scheme) else { return }
-        if _gradientState.gradientPreset != preset || !_gradientState.useGradientColoring {
-            _gradientState.applyPreset(preset)
-            _gradientState.useGradientColoring = true
-        }
-    }
-    
     private func makeColorSchemeParamsLocked() -> ColorSchemeParams {
-        let currentPal = _targetColorScheme.palette
-        let previousPal = _colorScheme.palette
-        let currentNeon = _targetColorScheme.neonParams
-        let previousNeon = _colorScheme.neonParams
-        
-        // Interpolate between previous and target palettes
-        let t = _colorSchemeTransitionProgress
-        let color1 = simd_mix(previousPal.color1, currentPal.color1, SIMD3<Float>(repeating: t))
-        let color2 = simd_mix(previousPal.color2, currentPal.color2, SIMD3<Float>(repeating: t))
-        let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
-        let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
-        
-        // Interpolate neon intensity (0 for non-neon, 1 for neon)
-        let prevNeonIntensity: Float = _colorScheme.isNeonMode ? 1.0 : 0.0
-        let currNeonIntensity: Float = _targetColorScheme.isNeonMode ? 1.0 : 0.0
-        let neonIntensity = prevNeonIntensity + (currNeonIntensity - prevNeonIntensity) * t
-        
-        // Interpolate neon parameters
-        let hueFreq = previousNeon.hueFreq + (currentNeon.hueFreq - previousNeon.hueFreq) * t
-        let hueOffset = previousNeon.hueOffset + (currentNeon.hueOffset - previousNeon.hueOffset) * t
-        let bandFreq = previousNeon.bandFreq + (currentNeon.bandFreq - previousNeon.bandFreq) * t
-        let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
-        let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
+        // Neon intensity from gradient preset
+        let isNeon = _gradientState.gradientPreset?.isNeonMode ?? false
+        let neonIntensity: Float = isNeon ? 1.0 : 0.0
+        let neonParams = _gradientState.gradientPreset?.neonParams ?? (hueFreq: Float(1.5), hueOffset: Float(0.0), bandFreq: Float(2.0), stripeFreq: Float(0.0), stripeStrength: Float(0.0), glowSharpness: Float(3.0), satPower: Float(0.3))
         
         // === Build gradient stop data for shader ===
         let gradState = _gradientState
@@ -1510,10 +1272,6 @@ final class RenderSettings: @unchecked Sendable {
         )
         
         return ColorSchemeParams(
-            color1: color1,
-            color2: color2,
-            color3: color3,
-            altMixFactors: altMixFactors,
             saturation: _colorSchemeSaturation,
             contrast: _colorSchemeContrast,
             gamma: _colorSchemeGamma,
@@ -1523,18 +1281,17 @@ final class RenderSettings: @unchecked Sendable {
             shadows: _colorSchemeShadows,
             highlights: _colorSchemeHighlights,
             neonIntensity: neonIntensity,
-            hueFrequency: hueFreq,
-            hueOffset: hueOffset,
-            bandFrequency: bandFreq,
-            glowSharpness: glowSharpness,
-            saturationPower: satPower,
+            hueFrequency: neonParams.hueFreq,
+            hueOffset: neonParams.hueOffset,
+            bandFrequency: neonParams.bandFreq,
+            glowSharpness: neonParams.glowSharpness,
+            saturationPower: neonParams.satPower,
             // === GRADIENT COLORING ===
             gradientStops: gs,
             gradientStopCount: Int32(gradCount),
             colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
             gradientRepeat: gradState.gradient.repeatCount,
             gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
-            useGradientColoring: gradState.useGradientColoring ? 1 : 0,
             gradientSmoothing: gradState.gradient.smoothing,
             gradientLoopSmooth: _gradientCycleEffect.smoothLoop ? 1 : 0,
             _gradPad: (0.0),
@@ -1622,19 +1379,6 @@ final class RenderSettings: @unchecked Sendable {
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier
             )
-        }
-    }
-    
-    /// Manually trigger a transition to a new scheme
-    func transitionToColorScheme(_ scheme: ColorScheme) {
-        withLock {
-            if _targetColorScheme != scheme {
-                // Current becomes previous
-                _colorScheme = _targetColorScheme
-                _targetColorScheme = scheme
-                _colorSchemeTransitionProgress = 0.0
-            }
-            syncGradientPresetForColorSchemeLocked(scheme)
         }
     }
     

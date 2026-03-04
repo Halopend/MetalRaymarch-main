@@ -43,7 +43,6 @@ struct FractalSyncMessage: Codable, Sendable {
     let maxRaySteps: Int             // Ray quality
     
     // === COLOR ===
-    let colorScheme: Int32           // ColorScheme raw value
     let colorMix: Float              // Color mixing factor
     
     // === QUALITY ===
@@ -68,7 +67,6 @@ struct FractalSyncMessage: Codable, Sendable {
         self.sphereRadius = settings.sphereRadius
         self.fractalIterations = settings.fractalIterations
         self.maxRaySteps = settings.maxRaySteps
-        self.colorScheme = settings.colorScheme.rawValue
         self.colorMix = settings.colorMix
         self.minDistance = settings.minDistance
         self.safetyBubbleEnabled = settings.safetyBubbleEnabled
@@ -98,10 +96,7 @@ struct FractalSyncMessage: Codable, Sendable {
         settings.fractalIterations = fractalIterations
         settings.maxRaySteps = maxRaySteps
         
-        // Color - use transitionToColorScheme for animated transitions
-        if let scheme = ColorScheme(rawValue: colorScheme) {
-            settings.transitionToColorScheme(scheme)
-        }
+        // Color
         settings.colorMix = colorMix
         
         // Safety bubble

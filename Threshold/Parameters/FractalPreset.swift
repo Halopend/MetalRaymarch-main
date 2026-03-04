@@ -28,7 +28,6 @@ struct FractalPreset: Codable, Identifiable {
 
     // Scene-style settings
     var fractalType: FractalModelType
-    var colorScheme: ColorScheme
     var colorSchemeSaturation: Float
     var colorSchemeContrast: Float
     var colorSchemeGamma: Float
@@ -69,11 +68,6 @@ struct FractalPreset: Codable, Identifiable {
     var gradientCycleEffect: GradientCycleEffect?
     var beatFlashEffect: BeatFlashEffect?
     
-    // === COLOR SCHEME AUTO-TRANSITION ===
-    var colorSchemeAutoTransition: Bool?
-    var colorSchemeAutoInterval: Float?
-    var colorSchemeTransitionDuration: Float?
-    
     // === DETAIL TRANSFORM (grab gesture orientation/scale) ===
     var worldRotation: simd_quatf?
     var detailScale: Float?
@@ -86,14 +80,12 @@ struct FractalPreset: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
-        case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
+        case fractalType, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, beatFlashEffect
-        // Color scheme auto-transition
-        case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // Detail transform
         case worldRotation, detailScale
         // v2.1 gradient coloring system
@@ -117,7 +109,6 @@ struct FractalPreset: Codable, Identifiable {
         self.scale = 1.0
 
         self.fractalType = .mandelbox
-        self.colorScheme = .classic
         self.colorSchemeSaturation = 1.5
         self.colorSchemeContrast = 1.02
         self.colorSchemeGamma = 0.75
@@ -146,7 +137,6 @@ struct FractalPreset: Codable, Identifiable {
         position = try container.decode(SIMD3<Float>.self, forKey: .position)
         scale = try container.decode(Float.self, forKey: .scale)
         fractalType = try container.decodeIfPresent(FractalModelType.self, forKey: .fractalType) ?? .mandelbox
-        colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
         colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 1.5
         colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.02
         colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.75
@@ -177,11 +167,6 @@ struct FractalPreset: Codable, Identifiable {
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
         beatFlashEffect = try container.decodeIfPresent(BeatFlashEffect.self, forKey: .beatFlashEffect)
         
-        // Color scheme auto-transition
-        colorSchemeAutoTransition = try container.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition)
-        colorSchemeAutoInterval = try container.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval)
-        colorSchemeTransitionDuration = try container.decodeIfPresent(Float.self, forKey: .colorSchemeTransitionDuration)
-        
         // Detail transform
         if let wrComponents = try container.decodeIfPresent([Float].self, forKey: .worldRotation), wrComponents.count == 4 {
             worldRotation = simd_quatf(ix: wrComponents[0], iy: wrComponents[1], iz: wrComponents[2], r: wrComponents[3])
@@ -210,7 +195,6 @@ struct FractalPreset: Codable, Identifiable {
         try container.encode(position, forKey: .position)
         try container.encode(scale, forKey: .scale)
         try container.encode(fractalType, forKey: .fractalType)
-        try container.encode(colorScheme, forKey: .colorScheme)
         try container.encode(colorSchemeSaturation, forKey: .colorSchemeSaturation)
         try container.encode(colorSchemeContrast, forKey: .colorSchemeContrast)
         try container.encode(colorSchemeGamma, forKey: .colorSchemeGamma)
@@ -240,11 +224,6 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
         try container.encodeIfPresent(beatFlashEffect, forKey: .beatFlashEffect)
-        
-        // Color scheme auto-transition
-        try container.encodeIfPresent(colorSchemeAutoTransition, forKey: .colorSchemeAutoTransition)
-        try container.encodeIfPresent(colorSchemeAutoInterval, forKey: .colorSchemeAutoInterval)
-        try container.encodeIfPresent(colorSchemeTransitionDuration, forKey: .colorSchemeTransitionDuration)
         
         // Detail transform
         if let wr = worldRotation {
@@ -298,7 +277,7 @@ struct FractalPreset: Codable, Identifiable {
             fractalIterations: Int32(fractalIterations),
             shadowIterations: Int32(max(fractalIterations - 2, 2)),
             maxRaySteps: Int32(maxRaySteps),
-            neonModeEnabled: colorScheme.isNeonMode,
+            neonModeEnabled: gradientState?.gradientPreset?.isNeonMode ?? false,
             colorIterations: Int32(colorIterations),
             safetyBubbleEnabled: safetyBubbleEnabled ?? true,
             qualityMode: qualityMode
@@ -324,7 +303,6 @@ struct FractalPreset: Codable, Identifiable {
         preset.scale = settings.scale
 
         preset.fractalType = settings.fractalType
-        preset.colorScheme = settings.colorScheme
         preset.colorSchemeSaturation = settings.colorSchemeSaturation
         preset.colorSchemeContrast = settings.colorSchemeContrast
         preset.colorSchemeGamma = settings.colorSchemeGamma
@@ -363,11 +341,6 @@ struct FractalPreset: Codable, Identifiable {
         preset.gradientCycleEffect = settings.gradientCycleEffect
         preset.beatFlashEffect = settings.beatFlashEffect
         
-        // Color scheme auto-transition
-        preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
-        preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
-        preset.colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
-        
         // Detail transform (grab gesture orientation/scale)
         preset.worldRotation = settings.worldRotation
         preset.detailScale = settings.detailScale
@@ -390,7 +363,6 @@ struct FractalPreset: Codable, Identifiable {
         settings.scale = scale
 
         settings.fractalType = fractalType
-        settings.transitionToColorScheme(colorScheme)
         settings.colorSchemeSaturation = colorSchemeSaturation
         settings.colorSchemeContrast = colorSchemeContrast
         settings.colorSchemeGamma = colorSchemeGamma
@@ -481,17 +453,6 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let beatFlashEffect = beatFlashEffect {
             settings.beatFlashEffect = beatFlashEffect
-        }
-        
-        // Color scheme auto-transition
-        if let colorSchemeAutoTransition = colorSchemeAutoTransition {
-            settings.colorSchemeAutoTransition = colorSchemeAutoTransition
-        }
-        if let colorSchemeAutoInterval = colorSchemeAutoInterval {
-            settings.colorSchemeAutoInterval = colorSchemeAutoInterval
-        }
-        if let colorSchemeTransitionDuration = colorSchemeTransitionDuration {
-            settings.colorSchemeTransitionDuration = colorSchemeTransitionDuration
         }
         
         // v2.1 gradient coloring system

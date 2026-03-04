@@ -235,7 +235,6 @@ class PresetManager {
         preset.scale = settings.scale
         
         preset.fractalType = settings.fractalType
-        preset.colorScheme = settings.colorScheme
         preset.colorSchemeSaturation = settings.colorSchemeSaturation
         preset.colorSchemeContrast = settings.colorSchemeContrast
         preset.colorSchemeGamma = settings.colorSchemeGamma
@@ -266,11 +265,6 @@ class PresetManager {
         preset.bloomEffect = settings.bloomEffect
         preset.fogEffect = settings.fogEffect
         preset.gradientCycleEffect = settings.gradientCycleEffect
-        
-        // Color scheme auto-transition
-        preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
-        preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
-        preset.colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
         
         // v2.1 gradient coloring system
         preset.gradientState = settings.gradientState
@@ -370,7 +364,6 @@ class PresetManager {
             newPreset.safetyBubbleShape = importedPreset.safetyBubbleShape
             newPreset.safetyBubbleBlend = importedPreset.safetyBubbleBlend
             newPreset.fractalType = importedPreset.fractalType
-            newPreset.colorScheme = importedPreset.colorScheme
             newPreset.colorSchemeSaturation = importedPreset.colorSchemeSaturation
             newPreset.colorSchemeContrast = importedPreset.colorSchemeContrast
             newPreset.colorSchemeGamma = importedPreset.colorSchemeGamma
@@ -389,11 +382,6 @@ class PresetManager {
             newPreset.bloomEffect = importedPreset.bloomEffect
             newPreset.fogEffect = importedPreset.fogEffect
             newPreset.gradientCycleEffect = importedPreset.gradientCycleEffect
-
-            // Color scheme auto-transition
-            newPreset.colorSchemeAutoTransition = importedPreset.colorSchemeAutoTransition
-            newPreset.colorSchemeAutoInterval = importedPreset.colorSchemeAutoInterval
-            newPreset.colorSchemeTransitionDuration = importedPreset.colorSchemeTransitionDuration
 
             // v2.1 gradient coloring system
             newPreset.gradientState = importedPreset.gradientState
@@ -454,7 +442,6 @@ extension PresetManager {
         // Minimal inline fallback (should never be reached)
         var preset = FractalPreset(name: "Bright Preset")
         preset.fractalType = .mandelbox
-        preset.colorScheme = .classic
         preset.fractalScale = 2.8
         preset.foldingLimit = 1.1646773
         preset.minDistance = 0.8117829

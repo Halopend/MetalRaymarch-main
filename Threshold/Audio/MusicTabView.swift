@@ -137,7 +137,7 @@ struct MusicTabContent: View {
     private var nowPlayingCard: some View {
         let music = appModel.musicService!
         return VStack(spacing: 10) {
-            if let track = music.nowPlaying {
+            if let track = music.nowPlayingUnified {
                 // Track info
                 HStack(spacing: 12) {
                     // Album art
