@@ -143,16 +143,18 @@ extension Renderer {
     /// 3. Fallback to generic pipeline
     func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool = false) -> MTLRenderPipelineState {
+        let fractalType = appModel.renderSettings.fractalType
+
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
            useQuadShared == lastSelectQS &&
-           neonMode == lastSelectNeon, let cached = lastSelectedPipeline {
+           neonMode == lastSelectNeon &&
+           fractalType.rawValue == lastSelectFT, let cached = lastSelectedPipeline {
             appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
             return cached
         }
 
         // Build unified cache key (only on parameter change)
-        let fractalType = appModel.renderSettings.fractalType
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
 
@@ -193,6 +195,7 @@ extension Renderer {
         lastSelectRS = raySteps
         lastSelectQS = useQuadShared
         lastSelectNeon = neonMode
+        lastSelectFT = fractalType.rawValue
         lastSelectedPipeline = result
         lastSelectedIsSpecialized = isSpecialized
         appModel.isUsingSpecializedPipeline = isSpecialized
@@ -204,8 +207,9 @@ extension Renderer {
     /// to avoid frame hitches during rendering.
     func ensurePipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool) {
+        let fractalType = appModel.renderSettings.fractalType
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
 
         // Already cached
         if pipelineCache[cacheKey] != nil { return }
@@ -221,6 +225,7 @@ extension Renderer {
             qualityMode: Int32(qualityMode),
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
+            fractalType: fractalType.rawValue,
             neonModeEnabled: neonMode,
             colorIterations: 8  // Color iterations are fixed for consistent coloring
         )

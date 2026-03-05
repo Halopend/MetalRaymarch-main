@@ -493,6 +493,7 @@ actor Renderer {
     var lastSelectRS: Int = -1
     var lastSelectQS: Bool = false
     var lastSelectNeon: Bool = false
+    var lastSelectFT: Int32 = -1
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     
