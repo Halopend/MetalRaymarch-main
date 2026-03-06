@@ -355,9 +355,10 @@ final class GestureController {
             settings.detailScale = 0.25
             settings.targetDetailScale = 0.25
 
-            // Center the Mandelbulb in front of the user by resetting position
-            // to the initial default (prevents carry-over from previous fractal).
-            let defaultPos = SIMD3<Float>(0.1, 0.1, 0.1)
+            // Center the Mandelbulb in front of the user by resetting position.
+            // Push ~1 m forward (-Z in visionOS world space) so the bulb isn't
+            // uncomfortably close on first load.
+            let defaultPos = SIMD3<Float>(0.1, 0.1, -0.9)
             settings.position = defaultPos
             settings.targetPosition = defaultPos
 
@@ -1244,8 +1245,9 @@ final class GestureController {
             // Scale inversely with detailScale so translation feels consistent:
             // - Zoomed in (large detailScale)  -> slower translation (more precision)
             // - Zoomed out (small detailScale) -> faster translation (more coverage)
-            // Clamp range to avoid extreme behavior at very small/large scales.
-            let zoomCompensation = simd_clamp(1.0 / max(settings.detailScale, 0.01), 0.2, 5.0)
+            // Mandelbulb uses detailScale 0.25 which would give 4× compensation,
+            // making pinch-move far too touchy. Cap at 2× to keep it manageable.
+            let zoomCompensation = simd_clamp(1.0 / max(settings.detailScale, 0.01), 0.2, 2.0)
             accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition

@@ -1078,7 +1078,14 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
 // Compiler unrolls based on FC_FRACTAL_ITERATIONS when defined
 FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {}, float maxRayDistance = kMaxRayDistanceDefault)
 {
-    float t = 0.05f;
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    bool isMandelbulb = (type == FractalTypeMandelbulb);
+
+    // Mandelbulb DE returns much smaller values near the surface; start closer
+    // and use a finer hit threshold to avoid overshooting the thin front face.
+    float t = isMandelbulb ? 0.005f : 0.05f;
+    float hitThreshold = isMandelbulb ? 0.005f : 0.02f;
+    int maxCoarseSteps = isMandelbulb ? 36 : 24;
     
     // Use MapContinuous with 0.6× iterations for smooth fractional DE.
     // This preserves thin features better than integer iterations/2 because
@@ -1087,12 +1094,12 @@ FORCE_INLINE float SceneCoarse(float3 rO, float3 rD, float foldingLimit, Fractal
     // The 0.6× factor balances speed (fewer iterations) vs. accuracy.
     float coarseIters = float(iterations) * 0.6f;
     
-    for(int j = 0; j < 24 && t <= maxRayDistance; j++)
+    for(int j = 0; j < maxCoarseSteps && t <= maxRayDistance; j++)
     {
         float3 p = fma(rD, float3(t), rO);
         float h = MapContinuousUnified(p, params, foldingLimit, coarseIters, fractalType, fp);
         
-        if(UNLIKELY(h < 0.02f)) return t;
+        if(UNLIKELY(h < hitThreshold)) return t;
         
         t += h;
     }
@@ -1168,8 +1175,9 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         // STEP OVER-RELAXATION (GMT-fractals technique)
         // stepMultiplier > 1.0 takes larger steps, converging faster at the risk
         // of stepping through thin features. 1.2-1.5 is safe for Mandelbox;
-        // CPU adjusts dynamically based on geometry state.
-        t += h * stepMultiplier;
+        // Mandelbulb DE is a lower bound that can overestimate near thin geometry,
+        // so cap at 1.0 to prevent overshooting the near-camera surface.
+        t += h * (isMandelbulb ? min(stepMultiplier, 1.0f) : stepMultiplier);
     }
     
     result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
@@ -1224,7 +1232,8 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
         // STEP OVER-RELAXATION (GMT-fractals technique)
-        t += h * stepMultiplier;
+        // Cap at 1.0 for Mandelbulb — its approximate DE can't tolerate over-relaxation.
+        t += h * (isMandelbulb ? min(stepMultiplier, 1.0f) : stepMultiplier);
     }
     
     result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));

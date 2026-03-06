@@ -105,6 +105,15 @@ struct ContentView: View {
             Text("Threshold")
                 .font(.title2.bold())
             ToggleImmersiveSpaceButton()
+            if appModel.immersiveSpaceState == .inTransition {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("Compiling shaders — first launch may take a moment…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .transition(.opacity)
+            }
         }
         .padding(30)
     }

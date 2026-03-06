@@ -297,6 +297,6 @@ typedef struct
 } TileUniforms;
 
 // Include Buddhabrot types so they're visible through the bridging header
-#include "../Buddhabrot/BuddhabrotTypes.h"
+#include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
 
 #endif /* ShaderTypes_h */
