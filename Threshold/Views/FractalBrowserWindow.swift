@@ -170,7 +170,7 @@ enum FractalBrowserCatalog {
     }
 
     private static let loadedFamilies: [FractalFamilyInfo]? = {
-        guard let url = Bundle.main.url(forResource: "fractal_browser_catalog", withExtension: "json", subdirectory: "FractalBrowser") ??
+        guard let url = Bundle.main.url(forResource: "fractal_browser_catalog", withExtension: "json", subdirectory: "Formulas") ??
                         Bundle.main.url(forResource: "fractal_browser_catalog", withExtension: "json") else {
             return nil
         }

@@ -59,9 +59,10 @@
 
 using namespace metal;
 
-// Include the fractal formula library (14 non-Mandelbox DE functions + dispatch)
+// Include the fractal formula library (15 non-Mandelbox DE functions + dispatch)
 // Must be after metal_stdlib and ShaderTypes.h
-#include "FractalFormulas.h"
+// Each formula lives in Formulas/{Name}/{Name}.h; FractalFormulas.h is the master include.
+#include "../Formulas/FractalFormulas.h"
 
 // === FUNCTION CONSTANTS ===
 // These allow the Metal compiler to specialize shaders at pipeline creation time,
@@ -556,7 +557,7 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
 // =============================================================================
 // The branching strategy is zero-overhead for Mandelbox:
 //   fractalType == 0 compiles to a perfectly-predicted branch (Mandelbox fast path)
-//   fractalType != 0 dispatches through FractalDE_Dispatch (FractalFormulas.h)
+//   fractalType != 0 dispatches through FractalDE_Dispatch (Formulas/FractalFormulas.h)
 // Safety bubble is now applied to ALL fractal types via applySafetyBubble().
 
 FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLimit,

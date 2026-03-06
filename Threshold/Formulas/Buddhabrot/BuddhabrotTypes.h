@@ -72,7 +72,7 @@ typedef struct {
     uint32_t resolution;          // Volume grid size per axis
     float    densityScale;        // Multiplier before log (adjusts brightness)
     float    gamma;               // Gamma curve exponent (e.g., 0.4 for Buddhabrot look)
-    float    logBase;             // log(1 + density * scale) normalization
+    float    logBase;             // fast::log(1 + density * scale) normalization
     uint32_t maxDensity;          // Current maximum density value (for adaptive normalization)
     float    pad[3];              // Alignment
 } BuddhabrotNormalizationUniforms;
