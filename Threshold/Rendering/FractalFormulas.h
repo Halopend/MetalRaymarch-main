@@ -44,6 +44,13 @@ inline float3x3 rotationMatrix3(float3 v, float angleDeg) {
 
 inline float clamp11(float x) { return clamp(x, -1.0f, 1.0f); }
 
+inline bool isIdentityRotation3(float3x3 m) {
+    const float eps = 1e-6f;
+    return all(abs(m[0] - float3(1.0f, 0.0f, 0.0f)) <= eps) &&
+           all(abs(m[1] - float3(0.0f, 1.0f, 0.0f)) <= eps) &&
+           all(abs(m[2] - float3(0.0f, 0.0f, 1.0f)) <= eps);
+}
+
 // Safe power: pow(a, b) for a >= 0
 inline float safePow(float a, float b) {
     return exp2(b * log2(max(a, 1e-30f)));
@@ -1288,26 +1295,43 @@ FORCE_INLINE float DE_MengerSphere_Dist(float3 pos, FormulaParams fp, float3x3 r
 // params[7]=DEoffset, [8-10]=Offset,
 // params[11]=MnIterations, [12]=MnScale, [13-15]=MnOffset
 FORCE_INLINE float DE_TheliHybridMengerShape(float3 z, int mnIterations, float mnScale, float3 mnOffset) {
+    const float kOneThird = 1.0f / 3.0f;
+    float invScalePow = 1.0f;
+    float invAbsMnScale = 1.0f / max(abs(mnScale), 1e-4f);
+    float zFold = kOneThird * mnOffset.z;
+    float3 mnBias = fma(-mnScale, mnOffset, mnOffset);
+
     // Initial fold
     z = abs(z);
-    if (z.x < z.y) z.xy = z.yx;
-    if (z.x < z.z) z.xz = z.zx;
-    if (z.y < z.z) z.yz = z.zy;
-    if (z.z < (1.0f / 3.0f)) z.z -= 2.0f * (z.z - (1.0f / 3.0f));
+    float sum0 = z.x + z.y + z.z;
+    float minXY0 = min(z.x, z.y);
+    float maxXY0 = max(z.x, z.y);
+    float minZ0 = min(minXY0, z.z);
+    float maxZ0 = max(maxXY0, z.z);
+    z.x = maxZ0;
+    z.z = minZ0;
+    z.y = sum0 - (maxZ0 + minZ0);
+    z.z = kOneThird + abs(z.z - kOneThird);
 
     int n = 0;
     for (; n < mnIterations && dot(z, z) < 100.0f; ++n) {
-        z = mnScale * (z - mnOffset) + mnOffset;
+        z = fma(mnScale, z, mnBias);
 
         z = abs(z);
-        if (z.x < z.y) z.xy = z.yx;
-        if (z.x < z.z) z.xz = z.zx;
-        if (z.y < z.z) z.yz = z.zy;
-        float zFold = (1.0f / 3.0f) * mnOffset.z;
-        if (z.z < zFold) z.z -= 2.0f * (z.z - zFold);
+        float sum = z.x + z.y + z.z;
+        float minXY = min(z.x, z.y);
+        float maxXY = max(z.x, z.y);
+        float minZ = min(minXY, z.z);
+        float maxZ = max(maxXY, z.z);
+        z.x = maxZ;
+        z.z = minZ;
+        z.y = sum - (maxZ + minZ);
+        z.z = zFold + abs(z.z - zFold);
+
+        // Equivalent to abs(mnScale)^(-n), accumulated without log/exp in safePow.
+        invScalePow *= invAbsMnScale;
     }
 
-    float invScalePow = safePow(max(abs(mnScale), 1e-4f), -float(n));
     return (z.x - mnOffset.x) * invScalePow;
 }
 
@@ -1316,12 +1340,14 @@ FORCE_INLINE float DE_TheliPseudoKleinian(float3 pos, FormulaParams fp, float3x3
                                           thread OrbitData& orbit) {
     float size = max(fp.params[0], 0.0f);
     float3 cSize = max(float3(fp.params[1], fp.params[2], fp.params[3]), float3(1e-4f));
+    float3 negCSize = -cSize;
     float3 c = float3(fp.params[4], fp.params[5], fp.params[6]);
     float deOffset = fp.params[7];
     float3 offset = float3(fp.params[8], fp.params[9], fp.params[10]);
     int mnIterations = clamp(int(fp.params[11]), 0, 20);
     float mnScale = fp.params[12];
     float3 mnOffset = float3(fp.params[13], fp.params[14], fp.params[15]);
+    bool hasRotation = !isIdentityRotation3(rot);
 
     float3 z = pos;
     float deFactor = 1.0f;
@@ -1330,28 +1356,82 @@ FORCE_INLINE float DE_TheliPseudoKleinian(float3 pos, FormulaParams fp, float3x3
     int trapIter = 0;
     float3 trapPos = z;
     int i = 0;
+    int trapIterations = min(max(colorIterations, 0), iterations);
 
     float3 az = abs(z);
     float r2Inf = max(az.x, max(az.y, az.z));
 
-    for (; i < iterations && r2Inf < 60.0f; ++i) {
-        z = rot * z;
-        z = 2.0f * clamp(z, -cSize, cSize) - z;
+    if (hasRotation) {
+        for (; i < trapIterations && r2Inf < 60.0f; ++i) {
+            z = rot * z;
+            z = 2.0f * clamp(z, negCSize, cSize) - z;
 
-        float r2 = dot(z, z);
-        float k = max(size / max(r2, 1e-6f), 1.0f);
-        z *= k;
-        deFactor *= k;
+            float r2 = dot(z, z);
+            float k = max(size / max(r2, 1e-6f), 1.0f);
+            z *= k;
+            deFactor *= k;
 
-        z += c;
+            z += c;
 
-        az = abs(z);
-        r2Inf = max(az.x, max(az.y, az.z));
-        UpdateTrapMinR2(trap, trapIter, trapPos, dot(z, z), i, colorIterations, z);
+            az = abs(z);
+            r2Inf = max(az.x, max(az.y, az.z));
+            float r2Trap = dot(z, z);
+            if (r2Trap < trap) {
+                trap = r2Trap;
+                trapIter = i;
+                trapPos = z;
+            }
+        }
+        for (; i < iterations && r2Inf < 60.0f; ++i) {
+            z = rot * z;
+            z = 2.0f * clamp(z, negCSize, cSize) - z;
+
+            float r2 = dot(z, z);
+            float k = max(size / max(r2, 1e-6f), 1.0f);
+            z *= k;
+            deFactor *= k;
+
+            z += c;
+            az = abs(z);
+            r2Inf = max(az.x, max(az.y, az.z));
+        }
+    } else {
+        for (; i < trapIterations && r2Inf < 60.0f; ++i) {
+            z = 2.0f * clamp(z, negCSize, cSize) - z;
+
+            float r2 = dot(z, z);
+            float k = max(size / max(r2, 1e-6f), 1.0f);
+            z *= k;
+            deFactor *= k;
+
+            z += c;
+
+            az = abs(z);
+            r2Inf = max(az.x, max(az.y, az.z));
+            float r2Trap = dot(z, z);
+            if (r2Trap < trap) {
+                trap = r2Trap;
+                trapIter = i;
+                trapPos = z;
+            }
+        }
+        for (; i < iterations && r2Inf < 60.0f; ++i) {
+            z = 2.0f * clamp(z, negCSize, cSize) - z;
+
+            float r2 = dot(z, z);
+            float k = max(size / max(r2, 1e-6f), 1.0f);
+            z *= k;
+            deFactor *= k;
+
+            z += c;
+            az = abs(z);
+            r2Inf = max(az.x, max(az.y, az.z));
+        }
     }
 
     float baseShape = DE_TheliHybridMengerShape(z - offset, mnIterations, mnScale, mnOffset);
-    float de = abs(0.5f * baseShape / max(deFactor, 1e-6f) - deOffset);
+    float invDeFactor = 0.5f / max(deFactor, 1e-6f);
+    float de = abs(baseShape * invDeFactor - deOffset);
 
     orbit.trap = trap;
     orbit.trapIteration = trapIter;
@@ -1365,12 +1445,14 @@ FORCE_INLINE float DE_TheliPseudoKleinian(float3 pos, FormulaParams fp, float3x3
 FORCE_INLINE float DE_TheliPseudoKleinian_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
     float size = max(fp.params[0], 0.0f);
     float3 cSize = max(float3(fp.params[1], fp.params[2], fp.params[3]), float3(1e-4f));
+    float3 negCSize = -cSize;
     float3 c = float3(fp.params[4], fp.params[5], fp.params[6]);
     float deOffset = fp.params[7];
     float3 offset = float3(fp.params[8], fp.params[9], fp.params[10]);
     int mnIterations = clamp(int(fp.params[11]), 0, 20);
     float mnScale = fp.params[12];
     float3 mnOffset = float3(fp.params[13], fp.params[14], fp.params[15]);
+    bool hasRotation = !isIdentityRotation3(rot);
 
     float3 z = pos;
     float deFactor = 1.0f;
@@ -1378,22 +1460,38 @@ FORCE_INLINE float DE_TheliPseudoKleinian_Dist(float3 pos, FormulaParams fp, flo
     float3 az = abs(z);
     float r2Inf = max(az.x, max(az.y, az.z));
 
-    for (int i = 0; i < iterations && r2Inf < 60.0f; ++i) {
-        z = rot * z;
-        z = 2.0f * clamp(z, -cSize, cSize) - z;
+    if (hasRotation) {
+        for (int i = 0; i < iterations && r2Inf < 60.0f; ++i) {
+            z = rot * z;
+            z = 2.0f * clamp(z, negCSize, cSize) - z;
 
-        float r2 = dot(z, z);
-        float k = max(size / max(r2, 1e-6f), 1.0f);
-        z *= k;
-        deFactor *= k;
+            float r2 = dot(z, z);
+            float k = max(size / max(r2, 1e-6f), 1.0f);
+            z *= k;
+            deFactor *= k;
 
-        z += c;
-        az = abs(z);
-        r2Inf = max(az.x, max(az.y, az.z));
+            z += c;
+            az = abs(z);
+            r2Inf = max(az.x, max(az.y, az.z));
+        }
+    } else {
+        for (int i = 0; i < iterations && r2Inf < 60.0f; ++i) {
+            z = 2.0f * clamp(z, negCSize, cSize) - z;
+
+            float r2 = dot(z, z);
+            float k = max(size / max(r2, 1e-6f), 1.0f);
+            z *= k;
+            deFactor *= k;
+
+            z += c;
+            az = abs(z);
+            r2Inf = max(az.x, max(az.y, az.z));
+        }
     }
 
     float baseShape = DE_TheliHybridMengerShape(z - offset, mnIterations, mnScale, mnOffset);
-    return abs(0.5f * baseShape / max(deFactor, 1e-6f) - deOffset);
+    float invDeFactor = 0.5f / max(deFactor, 1e-6f);
+    return abs(baseShape * invDeFactor - deOffset);
 }
 
 // ============================================================================

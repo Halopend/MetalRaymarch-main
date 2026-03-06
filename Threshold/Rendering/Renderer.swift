@@ -25,7 +25,9 @@ actor Renderer {
     
     // === UNIFIED PIPELINE CACHE ===
     // All specialized pipelines stored in a single cache with consistent key format.
-    // Key format: "FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
+    // Key formats:
+    // - FT-specific: "FT{type}_FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
+    // - Shared quality fallback: "FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
     // This allows preset pipelines and quality preset pipelines to be looked up uniformly.
     //
     // Pipeline specialization strategy:
@@ -36,7 +38,8 @@ actor Renderer {
     /// Unified pipeline cache - all specialized pipelines keyed by function constant signature
     var pipelineCache: [String: MTLRenderPipelineState] = [:]
     
-    /// Compute pipeline cache - specialized compute kernels keyed by "FI{n}_RS{n}"
+    /// Compute pipeline cache - specialized compute kernels keyed by either
+    /// "FT{type}_FI{n}_RS{n}" (exact) or "FI{n}_RS{n}" (shared quality fallback)
     /// Mirrors the render pipeline cache but for the adaptive hierarchical compute path.
     /// Each entry has Map()/Shadow loops fully unrolled for that iteration count.
     var computePipelineCache: [String: MTLComputePipelineState] = [:]

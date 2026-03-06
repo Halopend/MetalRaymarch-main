@@ -172,6 +172,7 @@ extension Renderer {
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,
+                fractalType: preset.fractalType.rawValue,
                 neonModeEnabled: fc.neonModeEnabled,
                 colorIterations: fc.colorIterations
             )

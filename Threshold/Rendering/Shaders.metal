@@ -565,7 +565,8 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
     if (type == FractalTypeMandelbox) {
         return Map(pos, params, foldingLimit, iterations);  // bubble applied inside Map()
     }
-    float d = FractalDE_Dispatch(pos, type, fp, iterations);
+    int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
+    float d = FractalDE_Dispatch(pos, type, fp, loopCount);
     return applySafetyBubble(d, pos, params);
 }
 
@@ -575,7 +576,8 @@ FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float fo
     if (type == FractalTypeMandelbox) {
         return MapDistOnly(pos, params, foldingLimit, iterations);  // bubble applied inside
     }
-    float d = FractalDE_Dispatch(pos, type, fp, iterations);
+    int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
+    float d = FractalDE_Dispatch(pos, type, fp, loopCount);
     return applySafetyBubble(d, pos, params);
 }
 
@@ -984,13 +986,14 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
 FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, float foldingLimit,
                                              int iterations, int fractalType, FormulaParams fp,
                                              int colorIterations, thread OrbitCache& cache) {
-    if (fractalType == FractalTypeMandelbox) {
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    if (type == FractalTypeMandelbox) {
         return MapWithOrbitCache(pos, params, foldingLimit, iterations, cache);
     }
     
     // Non-Mandelbox: use formula orbit tracking
     OrbitData orbit;
-    float d = FractalDE_WithOrbit(pos, fractalType, fp, iterations, colorIterations, orbit);
+    float d = FractalDE_WithOrbit(pos, type, fp, iterations, colorIterations, orbit);
     
     // Apply safety bubble to non-Mandelbox fractals
     d = applySafetyBubble(d, pos, params);
@@ -1020,7 +1023,9 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
 //   3. Standard finite differences — 4 Map() calls with full iterations
 FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, float foldingLimit, int iterations, int fractalType, FormulaParams fp = {}, OrbitCache cache = {})
 {
-    if (cache.hasJacobian && fractalType == 0) {
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+
+    if (cache.hasJacobian && type == FractalTypeMandelbox) {
         // === ANALYTIC JACOBIAN PATH — no extra Map() calls ===
         float3 pDir = cache.p.xyz * rsqrt(dot(cache.p.xyz, cache.p.xyz) + kPowEpsilon);
         float3 gradient = float3(
@@ -1029,7 +1034,7 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
             dot(cache.jacobian[2], pDir)
         );
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
-    } else if (cache.valid && fractalType == 0) {
+    } else if (cache.valid && type == FractalTypeMandelbox) {
         // Fallback: use cached center distance, reduced iterations
         int normalIters = max((iterations * 2) / 5, 3);
         float e = max(distance * 0.0005f, 0.0001f);
@@ -1042,7 +1047,7 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         
         float3 gradient = float3(dx - d0, dy - d0, dz - d0);
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
-    } else if (fractalType != 0 && cache.valid) {
+    } else if (type != FractalTypeMandelbox && cache.valid) {
         // Non-Mandelbox with cached center distance: 3 lean _Dist calls
         // with reduced iterations (40% of full).  The cache already holds
         // the center DE from the hit evaluation — reuse it.
@@ -1050,19 +1055,19 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         float e = max(distance * 0.0005f, 0.0001f);
         float d0 = cache.distance;
         float3 gradient = float3(
-            FractalDE_Dispatch(pos + float3(e,0,0), fractalType, fp, normalIters) - d0,
-            FractalDE_Dispatch(pos + float3(0,e,0), fractalType, fp, normalIters) - d0,
-            FractalDE_Dispatch(pos + float3(0,0,e), fractalType, fp, normalIters) - d0
+            FractalDE_Dispatch(pos + float3(e,0,0), type, fp, normalIters) - d0,
+            FractalDE_Dispatch(pos + float3(0,e,0), type, fp, normalIters) - d0,
+            FractalDE_Dispatch(pos + float3(0,0,e), type, fp, normalIters) - d0
         );
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
     } else {
         // Fallback: 4 Map calls with full iterations
         float e = distance * 0.001;
-        float d = MapUnified(pos, params, foldingLimit, iterations, fractalType, fp);
+        float d = MapUnified(pos, params, foldingLimit, iterations, type, fp);
         float3 gradient = float3(
-            MapUnified(pos + float3(e,0,0), params, foldingLimit, iterations, fractalType, fp) - d,
-            MapUnified(pos + float3(0,e,0), params, foldingLimit, iterations, fractalType, fp) - d,
-            MapUnified(pos + float3(0,0,e), params, foldingLimit, iterations, fractalType, fp) - d
+            MapUnified(pos + float3(e,0,0), params, foldingLimit, iterations, type, fp) - d,
+            MapUnified(pos + float3(0,e,0), params, foldingLimit, iterations, type, fp) - d,
+            MapUnified(pos + float3(0,0,e), params, foldingLimit, iterations, type, fp) - d
         );
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
     }
@@ -1105,12 +1110,13 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
     // Mandelbulb DE returns much smaller values near the surface compared to
     // box-fold fractals.  Start closer to the camera and use a finer hit
     // threshold so thin surface detail is not clipped.
-    bool isMandelbulb = (fractalType == FractalTypeMandelbulb);
+    bool isMandelbulb = (type == FractalTypeMandelbulb);
     float t = (isMandelbulb ? 0.005 : 0.05) + dither;
     
     // === BOUNDING SPHERE PRE-TEST (GMT-fractals technique) ===
@@ -1143,13 +1149,13 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
-        float h = MapUnified(p, params, foldingLimit, iterations, fractalType, fp);
+        float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
         
         if(UNLIKELY(h < threshold))
         {
             // Re-iterate with full orbit cache + Jacobian for normals/colors.
             OrbitCache hitCache;
-            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, fractalType, fp, colorIterations, hitCache);
+            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, type, fp, colorIterations, hitCache);
             result.cache = hitCache;
             result.distGlow = float2(t, saturate(glow * 0.25));
             return result;
@@ -1174,9 +1180,10 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
     
     float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
-    bool isMandelbulb = (fractalType == FractalTypeMandelbulb);
+    bool isMandelbulb = (type == FractalTypeMandelbulb);
     float t = max(isMandelbulb ? 0.002 : 0.01, startT - 0.3) + dither;
     
     float glow = 0.0;
@@ -1200,13 +1207,13 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
             : fma(t, 0.0006f, 0.0005f);
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
-        float h = MapUnified(p, params, foldingLimit, iterations, fractalType, fp);
+        float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
         
         if(UNLIKELY(h < threshold))
         {
             // Re-iterate with full orbit cache for normals/colors.
             OrbitCache hitCache;
-            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, fractalType, fp, colorIterations, hitCache);
+            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, type, fp, colorIterations, hitCache);
             result.cache = hitCache;
             result.distGlow = float2(t, saturate(glow * 0.25));
             return result;

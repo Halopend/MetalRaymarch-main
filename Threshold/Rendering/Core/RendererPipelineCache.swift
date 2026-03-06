@@ -139,8 +139,10 @@ extension Renderer {
     ///
     /// Pipeline lookup order:
     /// 1. Fast-path: same params as last frame → return cached result
-    /// 2. Exact match in unified cache (includes both quality presets and saved presets)
-    /// 3. Fallback to generic pipeline
+    /// 2. FT-specific exact match in unified cache
+    /// 3. FT-specific neon-off fallback
+    /// 4. Shared quality key fallback (startup-prebuilt, no FC_FRACTAL_TYPE)
+    /// 5. Generic pipeline fallback
     func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool = false) -> MTLRenderPipelineState {
         let fractalType = appModel.renderSettings.fractalType
@@ -179,14 +181,36 @@ extension Renderer {
                 }
                 result = pipeline
             }
-            // 3. Ultimate fallback to generic pipeline
             else {
-                if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
-                    print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
-                    lastLoggedPipelineKey = "fallback"
+                // 3. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
+                let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                if let pipeline = pipelineCache[sharedExactKey] {
+                    if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
+                        print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
+                        lastLoggedPipelineKey = sharedExactKey
+                    }
+                    result = pipeline
                 }
-                isSpecialized = false
-                result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+                // 4. Try shared neon=off quality key
+                else {
+                    let sharedFallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                    if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
+                        if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
+                            print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
+                            lastLoggedPipelineKey = sharedFallbackKey
+                        }
+                        result = pipeline
+                    }
+                    // 5. Ultimate fallback to generic pipeline
+                    else {
+                        if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
+                            print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
+                            lastLoggedPipelineKey = "fallback"
+                        }
+                        isSpecialized = false
+                        result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+                    }
+                }
             }
         }
 
@@ -305,9 +329,10 @@ extension Renderer {
     ///
     /// Lookup order:
     /// 1. Fast-path: same params as last frame → return cached result
-    /// 2. Exact match in computePipelineCache
-    /// 3. Builds on-demand for exact configuration (cached for future frames)
-    /// 4. Falls back to generic (no function constants) pipeline — shader uses runtime params
+    /// 2. Exact match in computePipelineCache (FT-specific)
+    /// 3. Shared quality key match (startup-prebuilt, no FC_FRACTAL_TYPE)
+    /// 4. Builds on-demand for exact configuration (cached for future frames)
+    /// 5. Falls back to generic (no function constants) pipeline — shader uses runtime params
     func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
         let fractalType = appModel.renderSettings.fractalType
         
@@ -332,7 +357,20 @@ extension Renderer {
             return pipeline
         }
 
-        // 2. Build on-demand for this exact configuration
+        let sharedKey = "FI\(fractalIterations)_RS\(maxRaySteps)"
+        if let pipeline = computePipelineCache[sharedKey] {
+            if RENDERER_DEBUG && lastComputePipelineKey != sharedKey {
+                print("🎯 [ComputeCache] Shared quality hit: \(sharedKey) for FT=\(fractalType.rawValue)")
+                lastComputePipelineKey = sharedKey
+            }
+            lastComputeFT = fractalType.rawValue
+            lastComputeFI = fractalIterations
+            lastComputeRS = maxRaySteps
+            lastSelectedComputePipeline = pipeline
+            return pipeline
+        }
+
+        // 3. Build on-demand for this exact configuration
         //    DO NOT use "nearest preset" — a pipeline with wrong FC_FRACTAL_ITERATIONS
         //    causes absScalePow mismatch and visual degradation (the caching bug).
         let library = cachedDefaultLibrary ?? device.makeDefaultLibrary()
@@ -355,7 +393,7 @@ extension Renderer {
             }
         }
 
-        // 3. Ultimate fallback — generic pipeline with NO function constants.
+        // 4. Ultimate fallback — generic pipeline with NO function constants.
         //    Shader reads iterations from uniforms at runtime, matching absScalePow.
         if RENDERER_DEBUG && lastComputePipelineKey != "fallback" {
             print("⚠️ [ComputeCache] Using fallback generic compute pipeline")
