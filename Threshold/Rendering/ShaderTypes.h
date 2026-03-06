@@ -80,11 +80,18 @@ typedef NS_ENUM(EnumBackingType, FractalType)
 // === FORMULA PARAMETERS ===
 // Generic parameter block for non-Mandelbox fractal formulas.
 // 16 float slots + 2 rotation matrices, bridging Swift ↔ GPU.
+enum {
+    FormulaRotationFlagRot1NonIdentity = 1 << 0,
+    FormulaRotationFlagRot2NonIdentity = 1 << 1,
+};
+
 typedef struct
 {
     float params[16];                  // Up to 16 formula-specific parameters
     matrix_float3x3 rotMatrix1;        // Primary rotation matrix
     matrix_float3x3 rotMatrix2;        // Secondary rotation matrix (IFS types)
+    uint32_t rotationFlags;            // Bitmask of FormulaRotationFlag* (precomputed on CPU)
+    uint32_t _formulaPad[3];           // Keep 16-byte alignment for uniform packing
 } FormulaParams;
 
 // Maximum gradient stops supported (matches GradientColorSystem.swift)

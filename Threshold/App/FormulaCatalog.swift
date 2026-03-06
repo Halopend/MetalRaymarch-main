@@ -50,6 +50,8 @@ private struct CatalogRoot: Codable {
 final class FormulaCatalog: @unchecked Sendable {
     
     static let shared = FormulaCatalog()
+    private static let rot1NonIdentityFlag: UInt32 = UInt32(FormulaRotationFlagRot1NonIdentity)
+    private static let rot2NonIdentityFlag: UInt32 = UInt32(FormulaRotationFlagRot2NonIdentity)
     
     /// All formula descriptors in declaration order.
     private(set) var formulas: [FormulaDescriptor] = []
@@ -134,6 +136,8 @@ final class FormulaCatalog: @unchecked Sendable {
         for (idx, val) in overrides {
             setParam(&fp, index: idx, value: val)
         }
+
+        Self.normalizeRotationFlags(&fp)
         
         return fp
     }
@@ -151,6 +155,32 @@ final class FormulaCatalog: @unchecked Sendable {
     }
     
     // MARK: - Param Accessors
+
+    /// Precompute matrix identity flags once on CPU so shader hot loops can avoid
+    /// per-call epsilon identity checks.
+    @inline(__always)
+    private static func isIdentityRotation3(_ m: simd_float3x3, epsilon: Float = 1e-6) -> Bool {
+        abs(m.columns.0.x - 1.0) <= epsilon &&
+        abs(m.columns.0.y) <= epsilon &&
+        abs(m.columns.0.z) <= epsilon &&
+        abs(m.columns.1.x) <= epsilon &&
+        abs(m.columns.1.y - 1.0) <= epsilon &&
+        abs(m.columns.1.z) <= epsilon &&
+        abs(m.columns.2.x) <= epsilon &&
+        abs(m.columns.2.y) <= epsilon &&
+        abs(m.columns.2.z - 1.0) <= epsilon
+    }
+
+    static func normalizeRotationFlags(_ fp: inout FormulaParams) {
+        var flags: UInt32 = 0
+        if !isIdentityRotation3(fp.rotMatrix1) {
+            flags |= rot1NonIdentityFlag
+        }
+        if !isIdentityRotation3(fp.rotMatrix2) {
+            flags |= rot2NonIdentityFlag
+        }
+        fp.rotationFlags = flags
+    }
     
     /// Read a single param from FormulaParams by slot index (0-15).
     static func getParam(_ fp: FormulaParams, index: Int) -> Float {

@@ -192,6 +192,8 @@ enum FractalModelType: Int32, CaseIterable {
             // Min Distance=0.8, Folding Limit=1.0, Sphere Radius=0.5
             fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
         }
+
+        FormulaCatalog.normalizeRotationFlags(&fp)
         
         return fp
     }

@@ -601,7 +601,13 @@ final class RenderSettings: @unchecked Sendable {
 
     var formulaParams: FormulaParams {
         get { withLock { _formulaParams } }
-        set { withLock { _formulaParams = newValue } }
+        set {
+            withLock {
+                var normalized = newValue
+                FormulaCatalog.normalizeRotationFlags(&normalized)
+                _formulaParams = normalized
+            }
+        }
     }
 
     // 0 = disabled (standard per-pixel raymarch)

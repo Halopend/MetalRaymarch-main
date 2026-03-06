@@ -280,9 +280,23 @@ actor Renderer {
         // For features like neon, use saved presets which build fully-specialized pipelines.
         
         let qualityPresets = QualityPreset.allCases
+        // Keep startup work bounded while still warming the most important FT-specialized variants.
+        // This removes first-use stutter for the active fractal and Theli-specific paths.
+        let startupFractalTypes: [FractalModelType] = {
+            var ordered: [FractalModelType] = []
+            var seen = Set<Int32>()
+            let warmTargets: [FractalModelType] = [appModel.renderSettings.fractalType, .theliPseudoKleinian]
+            for type in warmTargets where seen.insert(type.rawValue).inserted {
+                ordered.append(type)
+            }
+            return ordered
+        }()
         
         var pipelineCount = 0
-        if RENDERER_DEBUG { print("Building specialized pipelines for \(qualityPresets.count) quality presets...") }
+        if RENDERER_DEBUG {
+            let targets = startupFractalTypes.map(\.displayName).joined(separator: ", ")
+            print("Building specialized pipelines for \(qualityPresets.count) quality presets (+ FT warm targets: \(targets))...")
+        }
         
         for preset in qualityPresets {
             let iterCount = preset.fractalIterations
@@ -318,6 +332,37 @@ actor Renderer {
             ) {
                 pipelineCache[unifiedKey + "_QS"] = pipeline
             }
+
+            // FT-specific warmup keys hit selectPipeline() fast path directly (no shared fallback).
+            for fractalType in startupFractalTypes {
+                var ftConfig = config
+                ftConfig.fractalType = fractalType.rawValue
+                let ftConstants = ftConfig.toMTLConstants()
+                let ftKey = "FT\(fractalType.rawValue)_FI\(iterCount)_RS\(raySteps)_N0_Q\(qualityMode)"
+
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: rasterSampleCount,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    functionConstants: ftConstants
+                ) {
+                    pipelineCache[ftKey] = pipeline
+                    pipelineCount += 1
+                    if RENDERER_DEBUG { print("  ✓ FT \(fractalType.rawValue): FI=\(iterCount), RS=\(raySteps) [\(ftKey)]") }
+                }
+
+                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: rasterSampleCount,
+                    mtlVertexDescriptor: mtlVertexDescriptor,
+                    fragmentFunctionName: "fragmentShaderQuadShared",
+                    functionConstants: ftConstants
+                ) {
+                    pipelineCache[ftKey + "_QS"] = pipeline
+                }
+            }
         }
         if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total with quad-shared)") }
 
@@ -349,7 +394,10 @@ actor Renderer {
             // Build specialized compute pipelines for each quality preset.
             // Each pipeline bakes FC_FRACTAL_ITERATIONS / FC_SHADOW_ITERATIONS / FC_MAX_RAY_STEPS
             // so the Map() inner loop is fully unrolled per iteration count.
-            if RENDERER_DEBUG { print("Building specialized compute pipelines for \(QualityPreset.allCases.count) quality presets...") }
+            if RENDERER_DEBUG {
+                let targets = startupFractalTypes.map(\.displayName).joined(separator: ", ")
+                print("Building specialized compute pipelines for \(QualityPreset.allCases.count) quality presets (+ FT warm targets: \(targets))...")
+            }
             var computeBuilt = 0
             for preset in QualityPreset.allCases {
                 let fi = Int32(preset.fractalIterations)
@@ -362,6 +410,17 @@ actor Renderer {
                     computePipelineCache[key] = pipeline
                     computeBuilt += 1
                     if RENDERER_DEBUG { print("  ✓ Compute \(preset.rawValue): FI=\(fi), RS=\(rs) [\(key)]") }
+                }
+
+                for fractalType in startupFractalTypes {
+                    let ftKey = "FT\(fractalType.rawValue)_FI\(fi)_RS\(rs)"
+                    if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
+                                                                    fractalType: fractalType.rawValue,
+                                                                    fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
+                        computePipelineCache[ftKey] = pipeline
+                        computeBuilt += 1
+                        if RENDERER_DEBUG { print("  ✓ Compute FT\(fractalType.rawValue): FI=\(fi), RS=\(rs) [\(ftKey)]") }
+                    }
                 }
             }
             // Build a GENERIC fallback pipeline (no function constants baked in).

@@ -27,6 +27,10 @@ constant float kEpsAcos  = 1e-8f;
 constant float kLn2      = 0.6931471805599453f;
 constant float kLog2_10  = 3.32192809488736234787f; // log2(10)
 
+inline bool hasRot1Precomputed(FormulaParams fp) {
+    return (fp.rotationFlags & FormulaRotationFlagRot1NonIdentity) != 0u;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -45,6 +49,13 @@ inline float3x3 rotationMatrix3(float3 v, float angleDeg) {
 inline float clamp11(float x) { return clamp(x, -1.0f, 1.0f); }
 
 inline bool isIdentityRotation3(float3x3 m) {
+    // Fast path: most presets keep formula rotations exactly identity.
+    if (m[0].x == 1.0f && m[0].y == 0.0f && m[0].z == 0.0f &&
+        m[1].x == 0.0f && m[1].y == 1.0f && m[1].z == 0.0f &&
+        m[2].x == 0.0f && m[2].y == 0.0f && m[2].z == 1.0f) {
+        return true;
+    }
+
     const float eps = 1e-6f;
     return all(abs(m[0] - float3(1.0f, 0.0f, 0.0f)) <= eps) &&
            all(abs(m[1] - float3(0.0f, 1.0f, 0.0f)) <= eps) &&
@@ -1347,7 +1358,7 @@ FORCE_INLINE float DE_TheliPseudoKleinian(float3 pos, FormulaParams fp, float3x3
     int mnIterations = clamp(int(fp.params[11]), 0, 20);
     float mnScale = fp.params[12];
     float3 mnOffset = float3(fp.params[13], fp.params[14], fp.params[15]);
-    bool hasRotation = !isIdentityRotation3(rot);
+    bool hasRotation = hasRot1Precomputed(fp);
 
     float3 z = pos;
     float deFactor = 1.0f;
@@ -1452,7 +1463,7 @@ FORCE_INLINE float DE_TheliPseudoKleinian_Dist(float3 pos, FormulaParams fp, flo
     int mnIterations = clamp(int(fp.params[11]), 0, 20);
     float mnScale = fp.params[12];
     float3 mnOffset = float3(fp.params[13], fp.params[14], fp.params[15]);
-    bool hasRotation = !isIdentityRotation3(rot);
+    bool hasRotation = hasRot1Precomputed(fp);
 
     float3 z = pos;
     float deFactor = 1.0f;
