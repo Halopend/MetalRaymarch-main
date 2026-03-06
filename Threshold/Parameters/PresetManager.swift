@@ -192,26 +192,7 @@ class PresetManager {
         // Track for analytics with full preset data
         UsageAnalytics.shared.trackPresetSaved(preset: preset)
         
-        // Log all parameters for recovery purposes
-        print("""
-        📸 PRESET SAVED: "\(name)"
-        ─────────────────────────────────────────
-        ID: \(preset.id)
-        Position: (\(preset.position.x), \(preset.position.y), \(preset.position.z))
-        Scale: \(preset.scale)
-        ─────────────────────────────────────────
-        Fractal Scale: \(preset.fractalScale)
-        Folding Limit: \(preset.foldingLimit)
-        Sphere Radius: \(preset.sphereRadius)
-        Min Distance: \(preset.minDistance)
-        ─────────────────────────────────────────
-        Fractal Iterations: \(preset.fractalIterations)
-        Max Ray Steps: \(preset.maxRaySteps)
-        Color Iterations: \(preset.colorIterations)
-        Color Mix: \(preset.colorMix)
-        Glow Enabled: \(preset.glowEffect?.enabled ?? false)
-        ─────────────────────────────────────────
-        """)
+
     }
     
     /// Update an existing preset
@@ -311,11 +292,6 @@ class PresetManager {
     
     /// Load a preset's settings
     func loadPreset(_ preset: FractalPreset, into settings: RenderSettings, includePerformance: Bool = false) {
-        let fc = preset.deriveFunctionConstants()
-        print("📂 [PresetLoad] Loading preset: '\(preset.name)'")
-        print("   Pipeline key: \(preset.pipelineCacheKey)")
-        print("   FractalIters=\(fc.fractalIterations), RaySteps=\(fc.maxRaySteps), Neon=\(fc.neonModeEnabled)")
-        
         preset.apply(to: settings, includePerformance: includePerformance)
         // Track for analytics
         UsageAnalytics.shared.trackPresetLoaded(name: preset.name)

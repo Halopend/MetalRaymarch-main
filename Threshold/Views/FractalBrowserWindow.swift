@@ -131,7 +131,7 @@ enum FractalBrowserCatalog {
     static var families: [FractalFamilyInfo] {
         mergeFamilies(base: builtInFamilies, overrides: loadedFamilies)
             .compactMap { family in
-                let filteredTypes = family.types.filter { $0.type != .pseudoKnightyan }
+                let filteredTypes = family.types
                 guard !filteredTypes.isEmpty else { return nil }
                 return FractalFamilyInfo(
                     id: family.id,
@@ -253,9 +253,7 @@ enum FractalBrowserCatalog {
                             targetFractalScale: 2.5
                         )
                     ]
-                ),
-                FractalTypeBrowserInfo(type: .amazingSurface, subtitle: "Mandelbox-derived hybrid surface", historicalInfo: "Amazing Surface variants emerged from community experimentation with fold modes and pre-transforms.", variants: []),
-                FractalTypeBrowserInfo(type: .mandalayBox, subtitle: "Scale/fold hybrid with Julia mode", historicalInfo: "Mandalay Box combines box-fold motifs with additional control channels for hybrid behavior.", variants: [])
+                )
             ]
         ),
         FractalFamilyInfo(
@@ -317,7 +315,6 @@ enum FractalBrowserCatalog {
                 FractalTypeBrowserInfo(type: .sierpinski, subtitle: "Tetrahedral recursive simplex", historicalInfo: "Sierpinski constructions are among the earliest textbook self-similar fractals.", variants: []),
                 FractalTypeBrowserInfo(type: .dodecahedron, subtitle: "Golden-ratio fold symmetries", historicalInfo: "Polyhedral IFS variants leverage Platonic and Archimedean symmetry groups.", variants: []),
                 FractalTypeBrowserInfo(type: .octahedron, subtitle: "Octahedral abs-fold variant", historicalInfo: "Octahedral fold sets are efficient and common in shader-based fractal rendering.", variants: []),
-                FractalTypeBrowserInfo(type: .icosahedron, subtitle: "Icosahedral five-fold symmetry", historicalInfo: "Icosahedral systems are prized for dense, quasi-organic repetition.", variants: []),
                 FractalTypeBrowserInfo(type: .mengerSphere, subtitle: "Menger + optional spherification", historicalInfo: "Hybrid systems blending cubic and spherical operators became popular in modern real-time renderers.", variants: [])
             ]
         ),
@@ -327,10 +324,7 @@ enum FractalBrowserCatalog {
             summary: "Conditional folds and Julia constants for structured hybrids.",
             historicalInfo: "Julia-box style distance estimators emerged from practical experimentation in shader communities.",
             types: [
-                FractalTypeBrowserInfo(type: .pseudoKleinian, subtitle: "Pseudo-Kleinian lattice", historicalInfo: "Pseudo-Kleinian formulas are practical approximations inspired by Kleinian group aesthetics.", variants: []),
-                FractalTypeBrowserInfo(type: .theliPseudoKleinian, subtitle: "Julia-box fold + Menger base hybrid", historicalInfo: "Theli-at style hybrid combining a scale-1 Julia-box operator with a Menger-like base DE.", variants: []),
-                FractalTypeBrowserInfo(type: .sphereSponge, subtitle: "Recursive sphere inversion sponge", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: []),
-                FractalTypeBrowserInfo(type: .surfaceKIFS, subtitle: "KIFS with rotation controls", historicalInfo: "Surface KIFS formulas expanded artist control via explicit rotational parameterization.", variants: [])
+                FractalTypeBrowserInfo(type: .sphereSponge, subtitle: "Recursive sphere inversion sponge", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: [])
             ]
         ),
         FractalFamilyInfo(

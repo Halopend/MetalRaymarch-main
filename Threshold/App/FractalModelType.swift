@@ -14,15 +14,9 @@ enum FractalModelType: Int32, CaseIterable {
     case menger            = 2
     case sierpinski        = 3
     case dodecahedron      = 4
-    case pseudoKleinian    = 5
     case quaternionJulia   = 6
-    case amazingSurface    = 7
-    case pseudoKnightyan   = 8
-    case mandalayBox       = 9
     case sphereSponge      = 10
     case octahedron        = 11
-    case icosahedron       = 12
-    case surfaceKIFS       = 13
     case mengerSphere      = 14
     case theliPseudoKleinian = 15
     
@@ -33,15 +27,9 @@ enum FractalModelType: Int32, CaseIterable {
         case .menger:          return "Menger Sponge"
         case .sierpinski:      return "Sierpinski"
         case .dodecahedron:    return "Dodecahedron"
-        case .pseudoKleinian:  return "Pseudo Kleinian"
         case .quaternionJulia: return "Quaternion Julia"
-        case .amazingSurface:  return "Amazing Surface"
-        case .pseudoKnightyan: return "Pseudo Knightyan"
-        case .mandalayBox:     return "Mandalay Box"
         case .sphereSponge:    return "Sphere Sponge"
         case .octahedron:      return "Octahedron"
-        case .icosahedron:     return "Icosahedron"
-        case .surfaceKIFS:     return "Surface KIFS"
         case .mengerSphere:    return "Menger Sphere"
         case .theliPseudoKleinian: return "Theli Pseudo Kleinian"
         }
@@ -69,15 +57,9 @@ enum FractalModelType: Int32, CaseIterable {
         case .menger:          return "square.grid.3x3"
         case .sierpinski:      return "triangle"
         case .dodecahedron:    return "pentagon"
-        case .pseudoKleinian:  return "building.columns"
         case .quaternionJulia: return "atom"
-        case .amazingSurface:  return "sparkles"
-        case .pseudoKnightyan: return "leaf"
-        case .mandalayBox:     return "building.2"
         case .sphereSponge:    return "circle.grid.3x3"
         case .octahedron:      return "diamond"
-        case .icosahedron:     return "seal"
-        case .surfaceKIFS:     return "tree"
         case .mengerSphere:    return "circle.grid.cross"
         case .theliPseudoKleinian: return "cube"
         }
@@ -86,13 +68,13 @@ enum FractalModelType: Int32, CaseIterable {
     /// Category for grouping in UI
     var category: String {
         switch self {
-        case .mandelbox, .amazingSurface, .mandalayBox:
+        case .mandelbox:
             return "Box Folds"
         case .mandelbulb, .quaternionJulia:
             return "Power / Quaternion"
-        case .menger, .sierpinski, .dodecahedron, .octahedron, .icosahedron, .mengerSphere:
+        case .menger, .sierpinski, .dodecahedron, .octahedron, .mengerSphere:
             return "Kaleidoscopic IFS"
-        case .pseudoKleinian, .pseudoKnightyan, .sphereSponge, .surfaceKIFS, .theliPseudoKleinian:
+        case .sphereSponge, .theliPseudoKleinian:
             return "Julia Box"
         }
     }
@@ -144,38 +126,15 @@ enum FractalModelType: Int32, CaseIterable {
         case .dodecahedron:
             // Scale=2, Phi=1.618, Log10Bailout=2
             fp.params.0 = 2.0; fp.params.1 = 1.618; fp.params.2 = 2.0
-        case .pseudoKleinian:
-            // Size=1, CSize=(0.8,0.8,1.3), C=(0,0,0), DEoffset=0, Offset=(0,0,-1)
-            fp.params.0 = 1.0; fp.params.1 = 0.8; fp.params.2 = 0.8; fp.params.3 = 1.3
-            fp.params.10 = -1.0
         case .quaternionJulia:
             // C=(-0.2,0.8,0,0), Threshold=10
             fp.params.0 = -0.2; fp.params.1 = 0.8; fp.params.4 = 10.0
-        case .amazingSurface:
-            // Scale=2, MinRad2=0.25
-            fp.params.0 = 2.0; fp.params.1 = 0.25
-        case .pseudoKnightyan:
-            // CSize=(0.82,0.92,0.78), Size=1, DEfact=1, TwiddleRXY=0.13
-            fp.params.0 = 0.82; fp.params.1 = 0.92; fp.params.2 = 0.78
-            fp.params.3 = 1.0; fp.params.4 = 1.0; fp.params.5 = 0.13
-        case .mandalayBox:
-            // Scale=-1.77, MinRad2=0.42, DoBoxFold=0, fo=(1,1,1), g=(0,0,0), Serial=0
-            fp.params.0 = -1.77; fp.params.1 = 0.42
-            fp.params.3 = 1.0; fp.params.4 = 1.0; fp.params.5 = 1.0
         case .sphereSponge:
             // Scale=2, BubbleSize=3
             fp.params.0 = 2.0; fp.params.1 = 3.0
         case .octahedron:
             // Scale=2, Offset=(1,0,0)
             fp.params.0 = 2.0; fp.params.1 = 1.0
-        case .icosahedron:
-            // Scale=2, Phi=1.618, Offset=(1,0,0)
-            fp.params.0 = 2.0; fp.params.1 = 1.618; fp.params.2 = 1.0
-        case .surfaceKIFS:
-            // Scale=1.7, Fold=(0,0,0), Julia=(-2,-2,-0.5), RotVector=(0,0,1), RotAngle=40
-            fp.params.0 = 1.7
-            fp.params.4 = -2.0; fp.params.5 = -2.0; fp.params.6 = -0.5
-            fp.params.7 = 0.0; fp.params.8 = 0.0; fp.params.9 = 1.0; fp.params.10 = 40.0
         case .mengerSphere:
             // Scale=3, Offset=(1,1,1), Spherify=0
             fp.params.0 = 3.0; fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
@@ -200,8 +159,9 @@ enum FractalModelType: Int32, CaseIterable {
 }
 
 extension FractalModelType {
+    /// Types shown in the UI picker. theliPseudoKleinian is hidden.
     static var selectableCases: [FractalModelType] {
-        allCases.filter { $0 != .pseudoKnightyan }
+        allCases.filter { $0 != .theliPseudoKleinian }
     }
 }
 
@@ -215,19 +175,36 @@ extension FractalModelType: Codable {
         case .menger:          return "menger"
         case .sierpinski:      return "sierpinski"
         case .dodecahedron:    return "dodecahedron"
-        case .pseudoKleinian:  return "pseudoKleinian"
         case .quaternionJulia: return "quaternionJulia"
-        case .amazingSurface:  return "amazingSurface"
-        case .pseudoKnightyan: return "pseudoKnightyan"
-        case .mandalayBox:     return "mandalayBox"
         case .sphereSponge:    return "sphereSponge"
         case .octahedron:      return "octahedron"
-        case .icosahedron:     return "icosahedron"
-        case .surfaceKIFS:     return "surfaceKIFS"
         case .mengerSphere:    return "mengerSphere"
         case .theliPseudoKleinian: return "theliPseudoKleinian"
         }
     }
+
+    /// Maps removed/renamed fractal type strings to their replacements.
+    private static let legacyStringMap: [String: FractalModelType] = [
+        "apollonianGasket": .theliPseudoKleinian,
+        "apollonianLight": .theliPseudoKleinian,
+        "pseudoKleinian": .theliPseudoKleinian,
+        "amazingSurface": .mandelbox,
+        "pseudoKnightyan": .mandelbox,
+        "mandalayBox": .mandelbox,
+        "icosahedron": .dodecahedron,
+        "surfaceKIFS": .mengerSphere,
+    ]
+
+    /// Maps removed raw Int32 values to their replacements.
+    private static let legacyRawMap: [Int32: FractalModelType] = [
+        5: .theliPseudoKleinian,   // pseudoKleinian
+        7: .mandelbox,             // amazingSurface
+        8: .mandelbox,             // pseudoKnightyan
+        9: .mandelbox,             // mandalayBox
+        12: .dodecahedron,         // icosahedron
+        13: .mengerSphere,         // surfaceKIFS
+        16: .theliPseudoKleinian,  // old apollonian
+    ]
 
     private static let stringMap: [String: FractalModelType] = {
         var map: [String: FractalModelType] = [:]
@@ -238,22 +215,22 @@ extension FractalModelType: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let str = try? container.decode(String.self) {
-            if str == "apollonianGasket" || str == "apollonianLight" {
-                self = .theliPseudoKleinian
-                return
-            }
             if let value = Self.stringMap[str] {
                 self = value
                 return
             }
-        }
-        if let raw = try? container.decode(Int32.self) {
-            if raw == 16 {
-                self = .theliPseudoKleinian
+            if let legacy = Self.legacyStringMap[str] {
+                self = legacy
                 return
             }
+        }
+        if let raw = try? container.decode(Int32.self) {
             if let value = FractalModelType(rawValue: raw) {
                 self = value
+                return
+            }
+            if let legacy = Self.legacyRawMap[raw] {
+                self = legacy
                 return
             }
         }

@@ -285,7 +285,7 @@ actor Renderer {
         let startupFractalTypes: [FractalModelType] = {
             var ordered: [FractalModelType] = []
             var seen = Set<Int32>()
-            let warmTargets: [FractalModelType] = [appModel.renderSettings.fractalType, .theliPseudoKleinian]
+            let warmTargets: [FractalModelType] = [appModel.renderSettings.fractalType]
             for type in warmTargets where seen.insert(type.rawValue).inserted {
                 ordered.append(type)
             }

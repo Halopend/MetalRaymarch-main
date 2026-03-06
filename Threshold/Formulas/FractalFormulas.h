@@ -33,15 +33,9 @@
 #include "Menger/Menger.h"
 #include "Sierpinski/Sierpinski.h"
 #include "Dodecahedron/Dodecahedron.h"
-#include "PseudoKleinian/PseudoKleinian.h"
 #include "QuaternionJulia/QuaternionJulia.h"
-#include "AmazingSurface/AmazingSurface.h"
-#include "PseudoKnightyan/PseudoKnightyan.h"
-#include "MandalayBox/MandalayBox.h"
 #include "SphereSponge/SphereSponge.h"
 #include "Octahedron/Octahedron.h"
-#include "Icosahedron/Icosahedron.h"
-#include "SurfaceKIFS/SurfaceKIFS.h"
 #include "MengerSphere/MengerSphere.h"
 #include "TheliPseudoKleinian/TheliPseudoKleinian.h"
 
@@ -58,24 +52,12 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_Sierpinski_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeDodecahedron:
             return DE_Dodecahedron_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypePseudoKleinian:
-            return DE_PseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeQuaternionJulia:
             return DE_QuaternionJulia_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeAmazingSurface:
-            return DE_AmazingSurface_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypePseudoKnightyan:
-            return DE_PseudoKnightyan_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeMandalayBox:
-            return DE_MandalayBox_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeSphereSponge:
             return DE_SphereSponge_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeOctahedron:
             return DE_Octahedron_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeIcosahedron:
-            return DE_Icosahedron_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypeSurfaceKIFS:
-            return DE_SurfaceKIFS_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeMengerSphere:
             return DE_MengerSphere_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeTheliPseudoKleinian:
@@ -100,24 +82,12 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_Sierpinski(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeDodecahedron:
             return DE_Dodecahedron(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypePseudoKleinian:
-            return DE_PseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeQuaternionJulia:
             return DE_QuaternionJulia(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeAmazingSurface:
-            return DE_AmazingSurface(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypePseudoKnightyan:
-            return DE_PseudoKnightyan(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeMandalayBox:
-            return DE_MandalayBox(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeSphereSponge:
             return DE_SphereSponge(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeOctahedron:
             return DE_Octahedron(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeIcosahedron:
-            return DE_Icosahedron(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypeSurfaceKIFS:
-            return DE_SurfaceKIFS(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeMengerSphere:
             return DE_MengerSphere(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeTheliPseudoKleinian:

@@ -499,19 +499,7 @@ struct FractalPreset: Codable, Identifiable {
         if let b = ringFingerBinding   { settings.ringFingerBinding = b }
         if let b = pinkyFingerBinding  { settings.pinkyFingerBinding = b }
         
-        // Log preset load for debugging
-        print("""
-        📂 PRESET LOADED: "\(name)"
-        ─────────────────────────────────────────
-        Position: (\(position.x), \(position.y), \(position.z))
-        Scale: \(scale)
-        ─────────────────────────────────────────
-        Fractal Scale: \(fractalScale)
-        Folding Limit: \(foldingLimit)
-        Sphere Radius: \(sphereRadius)
-        Min Distance: \(minDistance)
-        ─────────────────────────────────────────
-        """)
+
     }
     
     /// Get the thumbnail as a UIImage (visionOS/iOS) or NSImage (macOS)

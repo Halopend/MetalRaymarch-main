@@ -1068,7 +1068,11 @@ enum DefaultScenes {
                     data = try JSONSerialization.data(withJSONObject: json)
                 }
 
-                let scene = try decoder.decode(AnimationScene.self, from: data)
+                var scene = try decoder.decode(AnimationScene.self, from: data)
+                // Default missing fractalType to .mandelbox so playback always switches correctly
+                if scene.fractalType == nil {
+                    scene.fractalType = .mandelbox
+                }
                 scenes.append(scene)
             } catch {
                 print("⚠️ DefaultScenes: failed to decode \(url.lastPathComponent) — \(error)")

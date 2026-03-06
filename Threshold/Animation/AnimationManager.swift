@@ -324,16 +324,19 @@ final class AnimationManager {
             return
         }
         
-        // Ensure pipelines are compiled before playback
-        precompilePipelinesForCurrentScene()
-
-        // Restore the fractal type the scene was authored for
-        if let sceneFractalType = currentScene?.fractalType,
-           let settings = renderSettings,
-           settings.fractalType != sceneFractalType {
-            settings.fractalType = sceneFractalType
-            print("🎬 Restored fractal type to \(sceneFractalType) for scene playback")
+        // Restore the fractal type the scene was authored for.
+        // This MUST happen before pipeline precompilation, because pipelines
+        // are specialized per-fractal-type (FT is baked into function constants).
+        if let settings = renderSettings {
+            let sceneFractalType = currentScene?.fractalType ?? .mandelbox
+            if settings.fractalType != sceneFractalType {
+                settings.fractalType = sceneFractalType
+                print("🎬 Switched fractal type to \(sceneFractalType) for scene playback")
+            }
         }
+
+        // Ensure pipelines are compiled before playback (after fractal type is set)
+        precompilePipelinesForCurrentScene()
 
         // Apply scene-level safety bubble / blend window settings
         if let settings = renderSettings, let scene = currentScene {

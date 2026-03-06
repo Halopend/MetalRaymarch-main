@@ -64,7 +64,7 @@ extension Renderer {
             colorIterations: Int32(colorIters)  // Use actual color iterations, not fractal iterations
         )
 
-        print("🔧 [ShaderCompilation] Building pipeline for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)...")
+        if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building pipeline for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)...") }
 
         do {
             let pipeline = try Renderer.buildSpecializedPipeline(
@@ -76,10 +76,10 @@ extension Renderer {
                 fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
             )
             pipelineCache[cacheKey] = pipeline
-            print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)")
+            if RENDERER_DEBUG { print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)") }
             return pipeline
         } catch {
-            print("❌ [ShaderCompilation] FAILED for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps): \(error)")
+            if RENDERER_DEBUG { print("❌ [ShaderCompilation] FAILED for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps): \(error)") }
             return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
         }
     }
