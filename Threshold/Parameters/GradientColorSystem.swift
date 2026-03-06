@@ -101,7 +101,7 @@ struct GradientColorMap: Codable, Identifiable, Equatable {
         guard stops.count > 1 else { return stops[0].color }
         
         // Apply repeat and offset
-        var mapped = fract(t * repeatCount + offset)
+        let mapped = fract(t * repeatCount + offset)
         
         // Find surrounding stops
         var lower = stops[0]

@@ -176,7 +176,7 @@ constant half kPowEpsilonHalf = 1e-4h;
 // === NAMED CONSTANTS FOR OPTIMIZATION ===
 // Raymarching thresholds
 constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
-constant float kMaxRayDistanceDefault = 12.0f;  // Fallback trace distance
+#define kMaxRayDistanceDefault 12.0f  // Fallback trace distance (macro to silence unused-variable warning)
 
     // Shading constants (tuned for softer, less harsh lighting)
     constant float kSpecularPower = 50.0f;          // Specular highlight power

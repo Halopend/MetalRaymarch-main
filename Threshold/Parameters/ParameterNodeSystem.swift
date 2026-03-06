@@ -139,7 +139,7 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     func markClean() { isDirty = false }
 }
 
-class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
+class BaseParameterNode<Value>: AnyParameterNodeBase, @unchecked Sendable, ParameterNode {
     var currentValue: Value {
         didSet { markDirty() }
     }
@@ -174,7 +174,7 @@ class BaseParameterNode<Value>: AnyParameterNodeBase, ParameterNode {
     }
 }
 
-class FloatParameterNode: BaseParameterNode<Float> {
+class FloatParameterNode: BaseParameterNode<Float>, @unchecked Sendable {
     let range: ClosedRange<Float>
     let step: Float
     let readValue: @MainActor (UISettingsCache) -> Float
@@ -246,7 +246,7 @@ class FloatParameterNode: BaseParameterNode<Float> {
     }
 }
 
-final class BoolParameterNode: BaseParameterNode<Bool> {
+final class BoolParameterNode: BaseParameterNode<Bool>, @unchecked Sendable {
     let readValue: @MainActor (UISettingsCache) -> Bool
     let writeValue: @MainActor (UISettingsCache, Bool) -> Void
 
@@ -306,7 +306,7 @@ final class FloatDelayBuffer {
     }
 }
 
-final class SmoothedFloatParameterNode: FloatParameterNode {
+final class SmoothedFloatParameterNode: FloatParameterNode, @unchecked Sendable {
     private(set) var smoothedValue: Float
     private var delayBuffer: FloatDelayBuffer
     private var smoothingTime: Float

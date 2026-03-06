@@ -10,9 +10,22 @@
 		D7D716912CEAC4B100CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D7D716932CEAC4B100CEEA52 /* Exceptions for "Threshold" folder in "Threshold" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				App/Info.plist,
+			);
+			target = D7D716902CEAC4B100CEEA51 /* Threshold */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D7D716932CEAC4B100CEEA51 /* Threshold */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D7D716932CEAC4B100CEEA52 /* Exceptions for "Threshold" folder in "Threshold" target */,
+			);
 			path = Threshold;
 			sourceTree = "<group>";
 		};

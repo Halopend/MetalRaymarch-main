@@ -129,7 +129,7 @@ final class UISettingsCache {
     var musicReactiveMappings: [MusicReactiveMapping] = MusicReactiveMapping.defaultMappings()
     
     // Safety & display
-    var showHUD: Bool = true
+    var showHUD: Bool = false
     var safetyBubbleEnabled: Bool = false
     var safetyBubbleRadius: Float = 1.8
     var safetyBubbleShape: Float = 0.0
@@ -192,7 +192,9 @@ final class UISettingsCache {
         self._appModel = appModel
         loadFromSettings()
         syncTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.syncLiveStats()
+            Task { @MainActor in
+                self?.syncLiveStats()
+            }
         }
     }
     
@@ -317,7 +319,7 @@ final class UISettingsCache {
     /// Convenience: dispatch a core/effect parameter write through the UI layer.
     /// Use for slider-driven changes to core.*, effect.* targets.
     func dispatchCoreWrite(targetID: String, value: Float) {
-        guard let settings else { return }
+        guard settings != nil else { return }
         let op = ParameterOperation(
             targetID: targetID,
             source: .slider,

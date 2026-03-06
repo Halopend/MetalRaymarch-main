@@ -65,29 +65,43 @@ class PresetManager {
     init() {
         loadPresets()
     }
+
+    private func mergedPresets(local localPresets: [FractalPreset]) -> [FractalPreset] {
+        let bundled = Self.loadBundledPresets()
+        var mergedByName: [String: FractalPreset] = [:]
+
+        // Seed with bundled presets, then let local presets override by name.
+        for preset in bundled {
+            mergedByName[preset.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = preset
+        }
+        for preset in localPresets {
+            mergedByName[preset.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = preset
+        }
+
+        return mergedByName.values.sorted { $0.createdAt > $1.createdAt }
+    }
     
     /// Load all presets from disk
     func loadPresets() {
         let fileURL = presetsFileURL
-        
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            presets = []
-            return
+        var loadedLocalPresets: [FractalPreset] = []
+
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            do {
+                let data = try Data(contentsOf: fileURL)
+                loadedLocalPresets = try presetDecoder.decode([FractalPreset].self, from: data)
+            } catch {
+                print("Failed to load presets: \(error). Trying latest backup…")
+                loadedLocalPresets = loadLatestBackupPresets()
+            }
         }
-        
-        do {
-            let data = try Data(contentsOf: fileURL)
-            presets = try presetDecoder.decode([FractalPreset].self, from: data)
-            presets.sort { $0.createdAt > $1.createdAt }
-            FractalPreset.clearThumbnailCache()
-        } catch {
-            print("Failed to load presets: \(error). Trying latest backup…")
-            loadLatestBackup()
-        }
+
+        presets = mergedPresets(local: loadedLocalPresets)
+        FractalPreset.clearThumbnailCache()
     }
 
     /// Attempt to load the most recent backup if the main file is missing or corrupt
-    private func loadLatestBackup() {
+    private func loadLatestBackupPresets() -> [FractalPreset] {
         do {
             let backups = try FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)
             let latest = backups.max { (a, b) -> Bool in
@@ -96,17 +110,15 @@ class PresetManager {
                 return da < db
             }
             guard let url = latest else {
-                presets = []
-                return
+                return []
             }
             let data = try Data(contentsOf: url)
-            presets = try presetDecoder.decode([FractalPreset].self, from: data)
-            presets.sort { $0.createdAt > $1.createdAt }
-            FractalPreset.clearThumbnailCache()
+            let loaded = try presetDecoder.decode([FractalPreset].self, from: data)
             print("✅ Loaded presets from backup: \(url.lastPathComponent)")
+            return loaded
         } catch {
             print("Failed to load presets backup: \(error)")
-            presets = []
+            return []
         }
     }
     
@@ -398,45 +410,68 @@ class PresetManager {
     }
 }
 
-// MARK: - Default Presets (loaded from bundled .threshscene JSON files)
+// MARK: - Default Presets (loaded from bundled preset JSON files)
 extension PresetManager {
     
     // ─── Bundle-loaded default scenes ────────────────────────────────────
-    // Built-in presets are stored as .threshscene JSON files in
+    // Built-in presets are stored as .threshscene / .threshmp JSON files in
     // Examples/Scenes (bundled as app resources). This keeps the
     // preset data in the same format as user exports and avoids
     // hardcoding parameter values in Swift.
     
-    /// Filenames (without extension) of bundled default scenes.
-    /// Add new defaults here — they will be auto-included on first launch.
-    private static let defaultSceneFiles = [
-        "Metallic_Pink",
-        "Bright_Preset",
-        "Orbit_Density"
-    ]
-    
-    /// Load a single preset from a bundled .threshscene file.
-    private static func loadBundledPreset(named fileName: String) -> FractalPreset? {
-        guard let url = Bundle.main.url(forResource: fileName, withExtension: "threshscene") else {
-            print("⚠️ DefaultPresets: missing bundled file \(fileName).threshscene")
-            return nil
+    private static func loadBundledPresets() -> [FractalPreset] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        // Try subdirectory first, then bundle root, then deep-scan as final fallback.
+        var sceneURLs = Bundle.main.urls(forResourcesWithExtension: "threshscene", subdirectory: "Examples/Scenes") ?? []
+        var musicPresetURLs = Bundle.main.urls(forResourcesWithExtension: "threshmp", subdirectory: "Examples/Scenes") ?? []
+
+        if sceneURLs.isEmpty {
+            sceneURLs = Bundle.main.urls(forResourcesWithExtension: "threshscene", subdirectory: nil) ?? []
         }
-        do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(FractalPreset.self, from: data)
-        } catch {
-            print("⚠️ DefaultPresets: failed to decode \(fileName).threshscene — \(error)")
-            return nil
+        if musicPresetURLs.isEmpty {
+            musicPresetURLs = Bundle.main.urls(forResourcesWithExtension: "threshmp", subdirectory: nil) ?? []
         }
+
+        // Deep-scan fallback: enumerate the entire bundle for our custom extensions
+        if sceneURLs.isEmpty && musicPresetURLs.isEmpty, let resourcePath = Bundle.main.resourcePath {
+            let enumerator = FileManager.default.enumerator(atPath: resourcePath)
+            while let file = enumerator?.nextObject() as? String {
+                let url = URL(fileURLWithPath: resourcePath).appendingPathComponent(file)
+                if file.hasSuffix(".threshscene") { sceneURLs.append(url) }
+                else if file.hasSuffix(".threshmp") { musicPresetURLs.append(url) }
+            }
+        }
+
+        let allURLs = Array(Set(sceneURLs + musicPresetURLs))
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        guard !allURLs.isEmpty else {
+            print("⚠️ DefaultPresets: no bundled .threshscene/.threshmp files found anywhere in bundle")
+            return []
+        }
+        print("ℹ️ DefaultPresets: found \(allURLs.count) bundled preset file(s): \(allURLs.map(\.lastPathComponent))")
+
+        var presets: [FractalPreset] = []
+        for url in allURLs {
+            do {
+                let data = try Data(contentsOf: url)
+                let preset = try decoder.decode(FractalPreset.self, from: data)
+                presets.append(preset)
+            } catch {
+                print("⚠️ DefaultPresets: failed to decode \(url.lastPathComponent) — \(error)")
+            }
+        }
+        print("ℹ️ DefaultPresets: successfully decoded \(presets.count) preset(s)")
+        return presets
     }
     
     /// The fallback preset for when no saved state exists.
     /// Loaded from Bright_Preset.threshscene; falls back to a minimal inline
     /// preset if the bundle file is somehow missing.
     static func brightPreset() -> FractalPreset {
-        if let preset = loadBundledPreset(named: "Bright_Preset") {
+        if let preset = loadBundledPresets().first(where: { $0.name == "Bright Preset" || $0.name == "Bright_Preset" }) {
             return preset
         }
         // Minimal inline fallback (should never be reached)
@@ -449,14 +484,9 @@ extension PresetManager {
         return preset
     }
     
-    /// Add built-in presets from bundled .threshscene files if not already present
+    /// Merge built-in presets with local presets.
     func addBuiltInPresetsIfNeeded() {
-        for fileName in Self.defaultSceneFiles {
-            guard let preset = Self.loadBundledPreset(named: fileName) else { continue }
-            guard !presets.contains(where: { $0.name == preset.name }) else { continue }
-            presets.append(preset)
-        }
-        scheduleSavePresets()
+        presets = mergedPresets(local: presets)
     }
     
     // MARK: - Last State Auto-Save/Restore

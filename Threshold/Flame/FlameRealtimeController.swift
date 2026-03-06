@@ -82,7 +82,7 @@ final class FlameRealtimeController: ObservableObject {
             while !Task.isCancelled {
                 guard self.isRunning else { break }
 
-                let flame = await flameProvider()
+                let flame = await MainActor.run { flameProvider() }
                 guard let flame else {
                     self.statusText = "No flame loaded"
                     try? await Task.sleep(nanoseconds: 150_000_000)

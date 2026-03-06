@@ -87,15 +87,15 @@ struct EffectsDynamicView: View {
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.caption)
                             .frame(width: 16)
-                        Text("Smooth Loop")
+                        Text("Mirror Loop")
                             .font(.subheadline)
                             .frame(width: 135, alignment: .leading)
                             .lineLimit(1)
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { cache.gradientCycleEffect.smoothLoop },
+                            get: { cache.gradientCycleEffect.mirrorLoop },
                             set: { newVal in
-                                cache.gradientCycleEffect.smoothLoop = newVal
+                                cache.gradientCycleEffect.mirrorLoop = newVal
                                 cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
                             }))
                             .labelsHidden()

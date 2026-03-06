@@ -142,7 +142,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
-    private var _showHUD: Bool = true                // Show in-world HUD (default on)
+    private var _showHUD: Bool = false               // Show in-world HUD (default off)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
@@ -1297,9 +1297,13 @@ final class RenderSettings: @unchecked Sendable {
             gradientStopCount: Int32(gradCount),
             colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
             gradientRepeat: gradState.gradient.repeatCount,
-            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
+            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled
+                ? (_gradientCycleEffect.mirrorLoop
+                    ? (1.0 - abs(2.0 * fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) - 1.0))
+                    : fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0))
+                : 0),
             gradientSmoothing: gradState.gradient.smoothing,
-            gradientLoopSmooth: _gradientCycleEffect.smoothLoop ? 1 : 0,
+            gradientLoopSmooth: 1,
             _gradPad: (0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: _colorAnimTime,

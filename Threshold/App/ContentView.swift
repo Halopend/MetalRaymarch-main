@@ -97,6 +97,16 @@ struct ContentView: View {
             cache.loadFromSettings()
         }
     }
+
+    private func resetCurrentFractalSettings() {
+        appModel.gestureController?.applyFractalDefaults()
+        cache.loadFromSettings()
+    }
+
+    private func saveCurrentAsResetDefaults() {
+        guard appModel.gestureController?.saveCurrentAsFractalDefaults() == true else { return }
+        cache.loadFromSettings()
+    }
     
     // MARK: - Pre-Immersive Layout
     
@@ -241,17 +251,10 @@ struct ContentView: View {
                 }
             )
             
-            Button {
-                appModel.renderSettings.targetPosition = .zero
-                appModel.renderSettings.position = .zero
-                appModel.renderSettings.resetDetailTransform()
-                appModel.gestureController?.applyFractalDefaults()
-                cache.loadFromSettings()
-            } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-            }
-            .buttonStyle(.bordered)
-            .tint(.orange)
+            HoldToSaveResetButton(
+                onTapReset: resetCurrentFractalSettings,
+                onHoldSave: saveCurrentAsResetDefaults
+            )
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -1056,15 +1059,15 @@ struct ContentView: View {
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.caption)
                             .frame(width: 16)
-                        Text("Smooth Loop")
+                        Text("Mirror Loop")
                             .font(.subheadline)
                             .frame(width: 135, alignment: .leading)
                             .lineLimit(1)
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { cache.gradientCycleEffect.smoothLoop },
+                            get: { cache.gradientCycleEffect.mirrorLoop },
                             set: { newVal in
-                                cache.gradientCycleEffect.smoothLoop = newVal
+                                cache.gradientCycleEffect.mirrorLoop = newVal
                                 cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
                             }))
                             .labelsHidden()
@@ -1736,6 +1739,118 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 #endif
+        }
+    }
+}
+
+private struct HoldToSaveResetButton: View {
+    let onTapReset: () -> Void
+    let onHoldSave: () -> Void
+
+    @State private var isPressing = false
+    @State private var holdProgress: CGFloat = 0
+    @State private var holdTask: Task<Void, Never>?
+    @State private var justSaved = false
+    @State private var holdCompleted = false
+
+    private let holdDuration: TimeInterval = 3.0
+
+    private var countdownValue: Int {
+        max(1, Int(ceil((1.0 - holdProgress) * holdDuration)))
+    }
+
+    var body: some View {
+        ZStack {
+            Capsule()
+                .fill(justSaved ? Color.green.opacity(0.16) : Color.orange.opacity(0.12))
+
+            GeometryReader { geo in
+                Capsule()
+                    .fill((justSaved ? Color.green : Color.orange).opacity(0.28))
+                    .frame(width: max(0, geo.size.width * holdProgress))
+            }
+            .clipShape(Capsule())
+
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.15), lineWidth: 2)
+                        .frame(width: 18, height: 18)
+                    Circle()
+                        .trim(from: 0, to: holdProgress)
+                        .stroke(justSaved ? Color.green : Color.orange,
+                                style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 18, height: 18)
+
+                    Image(systemName: justSaved ? "checkmark" : "arrow.counterclockwise")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+
+                Text(justSaved ? "Saved Reset" : (isPressing ? "Hold \(countdownValue)" : "Reset"))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .frame(width: 118, height: 34)
+        .contentShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(justSaved ? Color.green.opacity(0.5) : Color.orange.opacity(0.45), lineWidth: 1)
+        )
+        .animation(.easeInOut(duration: 0.15), value: holdProgress)
+        .animation(.easeInOut(duration: 0.2), value: justSaved)
+        .help("Tap to reset. Hold for 3 seconds to save the current settings as this fractal's reset defaults.")
+        .onTapGesture {
+            guard !isPressing && !justSaved else { return }
+            onTapReset()
+        }
+        .onLongPressGesture(minimumDuration: holdDuration, maximumDistance: 24, pressing: handlePressingChanged) {
+            completeHold()
+        }
+    }
+
+    private func handlePressingChanged(_ pressing: Bool) {
+        if pressing {
+            justSaved = false
+            holdCompleted = false
+            isPressing = true
+            holdTask?.cancel()
+            holdTask = Task { @MainActor in
+                let start = Date()
+                while !Task.isCancelled {
+                    let elapsed = Date().timeIntervalSince(start)
+                    holdProgress = min(1.0, elapsed / holdDuration)
+                    if elapsed >= holdDuration { break }
+                    try? await Task.sleep(nanoseconds: 33_000_000)
+                }
+            }
+        } else {
+            holdTask?.cancel()
+            holdTask = nil
+            isPressing = false
+            if !holdCompleted {
+                holdProgress = 0
+            }
+        }
+    }
+
+    private func completeHold() {
+        holdCompleted = true
+        holdTask?.cancel()
+        holdTask = nil
+        holdProgress = 1
+        onHoldSave()
+        justSaved = true
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            justSaved = false
+            holdProgress = 0
+            isPressing = false
+            holdCompleted = false
         }
     }
 }

@@ -1223,7 +1223,6 @@ struct KeyframeTimelineView: View {
             let h = geo.size.height
             let trackY = h * 0.58
             let trackHeight: CGFloat = 4
-            let markerRadius: CGFloat = 7
             
             ZStack(alignment: .topLeading) {
                 // ── Track background ──

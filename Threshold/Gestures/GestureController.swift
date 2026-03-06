@@ -18,6 +18,8 @@ import Foundation
 import ARKit
 import simd
 
+private let customFractalDefaultsKey = "customFractalDefaults.v1"
+
 // MARK: - Debug Configuration
 
 /// Set to true to enable verbose hand tracking debug logging
@@ -154,6 +156,18 @@ struct TwoHandGestureState {
 final class GestureController {
     let operationDispatcher: ParameterOperationDispatcher
     private var operationFrameCounter: UInt64 = 0
+
+    private struct StoredFractalDefaults: Codable {
+        var minDistance: Float
+        var foldingLimit: Float
+        var sphereRadius: Float
+        var fractalScale: Float
+        var formulaParamsData: Data
+        var detailScale: Float
+        var position: [Float]
+        var worldRotation: [Float]
+        var safetyBubbleEnabled: Bool?
+    }
     
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES
@@ -215,6 +229,129 @@ final class GestureController {
         defaultSphereRadius: 0.5,
         defaultFractalScale: 2.8
     )
+
+    private func makeFactoryDefaults(for fractalType: FractalModelType, ranges: FractalParamRanges) -> StoredFractalDefaults {
+        var formulaParams = fractalType.defaultFormulaParams()
+        let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        var detailScale: Float = 1.0
+        var position = SIMD3<Float>.zero
+        var rotation = identity
+        var safetyBubbleEnabled: Bool? = nil
+
+        if fractalType == .mandelbulb {
+            let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+            let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
+            let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
+            rotation = simd_normalize(qz * qy * qx)
+            detailScale = 0.25
+            position = SIMD3<Float>(0.1, 0.1, -0.9)
+            safetyBubbleEnabled = false
+        }
+
+        FormulaCatalog.normalizeRotationFlags(&formulaParams)
+        return StoredFractalDefaults(
+            minDistance: ranges.defaultMinDistance,
+            foldingLimit: ranges.defaultFoldingLimit,
+            sphereRadius: ranges.defaultSphereRadius,
+            fractalScale: ranges.defaultFractalScale,
+            formulaParamsData: Self.serializeFormulaParams(formulaParams),
+            detailScale: detailScale,
+            position: [position.x, position.y, position.z],
+            worldRotation: [rotation.vector.x, rotation.vector.y, rotation.vector.z, rotation.vector.w],
+            safetyBubbleEnabled: safetyBubbleEnabled
+        )
+    }
+
+    private static func serializeFormulaParams(_ formulaParams: FormulaParams) -> Data {
+        var copy = formulaParams
+        return withUnsafeBytes(of: &copy) { Data($0) }
+    }
+
+    private static func deserializeFormulaParams(_ data: Data) -> FormulaParams? {
+        let size = MemoryLayout<FormulaParams>.size
+        guard data.count == size else { return nil }
+        var formulaParams = FormulaParams()
+        data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            memcpy(&formulaParams, baseAddress, size)
+        }
+        FormulaCatalog.normalizeRotationFlags(&formulaParams)
+        return formulaParams
+    }
+
+    private func loadStoredDefaultsMap() -> [String: StoredFractalDefaults] {
+        guard let data = UserDefaults.standard.data(forKey: customFractalDefaultsKey) else { return [:] }
+        return (try? JSONDecoder().decode([String: StoredFractalDefaults].self, from: data)) ?? [:]
+    }
+
+    private func saveStoredDefaultsMap(_ defaultsMap: [String: StoredFractalDefaults]) {
+        guard let data = try? JSONEncoder().encode(defaultsMap) else { return }
+        UserDefaults.standard.set(data, forKey: customFractalDefaultsKey)
+    }
+
+    private func applyStoredDefaults(_ stored: StoredFractalDefaults, to settings: RenderSettings) {
+        settings.targetMinDistance = stored.minDistance
+        settings.targetFoldingLimit = stored.foldingLimit
+        settings.targetSphereRadius = stored.sphereRadius
+        settings.targetFractalScale = stored.fractalScale
+
+        settings.minDistance = stored.minDistance
+        settings.foldingLimit = stored.foldingLimit
+        settings.sphereRadius = stored.sphereRadius
+        settings.fractalScale = stored.fractalScale
+
+        if let formulaParams = Self.deserializeFormulaParams(stored.formulaParamsData) {
+            settings.formulaParams = formulaParams
+        }
+
+        if stored.position.count == 3 {
+            let position = SIMD3<Float>(stored.position[0], stored.position[1], stored.position[2])
+            settings.position = position
+            settings.targetPosition = position
+        }
+
+        if stored.worldRotation.count == 4 {
+            let rotation = simd_quatf(ix: stored.worldRotation[0],
+                                      iy: stored.worldRotation[1],
+                                      iz: stored.worldRotation[2],
+                                      r: stored.worldRotation[3]).normalized
+            settings.worldRotation = rotation
+            settings.targetWorldRotation = rotation
+        }
+
+        settings.detailScale = stored.detailScale
+        settings.targetDetailScale = stored.detailScale
+
+        if let safetyBubbleEnabled = stored.safetyBubbleEnabled {
+            settings.safetyBubbleEnabled = safetyBubbleEnabled
+        }
+    }
+
+    @discardableResult
+    func saveCurrentAsFractalDefaults() -> Bool {
+        guard let settings = renderSettings else { return false }
+
+        let fractalType = settings.fractalType
+        let stored = StoredFractalDefaults(
+            minDistance: settings.minDistance,
+            foldingLimit: settings.foldingLimit,
+            sphereRadius: settings.sphereRadius,
+            fractalScale: settings.fractalScale,
+            formulaParamsData: Self.serializeFormulaParams(settings.formulaParams),
+            detailScale: settings.detailScale,
+            position: [settings.position.x, settings.position.y, settings.position.z],
+            worldRotation: [settings.worldRotation.vector.x,
+                            settings.worldRotation.vector.y,
+                            settings.worldRotation.vector.z,
+                            settings.worldRotation.vector.w],
+            safetyBubbleEnabled: settings.safetyBubbleEnabled
+        )
+
+        var defaultsMap = loadStoredDefaultsMap()
+        defaultsMap[String(fractalType.rawValue)] = stored
+        saveStoredDefaultsMap(defaultsMap)
+        return true
+    }
     
     /// When true, parameter-changing gestures (two-hand pinch, single-hand drag) are
     /// suppressed so that pinching to interact with the SwiftUI menu window does not
@@ -327,44 +464,10 @@ final class GestureController {
     func applyFractalDefaults() {
         guard let settings = renderSettings else { return }
         let ranges = currentRanges()
-        
-        // Reset core shape properties (kept for smoothDamp/shader bridge).
-        settings.targetMinDistance = ranges.defaultMinDistance
-        settings.targetFoldingLimit = ranges.defaultFoldingLimit
-        settings.targetSphereRadius = ranges.defaultSphereRadius
-        settings.targetFractalScale = ranges.defaultFractalScale
-        
-        // Also update the immediate values for instant feedback
-        settings.minDistance = ranges.defaultMinDistance
-        settings.foldingLimit = ranges.defaultFoldingLimit
-        settings.sphereRadius = ranges.defaultSphereRadius
-        settings.fractalScale = ranges.defaultFractalScale
-
-        // Reset formula params to catalog defaults (includes Mandelbox now).
-        settings.formulaParams = settings.fractalType.defaultFormulaParams()
-
-        // Fractal-specific default orientation.
-        // Mandelbulb defaults requested: P75 Y180 R180 with detail scale 0.25.
-        if settings.fractalType == .mandelbulb {
-            let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))              // R180
-            let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0)) // P75
-            let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))              // Y180
-            let mandelbulbFacing = simd_normalize(qz * qy * qx)
-            settings.worldRotation = mandelbulbFacing
-            settings.targetWorldRotation = mandelbulbFacing
-            settings.detailScale = 0.25
-            settings.targetDetailScale = 0.25
-
-            // Center the Mandelbulb in front of the user by resetting position.
-            // Push ~1 m forward (-Z in visionOS world space) so the bulb isn't
-            // uncomfortably close on first load.
-            let defaultPos = SIMD3<Float>(0.1, 0.1, -0.9)
-            settings.position = defaultPos
-            settings.targetPosition = defaultPos
-
-            // Safety bubble clashes with the Mandelbulb surface — disable it.
-            settings.safetyBubbleEnabled = false
-        }
+        let defaultsMap = loadStoredDefaultsMap()
+        let storedDefaults = defaultsMap[String(settings.fractalType.rawValue)]
+            ?? makeFactoryDefaults(for: settings.fractalType, ranges: ranges)
+        applyStoredDefaults(storedDefaults, to: settings)
         
         // Reset gesture states
         syncWithSettings()
@@ -651,10 +754,6 @@ final class GestureController {
                 if fingerGestureState[digit]?.isActive == true {
                     fingerGestureState[digit]?.isActive = false
                 }
-            default:
-                if fingerGestureState[digit]?.isActive == true {
-                    fingerGestureState[digit]?.isActive = false
-                }
             }
         }
         
@@ -879,7 +978,19 @@ final class GestureController {
             let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : grabStartAxis
             
             // 1) SCALE: ratio of current hand distance to start distance
-            let scaleRatio = currentDistance / max(grabStartDistance, 0.01)
+            // Use log-space with a small deadzone so tiny tracking jitter near
+            // the starting hand separation does not make scaling feel clunky.
+            let rawScaleRatio = currentDistance / max(grabStartDistance, 0.01)
+            let logScaleDelta = log(max(rawScaleRatio, 1e-6))
+            let scaleDeadzone: Float = 0.025
+            let adjustedLogScaleDelta: Float
+            if abs(logScaleDelta) <= scaleDeadzone {
+                adjustedLogScaleDelta = 0.0
+            } else {
+                adjustedLogScaleDelta = copysign(abs(logScaleDelta) - scaleDeadzone, logScaleDelta)
+            }
+            let scaleResponse: Float = (settings.fractalType == .mandelbulb) ? 0.90 : 0.95
+            let scaleRatio = exp(adjustedLogScaleDelta * scaleResponse)
             let adjustedScale = detailStartScale * scaleRatio
             // Clamp to reasonable range (0.05× to 20× of starting scale)
             let clampedScale = max(0.05, min(20.0, adjustedScale))
@@ -1242,12 +1353,12 @@ final class GestureController {
             // Direct write (intentional dispatcher bypass) — position is a SIMD3 vector,
             // not a scalar parameter. See grab gesture for rationale.
             //
-            // Scale inversely with detailScale so translation feels consistent:
-            // - Zoomed in (large detailScale)  -> slower translation (more precision)
-            // - Zoomed out (small detailScale) -> faster translation (more coverage)
-            // Mandelbulb uses detailScale 0.25 which would give 4× compensation,
-            // making pinch-move far too touchy. Cap at 2× to keep it manageable.
-            let zoomCompensation = simd_clamp(1.0 / max(settings.detailScale, 0.01), 0.2, 2.0)
+            // Scale translation by inverse sqrt(detailScale) instead of full
+            // inverse scaling. This keeps large fractals movable without making
+            // small ones excessively touchy.
+            // Mandelbulb still gets a 2× cap because its default detailScale is 0.25.
+            let maxZoomCompensation: Float = (settings.fractalType == .mandelbulb) ? 2.0 : 3.0
+            let zoomCompensation = simd_clamp(1.0 / sqrt(max(settings.detailScale, 0.01)), 0.35, maxZoomCompensation)
             accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition

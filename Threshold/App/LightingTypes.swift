@@ -204,11 +204,37 @@ struct FogEffect: LightingEffect {
     }
 }
 
-/// Gradient cycle effect - rotates the gradient offset over time so colors loop through the fractal
+/// Gradient cycle effect - animates the gradient offset over time.
+/// `mirrorLoop` ping-pongs the offset 0→1→0 instead of wrapping 0→1→0 discontinuously.
 struct GradientCycleEffect: LightingEffect {
     var enabled: Bool = false
-    var speed: Float = 0.1          // Cycle speed (0-1), how fast the gradient rotates
-    var smoothLoop: Bool = true     // When true, gradient wraps smoothly (last stop blends back to first)
+    var speed: Float = 0.1          // Cycle speed (0-1), how fast the gradient animates
+    var mirrorLoop: Bool = true     // When true, offset runs forward then backward (ping-pong)
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, speed, mirrorLoop, smoothLoop
+    }
+
+    init(enabled: Bool = false, speed: Float = 0.1, mirrorLoop: Bool = true) {
+        self.enabled = enabled
+        self.speed = speed
+        self.mirrorLoop = mirrorLoop
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        speed = try container.decodeIfPresent(Float.self, forKey: .speed) ?? 0.1
+        mirrorLoop = try container.decodeIfPresent(Bool.self, forKey: .mirrorLoop)
+            ?? (try container.decodeIfPresent(Bool.self, forKey: .smoothLoop) ?? true)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(speed, forKey: .speed)
+        try container.encode(mirrorLoop, forKey: .mirrorLoop)
+    }
     
     var primaryValue: Float {
         get { speed }
@@ -217,19 +243,19 @@ struct GradientCycleEffect: LightingEffect {
     static let primaryLabel = "Speed"
     
     static var off: GradientCycleEffect {
-        GradientCycleEffect(enabled: false, speed: 0.0, smoothLoop: true)
+        GradientCycleEffect(enabled: false, speed: 0.0, mirrorLoop: true)
     }
     
     static var slow: GradientCycleEffect {
-        GradientCycleEffect(enabled: true, speed: 0.05, smoothLoop: true)
+        GradientCycleEffect(enabled: true, speed: 0.05, mirrorLoop: true)
     }
     
     static var medium: GradientCycleEffect {
-        GradientCycleEffect(enabled: true, speed: 0.15, smoothLoop: true)
+        GradientCycleEffect(enabled: true, speed: 0.15, mirrorLoop: true)
     }
     
     static var fast: GradientCycleEffect {
-        GradientCycleEffect(enabled: true, speed: 0.4, smoothLoop: true)
+        GradientCycleEffect(enabled: true, speed: 0.4, mirrorLoop: true)
     }
 }
 

@@ -381,7 +381,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             guard let a, let b else { return pickDiscrete(a, b) }
             return GradientCycleEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
                                        speed: lerp(a.speed, b.speed),
-                                       smoothLoop: clampedT < 0.5 ? a.smoothLoop : b.smoothLoop)
+                                       mirrorLoop: clampedT < 0.5 ? a.mirrorLoop : b.mirrorLoop)
         }
         
         func lerpFormulaParams(_ a: [Float]?, _ b: [Float]?) -> [Float]? {
@@ -1029,22 +1029,52 @@ enum DefaultScenes {
     
     /// All built-in scenes, decoded once from bundled .threshanim files.
     private static let cachedScenes: [AnimationScene] = {
-        let fileNames = ["Ambient_Blur"]  // Add more default scene filenames here
-        var scenes: [AnimationScene] = []
         let decoder = JSONDecoder()
-        for name in fileNames {
-            guard let url = Bundle.main.url(forResource: name, withExtension: "threshanim") else {
-                print("⚠️ DefaultScenes: missing bundled file \(name).threshanim")
-                continue
+        decoder.dateDecodingStrategy = .iso8601
+
+        // Try subdirectory first, then bundle root, then deep-scan as final fallback.
+        var urls = Bundle.main.urls(forResourcesWithExtension: "threshanim", subdirectory: "Examples/Animations")
+                   ?? Bundle.main.urls(forResourcesWithExtension: "threshanim", subdirectory: nil)
+                   ?? []
+
+        // Deep-scan fallback: enumerate the entire bundle for .threshanim files
+        if urls.isEmpty, let resourcePath = Bundle.main.resourcePath {
+            let enumerator = FileManager.default.enumerator(atPath: resourcePath)
+            while let file = enumerator?.nextObject() as? String {
+                if file.hasSuffix(".threshanim") {
+                    urls.append(URL(fileURLWithPath: resourcePath).appendingPathComponent(file))
+                }
             }
+        }
+
+        urls.sort { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        guard !urls.isEmpty else {
+            print("⚠️ DefaultScenes: no bundled .threshanim files found anywhere in bundle")
+            return []
+        }
+        print("ℹ️ DefaultScenes: found \(urls.count) bundled .threshanim file(s): \(urls.map(\.lastPathComponent))")
+
+        let isoFormatter = ISO8601DateFormatter()
+        var scenes: [AnimationScene] = []
+        for url in urls {
             do {
-                let data = try Data(contentsOf: url)
+                var data = try Data(contentsOf: url)
+
+                // Patch missing "modifiedAt" for older exports that predate the field.
+                if var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   json["modifiedAt"] == nil {
+                    json["modifiedAt"] = json["createdAt"] ?? isoFormatter.string(from: Date())
+                    data = try JSONSerialization.data(withJSONObject: json)
+                }
+
                 let scene = try decoder.decode(AnimationScene.self, from: data)
                 scenes.append(scene)
             } catch {
-                print("⚠️ DefaultScenes: failed to decode \(name).threshanim — \(error)")
+                print("⚠️ DefaultScenes: failed to decode \(url.lastPathComponent) — \(error)")
             }
         }
+        print("ℹ️ DefaultScenes: successfully decoded \(scenes.count) scene(s)")
         return scenes
     }()
 
