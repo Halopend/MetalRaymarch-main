@@ -469,8 +469,8 @@ struct SceneEditorView: View {
                         HStack {
                             Text("Blend").font(.caption)
                             Slider(value: Binding(
-                                get: { scene.safetyBubbleBlend ?? 0.5 },
-                                set: { scene.safetyBubbleBlend = $0 }
+                                get: { UISettingsCache.blendValueToSlider(scene.safetyBubbleBlend ?? 0.5) },
+                                set: { scene.safetyBubbleBlend = UISettingsCache.blendSliderToValue(Float($0)) }
                             ), in: 0.0...1.0, step: 0.05)
                             Text(String(format: "%.2f", scene.safetyBubbleBlend ?? 0.5))
                                 .font(.caption.monospacedDigit())
@@ -1060,7 +1060,7 @@ struct AnimationPlaybackControls: View {
                 // ── Keyframe Timeline ──
                 KeyframeTimelineView(
                     scene: scene,
-                    playhead: animationManager.playhead,
+                    playhead: animationManager.uiPlayhead,
                     onEditKeyframe: { keyframe in
                         editingKeyframe = keyframe
                     },
@@ -1077,7 +1077,7 @@ struct AnimationPlaybackControls: View {
                     } label: {
                         Image(systemName: "stop.fill")
                     }
-                    .disabled(!animationManager.isPlaying && animationManager.playhead.state != .paused)
+                    .disabled(!animationManager.isPlaying && animationManager.uiPlayhead.state != .paused)
                     
                     Button {
                         animationManager.togglePlayPause()
@@ -1122,7 +1122,7 @@ struct AnimationPlaybackControls: View {
                     Spacer()
                     
                     // Keyframe indicator
-                    Text("KF \(animationManager.playhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
+                    Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1162,12 +1162,12 @@ struct AnimationPlaybackControls: View {
         guard let scene = animationManager.currentScene else { return 0 }
         
         var time: TimeInterval = 0
-        for i in 0..<animationManager.playhead.currentKeyframeIndex {
+        for i in 0..<animationManager.uiPlayhead.currentKeyframeIndex {
             if i < scene.keyframes.count {
                 time += scene.keyframes[i].duration
             }
         }
-        time += animationManager.playhead.elapsedInSegment
+        time += animationManager.uiPlayhead.elapsedInSegment
         return time
     }
     

@@ -134,6 +134,28 @@ final class UISettingsCache {
     var safetyBubbleRadius: Float = 1.8
     var safetyBubbleShape: Float = 0.0
     var safetyBubbleBlend: Float = 1.0
+    
+    // MARK: - Blend Slider Curve
+    // 92% of slider range covers the 0…0.08 value range (fine control),
+    // remaining 8% covers 0.08…1.0 (coarse / full-strength).
+    
+    /// Maps linear slider position (0…1) to actual blend value (0…1)
+    static func blendSliderToValue(_ slider: Float) -> Float {
+        if slider <= 0.92 {
+            return slider * (0.08 / 0.92)
+        } else {
+            return 0.08 + (slider - 0.92) * (0.92 / 0.08)
+        }
+    }
+    
+    /// Maps actual blend value (0…1) back to slider position (0…1)
+    static func blendValueToSlider(_ value: Float) -> Float {
+        if value <= 0.08 {
+            return value * (0.92 / 0.08)
+        } else {
+            return 0.92 + (value - 0.08) * (0.08 / 0.92)
+        }
+    }
     var useRelativeGestures: Bool = true
     var extendedGestureRange: Bool = true
     var rotationAutoSnap: Bool = true

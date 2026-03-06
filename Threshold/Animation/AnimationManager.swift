@@ -92,6 +92,7 @@ final class AnimationManager {
             if currentScene?.id != oldValue?.id {
                 playhead.reset()
                 playhead.sceneID = currentScene?.id
+                uiPlayhead = playhead
                 
                 // Precompile pipelines for all keyframes in this scene
                 precompilePipelinesForCurrentScene()
@@ -103,8 +104,15 @@ final class AnimationManager {
     // PLAYBACK STATE
     // ═══════════════════════════════════════════════════════════════════════════
     
-    /// Current playback position and state
-    var playhead = AnimationPlayhead()
+    /// Internal playhead — drives precise per-frame animation timing.
+    /// Marked @ObservationIgnored so 90Hz writes don't trigger SwiftUI invalidation.
+    @ObservationIgnored var playhead = AnimationPlayhead()
+    
+    /// Throttled snapshot of playhead for SwiftUI views (updated ~15Hz).
+    /// Views should read this instead of `playhead` to avoid per-frame re-renders.
+    var uiPlayhead = AnimationPlayhead()
+    @ObservationIgnored private var uiThrottleCounter: Int = 0
+    private static let uiThrottleInterval: Int = 6   // update every ~6 frames ≈ 15Hz at 90fps
     
     /// Global easing function for all transitions
     /// Default to .smooth for continuous motion through keyframes (no stopping)
@@ -113,9 +121,10 @@ final class AnimationManager {
     /// Playback speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
     var playbackSpeed: Double = 1.0
     
-    /// Whether animation is currently playing
+    /// Whether animation is currently playing.
+    /// Reads from observed `uiPlayhead` so SwiftUI correctly tracks state changes.
     var isPlaying: Bool {
-        playhead.state == .playing
+        uiPlayhead.state == .playing
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -401,31 +410,31 @@ final class AnimationManager {
         renderSettings?.isAnimationPlaying = true
         
         playhead.state = .playing
+        uiPlayhead = playhead
+        uiThrottleCounter = 0
         UsageAnalytics.shared.trackAnimationUsed()
         
         // Auto-play attached song when scene starts
         if let song = currentScene?.attachedSong {
             playSongHandler?(song)
         }
-        
-        print("▶️ Playing scene '\(currentScene?.name ?? "?")'")  
     }
     
     /// Pause playback
     func pause() {
         playhead.state = .paused
+        uiPlayhead = playhead
         renderSettings?.isAnimationPlaying = false
         renderSettings?.commitAnimationOffsetsToTargets()
-        print("⏸️ Paused")
     }
     
     /// Stop playback and reset to beginning
     func stop() {
         playhead.state = .stopped
         playhead.reset()
+        uiPlayhead = playhead
         renderSettings?.isAnimationPlaying = false
         renderSettings?.commitAnimationOffsetsToTargets()
-        print("⏹️ Stopped")
     }
     
     /// Toggle play/pause
@@ -444,6 +453,7 @@ final class AnimationManager {
         
         playhead.currentKeyframeIndex = index
         playhead.elapsedInSegment = 0
+        uiPlayhead = playhead
         
         // Apply the keyframe immediately
         applyKeyframe(scene.keyframes[index])
@@ -563,6 +573,13 @@ final class AnimationManager {
         }
         
         applyKeyframe(interpolated)
+        
+        // Throttle UI playhead updates to ~15Hz to avoid per-frame SwiftUI invalidation
+        uiThrottleCounter += 1
+        if uiThrottleCounter >= Self.uiThrottleInterval {
+            uiThrottleCounter = 0
+            uiPlayhead = playhead
+        }
     }
     
     /// Apply a keyframe's values to render settings

@@ -404,11 +404,14 @@ struct ContentView: View {
                     Divider()
                     
                     EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
-                        value: $cache.safetyBubbleBlend, range: 0.0...1.0,
+                        value: Binding<Float>(
+                            get: { UISettingsCache.blendValueToSlider(cache.safetyBubbleBlend) },
+                            set: { cache.safetyBubbleBlend = UISettingsCache.blendSliderToValue($0) }
+                        ), range: 0.0...1.0,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubbleBlend) },
                         showToggle: false)
-                    Text("Controls how strongly the bubble masks fractal geometry (0 = transparent, 1 = fully active).")
+                    Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
