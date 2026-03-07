@@ -8,6 +8,78 @@
 
 import Foundation
 
+enum MusicReactiveMode: String, CaseIterable, Codable, Sendable {
+    case absolute
+    case relative
+
+    var displayName: String {
+        switch self {
+        case .absolute: return "Absolute"
+        case .relative: return "Relative"
+        }
+    }
+
+    var helpText: String {
+        switch self {
+        case .absolute: return "Music sets the value directly within min/max range"
+        case .relative: return "Music adds a delta around the current animation/gesture value"
+        }
+    }
+}
+
+enum LFOShape: String, CaseIterable, Codable, Sendable {
+    case sine
+    case triangle
+    case square
+    case sawtooth
+
+    var displayName: String {
+        switch self {
+        case .sine: return "Sine"
+        case .triangle: return "Triangle"
+        case .square: return "Square"
+        case .sawtooth: return "Sawtooth"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .sine: return "waveform.path"
+        case .triangle: return "triangle"
+        case .square: return "square"
+        case .sawtooth: return "chart.line.uptrend.xyaxis"
+        }
+    }
+
+    func evaluate(phase: Float) -> Float {
+        let p = phase - floor(phase)
+        switch self {
+        case .sine:
+            return sin(p * 2.0 * .pi)
+        case .triangle:
+            return p < 0.5 ? (4.0 * p - 1.0) : (3.0 - 4.0 * p)
+        case .square:
+            return p < 0.5 ? 1.0 : -1.0
+        case .sawtooth:
+            return 2.0 * p - 1.0
+        }
+    }
+}
+
+struct LFOSettings: Codable, Hashable, Sendable {
+    var enabled: Bool = false
+    var frequency: Float = 0.1
+    var amplitude: Float = 0.2
+    var shape: LFOShape = .sine
+
+    mutating func sanitizeInPlace() {
+        frequency = max(0.01, min(5.0, frequency))
+        amplitude = max(0.0, min(1.0, amplitude))
+    }
+
+    static let `default` = LFOSettings()
+}
+
 enum MusicReactiveSource: String, CaseIterable, Codable, Sendable {
     case composite
     case bass
@@ -287,6 +359,9 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     var responseSpeed: Float
     var amount: Float
     var isEnabled: Bool
+    var mode: MusicReactiveMode
+    var lfo: LFOSettings
+    var smoothingWindow: Float
 
     init(id: UUID = UUID(),
          target: MusicReactiveTarget,
@@ -295,7 +370,10 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
          rangeMax: Float,
          responseSpeed: Float,
          amount: Float,
-         isEnabled: Bool) {
+         isEnabled: Bool,
+         mode: MusicReactiveMode = .absolute,
+         lfo: LFOSettings = .default,
+         smoothingWindow: Float = 0.0) {
         self.id = id
         self.target = target
         self.source = source
@@ -304,6 +382,9 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.responseSpeed = responseSpeed
         self.amount = amount
         self.isEnabled = isEnabled
+        self.mode = mode
+        self.lfo = lfo
+        self.smoothingWindow = smoothingWindow
         sanitizeInPlace()
     }
 
@@ -314,8 +395,10 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         if rangeMin > rangeMax {
             swap(&rangeMin, &rangeMax)
         }
-        responseSpeed = max(0.01, min(0.6, responseSpeed))
-        amount = max(-2.0, min(2.0, amount))
+        responseSpeed = max(0.01, min(1.0, responseSpeed))
+        amount = max(-3.0, min(3.0, amount))
+        smoothingWindow = max(0.0, min(2.0, smoothingWindow))
+        lfo.sanitizeInPlace()
     }
 
     /// Sanitize with fractal-type-aware ranges (for formula params).
@@ -326,13 +409,37 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         if rangeMin > rangeMax {
             swap(&rangeMin, &rangeMax)
         }
-        responseSpeed = max(0.01, min(0.6, responseSpeed))
-        amount = max(-2.0, min(2.0, amount))
+        responseSpeed = max(0.01, min(1.0, responseSpeed))
+        amount = max(-3.0, min(3.0, amount))
+        smoothingWindow = max(0.0, min(2.0, smoothingWindow))
+        lfo.sanitizeInPlace()
     }
 
     /// Default mappings — starts empty. Users add what they want via the + button.
     static func defaultMappings() -> [MusicReactiveMapping] {
         []
+    }
+
+    // MARK: - Backward-compatible Codable
+
+    enum CodingKeys: String, CodingKey {
+        case id, target, source, rangeMin, rangeMax, responseSpeed, amount, isEnabled
+        case mode, lfo, smoothingWindow
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.target = try c.decode(MusicReactiveTarget.self, forKey: .target)
+        self.source = try c.decode(MusicReactiveSource.self, forKey: .source)
+        self.rangeMin = try c.decode(Float.self, forKey: .rangeMin)
+        self.rangeMax = try c.decode(Float.self, forKey: .rangeMax)
+        self.responseSpeed = try c.decode(Float.self, forKey: .responseSpeed)
+        self.amount = try c.decode(Float.self, forKey: .amount)
+        self.isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
+        self.mode = try c.decodeIfPresent(MusicReactiveMode.self, forKey: .mode) ?? .absolute
+        self.lfo = try c.decodeIfPresent(LFOSettings.self, forKey: .lfo) ?? .default
+        self.smoothingWindow = try c.decodeIfPresent(Float.self, forKey: .smoothingWindow) ?? 0.0
     }
 
     /// Migrate legacy Mandelbox-specific mappings to generic formula param slots.

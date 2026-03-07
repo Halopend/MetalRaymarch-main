@@ -760,15 +760,73 @@ struct MusicTabContent: View {
                                 }
                             ), range: mapping.target.allowedRange(for: cache.fractalType))
 
+                            // Mode picker (Absolute / Relative)
+                            Picker("Mode", selection: Binding(
+                                get: { mappingAt(index)?.mode ?? .absolute },
+                                set: { newValue in updateMapping(index) { $0.mode = newValue } }
+                            )) {
+                                ForEach(MusicReactiveMode.allCases, id: \.self) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
                             sliderRow(label: "Response", value: Binding(
                                 get: { mappingAt(index)?.responseSpeed ?? 0.12 },
                                 set: { newValue in updateMapping(index) { $0.responseSpeed = newValue; $0.sanitizeInPlace() } }
-                            ), range: 0.01...0.6)
+                            ), range: 0.01...1.0)
 
                             sliderRow(label: "Amount", value: Binding(
                                 get: { mappingAt(index)?.amount ?? 1.0 },
                                 set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
-                            ), range: -2...2)
+                            ), range: -3...3)
+
+                            sliderRow(label: "Smoothing", value: Binding(
+                                get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
+                                set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
+                            ), range: 0...2)
+
+                            // LFO section
+                            VStack(spacing: 4) {
+                                HStack {
+                                    Toggle("LFO", isOn: Binding(
+                                        get: { mappingAt(index)?.lfo.enabled ?? false },
+                                        set: { newValue in updateMapping(index) { $0.lfo.enabled = newValue } }
+                                    ))
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                                    .font(.caption2)
+
+                                    Spacer()
+
+                                    if mappingAt(index)?.lfo.enabled == true {
+                                        Picker("", selection: Binding(
+                                            get: { mappingAt(index)?.lfo.shape ?? .sine },
+                                            set: { newValue in updateMapping(index) { $0.lfo.shape = newValue } }
+                                        )) {
+                                            ForEach(LFOShape.allCases, id: \.self) { shape in
+                                                Image(systemName: shape.icon).tag(shape)
+                                            }
+                                        }
+                                        .pickerStyle(.segmented)
+                                        .frame(maxWidth: 160)
+                                    }
+                                }
+
+                                if mappingAt(index)?.lfo.enabled == true {
+                                    sliderRow(label: "Freq", value: Binding(
+                                        get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
+                                        set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
+                                    ), range: 0.01...5.0)
+
+                                    sliderRow(label: "Depth", value: Binding(
+                                        get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
+                                        set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
+                                    ), range: 0...1)
+                                }
+                            }
+                            .padding(6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.15)))
                         }
                         .padding(8)
                         .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))

@@ -204,6 +204,8 @@ actor Renderer {
     // Music-reactive fractal anchors (prevent parameter drift)
     private var musicFractalAnchorValid: Bool = false
     private var musicAnchorByTarget: [MusicReactiveTarget: Float] = [:]
+    private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
+    private var musicSmoothedValueByTarget: [MusicReactiveTarget: Float] = [:]
 
     private var parameterOperationFrameIndex: UInt64 = 0
     private let parameterOperationDispatcher = ParameterOperationDispatcher()
@@ -736,7 +738,6 @@ actor Renderer {
                     musicAnchorByTarget[.hueSpeed] = settings.hueRotationEffect.speed
                     musicAnchorByTarget[.saturation] = settings.colorSchemeSaturation
                     musicAnchorByTarget[.iterations] = Float(settings.fractalIterations)
-                    // Dynamic formula param anchors — resolve slot index via catalog
                     let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
                     for target in [MusicReactiveTarget.formulaParam0, .formulaParam1, .formulaParam2] {
                         if let slot = target.formulaParamSlot, slot < floatParams.count {
@@ -750,33 +751,21 @@ actor Renderer {
                 let mid = settings.midLevel
                 let treble = settings.trebleLevel
                 let beat = settings.beatIntensity
-                let amount = settings.fractalAudioAmount
+                let globalAmount = settings.fractalAudioAmount
                 let beatPunch = settings.fractalBeatPunch
-                
-                // Composite drives for default source behavior
+
+                // Composite drive (default source behavior)
                 let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
-                let drive = min(1.0, bandDrive * (0.9 * amount) + beat * (0.1 + 0.6 * beatPunch))
+                let drive = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
 
-                // ── Geometry modulation (layered music offset) ──────────────
+                let dt = cachedDeltaTime
+
                 var audioOperations: [ParameterOperation] = []
-                let dampening = max(0.02, 0.08 + (1.0 - amount) * 0.12)
-
-                func enqueue(_ id: String, target: Float, anchor: Float, smoothingTime: Float?) {
-                    let offset = target - anchor
-                    audioOperations.append(
-                        ParameterOperation(
-                            targetID: id,
-                            source: .audio,
-                            value: .absolute(offset),
-                            frameIndex: parameterOperationFrameIndex,
-                            smoothing: .init(smoothingTime: smoothingTime ?? dampening)
-                        )
-                    )
-                }
 
                 let activeFractalType = settings.fractalType
                 let mappings = settings.musicReactiveMappings
                 for mapping in mappings where mapping.isEnabled {
+                    // ── 1. Select audio source level (0-1) ──
                     let sourceValue: Float
                     switch mapping.source {
                     case .composite: sourceValue = drive
@@ -787,17 +776,61 @@ actor Renderer {
                     case .overall: sourceValue = settings.audioLevel
                     }
 
-                    let globalGain = 0.25 + amount * 1.5
-                    let scaled = min(1.0, max(0.0, sourceValue * globalGain * abs(mapping.amount)))
+                    // ── 2. Apply per-mapping amount (direct multiplier, no double-scaling) ──
+                    let absAmount = abs(mapping.amount)
+                    let scaled = min(1.0, max(0.0, sourceValue * absAmount * globalAmount))
                     let normalized = mapping.amount >= 0 ? scaled : (1.0 - scaled)
 
                     let minValue = min(mapping.rangeMin, mapping.rangeMax)
                     let maxValue = max(mapping.rangeMin, mapping.rangeMax)
-                    let targetValue = minValue + (maxValue - minValue) * normalized
+                    let rangeSpan = maxValue - minValue
+
+                    // ── 3. LFO slow oscillator ──
+                    var lfoOffset: Float = 0
+                    if mapping.lfo.enabled {
+                        var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
+                        phase += mapping.lfo.frequency * dt
+                        phase = phase - floor(phase)
+                        musicLFOPhaseByTarget[mapping.target] = phase
+                        lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * rangeSpan
+                    }
+
+                    // ── 4. Compute final target value based on mode ──
+                    let rawTargetValue: Float
+                    switch mapping.mode {
+                    case .absolute:
+                        // Music sets the value directly within the min/max range
+                        rawTargetValue = minValue + rangeSpan * normalized + lfoOffset
+                    case .relative:
+                        // Music adds a delta around the current anchor (animation/gesture base)
+                        let anchor = musicAnchorByTarget[mapping.target] ?? ((minValue + maxValue) * 0.5)
+                        let delta = (normalized - 0.5) * rangeSpan
+                        rawTargetValue = anchor + delta + lfoOffset
+                    }
+
+                    // ── 5. Output smoothing window (moving-average style) ──
+                    var finalValue = rawTargetValue
+                    if mapping.smoothingWindow > 0.001 {
+                        let prev = musicSmoothedValueByTarget[mapping.target] ?? rawTargetValue
+                        let alpha = min(1.0, dt / max(0.001, mapping.smoothingWindow))
+                        finalValue = prev + (rawTargetValue - prev) * alpha
+                        musicSmoothedValueByTarget[mapping.target] = finalValue
+                    } else {
+                        musicSmoothedValueByTarget[mapping.target] = rawTargetValue
+                    }
 
                     guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
-                    let anchor = musicAnchorByTarget[mapping.target] ?? targetValue
-                    enqueue(targetID, target: targetValue, anchor: anchor, smoothingTime: mapping.responseSpeed)
+                    let anchor = musicAnchorByTarget[mapping.target] ?? finalValue
+                    let offset = finalValue - anchor
+                    audioOperations.append(
+                        ParameterOperation(
+                            targetID: targetID,
+                            source: .audio,
+                            value: .absolute(offset),
+                            frameIndex: parameterOperationFrameIndex,
+                            smoothing: .init(smoothingTime: mapping.responseSpeed)
+                        )
+                    )
                 }
 
                 if !audioOperations.isEmpty {
@@ -814,6 +847,8 @@ actor Renderer {
                 }
                 musicFractalAnchorValid = false
                 musicAnchorByTarget.removeAll()
+                musicLFOPhaseByTarget.removeAll()
+                musicSmoothedValueByTarget.removeAll()
             }
         } else {
             if musicFractalAnchorValid {
@@ -821,6 +856,8 @@ actor Renderer {
             }
             musicFractalAnchorValid = false
             musicAnchorByTarget.removeAll()
+            musicLFOPhaseByTarget.removeAll()
+            musicSmoothedValueByTarget.removeAll()
         }
         let settingsSnapshot = settings.snapshot()
         

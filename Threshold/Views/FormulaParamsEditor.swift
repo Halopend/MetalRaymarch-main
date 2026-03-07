@@ -160,6 +160,20 @@ private struct ParameterNodeRow: View {
                     .help("Assign hand gesture")
                 }
 
+                // Assign to music reactive
+                if let musicTarget = musicReactiveTarget {
+                    Button {
+                        toggleMusicMapping(musicTarget)
+                    } label: {
+                        Image(systemName: hasMusicMapping(musicTarget) ? "waveform.circle.fill" : "waveform.circle")
+                            .font(.caption)
+                            .foregroundStyle(hasMusicMapping(musicTarget) ? AnyShapeStyle(.pink) : AnyShapeStyle(.tertiary))
+                            .frame(width: 20)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(hasMusicMapping(musicTarget) ? "Remove music reactivity" : "Assign to music")
+                }
+
                 // Flip to sensitivity
                 Button {
                     isFlipped = true
@@ -263,6 +277,37 @@ private struct ParameterNodeRow: View {
     private func clearGestureMapping() {
         guard let pair = currentGestureAssignment else { return }
         cache.setFingerBinding(.core(.none), for: pair)
+    }
+
+    // MARK: - Music Reactive Helpers
+
+    private var musicReactiveTarget: MusicReactiveTarget? {
+        guard let floatNode = node as? FloatParameterNode else { return nil }
+        let pieces = floatNode.id.split(separator: ".")
+        guard pieces.count >= 3, let formulaIndex = Int(pieces[2]) else { return nil }
+        let floatParams = MusicReactiveTarget.floatFormulaParams(for: cache.fractalType)
+        guard let slotIndex = floatParams.firstIndex(where: { $0.index == formulaIndex }) else { return nil }
+        switch slotIndex {
+        case 0: return .formulaParam0
+        case 1: return .formulaParam1
+        case 2: return .formulaParam2
+        default: return nil
+        }
+    }
+
+    private func hasMusicMapping(_ target: MusicReactiveTarget) -> Bool {
+        cache.musicReactiveMappings.contains { $0.target == target && $0.isEnabled }
+    }
+
+    private func toggleMusicMapping(_ target: MusicReactiveTarget) {
+        var mappings = cache.musicReactiveMappings
+        if let idx = mappings.firstIndex(where: { $0.target == target }) {
+            mappings.remove(at: idx)
+        } else {
+            mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
+        }
+        cache.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
     }
 }
 

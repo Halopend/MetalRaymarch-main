@@ -1820,6 +1820,27 @@ final class RenderSettings: @unchecked Sendable {
             let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
             
             // ═══════════════════════════════════════════════════════════════════════════
+            // ANIMATION OFFSET DECAY: When animation is playing and no gesture is
+            // active, tween manual offsets back to zero so the animation reasserts
+            // as the source of truth. This prevents "sticky" gesture perturbations
+            // that cause flickering when the user stops touching.
+            // ═══════════════════════════════════════════════════════════════════════════
+            if _isAnimationPlaying && !_isGeometryGestureActive {
+                let decayRate: Float = 1.0 - exp(-6.0 * clampedDT)  // ~6Hz half-life
+                _manualOffsetMinDistance   *= (1.0 - decayRate)
+                _manualOffsetFoldingLimit  *= (1.0 - decayRate)
+                _manualOffsetSphereRadius  *= (1.0 - decayRate)
+                _manualOffsetFractalScale  *= (1.0 - decayRate)
+                _manualOffsetPosition      *= (1.0 - decayRate)
+                // Snap to zero when negligible to avoid micro-drift
+                if abs(_manualOffsetMinDistance)  < 1e-5 { _manualOffsetMinDistance = 0 }
+                if abs(_manualOffsetFoldingLimit) < 1e-5 { _manualOffsetFoldingLimit = 0 }
+                if abs(_manualOffsetSphereRadius) < 1e-5 { _manualOffsetSphereRadius = 0 }
+                if abs(_manualOffsetFractalScale) < 1e-5 { _manualOffsetFractalScale = 0 }
+                if simd_length_squared(_manualOffsetPosition) < 1e-10 { _manualOffsetPosition = .zero }
+            }
+
+            // ═══════════════════════════════════════════════════════════════════════════
             // MANDELBOX BRIDGE: Sync formula params → target properties
             // Mandelbox's shader reads minDistance / foldingLimit / sphereRadius from
             // dedicated uniform fields (not formulaParams).  All user-facing write paths
