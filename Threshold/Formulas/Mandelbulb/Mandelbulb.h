@@ -24,6 +24,8 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     float polarRot2 = fp.params[5];
     bool  julia     = fp.params[8] > 0.5f;
     float3 juliaC   = float3(fp.params[9], fp.params[10], fp.params[11]);
+    // CPU precomputes identity flag — skip the 3x3 matmul when rotation is identity.
+    bool applyRot = hasRot1Precomputed(fp);
 
     float3 z = pos;
     float3 c = julia ? juliaC : pos;
@@ -36,45 +38,40 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     float3 trapPos = z;
     int i = 0;
 
+    // Precompute bailout² once outside the loop.
+    float bailout2 = bailout * bailout;
     // Min-distance early exit: once r is tiny we're on/inside the surface.
     // Skipping remaining trig-heavy iterations saves significant ALU at deep zoom.
     const float minR2Exit = 1e-12f;
 
-    for (; i < iterations && r2 < bailout * bailout && r2 > minR2Exit; ) {
+    for (; i < iterations && r2 < bailout2 && r2 > minR2Exit; ) {
         float log2r = fast::log2(max(r, 1e-30f));
+        float invR  = fast::rsqrt(r2 + 1e-6f); // shared 1/r (avoids div-by-zero)
 
         if (alternate) {
             // Alternate "triplex" approach
-            float theta = fast::acos(clamp11(z.z / max(r, kEpsLen))) + polarRot;
+            float theta = fast::acos(clamp11(z.z * invR)) + polarRot;
             float phi   = fast::atan2(z.y, z.x);
             float rn    = fast::exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
+            dr = fma(rn * power * invR, dr, 1.0f);
             
-            float thetaP = theta * power;
-            float sTheta = fast::sin(thetaP);
-            float cTheta = fast::cos(thetaP);
-            float phiP = phi * power;
-            float sPhi = fast::sin(phiP);
-            float cPhi = fast::cos(phiP);
+            float tP = theta * power, pP = phi * power;
+            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
+            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
             
             z = rn * float3(sTheta * cPhi,
                             sTheta * sPhi,
                             cTheta);
         } else {
             // Standard spherical coordinates
-            // polarRot2 provides a secondary phase offset that can emulate
-            // alternate-like framing without toggling AlternateVer.
-            float theta = fast::asin(clamp11(z.z / max(r, kEpsLen))) + polarRot + polarRot2;
+            float theta = fast::asin(clamp11(z.z * invR)) + polarRot + polarRot2;
             float phi   = fast::atan2(z.y, z.x);
             float rn    = fast::exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
+            dr = fma(rn * power * invR, dr, 1.0f);
             
-            float thetaP = theta * power;
-            float sTheta = fast::sin(thetaP);
-            float cTheta = fast::cos(thetaP);
-            float phiP = phi * power;
-            float sPhi = fast::sin(phiP);
-            float cPhi = fast::cos(phiP);
+            float tP = theta * power, pP = phi * power;
+            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
+            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
             
             z = rn * float3(cTheta * cPhi,
                             cTheta * sPhi,
@@ -82,7 +79,7 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
         }
 
         z += c;
-        z  = rot * z;
+        if (applyRot) z = rot * z;
 
         r2 = dot(z, z);
         r  = fast::sqrt(r2);
@@ -113,6 +110,7 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
     float polarRot2 = fp.params[5];
     bool  julia     = fp.params[8] > 0.5f;
     float3 juliaC   = float3(fp.params[9], fp.params[10], fp.params[11]);
+    bool applyRot = hasRot1Precomputed(fp);
 
     float3 z = pos;
     float3 c = julia ? juliaC : pos;
@@ -125,37 +123,32 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
 
     for (int i = 0; i < iterations && r2 < bailout2 && r2 > minR2Exit; ++i) {
         float log2r = fast::log2(max(r, 1e-30f));
+        float invR  = fast::rsqrt(r2 + 1e-6f);
         if (alternate) {
-            float theta = fast::acos(clamp11(z.z / max(r, kEpsLen))) + polarRot;
+            float theta = fast::acos(clamp11(z.z * invR)) + polarRot;
             float phi   = fast::atan2(z.y, z.x);
             float rn    = fast::exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
-            float thetaP = theta * power;
-            float sTheta = fast::sin(thetaP);
-            float cTheta = fast::cos(thetaP);
-            float phiP = phi * power;
-            float sPhi = fast::sin(phiP);
-            float cPhi = fast::cos(phiP);
+            dr = fma(rn * power * invR, dr, 1.0f);
+            float tP = theta * power, pP = phi * power;
+            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
+            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
             z = rn * float3(sTheta * cPhi,
                             sTheta * sPhi,
                             cTheta);
         } else {
-            float theta = fast::asin(clamp11(z.z / max(r, kEpsLen))) + polarRot + polarRot2;
+            float theta = fast::asin(clamp11(z.z * invR)) + polarRot + polarRot2;
             float phi   = fast::atan2(z.y, z.x);
             float rn    = fast::exp2(power * log2r);
-            dr = rn * power * dr / max(r, kEpsLen) + 1.0f;
-            float thetaP = theta * power;
-            float sTheta = fast::sin(thetaP);
-            float cTheta = fast::cos(thetaP);
-            float phiP = phi * power;
-            float sPhi = fast::sin(phiP);
-            float cPhi = fast::cos(phiP);
+            dr = fma(rn * power * invR, dr, 1.0f);
+            float tP = theta * power, pP = phi * power;
+            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
+            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
             z = rn * float3(cTheta * cPhi,
                             cTheta * sPhi,
                             sTheta);
         }
         z += c;
-        z  = rot * z;
+        if (applyRot) z = rot * z;
         r2 = dot(z, z);
         r  = fast::sqrt(r2);
     }
