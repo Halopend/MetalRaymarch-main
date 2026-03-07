@@ -35,6 +35,11 @@ struct FormulaParamsEditor: View {
                 ForEach(Array(parameterBatch.nodes.enumerated()), id: \.element.id) { idx, node in
                     if idx > 0 { Divider().padding(.leading, 159) }
                     ParameterNodeRow(cache: cache, node: node)
+
+                    // Quick-pick segmented control for Mandelbulb Power
+                    if node.id == "formula.1.0.Power" {
+                        PowerQuickPicker(cache: cache, node: node)
+                    }
                 }
             }
             .padding(10)
@@ -258,5 +263,69 @@ private struct ParameterNodeRow: View {
     private func clearGestureMapping() {
         guard let pair = currentGestureAssignment else { return }
         cache.setFingerBinding(.core(.none), for: pair)
+    }
+}
+
+// MARK: - Power Quick Picker (Mandelbulb)
+
+/// Segmented control for quickly selecting common Mandelbulb integer power values.
+private struct PowerQuickPicker: View {
+    @Bindable var cache: UISettingsCache
+    let node: AnyParameterNodeBase
+
+    private static let presets: [(label: String, value: Float)] = [
+        ("2", 2), ("3", 3), ("4", 4), ("5", 5),
+        ("6", 6), ("8", 8), ("10", 10), ("12", 12), ("16", 16)
+    ]
+
+    private var currentPower: Float {
+        (node as? FloatParameterNode)?.readValue(cache) ?? 8
+    }
+
+    /// Selected index matching one of the presets, or nil if the slider is at a custom value.
+    private var selectedIndex: Int? {
+        Self.presets.firstIndex { abs($0.value - currentPower) < 0.25 }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Spacer().frame(width: 16) // align with slider icon column
+
+            ForEach(Array(Self.presets.enumerated()), id: \.offset) { idx, preset in
+                Button {
+                    applyPower(preset.value)
+                } label: {
+                    Text(preset.label)
+                        .font(.caption2.weight(selectedIndex == idx ? .bold : .regular))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(selectedIndex == idx ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+                        )
+                        .foregroundStyle(selectedIndex == idx ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 2)
+        .frame(height: 26)
+    }
+
+    private func applyPower(_ value: Float) {
+        guard let floatNode = node as? FloatParameterNode else { return }
+        // Write directly to cache so the slider binding refreshes immediately
+        floatNode.writeValue(cache, value)
+        // Also dispatch through the parameter operation system for render settings
+        let frameIndex = UInt64(Date().timeIntervalSince1970 * 1000)
+        cache.dispatchParameterOperation(
+            ParameterOperation(
+                targetID: floatNode.id,
+                source: .slider,
+                value: .absolute(value),
+                frameIndex: frameIndex,
+                smoothing: .init()
+            )
+        )
     }
 }

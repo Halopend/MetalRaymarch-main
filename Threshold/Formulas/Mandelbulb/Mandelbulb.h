@@ -13,10 +13,21 @@
 #ifndef DE_Mandelbulb_h
 #define DE_Mandelbulb_h
 
+// When FC_MANDELBULB_POWER is baked via function constants, the compiler
+// constant-folds all power multiplications and dead-code-eliminates unused
+// branches in fastPowR — giving compile-time-optimized code for each integer power.
+#ifdef __METAL_VERSION__
+  // Declared in Shaders.metal; available to all included headers.
+  // is_function_constant_defined checks at compile time.
+  #define MB_POWER_CONST (is_function_constant_defined(FC_MANDELBULB_POWER) ? float(FC_MANDELBULB_POWER) : fp.params[0])
+#else
+  #define MB_POWER_CONST fp.params[0]
+#endif
+
 FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
                                  int iterations, int colorIterations,
                                  thread OrbitData& orbit) {
-    float power   = fp.params[0];
+    float power   = MB_POWER_CONST;
     float bailout = fp.params[1];
     float dBias   = max(fp.params[2], 0.01f);  // Clamp minimum for safety
     bool  alternate = fp.params[3] > 0.5f;
@@ -45,14 +56,13 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     const float minR2Exit = 1e-12f;
 
     for (; i < iterations && r2 < bailout2 && r2 > minR2Exit; ) {
-        float log2r = fast::log2(max(r, 1e-30f));
         float invR  = fast::rsqrt(r2 + 1e-6f); // shared 1/r (avoids div-by-zero)
 
         if (alternate) {
             // Alternate "triplex" approach
             float theta = fast::acos(clamp11(z.z * invR)) + polarRot;
             float phi   = fast::atan2(z.y, z.x);
-            float rn    = fast::exp2(power * log2r);
+            float rn    = fastPowR(r, power);
             dr = fma(rn * power * invR, dr, 1.0f);
             
             float tP = theta * power, pP = phi * power;
@@ -66,7 +76,7 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
             // Standard spherical coordinates
             float theta = fast::asin(clamp11(z.z * invR)) + polarRot + polarRot2;
             float phi   = fast::atan2(z.y, z.x);
-            float rn    = fast::exp2(power * log2r);
+            float rn    = fastPowR(r, power);
             dr = fma(rn * power * invR, dr, 1.0f);
             
             float tP = theta * power, pP = phi * power;
@@ -102,7 +112,7 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
 
 // Lean distance-only: no orbit tracking, no struct writes.
 FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
-    float power   = fp.params[0];
+    float power   = MB_POWER_CONST;
     float bailout2 = fp.params[1] * fp.params[1];
     float dBias   = max(fp.params[2], 0.01f);  // Clamp minimum for safety
     bool  alternate = fp.params[3] > 0.5f;
@@ -122,12 +132,11 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
     const float minR2Exit = 1e-12f;
 
     for (int i = 0; i < iterations && r2 < bailout2 && r2 > minR2Exit; ++i) {
-        float log2r = fast::log2(max(r, 1e-30f));
         float invR  = fast::rsqrt(r2 + 1e-6f);
         if (alternate) {
             float theta = fast::acos(clamp11(z.z * invR)) + polarRot;
             float phi   = fast::atan2(z.y, z.x);
-            float rn    = fast::exp2(power * log2r);
+            float rn    = fastPowR(r, power);
             dr = fma(rn * power * invR, dr, 1.0f);
             float tP = theta * power, pP = phi * power;
             float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
@@ -138,7 +147,7 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
         } else {
             float theta = fast::asin(clamp11(z.z * invR)) + polarRot + polarRot2;
             float phi   = fast::atan2(z.y, z.x);
-            float rn    = fast::exp2(power * log2r);
+            float rn    = fastPowR(r, power);
             dr = fma(rn * power * invR, dr, 1.0f);
             float tP = theta * power, pP = phi * power;
             float sTheta = fast::sin(tP), cTheta = fast::cos(tP);

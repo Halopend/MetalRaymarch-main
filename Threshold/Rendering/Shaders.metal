@@ -108,6 +108,10 @@ constant bool FC_SHARE_SHADOWS [[function_constant(10)]];
 // Shadow enable toggle - eliminates entire shadow computation when disabled
 constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
 
+// Mandelbulb power - when baked in, the compiler dead-code-eliminates all wrong
+// branches in fastPowR and constant-folds power multiplications in the inner loop.
+constant int FC_MANDELBULB_POWER [[function_constant(12)]];
+
 typedef struct
 {
     float3 position [[attribute(VertexAttributePosition)]];

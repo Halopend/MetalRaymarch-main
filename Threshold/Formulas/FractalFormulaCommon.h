@@ -56,6 +56,22 @@ inline bool isIdentityRotation3(float3x3 m) {
            all(abs(m[2] - float3(0.0f, 0.0f, 1.0f)) <= eps);
 }
 
+// Fast r^power for compile-time-known integer powers (Mandelbulb hot path).
+// Integer cases use repeated squaring (1-4 muls) vs ~30-cycle exp2*log2 pair.
+FORCE_INLINE float fastPowR(float r, float power) {
+    if (power == 2.0f)  { return r * r; }
+    if (power == 3.0f)  { return r * r * r; }
+    if (power == 4.0f)  { float r2 = r * r; return r2 * r2; }
+    if (power == 5.0f)  { float r2 = r * r; return r2 * r2 * r; }
+    if (power == 6.0f)  { float r2 = r * r; return r2 * r2 * r2; }
+    if (power == 8.0f)  { float r2 = r * r; float r4 = r2 * r2; return r4 * r4; }
+    if (power == 10.0f) { float r2 = r * r; float r4 = r2 * r2; return r4 * r4 * r2; }
+    if (power == 12.0f) { float r2 = r * r; float r4 = r2 * r2; return r4 * r4 * r4; }
+    if (power == 16.0f) { float r2 = r * r; float r4 = r2 * r2; float r8 = r4 * r4; return r8 * r8; }
+    // Fallback for fractional / unusual powers
+    return powr(max(r, 1e-10f), power);
+}
+
 // Safe power: pow(a, b) for a >= 0
 inline float safePow(float a, float b) {
     return fast::exp2(b * fast::log2(max(a, 1e-30f)));

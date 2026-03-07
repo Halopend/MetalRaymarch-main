@@ -285,7 +285,8 @@ extension Renderer {
     /// - Returns: Specialized compute pipeline, or nil on failure
     static func buildComputePipeline(device: MTLDevice, library: MTLLibrary, kernelName: String,
                                      fractalType: Int32? = nil,
-                                     fractalIterations: Int32, shadowIterations: Int32, maxRaySteps: Int32) -> MTLComputePipelineState? {
+                                     fractalIterations: Int32, shadowIterations: Int32, maxRaySteps: Int32,
+                                     mandelbulbPower: Int32? = nil) -> MTLComputePipelineState? {
         let constants = MTLFunctionConstantValues()
         var fi = fractalIterations
         var si = shadowIterations
@@ -296,6 +297,9 @@ extension Renderer {
 
         if var type = fractalType {
             constants.setConstantValue(&type, type: .int, index: FunctionConstantIndex.fractalType.rawValue)
+        }
+        if var power = mandelbulbPower {
+            constants.setConstantValue(&power, type: .int, index: FunctionConstantIndex.mandelbulbPower.rawValue)
         }
         constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
         constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
@@ -335,14 +339,28 @@ extension Renderer {
     /// 5. Falls back to generic (no function constants) pipeline — shader uses runtime params
     func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
         let fractalType = appModel.renderSettings.fractalType
+        // Extract Mandelbulb integer power for compile-time specialization
+        let mbPowerRaw = fractalType == .mandelbulb
+            ? FormulaCatalog.getParam(appModel.renderSettings.formulaParams, index: 0)
+            : Float(0)
+        let mbPowerInt: Int32? = {
+            let rounded = roundf(mbPowerRaw)
+            // Only bake integer powers that fastPowR has explicit fast paths for
+            if abs(mbPowerRaw - rounded) < 0.01,
+               [2,3,4,5,6,8,10,12,16].contains(Int(rounded)) {
+                return Int32(rounded)
+            }
+            return nil
+        }()
+        let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
         
         // Fast-path: parameters unchanged since last call
-        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT,
+        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower,
            let cached = lastSelectedComputePipeline {
             return cached
         }
 
-        let exactKey = "FT\(fractalType.rawValue)_FI\(fractalIterations)_RS\(maxRaySteps)"
+        let exactKey = "FT\(fractalType.rawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
 
         // 1. Exact match — FC values match precomputed absScalePow
         if let pipeline = computePipelineCache[exactKey] {
@@ -353,11 +371,12 @@ extension Renderer {
             lastComputeFT = fractalType.rawValue
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
+            lastComputePower = mbPowerInt
             lastSelectedComputePipeline = pipeline
             return pipeline
         }
 
-        let sharedKey = "FI\(fractalIterations)_RS\(maxRaySteps)"
+        let sharedKey = "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
         if let pipeline = computePipelineCache[sharedKey] {
             if RENDERER_DEBUG && lastComputePipelineKey != sharedKey {
                 print("🎯 [ComputeCache] Shared quality hit: \(sharedKey) for FT=\(fractalType.rawValue)")
@@ -366,6 +385,7 @@ extension Renderer {
             lastComputeFT = fractalType.rawValue
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
+            lastComputePower = mbPowerInt
             lastSelectedComputePipeline = pipeline
             return pipeline
         }
@@ -381,13 +401,15 @@ extension Renderer {
             let si = Int32(max(fractalIterations - 2, 2))
             let rs = Int32(maxRaySteps)
             if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
-                                                            fractalType: ft, fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
+                                                            fractalType: ft, fractalIterations: fi, shadowIterations: si, maxRaySteps: rs,
+                                                            mandelbulbPower: mbPowerInt) {
                 computePipelineCache[exactKey] = pipeline
                 if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
                 lastComputePipelineKey = exactKey
                 lastComputeFT = fractalType.rawValue
                 lastComputeFI = fractalIterations
                 lastComputeRS = maxRaySteps
+                lastComputePower = mbPowerInt
                 lastSelectedComputePipeline = pipeline
                 return pipeline
             }
@@ -403,6 +425,7 @@ extension Renderer {
         lastComputeFT = fractalType.rawValue
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
+        lastComputePower = mbPowerInt
         lastSelectedComputePipeline = fallback
         return fallback
     }

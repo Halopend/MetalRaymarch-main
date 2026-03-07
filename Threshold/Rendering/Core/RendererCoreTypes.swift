@@ -24,6 +24,7 @@ enum FunctionConstantIndex: Int {
     case colorIterations = 9  // Enables loop unrolling in ColourWithScheme
     // index 10 = FC_SHARE_SHADOWS (set in shader only)
     case shadowsEnabled = 11  // GMT-fractals: compile-out entire shadow computation
+    case mandelbulbPower = 12  // Bakes integer power for fastPowR dead-code elimination
 }
 
 enum RendererError: Error {

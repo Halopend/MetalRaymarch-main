@@ -53,6 +53,7 @@ extension Renderer {
         var neonModeEnabled: Bool?         // FC index 8 - eliminates neon orbit tracking
         var colorIterations: Int32?        // FC index 9 - enables loop unrolling in color
         var shadowsEnabled: Bool?          // FC index 11 - GMT-fractals: compile-out shadows entirely
+        var mandelbulbPower: Int32?        // FC index 12 - bakes integer power for fastPowR optimization
 
         /// Creates MTLFunctionConstantValues from this config
         func toMTLConstants() -> MTLFunctionConstantValues {
@@ -90,6 +91,9 @@ extension Renderer {
             }
             if var shadows = shadowsEnabled {
                 constants.setConstantValue(&shadows, type: .bool, index: FunctionConstantIndex.shadowsEnabled.rawValue)
+            }
+            if var power = mandelbulbPower {
+                constants.setConstantValue(&power, type: .int, index: FunctionConstantIndex.mandelbulbPower.rawValue)
             }
 
             return constants

@@ -50,6 +50,7 @@ actor Renderer {
     var lastComputeFT: Int32 = -1
     var lastComputeFI: Int = -1
     var lastComputeRS: Int = -1
+    var lastComputePower: Int32? = nil
     var lastSelectedComputePipeline: MTLComputePipelineState?
     
     /// Cached default Metal library — avoids device.makeDefaultLibrary() on every compute cache miss
