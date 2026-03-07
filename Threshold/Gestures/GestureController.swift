@@ -144,6 +144,134 @@ struct TwoHandGestureState {
     var startHeight: Float = 0          // Average Y position of hands when gesture started (for sensitivity scaling)
 }
 
+// MARK: - Grab Zoom Mapping
+
+/// Pre-computed inverse mapping from hand gesture space → fractal world transform.
+///
+/// Captured once when a two-point grab begins (and rebased at rotation breakaway).
+/// Each frame the mapping evaluates current hand positions into the target fractal
+/// transform using **true 1:1 scale tracking** with midpoint-grounded pivot:
+///
+/// ```
+///   scaleRatio    = currentHandDistance / startHandDistance
+///   newScale      = startDetailScale  × scaleRatio
+///   deltaRot      = quaternion(startAxis → currentAxis)
+///   newRotation   = deltaRot × startRotation
+///   newPosition   = currentMidpoint + deltaRot.act(scaleRatio × (startPos − startMid))
+/// ```
+///
+/// The position formula ensures the world-space point that was under the hand
+/// midpoint at gesture start stays pinned to wherever the midpoint moves, while
+/// scale and rotation expand / twist around that anchor.
+struct GrabZoomMapping {
+    // ── Hand-space snapshot ──────────────────────────────────────────────
+    var startMidpoint: SIMD3<Float>
+    var startDistance: Float           // clamped ≥ 0.01
+    var startAxis: SIMD3<Float>       // normalized right→left
+
+    // ── Fractal-space snapshot ───────────────────────────────────────────
+    var startPosition: SIMD3<Float>
+    var startRotation: simd_quatf
+    var startDetailScale: Float
+
+    // ── Factory ──────────────────────────────────────────────────────────
+    init(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
+         position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
+        self.startMidpoint = (leftPos + rightPos) * 0.5
+        self.startDistance = max(simd_length(leftPos - rightPos), 0.01)
+        let axis = rightPos - leftPos
+        let axisLen = simd_length(axis)
+        self.startAxis = axisLen > 1e-4 ? axis / axisLen : SIMD3<Float>(1, 0, 0)
+        self.startPosition = position
+        self.startRotation = rotation
+        self.startDetailScale = detailScale
+    }
+
+    /// Rebase to the current state — called at rotation breakaway so the
+    /// mapping continues smoothly from the current transform without a jump.
+    mutating func rebase(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
+                         position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
+        self = GrabZoomMapping(leftPos: leftPos, rightPos: rightPos,
+                               position: position, rotation: rotation, detailScale: detailScale)
+    }
+
+    // ── Evaluation ───────────────────────────────────────────────────────
+
+    /// Full evaluation: 1:1 scale + rotation + pivot-correct position.
+    func evaluate(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
+                  scaleClamp: ClosedRange<Float> = 0.001...500.0
+    ) -> (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
+        let currentMidpoint = (leftPos + rightPos) * 0.5
+        let currentDistance = simd_length(leftPos - rightPos)
+        let currentAxis = rightPos - leftPos
+        let currentAxisLen = simd_length(currentAxis)
+        let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : startAxis
+
+        // 1) SCALE — true 1:1 ratio of hand separation
+        let scaleRatio = currentDistance / startDistance
+        let newDetailScale = simd_clamp(startDetailScale * scaleRatio,
+                                        scaleClamp.lowerBound, scaleClamp.upperBound)
+        let effectiveScaleRatio = newDetailScale / max(startDetailScale, 1e-6)
+
+        // 2) ROTATION — quaternion from start axis → current axis
+        let deltaRotation = Self.quaternionBetweenAxes(from: startAxis, to: currentAxisNorm)
+        let newRotation = (deltaRotation * startRotation).normalized
+
+        // 3) POSITION — midpoint-grounded pivot
+        let startOffset = startPosition - startMidpoint
+        let scaledOffset = effectiveScaleRatio * startOffset
+        let rotatedOffset = deltaRotation.act(scaledOffset)
+        let newPosition = currentMidpoint + rotatedOffset
+
+        return (newPosition, newRotation, newDetailScale)
+    }
+
+    /// Scale-only evaluation: rotation stays at startRotation (pre-breakaway phase).
+    func evaluateScaleOnly(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
+                           scaleClamp: ClosedRange<Float> = 0.001...500.0
+    ) -> (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
+        let currentMidpoint = (leftPos + rightPos) * 0.5
+        let currentDistance = simd_length(leftPos - rightPos)
+
+        // 1) SCALE — true 1:1 ratio
+        let scaleRatio = currentDistance / startDistance
+        let newDetailScale = simd_clamp(startDetailScale * scaleRatio,
+                                        scaleClamp.lowerBound, scaleClamp.upperBound)
+        let effectiveScaleRatio = newDetailScale / max(startDetailScale, 1e-6)
+
+        // 2) ROTATION — identity delta (no rotation change)
+        let newRotation = startRotation
+
+        // 3) POSITION — midpoint-grounded pivot, no rotation component
+        let startOffset = startPosition - startMidpoint
+        let scaledOffset = effectiveScaleRatio * startOffset
+        let newPosition = currentMidpoint + scaledOffset
+
+        return (newPosition, newRotation, newDetailScale)
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    /// Shortest-arc quaternion rotating unit vector `from` to unit vector `to`.
+    static func quaternionBetweenAxes(from a: SIMD3<Float>, to b: SIMD3<Float>) -> simd_quatf {
+        let dot = simd_clamp(simd_dot(a, b), -1.0, 1.0)
+        let cross = simd_cross(a, b)
+        let crossLen = simd_length(cross)
+
+        if crossLen > 1e-6 {
+            return simd_quatf(angle: acos(dot), axis: cross / crossLen)
+        } else if dot < 0 {
+            // Anti-parallel: rotate π around any perpendicular axis
+            let perp: SIMD3<Float> = abs(a.x) < 0.9
+                ? simd_normalize(simd_cross(a, SIMD3<Float>(1, 0, 0)))
+                : simd_normalize(simd_cross(a, SIMD3<Float>(0, 1, 0)))
+            return simd_quatf(angle: .pi, axis: perp)
+        } else {
+            return simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // identity
+        }
+    }
+}
+
 // MARK: - Gesture Controller
 
 /// Processes hand tracking data and maps gestures to render parameters
@@ -371,23 +499,18 @@ final class GestureController {
         4: TwoHandGestureState(),   // pinky
     ]
     
-    // === TWO-POINT GRAB STATE (middle finger, both hands) ===
-    // Grabs two points in space; pulling apart scales, rotating rotates the world.
+    // === TWO-POINT GRAB STATE ===
+    // Pre-computed inverse mapping from gesture space → fractal world transform.
+    // Pulling hands apart scales 1:1, rotating the axis rotates the world,
+    // and the midpoint stays grounded as the spatial anchor.
     private var grabActive: Bool = false
     private var grabEndCooldown: Float = 0  // Prevents drag from stealing gesture after grab ends
-    private var grabStartLeftPos: SIMD3<Float> = .zero       // Left pinch position when grab started
-    private var grabStartRightPos: SIMD3<Float> = .zero      // Right pinch position when grab started
-    private var grabStartDistance: Float = 0                  // Distance between hands at grab start
-    private var grabStartMidpoint: SIMD3<Float> = .zero      // Midpoint of the two grab points at start
-    private var grabStartAxis: SIMD3<Float> = .zero          // Normalized axis (right-left) at start
-    private var grabStartRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // World rotation when grab started
-    private var detailStartScale: Float = 1.0                  // detailScale when gesture started
-    private var grabStartPosition: SIMD3<Float> = .zero      // World position when gesture started
+    private var grabMapping: GrabZoomMapping?             // Pre-computed gesture→fractal mapping
+    private var grabOriginalAxis: SIMD3<Float> = .zero    // Original axis at grab start (for breakaway check)
 
-    // Rotation breakaway state: rotation is suppressed until the hand delta exceeds the breakaway angle.
-    // Once broken away, rotation tracks hands 1:1. Resets on each new grab.
+    // Rotation breakaway: rotation is suppressed until the hand axis delta exceeds the
+    // breakaway angle. Once broken away, rotation tracks 1:1. Resets on each new grab.
     private var rotationBrokenAway: Bool = false
-    private var breakawayBaseAxis: SIMD3<Float> = .zero      // Hand axis when breakaway occurred (for rebasing delta)
     
     // Single-hand drag state
     private var rightIndexDragActive: Bool = false
@@ -449,6 +572,7 @@ final class GestureController {
         for digit in 1...4 { fingerGestureState[digit] = TwoHandGestureState() }
         grabActive = false
         grabEndCooldown = 0
+        grabMapping = nil
         rightIndexDragActive = false
         menuToggleActive = false
         menuToggleHoldTimer = 0
@@ -675,7 +799,7 @@ final class GestureController {
             for digit in 1...4 {
                 if fingerGestureState[digit]?.isActive == true { fingerGestureState[digit]?.isActive = false }
             }
-            if grabActive                  { grabActive = false }
+            if grabActive                  { grabActive = false; grabMapping = nil }
             if rightIndexDragActive        { rightIndexDragActive = false }
             settings.activeGestureIndex = 0
             settings.isGeometryGestureActive = false
@@ -896,18 +1020,18 @@ final class GestureController {
     // MARK: - Two-Point Grab Gesture (Configurable Finger, Both Hands)
     
     /// Two-point grab: both hands pinch the assigned finger to grab two points in space.
-    /// - Pulling hands apart/together → scales the fractal world (detailScale)
-    /// - Rotating the axis between hands → rotates the fractal world (worldRotation)
-    /// - Position is derived so the pivot (hand midpoint) stays "pinned" in world space.
     ///
-    /// Pivot-correct transform:
-    ///   newModel = T(currentMid) × R(deltaRot) × S(deltaScale) × T(-startMid) × startModel
-    /// Factored into T × R × R_fixed × S form:
-    ///   newPos       = currentMid + rot(deltaRot, scaleRatio × (startPos - startMid))
-    ///   newUserRot   = deltaRot × startRot
-    ///   newDetailScale = startDetailScale × scaleRatio
+    /// **1:1 SCALING**: hand separation ratio maps directly to detailScale.
+    ///   10 cm → 50 cm apart = 5× zoom, no deadzone, no attenuation.
     ///
-    /// This works because uniform scaling commutes with rotation in the model matrix.
+    /// **MIDPOINT GROUNDING**: the world-space point under the hand midpoint at
+    ///   gesture start stays pinned to wherever the midpoint moves. Scale and
+    ///   rotation expand/twist around that anchor.
+    ///
+    /// **PRE-COMPUTED MAPPING** (`GrabZoomMapping`): captured once at gesture start,
+    ///   it encodes the inverse map from hand positions → fractal transform.
+    ///   Each frame, `mapping.evaluate(hands)` produces the target transform.
+    ///   At rotation breakaway the mapping is rebased to the current state.
     private func processTwoPointGrab(digit: Int) {
         guard let settings = renderSettings else { return }
         
@@ -949,154 +1073,100 @@ final class GestureController {
         // === GESTURE START ===
         if bothActive && !grabActive {
             grabActive = true
-            grabStartLeftPos = leftPos
-            grabStartRightPos = rightPos
-            grabStartDistance = max(currentDistance, 0.01)  // Prevent division by zero
-            grabStartMidpoint = (leftPos + rightPos) * 0.5
-            let axis = rightPos - leftPos
-            let axisLen = simd_length(axis)
-            grabStartAxis = axisLen > 1e-4 ? axis / axisLen : SIMD3<Float>(1, 0, 0)
+            
             // Capture CURRENT values (what's visually shown), not targets.
-            // Since applyDetailState snaps current=target, these are the same after
-            // the first gesture. But on the very first grab, we want what's on screen.
-            grabStartRotation = settings.worldRotation
-            detailStartScale = settings.detailScale
-            grabStartPosition = settings.position
+            // Build the pre-computed inverse mapping from gesture → fractal space.
+            grabMapping = GrabZoomMapping(
+                leftPos: leftPos, rightPos: rightPos,
+                position: settings.position,
+                rotation: settings.worldRotation,
+                detailScale: settings.detailScale
+            )
+            grabOriginalAxis = grabMapping!.startAxis
             rotationBrokenAway = !settings.rotationAutoSnap  // If snap disabled, act as if already broken away
-            breakawayBaseAxis = .zero
             
             if HAND_TRACKING_DEBUG {
-                print("🤲✊ Two-point GRAB started: dist=\(grabStartDistance), mid=\(grabStartMidpoint)")
+                print("🤲✊ Two-point GRAB started: dist=\(grabMapping!.startDistance), mid=\(grabMapping!.startMidpoint)")
             }
         }
         
         // === GESTURE ACTIVE ===
-        if bothActive && grabActive {
-            let currentMidpoint = (leftPos + rightPos) * 0.5
-            let currentAxis = rightPos - leftPos
-            let currentAxisLen = simd_length(currentAxis)
-            let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : grabStartAxis
+        if bothActive && grabActive, var mapping = grabMapping {
             
-            // 1) SCALE: ratio of current hand distance to start distance
-            // Use log-space with a small deadzone so tiny tracking jitter near
-            // the starting hand separation does not make scaling feel clunky.
-            let rawScaleRatio = currentDistance / max(grabStartDistance, 0.01)
-            let logScaleDelta = log(max(rawScaleRatio, 1e-6))
-            let scaleDeadzone: Float = 0.025
-            let adjustedLogScaleDelta: Float
-            if abs(logScaleDelta) <= scaleDeadzone {
-                adjustedLogScaleDelta = 0.0
-            } else {
-                adjustedLogScaleDelta = copysign(abs(logScaleDelta) - scaleDeadzone, logScaleDelta)
-            }
-            let scaleResponse: Float = (settings.fractalType == .mandelbulb) ? 0.90 : 0.95
-            let scaleRatio = exp(adjustedLogScaleDelta * scaleResponse)
-            let adjustedScale = detailStartScale * scaleRatio
-            // Clamp to reasonable range (0.05× to 20× of starting scale)
-            let clampedScale = max(0.05, min(20.0, adjustedScale))
-            
-            // 2) ROTATION: compute quaternion from start axis to current axis
-            let dot = simd_clamp(simd_dot(grabStartAxis, currentAxisNorm), -1.0, 1.0)
-            let cross = simd_cross(grabStartAxis, currentAxisNorm)
-            let crossLen = simd_length(cross)
-            
-            let deltaRotation: simd_quatf
-            if crossLen > 1e-6 {
-                let angle = acos(dot)
-                let rotAxis = cross / crossLen
-                deltaRotation = simd_quatf(angle: angle, axis: rotAxis)
-            } else if dot < 0 {
-                let perp: SIMD3<Float> = abs(grabStartAxis.x) < 0.9
-                    ? simd_normalize(simd_cross(grabStartAxis, SIMD3<Float>(1, 0, 0)))
-                    : simd_normalize(simd_cross(grabStartAxis, SIMD3<Float>(0, 1, 0)))
-                deltaRotation = simd_quatf(angle: .pi, axis: perp)
-            } else {
-                deltaRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-            }
-            
-            // 2b) BREAKAWAY GATE: suppress rotation until hand delta exceeds breakaway angle
-            let effectiveRotation: simd_quatf
+            // ── Rotation breakaway gate ──────────────────────────────────
+            // Rotation is suppressed until the hand axis diverges enough from
+            // the original start axis. On breakaway, rebase the entire mapping
+            // to the current state so scale+position+rotation all continue
+            // smoothly from here with no jump.
             if !rotationBrokenAway {
-                // Measure angle between start axis and current axis
-                let breakawayAngleRad = acos(simd_clamp(dot, -1.0, 1.0))
+                let currentAxis = rightPos - leftPos
+                let currentAxisLen = simd_length(currentAxis)
+                let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : grabOriginalAxis
+                let dot = simd_clamp(simd_dot(grabOriginalAxis, currentAxisNorm), -1.0, 1.0)
+                let breakawayAngleRad = acos(dot)
                 let breakawayThresholdRad = settings.rotationBreakawayDegrees * (.pi / 180.0)
+                
                 if breakawayAngleRad >= breakawayThresholdRad {
-                    // Broken away! Rebase so rotation starts from current hand position
                     rotationBrokenAway = true
-                    breakawayBaseAxis = currentAxisNorm
-                    grabStartRotation = settings.worldRotation
-                    effectiveRotation = grabStartRotation  // No jump on the first frame
-                } else {
-                    effectiveRotation = grabStartRotation  // Hold at start rotation
+                    // Rebase: snapshot current state as the new baseline for
+                    // the mapping so rotation, scale, and position all start
+                    // from the current values — no jump.
+                    mapping.rebase(
+                        leftPos: leftPos, rightPos: rightPos,
+                        position: settings.position,
+                        rotation: settings.worldRotation,
+                        detailScale: settings.detailScale
+                    )
+                    grabMapping = mapping
                 }
-            } else if breakawayBaseAxis != .zero {
-                // Recompute delta from the breakaway axis instead of the original grab axis
-                let rebDot = simd_clamp(simd_dot(breakawayBaseAxis, currentAxisNorm), -1.0, 1.0)
-                let rebCross = simd_cross(breakawayBaseAxis, currentAxisNorm)
-                let rebCrossLen = simd_length(rebCross)
-                let rebDelta: simd_quatf
-                if rebCrossLen > 1e-6 {
-                    rebDelta = simd_quatf(angle: acos(rebDot), axis: rebCross / rebCrossLen)
-                } else if rebDot < 0 {
-                    let perp: SIMD3<Float> = abs(breakawayBaseAxis.x) < 0.9
-                        ? simd_normalize(simd_cross(breakawayBaseAxis, SIMD3<Float>(1, 0, 0)))
-                        : simd_normalize(simd_cross(breakawayBaseAxis, SIMD3<Float>(0, 1, 0)))
-                    rebDelta = simd_quatf(angle: .pi, axis: perp)
-                } else {
-                    rebDelta = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-                }
-                effectiveRotation = (rebDelta * grabStartRotation).normalized
-            } else {
-                effectiveRotation = (deltaRotation * grabStartRotation).normalized
             }
             
-            let newRotation = effectiveRotation
+            // ── Per-fractal scale clamp ─────────────────────────────────
+            // Mandelbulb starts at detailScale 0.25 and needs deep zoom;
+            // give it a much wider clamp range.
+            let scaleClamp: ClosedRange<Float> = (settings.fractalType == .mandelbulb)
+                ? 0.0005...2000.0
+                : 0.001...500.0
+
+            // ── Evaluate the mapping ─────────────────────────────────────
+            let result: (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float)
+            if rotationBrokenAway {
+                result = mapping.evaluate(leftPos: leftPos, rightPos: rightPos, scaleClamp: scaleClamp)
+            } else {
+                result = mapping.evaluateScaleOnly(leftPos: leftPos, rightPos: rightPos, scaleClamp: scaleClamp)
+            }
             
-            // 3) POSITION: pivot-correct transform
-            //    The world-space point under the hand midpoint stays "pinned" as
-            //    scale and rotation change around it.
-            //    newPos = currentMid + dR.act(scaleRatio × (startPos - startMid))
-            let effectiveScaleRatio = clampedScale / max(detailStartScale, 1e-6)
-            let startOffset = grabStartPosition - grabStartMidpoint
-            let scaledOffset = effectiveScaleRatio * startOffset
-            let rotatedOffset = deltaRotation.act(scaledOffset)
-            let newPosition = currentMidpoint + rotatedOffset
-            
-            // DIRECT APPLICATION (intentional dispatcher bypass):
-            // Position (SIMD3), rotation (quaternion), and grab-scale are set
-            // atomically with no smoothing for 1:1 hand-to-world feel.
-            // These bypass ParameterOperationDispatcher because:
-            //   - Quaternions need slerp, not scalar lerp
-            //   - Grab requires atomic snap (current == target, zeroed velocity)
-            //   - The scalar dispatcher is not designed for vector/quat operations
+            // ── Apply to render settings ─────────────────────────────────
+            // Direct application (intentional dispatcher bypass):
+            // Position (SIMD3), rotation (quaternion), and grab-scale bypass
+            // ParameterOperationDispatcher because quaternions need slerp,
+            // and grab requires 1:1 tracking, not scalar lerp.
             if settings.isAnimationPlaying {
-                settings.manualOffsetPosition = newPosition - settings.animationBasePosition
-                // Still need to set rotation/scale directly
-                settings.worldRotation = newRotation
-                settings.targetWorldRotation = newRotation
-                settings.detailScale = clampedScale
-                settings.targetDetailScale = clampedScale
+                settings.manualOffsetPosition = result.position - settings.animationBasePosition
+                settings.worldRotation = result.rotation
+                settings.targetWorldRotation = result.rotation
+                settings.detailScale = result.detailScale
+                settings.targetDetailScale = result.detailScale
             } else {
                 settings.applyDetailState(
-                    position: newPosition,
-                    worldRotation: newRotation,
-                    detailScale: clampedScale
+                    position: result.position,
+                    worldRotation: result.rotation,
+                    detailScale: result.detailScale,
+                    responsiveness: 1.0  // Near-direct 1:1 tracking
                 )
-                accumulatedPosition = newPosition
+                accumulatedPosition = result.position
             }
             
-            // Track hand gesture usage for analytics
             UsageAnalytics.shared.trackHandGestureUsed()
         }
         
         // === GESTURE END ===
         if !bothActive && grabActive {
             grabActive = false
+            grabMapping = nil
             grabEndCooldown = 0.15  // 150ms cooldown prevents drag from stealing
 
-            // Apply rotation auto-snap on release: sets targetWorldRotation to the
-            // nearest 45° aligned orientation (if within snap window), so the slerp
-            // in interpolateToTargets() animates smoothly to the snapped pose.
+            // Apply rotation auto-snap on release
             settings.applyRotationSnap()
 
             if HAND_TRACKING_DEBUG {

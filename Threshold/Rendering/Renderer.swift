@@ -1134,11 +1134,13 @@ actor Renderer {
             fractalScale: settingsSnapshot.fractalScale,
             sphereRadius: settingsSnapshot.sphereRadius,
             safetyBubbleRadius: tileScaledBubbleRadius,
-            safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
+            // Mandelbulb: force safety bubble off — its geometry is compact and
+            // the bubble blend/fade creates visible artifacts when zooming deep.
+            safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
             safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
             safetyBubbleFadeWidth: tileScaledFadeWidth,
-            safetyBubbleStrength: settingsSnapshot.safetyBubbleStrength,
+            safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
             foldingLimit: settingsSnapshot.foldingLimit,
             glowIntensity: settingsSnapshot.colorSchemeParams.glowIntensity,
             colorMix: settingsSnapshot.colorMix,
@@ -1155,7 +1157,11 @@ actor Renderer {
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
-            blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
+            // Mandelbulb: disable temporal color blending — fine surface detail gets
+            // softened by history accumulation, and reprojection artifacts are more
+            // visible on its smooth/spherical geometry. Temporal reprojection for
+            // ray-start optimization (startT) still works (separate system).
+            blendFactor: (settingsSnapshot.fractalType == .mandelbulb || settingsSnapshot.isGeometryGestureActive) ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
             jitterOffset: currentJitterOffset(),
             accumulationFrame: Int32(accumulationFrameCount),
             pad_gmt: 0.0,

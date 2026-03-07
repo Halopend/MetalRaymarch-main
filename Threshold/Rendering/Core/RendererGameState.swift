@@ -110,11 +110,14 @@ extension Renderer {
                             foldingLimit: settingsSnapshot.foldingLimit,
                             sphereRadius: settingsSnapshot.sphereRadius,
                             safetyBubbleRadius: scaleCorrectedBubbleRadius,
-                            safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
+                            // Mandelbulb: force safety bubble off — its compact geometry
+                            // doesn’t need a safety carve-out and the blend/fade creates
+                            // visible artifacts when zooming deep into surface detail.
+                            safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
                             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
                             safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
                             safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
-                            safetyBubbleStrength: settingsSnapshot.safetyBubbleStrength,
+                            safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
                             colorIterations: settingsSnapshot.colorIterations,
                             limitFlash: settingsSnapshot.limitFlash,
                             showHUD: settingsSnapshot.showHUD ? 1 : 0,

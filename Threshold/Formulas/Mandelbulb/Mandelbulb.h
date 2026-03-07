@@ -36,7 +36,11 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     float3 trapPos = z;
     int i = 0;
 
-    for (; i < iterations && r2 < bailout * bailout; ) {
+    // Min-distance early exit: once r is tiny we're on/inside the surface.
+    // Skipping remaining trig-heavy iterations saves significant ALU at deep zoom.
+    const float minR2Exit = 1e-12f;
+
+    for (; i < iterations && r2 < bailout * bailout && r2 > minR2Exit; ) {
         float log2r = fast::log2(max(r, 1e-30f));
 
         if (alternate) {
@@ -116,7 +120,10 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
     float r2 = dot(z, z);
     float r  = fast::sqrt(r2);
 
-    for (int i = 0; i < iterations && r2 < bailout2; ++i) {
+    // Min-distance early exit: once r is tiny we're on/inside the surface.
+    const float minR2Exit = 1e-12f;
+
+    for (int i = 0; i < iterations && r2 < bailout2 && r2 > minR2Exit; ++i) {
         float log2r = fast::log2(max(r, 1e-30f));
         if (alternate) {
             float theta = fast::acos(clamp11(z.z / max(r, kEpsLen))) + polarRot;

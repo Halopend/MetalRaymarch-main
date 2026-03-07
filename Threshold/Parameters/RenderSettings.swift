@@ -1916,15 +1916,21 @@ final class RenderSettings: @unchecked Sendable {
     /// Much faster than the full smooth-damp pipeline but takes the edge off
     /// hand-tracking jitter. Uses an adaptive rate: slower for tiny movements
     /// (dead-zone on noise), faster for clear intentional motion.
-    func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float) {
+    ///
+    /// - Parameter responsiveness: 0 = default smooth (jitter-damped),
+    ///   1 = near-direct 1:1 tracking for true grab feel. Intermediate values
+    ///   blend between the two extremes.
+    func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float, responsiveness: Float = 0.0) {
         withLock {
-            // Adaptive lerp: base 0.30 (smoother), ramp up to 0.55 for large motions.
-            // This damps hand-tracking micro-jitter while keeping big gestures snappy.
+            // Adaptive lerp: base/max ramp with responsiveness boost.
+            // responsiveness 0 → (0.30 … 0.55)  default smooth
+            // responsiveness 1 → (0.85 … 0.95)  near-direct 1:1
+            let r = simd_clamp(responsiveness, 0.0, 1.0)
             let positionDelta = simd_length(position - _position)
             let scaleDelta = abs(log(max(detailScale, 1e-6)) - log(max(_detailScale, 1e-6)))
             let motionMag = positionDelta + scaleDelta * 0.5  // rough combined metric
-            let tBase: Float = 0.30
-            let tMax:  Float = 0.55
+            let tBase: Float = 0.30 + r * 0.55   // 0.30 → 0.85
+            let tMax:  Float = 0.55 + r * 0.40   // 0.55 → 0.95
             let rampStart: Float = 0.001   // below this → mostly noise
             let rampEnd:   Float = 0.02    // above this → full response
             let rampT = simd_clamp((motionMag - rampStart) / (rampEnd - rampStart), 0, 1)
