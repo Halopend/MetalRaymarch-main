@@ -49,7 +49,29 @@ actor Renderer {
     var lastComputeRS: Int = -1
     var lastSelectedComputePipeline: MTLComputePipelineState?
     
-    /// Cached default Metal library — avoids device.makeDefaultLibrary() on every compute cache miss
+    // === UI UPDATE COORDINATION ===
+    /// Coordinates UI updates without blocking MainActor during heavy rendering
+    private(set) var uiUpdateCoordinator: UIUpdateCoordinator?
+    
+<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
+<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
+<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
+=======
+    /// Coordinates parameter smoothing and animation updates without blocking MainActor
+    private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
+    
+>>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
+=======
+    /// Coordinates parameter smoothing and animation updates without blocking MainActor
+    private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
+    
+>>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
+=======
+    /// Coordinates parameter smoothing and animation updates without blocking MainActor
+    private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
+    
+>>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
+    // Cached default Metal library — avoids device.makeDefaultLibrary() on every compute cache miss
     var cachedDefaultLibrary: MTLLibrary?
     
     // Cached constant matrices (computed once, reused every frame)
@@ -223,6 +245,27 @@ actor Renderer {
         self.commandQueue = queue
         self.appModel = appModel
         
+        // Initialize UI update coordinator to prevent UI blocking during heavy rendering
+        self.uiUpdateCoordinator = UIUpdateCoordinator(appModel: appModel)
+        
+<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
+<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
+<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
+=======
+        // Initialize parameter update coordinator to batch smoothing/animation updates
+        self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
+        
+>>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
+=======
+        // Initialize parameter update coordinator to batch smoothing/animation updates
+        self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
+        
+>>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
+=======
+        // Initialize parameter update coordinator to batch smoothing/animation updates
+        self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
+        
+>>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
         // Pre-compute constant rotation matrix (never changes)
         self.cachedRotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
 
@@ -597,25 +640,10 @@ actor Renderer {
             let updatedFPS = smoothedFPS + (instantFPS - smoothedFPS) * fpsSmoothFactor
             smoothedFPS = updatedFPS
             
-            // Throttle UI updates to 2Hz (every 0.5s) to reduce SwiftUI observation invalidation.
-            // appModel.fps is @Observable and triggers layout re-evaluation of all views reading it.
-            // 2Hz is frequent enough for visual FPS display while halving MainActor layout work.
-            if time - lastFPSUpdateTime > 0.5 {
-                lastFPSUpdateTime = time
-                Task { @MainActor in
-                    appModel.fps = updatedFPS
-                    // Sample analytics ~4Hz (matches FPS update rate)
-                    let qualityPreset = QualityPreset.detect(
-                        fractalIterations: settings.fractalIterations,
-                        raySteps: settings.maxRaySteps
-                    )?.rawValue ?? "custom"
-                    UsageAnalytics.shared.sample(
-                        settings: settings,
-                        fps: updatedFPS,
-                        currentQuality: qualityPreset
-                    )
-                }
-            }
+            // === UI UPDATE COORDINATION ===
+            // Use UIUpdateCoordinator to prevent UI blocking during heavy fractal rendering
+            // Decouples FPS updates from MainActor to maintain UI responsiveness
+            uiUpdateCoordinator?.scheduleUIUpdate(fps: updatedFPS, currentTime: time)
             
             // Periodic FPS console logging (every 2 seconds)
             if RENDERER_DEBUG && time - lastFPSConsoleLogTime > 2.0 {
@@ -650,32 +678,19 @@ actor Renderer {
         // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
         // Apple Music BPM-based synthesis — blend whatever is available.
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
-        
-        // Single consolidated MainActor dispatch only when needed.
-        // Avoid scheduling a per-frame task when no animation or audio updates are active.
         let shouldUpdateAnimation = settings.isAnimationPlaying
         let fractalType = settings.fractalType
-        if shouldUpdateAnimation || isAudioMode {
-            Task { @MainActor in
-                if shouldUpdateAnimation {
-                    self.appModel.animationManager?.update(deltaTime: animDelta)
-                }
-                if isAudioMode {
-                    self.appModel.spotifyManager.updateFrame()
-                    self.appModel.appleMusicManager.updateFrame()
-                }
-                // Advance per-node smoothing and consume dirty flags
-                ParameterNodeRegistry.shared.updateSmoothing(deltaTime: Float(animDelta), for: fractalType)
-                let _ = ParameterNodeRegistry.shared.consumeDirtyNodes(for: fractalType)
-            }
-        } else {
-            // Still tick per-node smoothing every frame even without animation/audio,
-            // so formula params animated by gestures or sliders smoothly converge.
-            Task { @MainActor in
-                ParameterNodeRegistry.shared.updateSmoothing(deltaTime: Float(animDelta), for: fractalType)
-                let _ = ParameterNodeRegistry.shared.consumeDirtyNodes(for: fractalType)
-            }
-        }
+        
+        // === PARAMETER UPDATE COORDINATION ===
+        // Use ParameterUpdateCoordinator to batch animation/audio/smoothing updates
+        // Prevents per-frame MainActor blocking that causes UI lag during heavy rendering
+        parameterUpdateCoordinator?.scheduleParameterUpdates(
+            shouldUpdateAnimation: shouldUpdateAnimation,
+            shouldUpdateAudio: isAudioMode,
+            deltaTime: animDelta,
+            currentTime: time,
+            fractalType: fractalType
+        )
         
         if isAudioMode {
             let mic = appModel.audioAnalyzer
