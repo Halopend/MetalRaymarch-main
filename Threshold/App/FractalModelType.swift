@@ -45,9 +45,9 @@ enum FractalModelType: Int32, CaseIterable {
     var supportedCoreGestureActions: [FingerGestureAction] {
         switch self {
         case .mandelbox:
-            return [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale]
+            return [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale, .translate]
         default:
-            return [.none, .grab, .fractalScale]
+            return [.none, .grab, .fractalScale, .translate]
         }
     }
 

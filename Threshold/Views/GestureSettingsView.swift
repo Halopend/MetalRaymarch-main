@@ -55,7 +55,19 @@ struct GestureSettingsView: View {
             ))
 
             VStack(alignment: .leading, spacing: 0) {
-                // ── Core Behavior (always visible) ───────────────────────
+                // ── Hand Assignments (per-hand × per-finger) ──────────────
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Hand Assignments", systemImage: "hand.point.up.braille")
+                        .font(.subheadline.weight(.semibold))
+
+                    handSection(mode: .left)
+                    handSection(mode: .right)
+                    handSection(mode: .both)
+                }
+
+                Divider().padding(.vertical, 2)
+
+                // ── Core Behavior ─────────────────────────────────────────
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Core Behavior", systemImage: "slider.horizontal.3")
                         .font(.subheadline.weight(.semibold))
@@ -82,27 +94,6 @@ struct GestureSettingsView: View {
                         enabled: .constant(true),
                         onChanged: { cache.push(\.translationSensitivity, value: cache.translationSensitivity) },
                         showToggle: false)
-                }
-
-                Divider().padding(.vertical, 2)
-
-                // ── Finger Assignments (always visible) ──────────────────
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Finger Assignments", systemImage: "hand.point.up.braille")
-                        .font(.subheadline.weight(.semibold))
-
-                    fingerActionPicker(finger: "Index",  icon: "1.circle.fill",
-                                       selection: Binding(get: { cache.indexFingerBinding }, set: { cache.indexFingerBinding = $0 }),
-                                       settingsKeyPath: \.indexFingerBinding)
-                    fingerActionPicker(finger: "Middle", icon: "2.circle.fill",
-                                       selection: Binding(get: { cache.middleFingerBinding }, set: { cache.middleFingerBinding = $0 }),
-                                       settingsKeyPath: \.middleFingerBinding)
-                    fingerActionPicker(finger: "Ring",   icon: "3.circle.fill",
-                                       selection: Binding(get: { cache.ringFingerBinding }, set: { cache.ringFingerBinding = $0 }),
-                                       settingsKeyPath: \.ringFingerBinding)
-                    fingerActionPicker(finger: "Pinky",  icon: "4.circle.fill",
-                                       selection: Binding(get: { cache.pinkyFingerBinding }, set: { cache.pinkyFingerBinding = $0 }),
-                                       settingsKeyPath: \.pinkyFingerBinding)
                 }
 
                 Divider().padding(.vertical, 2)
@@ -257,29 +248,40 @@ struct GestureSettingsView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
     }
 
-    // MARK: - Helpers
+    // MARK: - Hand Section Helpers
 
     @ViewBuilder
-    private func fingerActionPicker(
-        finger: String,
-        icon: String,
-        selection: Binding<GestureActionBinding>,
-        settingsKeyPath: WritableKeyPath<RenderSettings, GestureActionBinding>
-    ) -> some View {
-        let bindings = GestureActionBinding.availableBindings(for: cache.fractalType)
+    private func handSection(mode: GestureHandMode) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(mode.displayName, systemImage: mode.icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+
+            ForEach(FingerDigit.allCases, id: \.self) { finger in
+                let slot = GestureSlot(hand: mode, finger: finger)
+                slotPicker(slot: slot, handMode: mode)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func slotPicker(slot: GestureSlot, handMode: GestureHandMode) -> some View {
+        let bindings = GestureActionBinding.availableBindings(for: cache.fractalType, handMode: handMode)
+        let currentBinding = Binding<GestureActionBinding>(
+            get: { cache.gestureBinding(for: slot) },
+            set: { cache.setGestureBinding($0, for: slot) }
+        )
         HStack {
-            Label(finger, systemImage: icon).font(.subheadline)
+            Label(slot.finger.displayName, systemImage: slot.finger.icon).font(.subheadline)
             Spacer()
-            Picker(finger, selection: selection) {
+            Picker(slot.finger.displayName, selection: currentBinding) {
                 ForEach(bindings, id: \.self) { binding in
                     Label(binding.contextualDisplayName(for: cache.fractalType), systemImage: binding.icon).tag(binding)
                 }
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 220)
-            .onChange(of: selection.wrappedValue) { _, v in
-                cache.push(settingsKeyPath, value: v)
-            }
         }
     }
 

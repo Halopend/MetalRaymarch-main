@@ -140,24 +140,38 @@ private struct ParameterNodeRow: View {
             if floatNode.isGestureMappable {
                 if let formulaBinding = floatGestureBinding {
                     Menu {
-                        ForEach(FingerPair.allCases, id: \.self) { pair in
-                            Button {
-                                cache.setFingerBinding(formulaBinding, for: pair)
-                            } label: {
-                                Label(pair.displayName, systemImage: pair.icon)
+                        // Filter hand modes: triplets only work on single-hand
+                        let isTriplet: Bool = { if case .parameterTriplet = formulaBinding { return true }; return false }()
+                        let validModes: [GestureHandMode] = isTriplet ? [.left, .right] : GestureHandMode.allCases
+                        ForEach(validModes, id: \.self) { mode in
+                            Menu(mode.displayName) {
+                                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                                    let slot = GestureSlot(hand: mode, finger: finger)
+                                    let isCurrentSlot = currentGestureSlot == slot
+                                    Button {
+                                        cache.setGestureBinding(formulaBinding, for: slot)
+                                    } label: {
+                                        HStack {
+                                            Label(finger.displayName, systemImage: finger.icon)
+                                            if isCurrentSlot {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                        if currentGestureAssignment != nil {
+                        if currentGestureSlot != nil {
                             Divider()
                             Button("Clear Gesture") { clearGestureMapping() }
                         }
                     } label: {
-                        Image(systemName: currentGestureAssignment?.icon ?? "hand.point.up.left.fill")
+                        Image(systemName: currentGestureSlot != nil ? (currentGestureSlot!.hand.icon) : "hand.point.up.left.fill")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(currentGestureSlot != nil ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
                             .frame(width: 20)
                     }
-                    .help("Assign hand gesture")
+                    .help(currentGestureSlot.map { "\($0.hand.displayName) \($0.finger.displayName)" } ?? "Assign hand gesture")
                 }
 
                 // Assign to music reactive
@@ -368,14 +382,14 @@ private struct ParameterNodeRow: View {
         ))
     }
 
-    private var currentGestureAssignment: FingerPair? {
+    private var currentGestureSlot: GestureSlot? {
         guard let binding = floatGestureBinding else { return nil }
-        return cache.fingerPair(for: binding)
+        return cache.gestureSlot(for: binding)
     }
 
     private func clearGestureMapping() {
-        guard let pair = currentGestureAssignment else { return }
-        cache.setFingerBinding(.core(.none), for: pair)
+        guard let slot = currentGestureSlot else { return }
+        cache.setGestureBinding(.core(.none), for: slot)
     }
 
     // MARK: - Music Reactive Helpers

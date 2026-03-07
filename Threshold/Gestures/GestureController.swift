@@ -485,43 +485,34 @@ final class GestureController {
     private var leftHand: HandData = .zero
     private var rightHand: HandData = .zero
     
-    // Two-hand gesture states — one per finger pair, action-agnostic.
+    // Two-hand gesture states — one per finger (index/middle/ring), action-agnostic.
     // The action each finger performs is read from RenderSettings at dispatch time.
     private var fingerGestureState: [Int: TwoHandGestureState] = [
         1: TwoHandGestureState(),   // index
         2: TwoHandGestureState(),   // middle
         3: TwoHandGestureState(),   // ring
-        4: TwoHandGestureState(),   // pinky
     ]
     
     // === TWO-POINT GRAB STATE ===
-    // Pre-computed inverse mapping from gesture space → fractal world transform.
-    // Pulling hands apart scales 1:1, rotating the axis rotates the world,
-    // and the midpoint stays grounded as the spatial anchor.
     private var grabActive: Bool = false
-    private var grabEndCooldown: Float = 0  // Prevents drag from stealing gesture after grab ends
-    private var grabMapping: GrabZoomMapping?             // Pre-computed gesture→fractal mapping
-    private var grabOriginalAxis: SIMD3<Float> = .zero    // Original axis at grab start (for breakaway check)
-
-    // Rotation breakaway: rotation is suppressed until the hand axis delta exceeds the
-    // breakaway angle. Once broken away, rotation tracks 1:1. Resets on each new grab.
+    private var grabEndCooldown: Float = 0
+    private var grabMapping: GrabZoomMapping?
+    private var grabOriginalAxis: SIMD3<Float> = .zero
     private var rotationBrokenAway: Bool = false
     
-    // Single-hand drag state (index finger → position translation)
-    private var rightIndexDragActive: Bool = false
-    private var rightIndexDragStartPos: SIMD3<Float> = .zero
-    private var rightIndexPrevPos: SIMD3<Float> = .zero
-    private var rightIndexPrevPalm: SIMD3<Float> = .zero
+    // === UNIFIED SINGLE-HAND DRAG STATE (per GestureSlot) ===
+    struct SingleHandDragState {
+        var isActive: Bool = false
+        var prevPos: SIMD3<Float> = .zero
+        var prevPalm: SIMD3<Float> = .zero
+        var startValues: SIMD3<Float> = .zero   // for triplets
+        var startValue: Float = 0                // for scalars
+        var accumulatedPosition: SIMD3<Float> = .zero  // for translate
+    }
+    private var singleHandDragState: [String: SingleHandDragState] = [:]
     
-    // Accumulated position from drag gestures (target position)
+    // Accumulated position from drag gestures (shared for translate bindings)
     private var accumulatedPosition: SIMD3<Float> = .zero
-
-    // Triplet drag state (any finger → xyz formula param pinch-drag)
-    private var tripletDragActive: Bool = false
-    private var tripletDragDigit: Int = 0
-    private var tripletDragBinding: GestureBindableTriplet?
-    private var tripletDragStartValues: SIMD3<Float> = .zero
-    private var tripletDragPrevPos: SIMD3<Float> = .zero
 
     // Left hand tracking stability: prevents two-hand gesture false triggers when
     // the left hand briefly enters ARKit's tracking field without the user intending
@@ -571,13 +562,11 @@ final class GestureController {
         accumulatedPosition = settings.effectiveTargetPosition
         
         // Reset all gesture states to avoid stale data
-        for digit in 1...4 { fingerGestureState[digit] = TwoHandGestureState() }
+        for digit in 1...3 { fingerGestureState[digit] = TwoHandGestureState() }
         grabActive = false
         grabEndCooldown = 0
         grabMapping = nil
-        rightIndexDragActive = false
-        tripletDragActive = false
-        tripletDragBinding = nil
+        singleHandDragState.removeAll()
         menuToggleActive = false
         menuToggleHoldTimer = 0
         menuToggleCooldown = 0
@@ -784,44 +773,40 @@ final class GestureController {
         guard let settings = renderSettings else { return }
         
         // ── Suppress parameter gestures while the user is interacting with the menu window ──
-        // Eye-hover on the window sets this flag; we deactivate any in-flight gestures
-        // cleanly so releasing the suppression doesn't cause a jump.
         if suppressParameterGestures {
-            for digit in 1...4 {
+            for digit in 1...3 {
                 if fingerGestureState[digit]?.isActive == true { fingerGestureState[digit]?.isActive = false }
             }
-            if grabActive                  { grabActive = false; grabMapping = nil }
-            if rightIndexDragActive        { rightIndexDragActive = false }
-            if tripletDragActive           { tripletDragActive = false; tripletDragBinding = nil }
+            if grabActive { grabActive = false; grabMapping = nil }
+            for key in singleHandDragState.keys { singleHandDragState[key]?.isActive = false }
             settings.activeGestureIndex = 0
             settings.isGeometryGestureActive = false
             return
         }
 
-        // Track active gesture for HUD display
         var activeDigit = 0
-        
-        // Get parameter ranges for current fractal type
         let ranges = currentRanges()
         
-        // ── DATA-DRIVEN TWO-HAND GESTURE DISPATCH ──────────────────────────
-        // Each finger pair reads its assigned action from RenderSettings.
-        // Parameter gestures use processTwoHandGesture(); grab uses processTwoPointGrab().
+        // ── 1. BOTH-HAND GESTURE DISPATCH (two-hand pull-apart) ─────────
+        for digit in 1...3 {
+            let binding = settings.binding(forHand: .both, digit: digit)
 
-        for digit in 1...4 {
-            let binding = settings.bindingForDigit(digit)
-
-            if case .parameterTriplet(let triplet) = binding {
-                // Triplet bindings use single-hand (right) pinch-drag on this finger.
-                // Skip two-hand processing for this digit entirely.
-                processTripletDrag(digit: digit, triplet: triplet)
-                if tripletDragActive && tripletDragDigit == digit { activeDigit = digit }
+            // Runtime conflict guard: skip if any single-hand drag is active for this digit
+            guard let finger = FingerDigit(rawValue: digit) else { continue }
+            let leftKey = GestureSlot(hand: .left, finger: finger).persistenceKey
+            let rightKey = GestureSlot(hand: .right, finger: finger).persistenceKey
+            if singleHandDragState[leftKey]?.isActive == true ||
+               singleHandDragState[rightKey]?.isActive == true {
+                if fingerGestureState[digit]?.isActive == true {
+                    fingerGestureState[digit]?.isActive = false
+                }
                 continue
             }
 
             if case .parameter(let descriptor) = binding,
                let formulaIndex = descriptor.formulaIndex,
                let node = ParameterNodeRegistry.shared.node(for: descriptor) {
+                guard fingerGestureState[digit] != nil else { continue }
                 processTwoHandGesture(
                     digit: digit,
                     state: &fingerGestureState[digit]!,
@@ -833,11 +818,11 @@ final class GestureController {
                         targetID: node.id,
                         source: .gesture,
                         value: .absolute(newValue),
-                        frameIndex: operationFrameCounter,
+                        frameIndex: self.operationFrameCounter,
                         smoothing: .init()
                     )
-                    operationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
+                    self.operationDispatcher.dispatch(
+                        ParameterTransaction(frameIndex: self.operationFrameCounter, operations: [op]),
                         settings: settings
                     )
                     UsageAnalytics.shared.trackHandGestureUsed()
@@ -859,8 +844,6 @@ final class GestureController {
                 if grabActive { activeDigit = digit }
                 
             case .minDistance, .foldingLimit, .sphereRadius:
-                // Shape params are now formula params for Mandelbox. Non-Mandelbox
-                // types won't have these bindings (sanitised on type switch).
                 guard settings.fractalType == .mandelbox else {
                     if fingerGestureState[digit]?.isActive == true {
                         fingerGestureState[digit]?.isActive = false
@@ -870,28 +853,40 @@ final class GestureController {
                 processMandelboxShapeGesture(digit: digit, action: action, ranges: ranges, settings: settings, activeDigit: &activeDigit)
 
             case .fractalScale:
-                // Fractal scale is a universal core parameter (all types).
                 processCoreScaleGesture(digit: digit, ranges: ranges, settings: settings, activeDigit: &activeDigit)
                 
-            case .none:
-                // Deactivate any stale state for unassigned fingers
+            case .none, .translate:
+                // translate is only valid for single-hand; deactivate any stale two-hand state
                 if fingerGestureState[digit]?.isActive == true {
                     fingerGestureState[digit]?.isActive = false
                 }
             }
         }
         
+        // ── 2. LEFT-HAND SINGLE-HAND GESTURES ──────────────────────────
+        for digit in 1...3 {
+            guard let finger = FingerDigit(rawValue: digit) else { continue }
+            let slot = GestureSlot(hand: .left, finger: finger)
+            let binding = settings.binding(for: slot)
+            processSingleHandDrag(slot: slot, hand: leftHand, binding: binding, settings: settings, activeDigit: &activeDigit)
+        }
+
+        // ── 3. RIGHT-HAND SINGLE-HAND GESTURES ─────────────────────────
+        for digit in 1...3 {
+            guard let finger = FingerDigit(rawValue: digit) else { continue }
+            let slot = GestureSlot(hand: .right, finger: finger)
+            let binding = settings.binding(for: slot)
+            processSingleHandDrag(slot: slot, hand: rightHand, binding: binding, settings: settings, activeDigit: &activeDigit)
+        }
+
         // Update active gesture for HUD
         settings.activeGestureIndex = activeDigit
         
-        // Wire geometry gesture flag so the state machine and dynamic quality know
-        // when a geometry-affecting gesture is in progress.
-        let anyGeometryGestureActive = grabActive ||
-            (1...4).contains(where: { fingerGestureState[$0]?.isActive == true })
+        // Wire geometry gesture flag
+        let anySingleHandActive = singleHandDragState.values.contains { $0.isActive }
+        let anyGeometryGestureActive = grabActive || anySingleHandActive ||
+            (1...3).contains(where: { fingerGestureState[$0]?.isActive == true })
         settings.isGeometryGestureActive = anyGeometryGestureActive
-        
-        // SINGLE-HAND gesture: Right index pinch drag → translate
-        processRightIndexDrag()
     }
     
     // MARK: - Shape & Scale Gesture Dispatch
@@ -1301,176 +1296,190 @@ final class GestureController {
         }
     }
     
-    /// Right-hand single-finger pinch drag → xyz formula param triplet.
-    /// Similar to processRightIndexDrag but writes to 3 formula params instead of position.
-    private func processTripletDrag(digit: Int, triplet: GestureBindableTriplet) {
-        guard let settings = renderSettings else { return }
+    // MARK: - Unified Single-Hand Drag
+
+    /// Unified single-hand pinch-drag handler for any hand+finger slot.
+    /// Handles .translate (position), .parameterTriplet (xyz), .parameter (1D scalar),
+    /// and skips .core(.none) or unsupported bindings.
+    private func processSingleHandDrag(
+        slot: GestureSlot,
+        hand: HandData,
+        binding: GestureActionBinding,
+        settings: RenderSettings,
+        activeDigit: inout Int
+    ) {
+        let key = slot.persistenceKey
+        let digit = slot.finger.rawValue
         let activateThresh = settings.twoHandPinchActivateThreshold
         let releaseThresh = settings.twoHandPinchReleaseThreshold
 
-        // Block if left hand is attempting any pinch (likely a two-hand gesture)
-        let leftAttemptingPinch = leftHand.isTracked && (
-            leftHand.indexPinch >= 0.4 || leftHand.middlePinch >= 0.4 ||
-            leftHand.ringPinch >= 0.3 || leftHand.pinkyPinch >= 0.3
+        // Skip unassigned slots
+        if case .core(.none) = binding { 
+            singleHandDragState[key]?.isActive = false
+            return
+        }
+
+        // Block if BOTH-hand two-hand gesture is active for this digit
+        if fingerGestureState[digit]?.isActive == true {
+            singleHandDragState[key]?.isActive = false
+            return
+        }
+
+        // Block during grab-end cooldown
+        if grabEndCooldown > 0 || grabActive {
+            singleHandDragState[key]?.isActive = false
+            return
+        }
+
+        // Check if the OTHER hand is attempting any pinch (likely a two-hand gesture)
+        let otherHand = (slot.hand == .right) ? leftHand : rightHand
+        let otherAttemptingPinch = otherHand.isTracked && (
+            otherHand.indexPinch >= 0.4 ||
+            otherHand.middlePinch >= 0.4 ||
+            otherHand.ringPinch >= 0.3
         )
 
-        let rightPinch = rightHand.pinchStrength(digit: digit)
+        let pinch = hand.pinchStrength(digit: digit)
+        var state = singleHandDragState[key] ?? SingleHandDragState()
         let active: Bool
-        if tripletDragActive && tripletDragDigit == digit {
-            active = rightHand.isTracked && rightPinch >= releaseThresh && !leftAttemptingPinch
+        if state.isActive {
+            active = hand.isTracked && pinch >= releaseThresh && !otherAttemptingPinch
         } else {
-            active = rightHand.isTracked && rightPinch >= activateThresh && !leftAttemptingPinch && !grabActive
+            active = hand.isTracked && pinch >= activateThresh && !otherAttemptingPinch
         }
 
-        // Gesture started
-        if active && !(tripletDragActive && tripletDragDigit == digit) {
-            tripletDragActive = true
-            tripletDragDigit = digit
-            tripletDragBinding = triplet
-            let fp = settings.formulaParams
-            tripletDragStartValues = SIMD3<Float>(
-                FormulaCatalog.getParam(fp, index: triplet.xFormulaIndex),
-                FormulaCatalog.getParam(fp, index: triplet.yFormulaIndex),
-                FormulaCatalog.getParam(fp, index: triplet.zFormulaIndex)
-            )
-            tripletDragPrevPos = rightHand.pinchPosition(digit: digit)
-        }
+        // ── Handle by binding type ──────────────────────────────────────
+        switch binding {
+        case .core(.translate):
+            // Position XYZ pinch-drag (previously processRightIndexDrag)
+            if active && !state.isActive {
+                state.isActive = true
+                state.accumulatedPosition = settings.effectiveTargetPosition
+                accumulatedPosition = settings.effectiveTargetPosition
+                state.prevPos = hand.pinchPosition(digit: digit)
+                state.prevPalm = hand.palmPosition
+            }
+            if active && state.isActive {
+                var currentPos = hand.palmPosition
+                if simd_length_squared(currentPos) == 0 { currentPos = hand.pinchPosition(digit: digit) }
+                var previousPos = state.prevPalm
+                if simd_length_squared(previousPos) == 0 { previousPos = state.prevPos }
 
-        // Gesture active — update param values
-        if active && tripletDragActive && tripletDragDigit == digit {
-            let currentPos = rightHand.pinchPosition(digit: digit)
-            let rawDelta = currentPos - tripletDragPrevPos
-            let deltaLength = simd_length(rawDelta)
+                let rawDelta = currentPos - previousPos
+                let deltaLength = simd_length(rawDelta)
+                let maxStep: Float = 0.30
+                let baseMultiplier: Float = 3.0
 
-            let maxStep: Float = 0.15
-            let sensitivity: Float = settings.gestureSensitivity
-            let rangeSpan = triplet.range.upperBound - triplet.range.lowerBound
+                var scaledDelta: SIMD3<Float> = .zero
+                if deltaLength > 0 {
+                    let direction = rawDelta / deltaLength
+                    scaledDelta = direction * min(deltaLength * baseMultiplier, maxStep)
+                }
 
-            if deltaLength > 0 {
-                let direction = rawDelta / deltaLength
-                let scaledLength = min(deltaLength * sensitivity, maxStep)
-                let scaledDelta = direction * scaledLength * rangeSpan
+                let maxZoomCompensation: Float = (settings.fractalType == .mandelbulb) ? 2.0 : 3.0
+                let zoomCompensation = simd_clamp(1.0 / sqrt(max(settings.detailScale, 0.01)), 0.35, maxZoomCompensation)
+                accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
+                if settings.isAnimationPlaying {
+                    settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition
+                } else {
+                    settings.targetPosition = accumulatedPosition
+                }
+                state.prevPos = currentPos
+                state.prevPalm = currentPos
+                activeDigit = digit
+            }
+            if !active && state.isActive { state.isActive = false }
 
-                tripletDragStartValues.x = simd_clamp(tripletDragStartValues.x + scaledDelta.x, triplet.range.lowerBound, triplet.range.upperBound)
-                tripletDragStartValues.y = simd_clamp(tripletDragStartValues.y + scaledDelta.y, triplet.range.lowerBound, triplet.range.upperBound)
-                tripletDragStartValues.z = simd_clamp(tripletDragStartValues.z + scaledDelta.z, triplet.range.lowerBound, triplet.range.upperBound)
+        case .parameterTriplet(let triplet):
+            // XYZ triplet pinch-drag
+            if active && !state.isActive {
+                state.isActive = true
+                let fp = settings.formulaParams
+                state.startValues = SIMD3<Float>(
+                    FormulaCatalog.getParam(fp, index: triplet.xFormulaIndex),
+                    FormulaCatalog.getParam(fp, index: triplet.yFormulaIndex),
+                    FormulaCatalog.getParam(fp, index: triplet.zFormulaIndex)
+                )
+                state.prevPos = hand.pinchPosition(digit: digit)
+            }
+            if active && state.isActive {
+                let currentPos = hand.pinchPosition(digit: digit)
+                let rawDelta = currentPos - state.prevPos
+                let deltaLength = simd_length(rawDelta)
+                let maxStep: Float = 0.15
+                let sensitivity = settings.gestureSensitivity
+                let rangeSpan = triplet.range.upperBound - triplet.range.lowerBound
 
-                var ops: [ParameterOperation] = []
-                ops.append(ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: .absolute(tripletDragStartValues.x), frameIndex: operationFrameCounter, smoothing: .init()))
-                ops.append(ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(tripletDragStartValues.y), frameIndex: operationFrameCounter, smoothing: .init()))
-                ops.append(ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: .absolute(tripletDragStartValues.z), frameIndex: operationFrameCounter, smoothing: .init()))
+                if deltaLength > 0 {
+                    let direction = rawDelta / deltaLength
+                    let scaledDelta = direction * min(deltaLength * sensitivity, maxStep) * rangeSpan
+
+                    state.startValues.x = simd_clamp(state.startValues.x + scaledDelta.x, triplet.range.lowerBound, triplet.range.upperBound)
+                    state.startValues.y = simd_clamp(state.startValues.y + scaledDelta.y, triplet.range.lowerBound, triplet.range.upperBound)
+                    state.startValues.z = simd_clamp(state.startValues.z + scaledDelta.z, triplet.range.lowerBound, triplet.range.upperBound)
+
+                    let ops = [
+                        ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: .absolute(state.startValues.x), frameIndex: operationFrameCounter, smoothing: .init()),
+                        ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(state.startValues.y), frameIndex: operationFrameCounter, smoothing: .init()),
+                        ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: .absolute(state.startValues.z), frameIndex: operationFrameCounter, smoothing: .init()),
+                    ]
+                    operationDispatcher.dispatch(
+                        ParameterTransaction(frameIndex: operationFrameCounter, operations: ops),
+                        settings: settings
+                    )
+                    UsageAnalytics.shared.trackHandGestureUsed()
+                }
+                state.prevPos = currentPos
+                activeDigit = digit
+            }
+            if !active && state.isActive { state.isActive = false }
+
+        case .parameter(let descriptor):
+            // 1D scalar pinch-drag (vertical movement → parameter value)
+            guard let formulaIndex = descriptor.formulaIndex,
+                  let node = ParameterNodeRegistry.shared.node(for: descriptor) else {
+                state.isActive = false
+                singleHandDragState[key] = state
+                return
+            }
+            if active && !state.isActive {
+                state.isActive = true
+                state.startValue = FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex)
+                state.prevPos = hand.pinchPosition(digit: digit)
+            }
+            if active && state.isActive {
+                let currentPos = hand.pinchPosition(digit: digit)
+                let verticalDelta = currentPos.y - state.prevPos.y
+                let sensitivity = settings.gestureSensitivity
+                let rangeSpan = node.range.upperBound - node.range.lowerBound
+                let maxStep: Float = 0.15
+
+                let scaledDelta = simd_clamp(verticalDelta * sensitivity * rangeSpan, -maxStep * rangeSpan, maxStep * rangeSpan)
+                state.startValue = simd_clamp(state.startValue + scaledDelta, node.range.lowerBound, node.range.upperBound)
+
+                let op = ParameterOperation(
+                    targetID: node.id,
+                    source: .gesture,
+                    value: .absolute(state.startValue),
+                    frameIndex: operationFrameCounter,
+                    smoothing: .init()
+                )
                 operationDispatcher.dispatch(
-                    ParameterTransaction(frameIndex: operationFrameCounter, operations: ops),
+                    ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
                     settings: settings
                 )
                 UsageAnalytics.shared.trackHandGestureUsed()
+                state.prevPos = currentPos
+                activeDigit = digit
             }
-            tripletDragPrevPos = currentPos
+            if !active && state.isActive { state.isActive = false }
+
+        default:
+            // .core(.grab), .core(.fractalScale), etc. are only valid for both-hand
+            state.isActive = false
         }
 
-        // Gesture ended
-        if !active && tripletDragActive && tripletDragDigit == digit {
-            tripletDragActive = false
-            tripletDragBinding = nil
-        }
-    }
-
-    /// Right-hand index pinch drag → position translate (XYZ)
-    private func processRightIndexDrag() {
-        guard let settings = renderSettings else { return }
-        let pinchActivateThreshold = settings.twoHandPinchActivateThreshold
-        let pinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
-        
-        // Only if NOT doing a two-hand gesture with index fingers
-        // Also block during grab-end cooldown to prevent drag from stealing the gesture
-        guard fingerGestureState[1]?.isActive != true && !(grabActive && settings.bindingForDigit(1) == .core(.grab)) && grabEndCooldown <= 0 else {
-            rightIndexDragActive = false
-            return
-        }
-        
-        // Check if left hand is attempting ANY pinch (user likely wants two-hand gesture)
-        // This prevents drag from starting when user is setting up a two-hand pull-apart
-        let leftAttemptingPinch = leftHand.isTracked && (
-            leftHand.indexPinch >= 0.4 ||   // Index approaching pinch
-            leftHand.middlePinch >= 0.4 ||  // Middle approaching pinch
-            leftHand.ringPinch >= 0.3 ||    // Ring (lower threshold)
-            leftHand.pinkyPinch >= 0.3      // Pinky (lower threshold)
-        )
-        
-        let rightPinch = rightHand.indexPinch
-        let active: Bool
-        if rightIndexDragActive {
-            // Once active, only left pinch causes immediate cancel
-            active = rightHand.isTracked && rightPinch >= pinchReleaseThreshold && !leftAttemptingPinch
-        } else {
-            // Don't start drag if left hand is attempting any pinch
-            active = rightHand.isTracked && rightPinch >= pinchActivateThreshold && !leftAttemptingPinch
-        }
-        
-        // Gesture started
-        if active && !rightIndexDragActive {
-            rightIndexDragActive = true
-            rightIndexDragStartPos = settings.effectiveTargetPosition
-            rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
-            rightIndexPrevPalm = rightHand.palmPosition
-            accumulatedPosition = settings.effectiveTargetPosition
-        }
-        
-        // Gesture active - update target position directly
-        if active {
-            // Prefer palm for smoother tracking; fall back to pinch midpoint if palm is zero (not tracked)
-            var currentPos = rightHand.palmPosition
-            if simd_length_squared(currentPos) == 0 { // palm not tracked
-                currentPos = rightHand.pinchPosition(digit: 1)
-            }
-            var previousPos = rightIndexPrevPalm
-            if simd_length_squared(previousPos) == 0 { // previous palm not tracked
-                previousPos = rightIndexPrevPos
-            }
-
-            let rawDelta = currentPos - previousPos
-            let deltaLength = simd_length(rawDelta)
-            
-            // Direct, immediate response with no deadzone.
-            // All movements are scaled uniformly — no slow/fast threshold split.
-            // A single multiplier provides consistent sensitivity, and the maxStep
-            // cap prevents runaway translation from tracking glitches.
-            let maxStep: Float = 0.30         // 30cm per frame cap
-            let baseMultiplier: Float = 3.0   // Uniform sensitivity boost
-            
-            var scaledDelta: SIMD3<Float>
-            if deltaLength > 0 {
-                let direction = rawDelta / deltaLength
-                let scaledLength = min(deltaLength * baseMultiplier, maxStep)
-                scaledDelta = direction * scaledLength
-            } else {
-                scaledDelta = .zero
-            }
-
-            // Apply translation (world space) to target.
-            // Direct write (intentional dispatcher bypass) — position is a SIMD3 vector,
-            // not a scalar parameter. See grab gesture for rationale.
-            //
-            // Scale translation by inverse sqrt(detailScale) instead of full
-            // inverse scaling. This keeps large fractals movable without making
-            // small ones excessively touchy.
-            // Mandelbulb still gets a 2× cap because its default detailScale is 0.25.
-            let maxZoomCompensation: Float = (settings.fractalType == .mandelbulb) ? 2.0 : 3.0
-            let zoomCompensation = simd_clamp(1.0 / sqrt(max(settings.detailScale, 0.01)), 0.35, maxZoomCompensation)
-            accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
-            if settings.isAnimationPlaying {
-                settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition
-            } else {
-                settings.targetPosition = accumulatedPosition
-            }
-            rightIndexPrevPos = currentPos
-            rightIndexPrevPalm = currentPos
-        }
-        
-        // Gesture ended
-        if !active && rightIndexDragActive {
-            rightIndexDragActive = false
-        }
+        singleHandDragState[key] = state
     }
     
 }

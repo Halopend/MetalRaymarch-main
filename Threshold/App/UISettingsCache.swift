@@ -145,7 +145,7 @@ final class UISettingsCache {
     var musicReactiveMappings: [MusicReactiveMapping] = MusicReactiveMapping.defaultMappings()
     
     // Safety & display
-    var showHUD: Bool = true
+    var showHUD: Bool = false
     var showMusicShortcuts: Bool = false
     var safetyBubbleEnabled: Bool = false
     var safetyBubbleRadius: Float = 1.8
@@ -160,11 +160,17 @@ final class UISettingsCache {
     var gestureSmoothingFactor: Float = 0.5
     var menuToggleGestureEnabled: Bool = true
     var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
-    // Configurable finger → action assignments
-    var indexFingerBinding: GestureActionBinding = .core(.grab)
-    var middleFingerBinding: GestureActionBinding = .core(.minDistance)
-    var ringFingerBinding: GestureActionBinding = .core(.fractalScale)
-    var pinkyFingerBinding: GestureActionBinding = .core(.sphereRadius)
+    // Per-hand × per-finger gesture binding slots (9 total)
+    var gestureBindings: [String: GestureActionBinding] = {
+        var d: [String: GestureActionBinding] = [:]
+        for slot in GestureSlot.allSlots { d[slot.persistenceKey] = .core(.none) }
+        d["rightIndexBinding"] = .core(.translate)
+        d["bothIndexBinding"]  = .core(.grab)
+        d["bothMiddleBinding"] = .core(.minDistance)
+        d["bothRingBinding"]   = .core(.fractalScale)
+        return d
+    }()
+
     var menuToggleHoldDuration: Float = 0.06
     var menuToggleCooldown: Float = 0.35
     var menuToggleActivateThreshold: Float = 0.48
@@ -306,10 +312,9 @@ final class UISettingsCache {
         gestureSmoothingFactor = settings.gestureSmoothingFactor
         menuToggleGestureEnabled = settings.menuToggleGestureEnabled
         menuToggleGestureMode = settings.menuToggleGestureMode
-        indexFingerBinding = settings.indexFingerBinding
-        middleFingerBinding = settings.middleFingerBinding
-        ringFingerBinding = settings.ringFingerBinding
-        pinkyFingerBinding = settings.pinkyFingerBinding
+        for slot in GestureSlot.allSlots {
+            gestureBindings[slot.persistenceKey] = settings.binding(for: slot)
+        }
         menuToggleHoldDuration = settings.menuToggleHoldDuration
         menuToggleCooldown = settings.menuToggleCooldown
         menuToggleActivateThreshold = settings.menuToggleActivateThreshold
@@ -356,28 +361,30 @@ final class UISettingsCache {
     }
     
 
-    func setFingerBinding(_ binding: GestureActionBinding, for pair: FingerPair) {
-        switch pair {
-        case .index:
-            indexFingerBinding = binding
-            push(\.indexFingerBinding, value: binding)
-        case .middle:
-            middleFingerBinding = binding
-            push(\.middleFingerBinding, value: binding)
-        case .ring:
-            ringFingerBinding = binding
-            push(\.ringFingerBinding, value: binding)
-        case .pinky:
-            pinkyFingerBinding = binding
-            push(\.pinkyFingerBinding, value: binding)
+    // ── GestureSlot-based binding helpers ──────────────────────────────────
+
+    func gestureBinding(for slot: GestureSlot) -> GestureActionBinding {
+        gestureBindings[slot.persistenceKey] ?? .core(.none)
+    }
+
+    func setGestureBinding(_ binding: GestureActionBinding, for slot: GestureSlot) {
+        // RenderSettings.setBinding handles validation + mutual exclusion + persistence.
+        settings?.setBinding(binding, for: slot)
+        // Re-sync all 9 slots from the authoritative RenderSettings so the UI
+        // reflects any cascade clears from mutual exclusion enforcement.
+        if let settings = settings {
+            for s in GestureSlot.allSlots {
+                gestureBindings[s.persistenceKey] = settings.binding(for: s)
+            }
+        } else {
+            gestureBindings[slot.persistenceKey] = binding
         }
     }
 
-    func fingerPair(for binding: GestureActionBinding) -> FingerPair? {
-        if indexFingerBinding == binding { return .index }
-        if middleFingerBinding == binding { return .middle }
-        if ringFingerBinding == binding { return .ring }
-        if pinkyFingerBinding == binding { return .pinky }
+    func gestureSlot(for binding: GestureActionBinding) -> GestureSlot? {
+        for slot in GestureSlot.allSlots {
+            if gestureBindings[slot.persistenceKey] == binding { return slot }
+        }
         return nil
     }
 

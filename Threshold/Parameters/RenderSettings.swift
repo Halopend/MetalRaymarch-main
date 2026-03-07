@@ -34,7 +34,7 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     private static func loadGestureBinding(_ key: String,
-                                           legacyKey: String,
+                                           legacyKey: String? = nil,
                                            default fallback: GestureActionBinding) -> GestureActionBinding {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: key),
@@ -42,7 +42,8 @@ final class RenderSettings: @unchecked Sendable {
             return decoded
         }
         // Legacy migration: old Int32 FingerGestureAction raw values
-        guard defaults.object(forKey: legacyKey) != nil else { return fallback }
+        guard let legacyKey = legacyKey,
+              defaults.object(forKey: legacyKey) != nil else { return fallback }
         let legacyRaw = Int32(defaults.integer(forKey: legacyKey))
         guard let legacy = FingerGestureAction(rawValue: legacyRaw),
               FingerGestureAction.coreCases.contains(legacy) else { return fallback }
@@ -158,7 +159,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
-    private var _showHUD: Bool = true                // Show in-world HUD (default on)
+    private var _showHUD: Bool = false               // HUD disabled
     private var _showMusicShortcuts: Bool = loadBool("showMusicShortcuts", default: false)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
@@ -177,11 +178,80 @@ final class RenderSettings: @unchecked Sendable {
         return MenuToggleGestureMode(rawValue: Int32(raw)) ?? .middleAndRingToPalm
     }()
 
-    // ── Configurable finger → gesture action assignments ───────────────────
-    private var _indexFingerBinding: GestureActionBinding = loadGestureBinding("indexFingerBinding", legacyKey: "indexFingerAction", default: .core(.grab))
-    private var _middleFingerBinding: GestureActionBinding = loadGestureBinding("middleFingerBinding", legacyKey: "middleFingerAction", default: .core(.minDistance))
-    private var _ringFingerBinding: GestureActionBinding = loadGestureBinding("ringFingerBinding", legacyKey: "ringFingerAction", default: .core(.fractalScale))
-    private var _pinkyFingerBinding: GestureActionBinding = loadGestureBinding("pinkyFingerBinding", legacyKey: "pinkyFingerAction", default: .core(.sphereRadius))
+    // ── Per-hand × per-finger gesture binding slots (9 total) ──────────────
+    // Migration: on first launch after upgrade, old 4-finger keys are mapped
+    // to the new "both" hand slots (two-hand gestures), and right-index gets translate.
+    private var _gestureBindings: [String: GestureActionBinding] = {
+        var bindings: [String: GestureActionBinding] = [:]
+        // Defaults
+        let defaults: [String: GestureActionBinding] = [
+            "leftIndexBinding":   .core(.none),
+            "leftMiddleBinding":  .core(.none),
+            "leftRingBinding":    .core(.none),
+            "rightIndexBinding":  .core(.translate),
+            "rightMiddleBinding": .core(.none),
+            "rightRingBinding":   .core(.none),
+            "bothIndexBinding":   .core(.grab),
+            "bothMiddleBinding":  .core(.minDistance),
+            "bothRingBinding":    .core(.fractalScale),
+        ]
+        // Helper: infer hand mode from persistence key for validation
+        func handMode(for key: String) -> GestureHandMode {
+            if key.hasPrefix("left")  { return .left }
+            if key.hasPrefix("right") { return .right }
+            return .both
+        }
+
+        // Check if we've already migrated (new keys exist)
+        let migrated = UserDefaults.standard.data(forKey: "bothIndexBinding") != nil
+        if migrated {
+            // Load from new keys, validating each against its hand mode
+            for (key, fallback) in defaults {
+                let loaded = loadGestureBinding(key, legacyKey: nil, default: fallback)
+                bindings[key] = RenderSettings.validated(loaded, forHandMode: handMode(for: key))
+            }
+        } else {
+            // Migrate from old 4-finger keys → both-hand slots
+            let oldIndex  = loadGestureBinding("indexFingerBinding",  legacyKey: "indexFingerAction",  default: .core(.grab))
+            let oldMiddle = loadGestureBinding("middleFingerBinding", legacyKey: "middleFingerAction", default: .core(.minDistance))
+            let oldRing   = loadGestureBinding("ringFingerBinding",   legacyKey: "ringFingerAction",   default: .core(.fractalScale))
+            // Map old finger bindings → both-hand (validated for two-hand mode)
+            bindings["bothIndexBinding"]  = RenderSettings.validated(oldIndex,  forHandMode: .both)
+            bindings["bothMiddleBinding"] = RenderSettings.validated(oldMiddle, forHandMode: .both)
+            bindings["bothRingBinding"]   = RenderSettings.validated(oldRing,   forHandMode: .both)
+            // Single-hand defaults
+            bindings["rightIndexBinding"]  = .core(.translate)
+            bindings["rightMiddleBinding"] = .core(.none)
+            bindings["rightRingBinding"]   = .core(.none)
+            bindings["leftIndexBinding"]   = .core(.none)
+            bindings["leftMiddleBinding"]  = .core(.none)
+            bindings["leftRingBinding"]    = .core(.none)
+            // Persist new keys
+            let encoder = JSONEncoder()
+            for (key, value) in bindings {
+                if let data = try? encoder.encode(value) {
+                    UserDefaults.standard.set(data, forKey: key)
+                }
+            }
+        }
+
+        // Final pass: enforce mutual exclusion — if both single-hand slots AND
+        // the both-hand slot are non-none for the same digit, clear the both-hand.
+        for finger in FingerDigit.allCases {
+            let lKey = GestureSlot(hand: .left,  finger: finger).persistenceKey
+            let rKey = GestureSlot(hand: .right, finger: finger).persistenceKey
+            let bKey = GestureSlot(hand: .both,  finger: finger).persistenceKey
+            let lNone = (bindings[lKey].map { if case .core(.none) = $0 { return true } else { return false } }) ?? true
+            let rNone = (bindings[rKey].map { if case .core(.none) = $0 { return true } else { return false } }) ?? true
+            let bNone = (bindings[bKey].map { if case .core(.none) = $0 { return true } else { return false } }) ?? true
+            if !lNone && !rNone && !bNone {
+                // Both single-hands active AND both-hand active → clear both-hand
+                bindings[bKey] = .core(.none)
+            }
+        }
+
+        return bindings
+    }()
     private var _menuToggleHoldDuration: Float        = loadFloat("menuToggleHoldDuration", default: 0.06)
     private var _menuToggleCooldown: Float              = loadFloat("menuToggleCooldown", default: 0.35)
     private var _menuToggleActivateThreshold: Float     = loadFloat("menuToggleActivateThreshold", default: 0.48)
@@ -728,15 +798,23 @@ final class RenderSettings: @unchecked Sendable {
                         }
                     }
                 }
-                sanitize(&_indexFingerBinding)
-                sanitize(&_middleFingerBinding)
-                sanitize(&_ringFingerBinding)
-                sanitize(&_pinkyFingerBinding)
+                for key in _gestureBindings.keys {
+                    if var binding = _gestureBindings[key] {
+                        sanitize(&binding)
+                        _gestureBindings[key] = binding
+                    }
+                }
 
-                // Restore default finger → core bindings for any finger that was
+                // Restore default both-hand bindings for any slot that was
                 // cleared to .none, provided the default is supported by the new type.
                 // This ensures switching back to Mandelbox automatically re-enables
                 // the standard geometry gesture mappings.
+                let slotDefaults: [String: GestureActionBinding] = [
+                    "bothIndexBinding":   .core(.grab),
+                    "bothMiddleBinding":  .core(.minDistance),
+                    "bothRingBinding":    .core(.fractalScale),
+                    "rightIndexBinding":  .core(.translate),
+                ]
                 func restoreDefault(_ binding: inout GestureActionBinding, _ fallback: GestureActionBinding) {
                     if case .core(.none) = binding,
                        case .core(let action) = fallback,
@@ -744,10 +822,12 @@ final class RenderSettings: @unchecked Sendable {
                         binding = fallback
                     }
                 }
-                restoreDefault(&_indexFingerBinding,  .core(.grab))
-                restoreDefault(&_middleFingerBinding, .core(.minDistance))
-                restoreDefault(&_ringFingerBinding,   .core(.fractalScale))
-                restoreDefault(&_pinkyFingerBinding,  .core(.sphereRadius))
+                for (key, fallback) in slotDefaults {
+                    if var binding = _gestureBindings[key] {
+                        restoreDefault(&binding, fallback)
+                        _gestureBindings[key] = binding
+                    }
+                }
             }
         }
     }
@@ -794,8 +874,8 @@ final class RenderSettings: @unchecked Sendable {
     }
     
     var showHUD: Bool {
-        get { withLock { _showHUD } }
-        set { withLock { _showHUD = newValue } }
+        get { false }
+        set { /* HUD disabled */ }
     }
 
     var showMusicShortcuts: Bool {
@@ -887,64 +967,87 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    // ── Finger → gesture binding assignments ───────────────────────────────
+    // ── Per-hand gesture binding accessors ──────────────────────────────────
     private func persistGestureBinding(_ binding: GestureActionBinding, key: String) {
         if let data = try? JSONEncoder().encode(binding) {
             UserDefaults.standard.set(data, forKey: key)
         }
     }
 
-    var indexFingerBinding: GestureActionBinding {
-        get { withLock { _indexFingerBinding } }
-        set {
-            withLock { _indexFingerBinding = newValue }
-            persistGestureBinding(newValue, key: "indexFingerBinding")
-        }
-    }
-    var middleFingerBinding: GestureActionBinding {
-        get { withLock { _middleFingerBinding } }
-        set {
-            withLock { _middleFingerBinding = newValue }
-            persistGestureBinding(newValue, key: "middleFingerBinding")
-        }
-    }
-    var ringFingerBinding: GestureActionBinding {
-        get { withLock { _ringFingerBinding } }
-        set {
-            withLock { _ringFingerBinding = newValue }
-            persistGestureBinding(newValue, key: "ringFingerBinding")
-        }
-    }
-    var pinkyFingerBinding: GestureActionBinding {
-        get { withLock { _pinkyFingerBinding } }
-        set {
-            withLock { _pinkyFingerBinding = newValue }
-            persistGestureBinding(newValue, key: "pinkyFingerBinding")
-        }
+    /// Get binding for a specific hand+finger slot.
+    func binding(for slot: GestureSlot) -> GestureActionBinding {
+        withLock { _gestureBindings[slot.persistenceKey] ?? .core(.none) }
     }
 
-    /// Returns the binding assigned to a given finger digit (1=index, 2=middle, 3=ring, 4=pinky).
-    func bindingForDigit(_ digit: Int) -> GestureActionBinding {
+    /// Set binding for a specific hand+finger slot.
+    /// Enforces mutual exclusion between single-hand and both-hand slots,
+    /// and validates that the binding is appropriate for the hand mode.
+    func setBinding(_ binding: GestureActionBinding, for slot: GestureSlot) {
+        // Validate binding is appropriate for the hand mode
+        let validated = Self.validated(binding, forHandMode: slot.hand)
+        let key = slot.persistenceKey
         withLock {
-            switch digit {
-            case 1: return _indexFingerBinding
-            case 2: return _middleFingerBinding
-            case 3: return _ringFingerBinding
-            case 4: return _pinkyFingerBinding
-            default: return .core(.none)
+            _gestureBindings[key] = validated
+            // ── Mutual exclusion: single-hand vs two-hand ──────────────
+            if case .core(.none) = validated { /* clearing — no conflict to resolve */ } else {
+                if slot.hand == .left || slot.hand == .right {
+                    let otherHand: GestureHandMode = (slot.hand == .left) ? .right : .left
+                    let otherKey = GestureSlot(hand: otherHand, finger: slot.finger).persistenceKey
+                    if let otherBinding = _gestureBindings[otherKey],
+                       !(otherBinding == .core(.none)) {
+                        let bothKey = GestureSlot(hand: .both, finger: slot.finger).persistenceKey
+                        _gestureBindings[bothKey] = .core(.none)
+                        persistGestureBinding(.core(.none), key: bothKey)
+                    }
+                } else if slot.hand == .both {
+                    let leftKey = GestureSlot(hand: .left, finger: slot.finger).persistenceKey
+                    let rightKey = GestureSlot(hand: .right, finger: slot.finger).persistenceKey
+                    _gestureBindings[leftKey] = .core(.none)
+                    _gestureBindings[rightKey] = .core(.none)
+                    persistGestureBinding(.core(.none), key: leftKey)
+                    persistGestureBinding(.core(.none), key: rightKey)
+                }
             }
         }
+        persistGestureBinding(validated, key: key)
     }
 
-    /// Returns the digit (1-4) assigned to a given binding, or nil if unassigned.
-    func digitForBinding(_ binding: GestureActionBinding) -> Int? {
+    /// Validates that a binding is appropriate for the given hand mode.
+    /// Returns `.core(.none)` for invalid combinations (e.g. `.translate` on both-hand).
+    static func validated(_ binding: GestureActionBinding, forHandMode hand: GestureHandMode) -> GestureActionBinding {
+        switch hand {
+        case .both:
+            // Both-hand only supports core (except .translate) and scalar .parameter
+            if case .core(.translate) = binding { return .core(.none) }
+            if case .parameterTriplet = binding { return .core(.none) }
+            return binding
+        case .left, .right:
+            // Single-hand supports .translate, .parameter, .parameterTriplet, .core(.none)
+            // Does NOT support .core(.grab), .core(.minDistance), etc.
+            if case .core(let action) = binding {
+                if action == .none || action == .translate { return binding }
+                return .core(.none) // two-hand-only core actions
+            }
+            return binding
+        }
+    }
+
+    /// Find the slot currently assigned to a given binding, or nil.
+    func slot(for binding: GestureActionBinding) -> GestureSlot? {
         withLock {
-            if _indexFingerBinding == binding  { return 1 }
-            if _middleFingerBinding == binding { return 2 }
-            if _ringFingerBinding == binding   { return 3 }
-            if _pinkyFingerBinding == binding  { return 4 }
+            for slot in GestureSlot.allSlots {
+                if _gestureBindings[slot.persistenceKey] == binding {
+                    return slot
+                }
+            }
             return nil
         }
+    }
+
+    /// Returns the binding for a given hand mode and digit (1=index, 2=middle, 3=ring).
+    func binding(forHand hand: GestureHandMode, digit: Int) -> GestureActionBinding {
+        guard let finger = FingerDigit(rawValue: digit) else { return .core(.none) }
+        return binding(for: GestureSlot(hand: hand, finger: finger))
     }
 
     /// How long the menu gesture must be held before toggling (seconds).

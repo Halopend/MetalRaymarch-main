@@ -602,27 +602,24 @@ struct ContentView: View {
         return (qz * qy * qx).normalized
     }
 
-    /// Picker row for assigning a `FingerGestureAction` to a finger pair.
+    /// Picker row for assigning a gesture binding to a hand+finger slot.
     @ViewBuilder
-    private func fingerActionPicker(
-        finger: String,
-        icon: String,
-        selection: Binding<GestureActionBinding>,
-        settingsKeyPath: WritableKeyPath<RenderSettings, GestureActionBinding>
-    ) -> some View {
+    private func gestureSlotPicker(slot: GestureSlot, handMode: GestureHandMode) -> some View {
+        let bindings = GestureActionBinding.availableBindings(for: cache.fractalType, handMode: handMode)
+        let currentBinding = Binding<GestureActionBinding>(
+            get: { cache.gestureBinding(for: slot) },
+            set: { cache.setGestureBinding($0, for: slot) }
+        )
         HStack {
-            Label(finger, systemImage: icon).font(.subheadline)
+            Label(slot.finger.displayName, systemImage: slot.finger.icon).font(.subheadline)
             Spacer()
-            Picker(finger, selection: selection) {
-                ForEach(GestureActionBinding.availableBindings(for: cache.fractalType), id: \.self) { action in
+            Picker(slot.finger.displayName, selection: currentBinding) {
+                ForEach(bindings, id: \.self) { action in
                     Label(action.contextualDisplayName(for: cache.fractalType), systemImage: action.icon).tag(action)
                 }
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 220)
-            .onChange(of: selection.wrappedValue) { _, v in
-                cache.push(settingsKeyPath, value: v)
-            }
         }
     }
 
@@ -1181,8 +1178,6 @@ struct ContentView: View {
                     Label("Display", systemImage: "eye").font(.headline)
                     Spacer()
                 }
-                Toggle("Show HUD Overlay", isOn: $cache.showHUD)
-                    .onChange(of: cache.showHUD) { _, v in cache.push(\.showHUD, value: v) }
                 Toggle("Show Music Shortcuts", isOn: $cache.showMusicShortcuts)
                     .onChange(of: cache.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
                 if cache.showMusicShortcuts {
@@ -1232,6 +1227,27 @@ struct ContentView: View {
                     set: { appModel.handTrackingEnabled = $0 }
                 ))
 
+                // ── Hand Assignments (per-hand × per-finger) ──────────────
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Hand Assignments", systemImage: "hand.point.up.braille")
+                        .font(.subheadline.weight(.semibold))
+
+                    ForEach(GestureHandMode.allCases, id: \.self) { mode in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(mode.displayName, systemImage: mode.icon)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 4)
+                            ForEach(FingerDigit.allCases, id: \.self) { finger in
+                                let slot = GestureSlot(hand: mode, finger: finger)
+                                gestureSlotPicker(slot: slot, handMode: mode)
+                            }
+                        }
+                    }
+                }
+
+                Divider().padding(.vertical, 2)
+
                 Group {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Core Behavior", systemImage: "slider.horizontal.3")
@@ -1279,39 +1295,6 @@ struct ContentView: View {
                             onChanged: { cache.push(\.rotationSnapWindowDegrees, value: cache.rotationSnapWindowDegrees) },
                             showToggle: false)
                     }
-                    }
-
-                    Divider().padding(.vertical, 2)
-
-                    // ── Finger → Action Assignments ─────────────────────────────
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Finger Assignments", systemImage: "hand.point.up.braille")
-                            .font(.subheadline.weight(.semibold))
-
-                        fingerActionPicker(
-                            finger: "Index",
-                            icon: "1.circle.fill",
-                            selection: $cache.indexFingerBinding,
-                            settingsKeyPath: \.indexFingerBinding
-                        )
-                        fingerActionPicker(
-                            finger: "Middle",
-                            icon: "2.circle.fill",
-                            selection: $cache.middleFingerBinding,
-                            settingsKeyPath: \.middleFingerBinding
-                        )
-                        fingerActionPicker(
-                            finger: "Ring",
-                            icon: "3.circle.fill",
-                            selection: $cache.ringFingerBinding,
-                            settingsKeyPath: \.ringFingerBinding
-                        )
-                        fingerActionPicker(
-                            finger: "Pinky",
-                            icon: "4.circle.fill",
-                            selection: $cache.pinkyFingerBinding,
-                            settingsKeyPath: \.pinkyFingerBinding
-                        )
                     }
 
                     Divider().padding(.vertical, 2)
