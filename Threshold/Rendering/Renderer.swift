@@ -776,35 +776,52 @@ actor Renderer {
                     case .overall: sourceValue = settings.audioLevel
                     }
 
-                    // ── 2. Apply per-mapping amount (direct multiplier, no double-scaling) ──
+                    // ── 2. Scale audio level by intensity ──
                     let absAmount = abs(mapping.amount)
                     let scaled = min(1.0, max(0.0, sourceValue * absAmount * globalAmount))
                     let normalized = mapping.amount >= 0 ? scaled : (1.0 - scaled)
 
-                    let minValue = min(mapping.rangeMin, mapping.rangeMax)
-                    let maxValue = max(mapping.rangeMin, mapping.rangeMax)
-                    let rangeSpan = maxValue - minValue
-
-                    // ── 3. LFO slow oscillator ──
-                    var lfoOffset: Float = 0
-                    if mapping.lfo.enabled {
-                        var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
-                        phase += mapping.lfo.frequency * dt
-                        phase = phase - floor(phase)
-                        musicLFOPhaseByTarget[mapping.target] = phase
-                        lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * rangeSpan
-                    }
-
-                    // ── 4. Compute final target value based on mode ──
+                    // ── 3. Compute final target value based on mode ──
                     let rawTargetValue: Float
                     switch mapping.mode {
                     case .absolute:
-                        // Music sets the value directly within the min/max range
+                        // Music sets the value directly within the user-defined min/max range
+                        let minValue = min(mapping.rangeMin, mapping.rangeMax)
+                        let maxValue = max(mapping.rangeMin, mapping.rangeMax)
+                        let rangeSpan = maxValue - minValue
+
+                        var lfoOffset: Float = 0
+                        if mapping.lfo.enabled {
+                            var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
+                            phase += mapping.lfo.frequency * dt
+                            phase = phase - floor(phase)
+                            musicLFOPhaseByTarget[mapping.target] = phase
+                            lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * rangeSpan
+                        }
+
                         rawTargetValue = minValue + rangeSpan * normalized + lfoOffset
+
                     case .relative:
-                        // Music adds a delta around the current anchor (animation/gesture base)
-                        let anchor = musicAnchorByTarget[mapping.target] ?? ((minValue + maxValue) * 0.5)
-                        let delta = (normalized - 0.5) * rangeSpan
+                        // Music adds a deviation around the current anchor.
+                        // Intensity alone controls how far it can push — no min/max needed.
+                        // Max deviation = 15% of the parameter's full allowed range × intensity.
+                        let allowed = mapping.target.allowedRange(for: activeFractalType)
+                        let allowedSpan = allowed.upperBound - allowed.lowerBound
+                        let maxDeviation = allowedSpan * 0.15 * absAmount * globalAmount
+
+                        var lfoOffset: Float = 0
+                        if mapping.lfo.enabled {
+                            var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
+                            phase += mapping.lfo.frequency * dt
+                            phase = phase - floor(phase)
+                            musicLFOPhaseByTarget[mapping.target] = phase
+                            lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
+                        }
+
+                        let anchor = musicAnchorByTarget[mapping.target]
+                            ?? ((allowed.lowerBound + allowed.upperBound) * 0.5)
+                        let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
+                        let delta = sourceValue * maxDeviation * sign
                         rawTargetValue = anchor + delta + lfoOffset
                     }
 
@@ -828,7 +845,7 @@ actor Renderer {
                             source: .audio,
                             value: .absolute(offset),
                             frameIndex: parameterOperationFrameIndex,
-                            smoothing: .init(smoothingTime: mapping.responseSpeed)
+                            smoothing: .init(smoothingTime: max(0.02, mapping.smoothingWindow * 0.15 + 0.02))
                         )
                     )
                 }

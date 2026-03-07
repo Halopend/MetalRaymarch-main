@@ -142,8 +142,9 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     contentPanel
                     
-                    // ── PLAYER: Fixed playback bar (visible when a scene is loaded) ──
-                    if let animationManager = appModel.animationManager,
+                    // ── PLAYER: Fixed playback bar (only in Animate tab) ──
+                    if selectedTab == .animate,
+                       let animationManager = appModel.animationManager,
                        animationManager.currentScene != nil {
                         Divider()
                         AnimationPlaybackControls(animationManager: animationManager)
@@ -1182,6 +1183,13 @@ struct ContentView: View {
                 }
                 Toggle("Show HUD Overlay", isOn: $cache.showHUD)
                     .onChange(of: cache.showHUD) { _, v in cache.push(\.showHUD, value: v) }
+                Toggle("Show Music Shortcuts", isOn: $cache.showMusicShortcuts)
+                    .onChange(of: cache.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
+                if cache.showMusicShortcuts {
+                    Text("Shows music reactivity controls in the parameter sensitivity panel.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
@@ -1308,115 +1316,122 @@ struct ContentView: View {
 
                     Divider().padding(.vertical, 2)
 
+                    // ── Menu Toggle (compact) ──
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Menu Toggle", systemImage: "menucard")
-                            .font(.subheadline.weight(.semibold))
+                        Toggle("Menu Toggle Gesture", isOn: $cache.menuToggleGestureEnabled)
+                            .onChange(of: cache.menuToggleGestureEnabled) { _, v in
+                                cache.push(\.menuToggleGestureEnabled, value: v)
+                            }
 
-                    Toggle("Menu Toggle Gesture", isOn: $cache.menuToggleGestureEnabled)
-                        .onChange(of: cache.menuToggleGestureEnabled) { _, v in
-                            cache.push(\.menuToggleGestureEnabled, value: v)
-                        }
-
-                    HStack {
-                        Label("Menu Gesture", systemImage: cache.menuToggleGestureMode.icon)
-                            .font(.subheadline)
-                        Spacer()
-                        Picker("Menu Gesture", selection: $cache.menuToggleGestureMode) {
-                            ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
-                                Text(mode.displayName).tag(mode)
+                        if cache.menuToggleGestureEnabled {
+                            HStack {
+                                Label("Gesture", systemImage: cache.menuToggleGestureMode.icon)
+                                    .font(.subheadline)
+                                Spacer()
+                                Picker("", selection: $cache.menuToggleGestureMode) {
+                                    ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
+                                        Text(mode.displayName).tag(mode)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: 180)
+                                .onChange(of: cache.menuToggleGestureMode) { _, v in
+                                    cache.push(\.menuToggleGestureMode, value: v)
+                                }
                             }
                         }
-                        .pickerStyle(.menu)
-                        .frame(maxWidth: 220)
-                        .disabled(!cache.menuToggleGestureEnabled)
-                        .onChange(of: cache.menuToggleGestureMode) { _, v in
-                            cache.push(\.menuToggleGestureMode, value: v)
-                        }
-                    }
-
-                    EffectSliderRow(icon: "hand.tap", label: "Hold Time",
-                        value: $cache.menuToggleHoldDuration, range: 0.05...0.6,
-                        enabled: .constant(cache.menuToggleGestureEnabled),
-                        onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.menuToggleHoldDuration) },
-                        showToggle: false)
-
-                    EffectSliderRow(icon: "timer", label: "Cooldown",
-                        value: $cache.menuToggleCooldown, range: 0.1...2.5,
-                        enabled: .constant(cache.menuToggleGestureEnabled),
-                        onChanged: { cache.push(\.menuToggleCooldown, value: cache.menuToggleCooldown) },
-                        showToggle: false)
-
-                    EffectSliderRow(icon: "bolt.horizontal", label: "Activate Threshold",
-                        value: $cache.menuToggleActivateThreshold, range: 0.2...0.95,
-                        enabled: .constant(cache.menuToggleGestureEnabled),
-                        onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.menuToggleActivateThreshold) },
-                        showToggle: false)
-
-                    EffectSliderRow(icon: "arrow.down.to.line", label: "Release Threshold",
-                        value: $cache.menuToggleReleaseThreshold, range: 0.1...0.9,
-                        enabled: .constant(cache.menuToggleGestureEnabled),
-                        onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.menuToggleReleaseThreshold) },
-                        showToggle: false)
                     }
 
                     Divider().padding(.vertical, 2)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Two-Hand Gesture Tuning", systemImage: "hands.sparkles")
-                            .font(.subheadline.weight(.semibold))
+                    // ── Gesture Lab (collapsed by default) ──
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Menu Toggle Tuning", systemImage: "menucard")
+                                .font(.caption.weight(.semibold))
 
-                    EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Hand Distance",
-                        value: $cache.gestureMinHandDistance, range: 0.02...0.25,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gestureMinHandDistance) },
-                        showToggle: false)
+                            EffectSliderRow(icon: "hand.tap", label: "Hold Time",
+                                value: $cache.menuToggleHoldDuration, range: 0.05...0.6,
+                                enabled: .constant(cache.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.menuToggleHoldDuration) },
+                                showToggle: false)
 
-                    EffectSliderRow(icon: "arrow.left.and.right", label: "Max Hand Distance",
-                        value: $cache.gestureMaxHandDistance, range: 0.2...1.2,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gestureMaxHandDistance) },
-                        showToggle: false)
+                            EffectSliderRow(icon: "timer", label: "Cooldown",
+                                value: $cache.menuToggleCooldown, range: 0.1...2.5,
+                                enabled: .constant(cache.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleCooldown, value: cache.menuToggleCooldown) },
+                                showToggle: false)
 
-                    EffectSliderRow(icon: "play.circle", label: "Start Distance Guard",
-                        value: $cache.gestureMaxStartHandDistance, range: 0.08...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gestureMaxStartHandDistance) },
-                        showToggle: false)
+                            EffectSliderRow(icon: "bolt.horizontal", label: "Activate",
+                                value: $cache.menuToggleActivateThreshold, range: 0.2...0.95,
+                                enabled: .constant(cache.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.menuToggleActivateThreshold) },
+                                showToggle: false)
 
-                    EffectSliderRow(icon: "checkmark.circle", label: "Active Distance Guard",
-                        value: $cache.gestureMaxActiveHandDistance, range: 0.1...1.5,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gestureMaxActiveHandDistance) },
-                        showToggle: false)
+                            EffectSliderRow(icon: "arrow.down.to.line", label: "Release",
+                                value: $cache.menuToggleReleaseThreshold, range: 0.1...0.9,
+                                enabled: .constant(cache.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.menuToggleReleaseThreshold) },
+                                showToggle: false)
 
-                    EffectSliderRow(icon: "hand.draw", label: "Pinch Activate",
-                        value: $cache.twoHandPinchActivateThreshold, range: 0.2...0.98,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.twoHandPinchActivateThreshold) },
-                        showToggle: false)
+                            Divider()
 
-                    EffectSliderRow(icon: "hand.raised", label: "Pinch Release",
-                        value: $cache.twoHandPinchReleaseThreshold, range: 0.1...0.95,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.twoHandPinchReleaseThreshold) },
-                        showToggle: false)
+                            Label("Two-Hand Pinch Tuning", systemImage: "hands.sparkles")
+                                .font(.caption.weight(.semibold))
 
-                    EffectSliderRow(icon: "hand.point.up.left", label: "Ring Activate",
-                        value: $cache.ringPinchActivateThreshold, range: 0.1...0.95,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.ringPinchActivateThreshold) },
-                        showToggle: false)
+                            EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Distance",
+                                value: $cache.gestureMinHandDistance, range: 0.02...0.25,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gestureMinHandDistance) },
+                                showToggle: false)
 
-                    EffectSliderRow(icon: "hand.point.up.braille", label: "Ring Release",
-                        value: $cache.ringPinchReleaseThreshold, range: 0.05...0.9,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.ringPinchReleaseThreshold) },
-                        showToggle: false)
+                            EffectSliderRow(icon: "arrow.left.and.right", label: "Max Distance",
+                                value: $cache.gestureMaxHandDistance, range: 0.2...1.2,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gestureMaxHandDistance) },
+                                showToggle: false)
+
+                            EffectSliderRow(icon: "hand.draw", label: "Pinch Activate",
+                                value: $cache.twoHandPinchActivateThreshold, range: 0.2...0.98,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.twoHandPinchActivateThreshold) },
+                                showToggle: false)
+
+                            EffectSliderRow(icon: "hand.raised", label: "Pinch Release",
+                                value: $cache.twoHandPinchReleaseThreshold, range: 0.1...0.95,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.twoHandPinchReleaseThreshold) },
+                                showToggle: false)
+
+                            EffectSliderRow(icon: "hand.point.up.left", label: "Ring Activate",
+                                value: $cache.ringPinchActivateThreshold, range: 0.1...0.95,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.ringPinchActivateThreshold) },
+                                showToggle: false)
+
+                            EffectSliderRow(icon: "hand.point.up.braille", label: "Ring Release",
+                                value: $cache.ringPinchReleaseThreshold, range: 0.05...0.9,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.ringPinchReleaseThreshold) },
+                                showToggle: false)
+
+                            EffectSliderRow(icon: "play.circle", label: "Start Guard",
+                                value: $cache.gestureMaxStartHandDistance, range: 0.08...1.0,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gestureMaxStartHandDistance) },
+                                showToggle: false)
+
+                            EffectSliderRow(icon: "checkmark.circle", label: "Active Guard",
+                                value: $cache.gestureMaxActiveHandDistance, range: 0.1...1.5,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gestureMaxActiveHandDistance) },
+                                showToggle: false)
+                        }
+                    } label: {
+                        Label("Gesture Lab", systemImage: "wrench.and.screwdriver")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-
-                    Text("Gesture Lab: tune menu triggering, pinch hysteresis, and hand-distance mapping for your hands and room setup.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
                 .disabled(!appModel.handTrackingEnabled)
                 .opacity(appModel.handTrackingEnabled ? 1.0 : 0.6)

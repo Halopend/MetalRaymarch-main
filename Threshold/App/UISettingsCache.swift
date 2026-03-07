@@ -146,6 +146,7 @@ final class UISettingsCache {
     
     // Safety & display
     var showHUD: Bool = true
+    var showMusicShortcuts: Bool = false
     var safetyBubbleEnabled: Bool = false
     var safetyBubbleRadius: Float = 1.8
     var safetyBubbleShape: Float = 0.0
@@ -291,6 +292,7 @@ final class UISettingsCache {
         fractalAudioAffectsIterations = settings.fractalAudioAffectsIterations
         musicReactiveMappings = settings.musicReactiveMappings
         showHUD = settings.showHUD
+        showMusicShortcuts = settings.showMusicShortcuts
         safetyBubbleEnabled = settings.safetyBubbleEnabled
         safetyBubbleRadius = settings.safetyBubbleRadius
         safetyBubbleShape = settings.safetyBubbleShape

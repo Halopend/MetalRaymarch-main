@@ -189,65 +189,164 @@ private struct ParameterNodeRow: View {
         }
     }
 
-    // MARK: - Back Face (Sensitivity Slider)
+    // MARK: - Back Face (Gesture Sensitivity + Music Shortcuts)
 
     @ViewBuilder
     private func backFace(floatNode: FloatParameterNode) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "gauge.with.dots.needle.67percent")
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .frame(width: 16)
+        VStack(spacing: 4) {
+            // ── Row 1: Gesture sensitivity ──
+            HStack(spacing: 8) {
+                Image(systemName: "gauge.with.dots.needle.67percent")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .frame(width: 16)
 
-            Text("Sensitivity")
-                .font(.subheadline)
-                .foregroundStyle(.orange)
-                .frame(width: 80, alignment: .leading)
-                .lineLimit(1)
+                Text("Sensitivity")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .frame(width: 66, alignment: .leading)
+                    .lineLimit(1)
 
-            Slider(value: $sensitivityValue,
-                   in: GestureSensitivityStore.range.lowerBound...GestureSensitivityStore.range.upperBound)
-                .tint(.orange)
-                .onChange(of: sensitivityValue) { _, newVal in
-                    GestureSensitivityStore.shared.setSensitivity(newVal, for: floatNode.id)
+                Slider(value: $sensitivityValue,
+                       in: GestureSensitivityStore.range.lowerBound...GestureSensitivityStore.range.upperBound)
+                    .tint(.orange)
+                    .onChange(of: sensitivityValue) { _, newVal in
+                        GestureSensitivityStore.shared.setSensitivity(newVal, for: floatNode.id)
+                    }
+
+                Text(String(format: "%.1fx", sensitivityValue))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32)
+
+                Button {
+                    sensitivityValue = GestureSensitivityStore.defaultSensitivity
+                    GestureSensitivityStore.shared.resetSensitivity(for: floatNode.id)
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                }
+                .buttonStyle(.borderless)
+
+                Button {
+                    isFlipped = false
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            // ── Row 2+: Music shortcuts (when enabled and param has a music target) ──
+            if cache.showMusicShortcuts, let target = musicReactiveTarget {
+                let mappingIndex = musicMappingIndex(for: target)
+
+                Divider()
+
+                // Source picker
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform.circle")
+                        .font(.caption)
+                        .foregroundStyle(.pink)
+                        .frame(width: 16)
+
+                    if let idx = mappingIndex, idx < cache.musicReactiveMappings.count {
+                        Picker("", selection: Binding(
+                            get: { idx < cache.musicReactiveMappings.count ? cache.musicReactiveMappings[idx].source : .composite },
+                            set: { src in updateMusicMapping(target) { $0.source = src } }
+                        )) {
+                            ForEach(MusicReactiveSource.allCases, id: \.self) { s in
+                                Text(s.displayName).tag(s)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .controlSize(.small)
+                    } else {
+                        Text("Not mapped")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Button("Add") { toggleMusicMapping(target) }
+                            .font(.caption2)
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                            .tint(.pink)
+                    }
                 }
 
-            Text(String(format: "%.1fx", sensitivityValue))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 36)
+                if mappingIndex != nil {
+                    // Intensity
+                    HStack(spacing: 4) {
+                        Text("Intensity")
+                            .font(.caption2)
+                            .foregroundStyle(.pink)
+                            .frame(width: 52, alignment: .leading)
+                        Slider(
+                            value: Binding(
+                                get: { musicMappingValue(for: target, \.amount) ?? 1.0 },
+                                set: { v in updateMusicMapping(target) { $0.amount = v; $0.sanitizeInPlace() } }
+                            ),
+                            in: 0...3
+                        )
+                        .tint(.pink)
+                        Text(String(format: "%.1f", musicMappingValue(for: target, \.amount) ?? 1.0))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28)
+                    }
 
-            // Reset sensitivity to default
-            Button {
-                sensitivityValue = GestureSensitivityStore.defaultSensitivity
-                GestureSensitivityStore.shared.resetSensitivity(for: floatNode.id)
-            } label: {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
+                    // Smooth
+                    HStack(spacing: 4) {
+                        Text("Smooth")
+                            .font(.caption2)
+                            .foregroundStyle(.pink)
+                            .frame(width: 52, alignment: .leading)
+                        Slider(
+                            value: Binding(
+                                get: { musicMappingValue(for: target, \.smoothingWindow) ?? 0.0 },
+                                set: { v in updateMusicMapping(target) { $0.smoothingWindow = v; $0.sanitizeInPlace() } }
+                            ),
+                            in: 0...2
+                        )
+                        .tint(.pink)
+                        Text(String(format: "%.1f", musicMappingValue(for: target, \.smoothingWindow) ?? 0.0))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28)
+                    }
+                }
             }
-            .buttonStyle(.borderless)
-            .help("Reset sensitivity to default")
-
-            // Flip back to parameter
-            Button {
-                isFlipped = false
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-            }
-            .buttonStyle(.borderless)
-            .help("Back to parameter")
         }
-        .frame(height: 32)
         .padding(.horizontal, 4)
+        .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.orange.opacity(0.06))
         )
+    }
+
+    // MARK: - Music Mapping Inline Helpers
+
+    private func musicMappingIndex(for target: MusicReactiveTarget) -> Int? {
+        cache.musicReactiveMappings.firstIndex(where: { $0.target == target })
+    }
+
+    private func musicMappingValue(for target: MusicReactiveTarget, _ keyPath: KeyPath<MusicReactiveMapping, Float>) -> Float? {
+        guard let idx = musicMappingIndex(for: target) else { return nil }
+        return cache.musicReactiveMappings[idx][keyPath: keyPath]
+    }
+
+    private func updateMusicMapping(_ target: MusicReactiveTarget, _ mutate: (inout MusicReactiveMapping) -> Void) {
+        var mappings = cache.musicReactiveMappings
+        if let idx = mappings.firstIndex(where: { $0.target == target }) {
+            mutate(&mappings[idx])
+            cache.musicReactiveMappings = mappings
+            cache.push(\.musicReactiveMappings, value: mappings)
+        }
     }
 
     // MARK: - Helpers

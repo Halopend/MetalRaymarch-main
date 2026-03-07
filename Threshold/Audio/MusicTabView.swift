@@ -702,6 +702,7 @@ struct MusicTabContent: View {
 
                     ForEach(Array(cache.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
                         VStack(spacing: 6) {
+                            // ── Header: toggle + name + trash ──
                             HStack(spacing: 8) {
                                 Toggle("", isOn: Binding(
                                     get: { mappingAt(index)?.isEnabled ?? false },
@@ -730,6 +731,7 @@ struct MusicTabContent: View {
                                 .foregroundStyle(.secondary)
                             }
 
+                            // ── Audio source ──
                             Picker("Source", selection: Binding(
                                 get: { mappingAt(index)?.source ?? .composite },
                                 set: { newValue in updateMapping(index) { $0.source = newValue } }
@@ -740,67 +742,76 @@ struct MusicTabContent: View {
                             }
                             .pickerStyle(.segmented)
 
-                            sliderRow(label: "Min", value: Binding(
-                                get: { mappingAt(index)?.rangeMin ?? mapping.target.defaultRange(for: cache.fractalType).lowerBound },
-                                set: { newValue in
-                                    updateMapping(index) { m in
-                                        m.rangeMin = newValue
-                                        m.sanitizeInPlace(for: cache.fractalType)
-                                    }
-                                }
-                            ), range: mapping.target.allowedRange(for: cache.fractalType))
-
-                            sliderRow(label: "Max", value: Binding(
-                                get: { mappingAt(index)?.rangeMax ?? mapping.target.defaultRange(for: cache.fractalType).upperBound },
-                                set: { newValue in
-                                    updateMapping(index) { m in
-                                        m.rangeMax = newValue
-                                        m.sanitizeInPlace(for: cache.fractalType)
-                                    }
-                                }
-                            ), range: mapping.target.allowedRange(for: cache.fractalType))
-
-                            // Mode picker (Absolute / Relative)
+                            // ── Mode (always visible — changes what other controls appear) ──
                             Picker("Mode", selection: Binding(
                                 get: { mappingAt(index)?.mode ?? .absolute },
                                 set: { newValue in updateMapping(index) { $0.mode = newValue } }
                             )) {
-                                ForEach(MusicReactiveMode.allCases, id: \.self) { mode in
-                                    Text(mode.displayName).tag(mode)
-                                }
+                                Text("Absolute").tag(MusicReactiveMode.absolute)
+                                Text("Relative").tag(MusicReactiveMode.relative)
                             }
                             .pickerStyle(.segmented)
 
-                            sliderRow(label: "Response", value: Binding(
-                                get: { mappingAt(index)?.responseSpeed ?? 0.12 },
-                                set: { newValue in updateMapping(index) { $0.responseSpeed = newValue; $0.sanitizeInPlace() } }
-                            ), range: 0.01...1.0)
+                            // ── Absolute: Min/Max define the output range ──
+                            if mappingAt(index)?.mode != .relative {
+                                sliderRow(label: "Min", value: Binding(
+                                    get: { mappingAt(index)?.rangeMin ?? mapping.target.defaultRange(for: cache.fractalType).lowerBound },
+                                    set: { newValue in
+                                        updateMapping(index) { m in
+                                            m.rangeMin = newValue
+                                            m.sanitizeInPlace(for: cache.fractalType)
+                                        }
+                                    }
+                                ), range: mapping.target.allowedRange(for: cache.fractalType))
 
-                            sliderRow(label: "Amount", value: Binding(
+                                sliderRow(label: "Max", value: Binding(
+                                    get: { mappingAt(index)?.rangeMax ?? mapping.target.defaultRange(for: cache.fractalType).upperBound },
+                                    set: { newValue in
+                                        updateMapping(index) { m in
+                                            m.rangeMax = newValue
+                                            m.sanitizeInPlace(for: cache.fractalType)
+                                        }
+                                    }
+                                ), range: mapping.target.allowedRange(for: cache.fractalType))
+                            }
+
+                            // ── Intensity: how much audio drives the parameter ──
+                            sliderRow(label: "Intensity", value: Binding(
                                 get: { mappingAt(index)?.amount ?? 1.0 },
                                 set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
-                            ), range: -3...3)
+                            ), range: 0...3)
 
-                            sliderRow(label: "Smoothing", value: Binding(
+                            // ── Smooth: single feel knob (snappy ↔ smooth) ──
+                            sliderRow(label: "Smooth", value: Binding(
                                 get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
                                 set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
                             ), range: 0...2)
 
-                            // LFO section
-                            VStack(spacing: 4) {
-                                HStack {
-                                    Toggle("LFO", isOn: Binding(
+                            // ── Advanced: Invert + LFO (collapsed) ──
+                            DisclosureGroup {
+                                VStack(spacing: 6) {
+                                    Toggle("Invert", isOn: Binding(
+                                        get: { (mappingAt(index)?.amount ?? 1.0) < 0 },
+                                        set: { invert in
+                                            updateMapping(index) { $0.amount = invert ? -abs($0.amount) : abs($0.amount) }
+                                        }
+                                    ))
+                                    .font(.caption2)
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+
+                                    Divider()
+
+                                    Toggle("LFO Oscillator", isOn: Binding(
                                         get: { mappingAt(index)?.lfo.enabled ?? false },
                                         set: { newValue in updateMapping(index) { $0.lfo.enabled = newValue } }
                                     ))
+                                    .font(.caption2)
                                     .toggleStyle(.switch)
                                     .controlSize(.small)
-                                    .font(.caption2)
-
-                                    Spacer()
 
                                     if mappingAt(index)?.lfo.enabled == true {
-                                        Picker("", selection: Binding(
+                                        Picker("Shape", selection: Binding(
                                             get: { mappingAt(index)?.lfo.shape ?? .sine },
                                             set: { newValue in updateMapping(index) { $0.lfo.shape = newValue } }
                                         )) {
@@ -809,24 +820,24 @@ struct MusicTabContent: View {
                                             }
                                         }
                                         .pickerStyle(.segmented)
-                                        .frame(maxWidth: 160)
+
+                                        sliderRow(label: "Speed", value: Binding(
+                                            get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
+                                            set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
+                                        ), range: 0.01...5.0)
+
+                                        sliderRow(label: "Depth", value: Binding(
+                                            get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
+                                            set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
+                                        ), range: 0...1)
                                     }
                                 }
-
-                                if mappingAt(index)?.lfo.enabled == true {
-                                    sliderRow(label: "Freq", value: Binding(
-                                        get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
-                                        set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
-                                    ), range: 0.01...5.0)
-
-                                    sliderRow(label: "Depth", value: Binding(
-                                        get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
-                                        set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
-                                    ), range: 0...1)
-                                }
+                            } label: {
+                                Text("Advanced")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
-                            .padding(6)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.15)))
+                            .font(.caption2)
                         }
                         .padding(8)
                         .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))

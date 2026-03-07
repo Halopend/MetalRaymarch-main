@@ -159,6 +159,7 @@ final class RenderSettings: @unchecked Sendable {
     
     // HUD display
     private var _showHUD: Bool = true                // Show in-world HUD (default on)
+    private var _showMusicShortcuts: Bool = loadBool("showMusicShortcuts", default: false)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
@@ -791,6 +792,14 @@ final class RenderSettings: @unchecked Sendable {
     var showHUD: Bool {
         get { withLock { _showHUD } }
         set { withLock { _showHUD = newValue } }
+    }
+
+    var showMusicShortcuts: Bool {
+        get { withLock { _showMusicShortcuts } }
+        set {
+            withLock { _showMusicShortcuts = newValue }
+            UserDefaults.standard.set(newValue, forKey: "showMusicShortcuts")
+        }
     }
 
     /// Whether menu UI interaction is currently active.
