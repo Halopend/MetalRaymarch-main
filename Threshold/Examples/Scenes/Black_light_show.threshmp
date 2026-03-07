@@ -1,0 +1,232 @@
+{
+  "bloomEffect" : {
+    "enabled" : true,
+    "strength" : 0.10260423
+  },
+  "colorIterations" : 16,
+  "colorMix" : 0.25241977,
+  "colorScheme" : "classic",
+  "colorSchemeAutoInterval" : 30,
+  "colorSchemeAutoTransition" : false,
+  "colorSchemeContrast" : 1.15,
+  "colorSchemeCurve" : 0,
+  "colorSchemeGamma" : 0.75,
+  "colorSchemeHighlights" : 1,
+  "colorSchemeSaturation" : 1.2025753,
+  "colorSchemeShadows" : 0,
+  "colorSchemeTransitionDuration" : 2,
+  "colorSchemeVibrance" : 1,
+  "createdAt" : "2026-03-07T20:38:34Z",
+  "doppelgangerEnabled" : false,
+  "doppelgangerOffset" : 0,
+  "doppelgangerPlane" : [
+    1,
+    0,
+    0
+  ],
+  "fogEffect" : {
+    "enabled" : true,
+    "intensity" : 0.083698414
+  },
+  "foldingLimit" : 1,
+  "formulaParamValues" : [
+    -0.059521,
+    -1.049433,
+    -0.5466318,
+    2.9999967,
+    0.87897384,
+    1.0217812,
+    0.52353466,
+    1.0244274,
+    1.9928894,
+    2.9945393,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fractalIterations" : 6,
+  "fractalScale" : 0.99946576,
+  "fractalType" : "kleinian",
+  "glowEffect" : {
+    "enabled" : true,
+    "intensity" : 0.40530083
+  },
+  "gradientCycleEffect" : {
+    "enabled" : false,
+    "mirrorLoop" : true,
+    "speed" : 0.09695886
+  },
+  "gradientState" : {
+    "gradient" : {
+      "id" : "4CCF02FB-D9BF-41EB-A4D7-CBC59BEE5A21",
+      "mappingMode" : 5,
+      "name" : "Rainbow",
+      "offset" : 0.09882506,
+      "repeatCount" : 5,
+      "smoothing" : 1,
+      "stops" : [
+        {
+          "color" : [
+            1,
+            0,
+            0
+          ],
+          "id" : "E176D126-2853-48DC-BD00-CFD58030258E",
+          "position" : 0
+        },
+        {
+          "color" : [
+            1,
+            0.5,
+            0
+          ],
+          "id" : "FCEA8047-2944-4C1A-B25B-A5CEA110829E",
+          "position" : 0.167
+        },
+        {
+          "color" : [
+            1,
+            1,
+            0
+          ],
+          "id" : "85502A8A-54DC-44D4-B43A-64CB9AEB06EF",
+          "position" : 0.333
+        },
+        {
+          "color" : [
+            0,
+            1,
+            0
+          ],
+          "id" : "DD8DA69D-A87D-4ACA-BADD-4D1E49BB5FB1",
+          "position" : 0.5
+        },
+        {
+          "color" : [
+            0,
+            0.5,
+            1
+          ],
+          "id" : "0517C8FE-354E-463E-8098-2F2FE847AEFB",
+          "position" : 0.667
+        },
+        {
+          "color" : [
+            0.5,
+            0,
+            1
+          ],
+          "id" : "86C3683D-D1D2-4AFF-88C3-9A0FFD471A74",
+          "position" : 0.833
+        },
+        {
+          "color" : [
+            1,
+            0,
+            0.5
+          ],
+          "id" : "8E6207B0-6590-47AF-BF72-1425A6C18AF9",
+          "position" : 1
+        }
+      ]
+    },
+    "gradientPreset" : "rainbow",
+    "useGradientColoring" : true
+  },
+  "hueRotationEffect" : {
+    "enabled" : true,
+    "intensity" : 0.3,
+    "speed" : 0.13743615
+  },
+  "id" : "674CDCAC-4347-4699-A921-533BADDF8D61",
+  "lightingMode" : "audioReactive",
+  "lightingPreset" : "Custom",
+  "lightingSoftness" : 0,
+  "maxRaySteps" : 32,
+  "minDistance" : 0.8,
+  "musicReactiveMappings" : [
+    {
+      "amount" : 1,
+      "id" : "4B8A2732-D6CC-44D2-8C14-646FC778F8B4",
+      "isEnabled" : true,
+      "rangeMax" : 0.9,
+      "rangeMin" : 0.2,
+      "responseSpeed" : 0.12,
+      "source" : "composite",
+      "target" : "colorMix"
+    },
+    {
+      "amount" : 1,
+      "id" : "8B049070-28EB-4E06-A3A5-4214BCB68D8E",
+      "isEnabled" : true,
+      "rangeMax" : 0.5,
+      "rangeMin" : 0.05,
+      "responseSpeed" : 0.12,
+      "source" : "composite",
+      "target" : "fog"
+    },
+    {
+      "amount" : 1,
+      "id" : "110F5D82-AA84-4EFF-B455-42C9E3F019C5",
+      "isEnabled" : true,
+      "rangeMax" : 0.25,
+      "rangeMin" : 0.02,
+      "responseSpeed" : 0.12,
+      "source" : "treble",
+      "target" : "hueSpeed"
+    },
+    {
+      "amount" : 1,
+      "id" : "CD248C6F-36FF-4052-907F-487E08939390",
+      "isEnabled" : true,
+      "rangeMax" : 2,
+      "rangeMin" : 0.8,
+      "responseSpeed" : 0.12,
+      "source" : "mid",
+      "target" : "saturation"
+    },
+    {
+      "amount" : 1,
+      "id" : "2274CE77-34A1-4DB8-9F8B-E9B564B0076F",
+      "isEnabled" : true,
+      "rangeMax" : 0.8,
+      "rangeMin" : 0.1,
+      "responseSpeed" : 0.12,
+      "source" : "beat",
+      "target" : "bloom"
+    },
+    {
+      "amount" : 1,
+      "id" : "C50BF950-0B01-4875-87AB-5714AF03D225",
+      "isEnabled" : true,
+      "rangeMax" : 0.013800025,
+      "rangeMin" : -1.5862,
+      "responseSpeed" : 0.12,
+      "source" : "mid",
+      "target" : "formulaParam1"
+    }
+  ],
+  "name" : "Black light show",
+  "position" : [
+    0.35274956,
+    1.0394936,
+    1.67773
+  ],
+  "pulseEffect" : {
+    "amount" : 0.1637325,
+    "enabled" : false,
+    "speed" : 0.46227682
+  },
+  "rating" : 5,
+  "resolutionScale" : 1,
+  "safetyBubbleBlend" : 0.080658935,
+  "safetyBubbleEnabled" : true,
+  "safetyBubbleRadius" : 1.4234283,
+  "safetyBubbleShape" : 0,
+  "scale" : 1,
+  "sphereRadius" : 0.5,
+  "tileSize" : 0
+}
