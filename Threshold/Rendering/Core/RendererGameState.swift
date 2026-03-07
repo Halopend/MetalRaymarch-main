@@ -80,6 +80,7 @@ extension Renderer {
         cachedPrecomputedFog = precomputedFog
         cachedModelMatrix = modelMatrix
         cachedMaxViewDistance = maxViewDistance
+        let boundingSphereRadius = settingsSnapshot.estimatedBoundingSphereRadius
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -127,7 +128,7 @@ extension Renderer {
                             lightingSoftness: settingsSnapshot.lightingSoftness,
                             // === GMT-FRACTALS OPTIMIZATIONS ===
                             stepMultiplier: settingsSnapshot.stepMultiplier,
-                            boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
+                            boundingSphereRadius: boundingSphereRadius,
                             jitterOffset: currentJitterOffset(),
                             precomputedFractal: precomputedFractal,
                             precomputedLighting: precomputedLighting,

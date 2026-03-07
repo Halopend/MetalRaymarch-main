@@ -9,7 +9,7 @@ enum RenderFramePath {
 
 extension Renderer {
     func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {
-        if settingsSnapshot.tileSize == 8,
+        if settingsSnapshot.prefersAdaptiveComputePath,
            adaptiveHierarchicalPipeline8x8 != nil {
             return .adaptiveCompute
         }

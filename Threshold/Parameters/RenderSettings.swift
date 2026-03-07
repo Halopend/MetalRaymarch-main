@@ -612,7 +612,7 @@ final class RenderSettings: @unchecked Sendable {
 
     // 0 = disabled (standard per-pixel raymarch)
     // 2 = 2x2 tiles (4x overhead reduction, high quality)
-    // 4 = 4x4 tiles (16x overhead reduction, performance mode)
+    // 4 = performance mode (currently routed to the adaptive compute backend)
     // 8 = 8x8 adaptive hierarchical (3-8x speedup, best performance)
     var tileSize: Int {
         get { withLock { _tileSize } }

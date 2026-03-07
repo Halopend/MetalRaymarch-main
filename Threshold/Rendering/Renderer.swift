@@ -1123,6 +1123,7 @@ actor Renderer {
         let computePrecomputedAudio = cachedPrecomputedAudio
         let computePrecomputedFog = cachedPrecomputedFog
         let frameTime = cachedFrameTime
+        let boundingSphereRadius = settingsSnapshot.estimatedBoundingSphereRadius
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
@@ -1156,7 +1157,7 @@ actor Renderer {
             lightingSoftness: settingsSnapshot.lightingSoftness,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
-            boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
+            boundingSphereRadius: boundingSphereRadius,
             // Mandelbulb: disable temporal color blending — fine surface detail gets
             // softened by history accumulation, and reprojection artifacts are more
             // visible on its smooth/spherical geometry. Temporal reprojection for

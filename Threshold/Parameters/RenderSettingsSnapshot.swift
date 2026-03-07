@@ -61,3 +61,20 @@ struct RenderSettingsSnapshot {
     // ═══════════════════════════════════════════════════════════════════════════
     let stepMultiplier: Float
 }
+
+extension RenderSettingsSnapshot {
+    /// Route explicit performance tile modes through the hierarchical compute path.
+    var prefersAdaptiveComputePath: Bool {
+        switch tileSize {
+        case 8, 4:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Disabled until the bound is calibrated against real scene extents.
+    var estimatedBoundingSphereRadius: Float {
+        0.0
+    }
+}

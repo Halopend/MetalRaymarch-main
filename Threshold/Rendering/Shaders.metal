@@ -588,7 +588,13 @@ FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float 
     if (type == FractalTypeMandelbox) {
         return MapContinuous(pos, params, foldingLimit, fractionalIterations);  // bubble applied inside
     }
-    float d = FractalDE_Dispatch(pos, type, fp, int(fractionalIterations));
+    // Formula DEs do not support Mandelbox-style fractional interpolation yet.
+    // For Mandelbulb, rounding up keeps the coarse pass conservative and avoids
+    // underestimating surface complexity near the front shell.
+    int loopCount = max(type == FractalTypeMandelbulb
+                        ? int(ceil(fractionalIterations))
+                        : int(fractionalIterations), 1);
+    float d = FractalDE_Dispatch(pos, type, fp, loopCount);
     return applySafetyBubble(d, pos, params);
 }
 
@@ -1015,6 +1021,48 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
     return d;
 }
 
+FORCE_INLINE int ReducedSecondaryIterations(int iterations, int fractalType, bool forShadow = false)
+{
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+    if (type == FractalTypeMandelbulb) {
+        return max(forShadow ? ((iterations + 2) / 3) : ((iterations + 1) / 3), 2);
+    }
+    return max((iterations * 2) / 5, 3);
+}
+
+FORCE_INLINE float3 ApproximateMandelbulbNormal(float3 pos, float distance, FractalParams params,
+                                                float foldingLimit, int iterations, FormulaParams fp,
+                                                float cachedDistance, OrbitCache cache)
+{
+    float3 escapeDir = cache.p.xyz;
+    float escapeLen2 = dot(escapeDir, escapeDir);
+    if (escapeLen2 <= 1e-8f) {
+        escapeDir = pos;
+        escapeLen2 = dot(escapeDir, escapeDir);
+    }
+
+    float3 baseNormal = (escapeLen2 > 1e-8f)
+        ? escapeDir * rsqrt(escapeLen2)
+        : float3(0.0f, 1.0f, 0.0f);
+
+    float3 upAxis = (abs(baseNormal.y) < 0.92f) ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
+    float3 tangentX = cross(upAxis, baseNormal);
+    tangentX *= rsqrt(dot(tangentX, tangentX) + kPowEpsilon);
+    float3 tangentY = cross(baseNormal, tangentX);
+
+    int normalIters = ReducedSecondaryIterations(iterations, FractalTypeMandelbulb, false);
+    float e = max(distance * 0.00075f, 0.00012f);
+    float invE = 1.0f / max(e, kPowEpsilon);
+
+    float dX = MapUnified(pos + tangentX * e, params, foldingLimit, normalIters, FractalTypeMandelbulb, fp);
+    float dY = MapUnified(pos + tangentY * e, params, foldingLimit, normalIters, FractalTypeMandelbulb, fp);
+
+    float3 gradient = baseNormal;
+    gradient += tangentX * ((dX - cachedDistance) * invE * 0.35f);
+    gradient += tangentY * ((dY - cachedDistance) * invE * 0.35f);
+    return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+}
+
 // Compute normal using cached orbit state
 // Three paths, in priority order:
 //   1. Analytic Jacobian (cache.hasJacobian) — ZERO extra Map() calls
@@ -1035,9 +1083,13 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
             dot(cache.jacobian[2], pDir)
         );
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
+    } else if (type == FractalTypeMandelbulb && cache.valid) {
+        // Mandelbulb-specific fast path: use cached escape direction as the base
+        // normal and refine it with only two tangent-space DE probes.
+        return ApproximateMandelbulbNormal(pos, distance, params, foldingLimit, iterations, fp, cache.distance, cache);
     } else if (cache.valid && type == FractalTypeMandelbox) {
         // Fallback: use cached center distance, reduced iterations
-        int normalIters = max((iterations * 2) / 5, 3);
+        int normalIters = ReducedSecondaryIterations(iterations, type, false);
         float e = max(distance * 0.0005f, 0.0001f);
         float d0 = cache.distance;
         
@@ -1052,7 +1104,7 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         // Non-Mandelbox with cached center distance: 3 lean _Dist calls
         // with reduced iterations (40% of full).  The cache already holds
         // the center DE from the hit evaluation — reuse it.
-        int normalIters = max((iterations * 2) / 5, 3);
+        int normalIters = ReducedSecondaryIterations(iterations, type, false);
         float e = max(distance * 0.0005f, 0.0001f);
         float d0 = cache.distance;
         float3 gradient = float3(
@@ -1851,7 +1903,7 @@ kernel void adaptiveHierarchical8x8(
         const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
             ? FC_SHARE_SHADOWS
             : (uniforms.lightingSoftness < 0.9f);
-        int shadowIterations = max(lodIterations - 2, 2);
+        int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
         half shaSpot = 1.0h;
         half shaSun = 1.0h;
         if (shareShadows) {
@@ -2079,7 +2131,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             float sunDiffuseScale = lp.sunDiffuseScale;
             float lightIntensity = lp.lightIntensity;
 
-            int shadowIterations = max(lodIterations - 2, 2);
+            int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
             // Shadow params still need per-pixel bubble center, but use precomputed fractal values
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
@@ -2261,7 +2313,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         half shaSpot = 1.0h;
         half shaSun = 1.0h;
         
-        int shadowIterations = max(lodIterations - 2, 2);
+        int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
         FractalParams shadowParams = makeFractalParamsFromPrecomputed(
             uniforms.precomputedFractal,
             uniforms.minDistance,
