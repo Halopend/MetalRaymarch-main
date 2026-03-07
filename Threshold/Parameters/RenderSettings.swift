@@ -50,21 +50,23 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     private static func defaultMusicReactiveMappingsFromLegacyToggles() -> [MusicReactiveMapping] {
-        var mappings = MusicReactiveMapping.defaultMappings()
+        // Legacy toggles mapped to the new universal + formula-param targets.
+        // foldingLimit → formulaParam1, sphereRadius → formulaParam2 (Mandelbox migration)
         let defaults = UserDefaults.standard
         let legacyToggleByTarget: [(MusicReactiveTarget, String, Bool)] = [
-            (.fractalScale, "fractalAudioAffectsScale", true),
-            (.foldingLimit, "fractalAudioAffectsFolding", true),
-            (.sphereRadius, "fractalAudioAffectsRadius", true),
-            (.colorMix, "fractalAudioAffectsColorMix", true),
-            (.glow, "fractalAudioAffectsGlow", true),
-            (.fog, "fractalAudioAffectsFog", true),
-            (.bloom, "fractalAudioAffectsBloom", true),
-            (.hueSpeed, "fractalAudioAffectsHueSpeed", true),
-            (.saturation, "fractalAudioAffectsSaturation", true),
-            (.iterations, "fractalAudioAffectsIterations", false)
+            (.fractalScale,  "fractalAudioAffectsScale", true),
+            (.formulaParam1, "fractalAudioAffectsFolding", true),
+            (.formulaParam2, "fractalAudioAffectsRadius", true),
+            (.colorMix,      "fractalAudioAffectsColorMix", true),
+            (.glow,          "fractalAudioAffectsGlow", true),
+            (.fog,           "fractalAudioAffectsFog", true),
+            (.bloom,         "fractalAudioAffectsBloom", true),
+            (.hueSpeed,      "fractalAudioAffectsHueSpeed", true),
+            (.saturation,    "fractalAudioAffectsSaturation", true),
+            (.iterations,    "fractalAudioAffectsIterations", false)
         ]
 
+        var mappings: [MusicReactiveMapping] = []
         for (target, key, fallback) in legacyToggleByTarget {
             let enabled: Bool
             if defaults.object(forKey: key) != nil {
@@ -72,8 +74,8 @@ final class RenderSettings: @unchecked Sendable {
             } else {
                 enabled = fallback
             }
-            if let index = mappings.firstIndex(where: { $0.target == target }) {
-                mappings[index].isEnabled = enabled
+            if enabled {
+                mappings.append(target.defaultMapping(enabled: true))
             }
         }
         return mappings
@@ -83,7 +85,9 @@ final class RenderSettings: @unchecked Sendable {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: key),
            let decoded = try? JSONDecoder().decode([MusicReactiveMapping].self, from: data) {
-            return sanitizeMusicReactiveMappings(decoded)
+            // Migrate legacy Mandelbox-specific targets (foldingLimit → formulaParam1, etc.)
+            let migrated = MusicReactiveMapping.migrateLegacy(decoded)
+            return sanitizeMusicReactiveMappings(migrated)
         }
         let migrated = defaultMusicReactiveMappingsFromLegacyToggles()
         if let data = try? JSONEncoder().encode(migrated) {
@@ -128,6 +132,18 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioReactiveEnabled: Bool = loadBool("fractalAudioReactiveEnabled", default: true)
     private var _fractalAudioAmount: Float              = loadFloat("fractalAudioAmount", default: 0.6)
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
+    private var _fractalAudioAffectsScale: Bool         = loadBool("fractalAudioAffectsScale", default: true)
+    private var _fractalAudioAffectsFolding: Bool       = loadBool("fractalAudioAffectsFolding", default: true)
+    private var _fractalAudioAffectsRadius: Bool        = loadBool("fractalAudioAffectsRadius", default: true)
+    private var _fractalAudioAffectsColorMix: Bool      = loadBool("fractalAudioAffectsColorMix", default: true)
+    
+    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
+    private var _fractalAudioAffectsGlow: Bool          = loadBool("fractalAudioAffectsGlow", default: true)
+    private var _fractalAudioAffectsFog: Bool           = loadBool("fractalAudioAffectsFog", default: true)
+    private var _fractalAudioAffectsBloom: Bool         = loadBool("fractalAudioAffectsBloom", default: true)
+    private var _fractalAudioAffectsHueSpeed: Bool      = loadBool("fractalAudioAffectsHueSpeed", default: true)
+    private var _fractalAudioAffectsSaturation: Bool    = loadBool("fractalAudioAffectsSaturation", default: true)
+    private var _fractalAudioAffectsIterations: Bool    = loadBool("fractalAudioAffectsIterations", default: false)
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
     
     private var _foldingLimit: Float = 1.0
@@ -142,20 +158,14 @@ final class RenderSettings: @unchecked Sendable {
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
-    private var _showHUD: Bool = false               // Show in-world HUD (default off)
+    private var _showHUD: Bool = true                // Show in-world HUD (default on)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
     private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
-    private var _rotationAutoSnap: Bool = true        // Snap rotation to nearest 45° multiple within snap window
-    private var _rotationBreakawayDegrees: Float = 15.0  // Initial breakaway angle before rotation engages (degrees)
+    private var _rotationAutoSnap: Bool = false       // Snap rotation to nearest 45° multiple within snap window
     private var _rotationSnapWindowDegrees: Float = 6.0  // ±halfWindow snap threshold per axis (degrees)
     private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
-    private var _gestureSmoothingFactor: Float = {
-        let key = "gestureSmoothingFactor"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return 0.0 }
-        return max(0.0, min(1.0, UserDefaults.standard.float(forKey: key)))
-    }()
     private var _menuToggleGestureEnabled: Bool        = loadBool("menuToggleGestureEnabled", default: true)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
@@ -187,15 +197,16 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
-    private var _safetyBubbleFadeEnabled: Bool = true   // Always use smooth fade transition (polynomial smooth-max)
-    private var _safetyBubbleFadeWidth: Float = 0.5     // Width of fade region beyond inner radius (meters)
-    private var _safetyBubbleBlend: Float = 1.0         // User-facing blend strength (0=transparent, 1=fully active)
-    private var _safetyBubbleStrength: Float = 0.0      // Current strength (0=off, 1=fully active) — smoothDamped toward blend target
-    private var _safetyBubbleStrengthTarget: Float = 0.0 // Target strength (set by safetyBubbleEnabled toggle)
-    private var _safetyBubbleStrengthVelocity: Float = 0.0 // Spring velocity for smoothDamp
     
-    // === COLOR POST-PROCESSING ===
-    // Post-processing overrides for fractal coloring (independent of gradient preset)
+    // === COLOR SCHEME ===
+    // Controls the color palette and post-processing for fractal coloring
+    private var _colorScheme: ColorScheme = .nebula      // Current color scheme
+    private var _targetColorScheme: ColorScheme = .nebula // Target for transitions
+    private var _colorSchemeTransitionProgress: Float = 1.0 // 0 = previous, 1 = current (complete)
+    private var _colorSchemeTransitionDuration: Float = 2.0 // Seconds to transition between schemes
+    private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes
+    private var _colorSchemeAutoInterval: Float = 30.0      // Seconds between auto-transitions
+    private var _colorSchemeAutoTimer: Float = 0.0          // Timer for auto-transitions
     private var _colorSchemeSaturation: Float = 1.5         // Color saturation override
     private var _colorSchemeContrast: Float = 1.02          // Contrast override (subtle)
     private var _colorSchemeGamma: Float = 0.75             // Gamma override (lower = brighter, 1.0 = linear)
@@ -215,9 +226,13 @@ final class RenderSettings: @unchecked Sendable {
     private var _bloomEffect: BloomEffect = .off
     private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     private var _gradientCycleEffect: GradientCycleEffect = .off
-    private var _polarRotationEffect: PolarRotationEffect = PolarRotationEffect(direction: .clockwise, speed: 0.2)
+    private var _polarRotationEffect: PolarRotationEffect = .off
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
-    private var _beatFlashEffect: BeatFlashEffect = .off
+    
+    // === DOPPELGANGER MODE ===
+    private var _doppelgangerEnabled: Bool = false              // Pre-fold mirror creates structural twin
+    private var _doppelgangerPlane: SIMD3<Float> = SIMD3<Float>(1, 0, 0)  // Mirror plane normal (x-axis default)
+    private var _doppelgangerOffset: Float = 0.0               // Mirror plane distance from origin
     
     // === GEOMETRY STABILITY STATE ===
     // Tracks whether geometry parameters have settled for optimization
@@ -288,6 +303,15 @@ final class RenderSettings: @unchecked Sendable {
     private var _velocitySphereRadius: Float = 0.0
     private var _velocityFractalScale: Float = 0.0
     private var _velocityPosition: SIMD3<Float> = .zero
+    
+    // === REFINING PARAMETERS (Polychronakis 2024 / Keinert 2014) ===
+    // These control the sphere tracing optimization thresholds
+    private var _relaxFactor: Float = 1.6            // Over-relaxation multiplier (1.0-2.0)
+    private var _relaxBacktrack: Float = 0.7         // Backtrack factor when overshooting (0.5-1.0)
+    private var _sdfScaleCoarse: Float = 1.3         // SDF scaling for coarse pass (1.0-2.0)
+    private var _sdfScaleSuperCoarse: Float = 1.5    // SDF scaling for super-coarse pass (1.0-2.5)
+    private var _earlyTermRatio: Float = 0.3         // Early termination convergence ratio (0.1-0.5)
+    private var _earlyTermCount: Int = 3             // Steps before early termination (1-5)
 
     var minDistance: Float {
         get { withLock { _minDistance } }
@@ -482,6 +506,124 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
     }
+
+    var fractalAudioAffectsScale: Bool {
+        get { withLock { mappingEnabledLocked(.fractalScale) } }
+        set {
+            withLock {
+                _fractalAudioAffectsScale = newValue
+                setMappingEnabledLocked(.fractalScale, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsScale")
+        }
+    }
+
+    var fractalAudioAffectsFolding: Bool {
+        get { withLock { mappingEnabledLocked(.formulaParam1) } }
+        set {
+            withLock {
+                _fractalAudioAffectsFolding = newValue
+                setMappingEnabledLocked(.formulaParam1, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFolding")
+        }
+    }
+
+    var fractalAudioAffectsRadius: Bool {
+        get { withLock { mappingEnabledLocked(.formulaParam2) } }
+        set {
+            withLock {
+                _fractalAudioAffectsRadius = newValue
+                setMappingEnabledLocked(.formulaParam2, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsRadius")
+        }
+    }
+
+    var fractalAudioAffectsColorMix: Bool {
+        get { withLock { mappingEnabledLocked(.colorMix) } }
+        set {
+            withLock {
+                _fractalAudioAffectsColorMix = newValue
+                setMappingEnabledLocked(.colorMix, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsColorMix")
+        }
+    }
+    
+    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
+    
+    /// Glow intensity responds to RMS energy + beat pulses (Fractal Forge: glow)
+    var fractalAudioAffectsGlow: Bool {
+        get { withLock { mappingEnabledLocked(.glow) } }
+        set {
+            withLock {
+                _fractalAudioAffectsGlow = newValue
+                setMappingEnabledLocked(.glow, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsGlow")
+        }
+    }
+    
+    /// Fog clears on loud passages, thickens on quiet (Fractal Forge: inverse energy)
+    var fractalAudioAffectsFog: Bool {
+        get { withLock { mappingEnabledLocked(.fog) } }
+        set {
+            withLock {
+                _fractalAudioAffectsFog = newValue
+                setMappingEnabledLocked(.fog, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFog")
+        }
+    }
+    
+    /// Bloom strength pulses with beats (Fractal Forge: beat bloom)
+    var fractalAudioAffectsBloom: Bool {
+        get { withLock { mappingEnabledLocked(.bloom) } }
+        set {
+            withLock {
+                _fractalAudioAffectsBloom = newValue
+                setMappingEnabledLocked(.bloom, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsBloom")
+        }
+    }
+    
+    /// Hue rotation speed driven by treble (Fractal Forge: brilliance → color speed)
+    var fractalAudioAffectsHueSpeed: Bool {
+        get { withLock { mappingEnabledLocked(.hueSpeed) } }
+        set {
+            withLock {
+                _fractalAudioAffectsHueSpeed = newValue
+                setMappingEnabledLocked(.hueSpeed, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsHueSpeed")
+        }
+    }
+    
+    /// Color saturation responds to tonal/harmonic energy
+    var fractalAudioAffectsSaturation: Bool {
+        get { withLock { mappingEnabledLocked(.saturation) } }
+        set {
+            withLock {
+                _fractalAudioAffectsSaturation = newValue
+                setMappingEnabledLocked(.saturation, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsSaturation")
+        }
+    }
+    
+    /// Fractal iterations increase with mid energy (detail on transients — caution: performance)
+    var fractalAudioAffectsIterations: Bool {
+        get { withLock { mappingEnabledLocked(.iterations) } }
+        set {
+            withLock {
+                _fractalAudioAffectsIterations = newValue
+                setMappingEnabledLocked(.iterations, enabled: newValue)
+            }
+            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsIterations")
+        }
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // AUDIO MODULATION SETTERS (bypass lighting preset tracking)
@@ -601,18 +743,12 @@ final class RenderSettings: @unchecked Sendable {
 
     var formulaParams: FormulaParams {
         get { withLock { _formulaParams } }
-        set {
-            withLock {
-                var normalized = newValue
-                FormulaCatalog.normalizeRotationFlags(&normalized)
-                _formulaParams = normalized
-            }
-        }
+        set { withLock { _formulaParams = newValue } }
     }
 
     // 0 = disabled (standard per-pixel raymarch)
     // 2 = 2x2 tiles (4x overhead reduction, high quality)
-    // 4 = performance mode (currently routed to the adaptive compute backend)
+    // 4 = 4x4 tiles (16x overhead reduction, performance mode)
     // 8 = 8x8 adaptive hierarchical (3-8x speedup, best performance)
     var tileSize: Int {
         get { withLock { _tileSize } }
@@ -680,13 +816,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _rotationAutoSnap = newValue } }
     }
 
-    /// Initial breakaway angle in degrees. Rotation doesn't engage until the hand
-    /// rotation exceeds this threshold from the grab-start orientation. Default 15°.
-    var rotationBreakawayDegrees: Float {
-        get { withLock { _rotationBreakawayDegrees } }
-        set { withLock { _rotationBreakawayDegrees = max(0.0, min(45.0, newValue)) } }
-    }
-
     /// Half-angle snap window in degrees (±this value). Default 6° → snaps within ±3° of target.
     var rotationSnapWindowDegrees: Float {
         get { withLock { _rotationSnapWindowDegrees } }
@@ -700,16 +829,6 @@ final class RenderSettings: @unchecked Sendable {
             let clamped = max(1.0, min(10.0, newValue))
             withLock { _gestureSensitivity = clamped }
             UserDefaults.standard.set(clamped, forKey: "gestureSensitivity")
-        }
-    }
-
-    /// Gesture drag smoothing amount (0-1, where higher adds more response latency).
-    var gestureSmoothingFactor: Float {
-        get { withLock { _gestureSmoothingFactor } }
-        set {
-            let clamped = max(0.0, min(1.0, newValue))
-            withLock { _gestureSmoothingFactor = clamped }
-            UserDefaults.standard.set(clamped, forKey: "gestureSmoothingFactor")
         }
     }
 
@@ -913,18 +1032,7 @@ final class RenderSettings: @unchecked Sendable {
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry
     var safetyBubbleEnabled: Bool {
         get { withLock { _safetyBubbleEnabled } }
-        set {
-            withLock {
-                _safetyBubbleEnabled = newValue
-                _safetyBubbleStrengthTarget = newValue ? _safetyBubbleBlend : 0.0
-            }
-        }
-    }
-
-    /// Current interpolated bubble strength (0 = fully off, 1 = fully active)
-    /// Read-only: driven by smoothDamp toward safetyBubbleEnabled target
-    var safetyBubbleStrength: Float {
-        get { withLock { _safetyBubbleStrength } }
+        set { withLock { _safetyBubbleEnabled = newValue } }
     }
 
     /// Radius of the safety bubble in meters (0.05 - 2.5)
@@ -939,34 +1047,54 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _safetyBubbleShape } }
         set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
     }
-
-    /// User-facing blend amount for the safety bubble (0 = transparent, 1 = fully active)
-    /// When the bubble is enabled, the smoothDamp target = this value. When disabled, target = 0.
-    var safetyBubbleBlend: Float {
-        get { withLock { _safetyBubbleBlend } }
-        set {
-            withLock {
-                _safetyBubbleBlend = max(0.0, min(1.0, newValue))
-                if _safetyBubbleEnabled {
-                    _safetyBubbleStrengthTarget = _safetyBubbleBlend
+    
+    // === COLOR SCHEME SETTINGS ===
+    // Controls the color palette and transitions for fractal coloring
+    
+    /// Current color scheme (or target when transitioning)
+    var colorScheme: ColorScheme {
+        get { withLock { _colorScheme } }
+        set { 
+            withLock { 
+                if _targetColorScheme != newValue {
+                    _targetColorScheme = newValue
+                    _colorSchemeTransitionProgress = 0.0
                 }
-            }
+                syncGradientPresetForColorSchemeLocked(newValue)
+            } 
         }
     }
-
-    /// Smooth fade always enabled (internal — no longer user-facing)
-    var safetyBubbleFadeEnabled: Bool {
-        get { withLock { _safetyBubbleFadeEnabled } }
-    }
-
-    /// Width of fade region (internal — no longer user-facing, fixed at 0.5m)
-    var safetyBubbleFadeWidth: Float {
-        get { withLock { _safetyBubbleFadeWidth } }
+    
+    /// Previous color scheme (for transitions)
+    var previousColorScheme: ColorScheme {
+        get { withLock { _colorScheme } }
     }
     
-    // === COLOR POST-PROCESSING SETTINGS ===
+    /// Transition progress (0 = start, 1 = complete)
+    var colorSchemeTransitionProgress: Float {
+        get { withLock { _colorSchemeTransitionProgress } }
+        set { withLock { _colorSchemeTransitionProgress = max(0.0, min(1.0, newValue)) } }
+    }
     
-    /// Saturation override (independent of gradient preset)
+    /// Duration of color scheme transitions in seconds
+    var colorSchemeTransitionDuration: Float {
+        get { withLock { _colorSchemeTransitionDuration } }
+        set { withLock { _colorSchemeTransitionDuration = max(0.1, min(10.0, newValue)) } }
+    }
+    
+    /// Enable auto-cycling through color schemes
+    var colorSchemeAutoTransition: Bool {
+        get { withLock { _colorSchemeAutoTransition } }
+        set { withLock { _colorSchemeAutoTransition = newValue } }
+    }
+    
+    /// Seconds between auto-transitions
+    var colorSchemeAutoInterval: Float {
+        get { withLock { _colorSchemeAutoInterval } }
+        set { withLock { _colorSchemeAutoInterval = max(5.0, min(120.0, newValue)) } }
+    }
+    
+    /// Saturation override (independent of scheme default)
     var colorSchemeSaturation: Float {
         get { withLock { _colorSchemeSaturation } }
         set { withLock { _colorSchemeSaturation = max(0.0, min(3.0, newValue)) } }
@@ -1184,16 +1312,25 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
     }
-
-    /// Beat flash effect (music-driven edge glow)
-    var beatFlashEffect: BeatFlashEffect {
-        get { withLock { _beatFlashEffect } }
-        set {
-            withLock {
-                _beatFlashEffect = newValue
-                _lightingPreset = .custom
-            }
-        }
+    
+    // === DOPPELGANGER MODE ===
+    
+    /// Enable doppelganger pre-fold (creates structural twin)
+    var doppelgangerEnabled: Bool {
+        get { withLock { _doppelgangerEnabled } }
+        set { withLock { _doppelgangerEnabled = newValue } }
+    }
+    
+    /// Mirror plane normal (normalized direction vector)
+    var doppelgangerPlane: SIMD3<Float> {
+        get { withLock { _doppelgangerPlane } }
+        set { withLock { _doppelgangerPlane = simd_normalize(newValue) } }
+    }
+    
+    /// Mirror plane offset from origin along the plane normal
+    var doppelgangerOffset: Float {
+        get { withLock { _doppelgangerOffset } }
+        set { withLock { _doppelgangerOffset = newValue } }
     }
     
     // === GMT-FRACTALS: HALTON JITTER TEMPORAL AA ===
@@ -1249,7 +1386,7 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _currentRenderQuality = newValue } }
     }
     
-    /// Update animation time and polar rotation. Call once per frame.
+    /// Update color scheme transitions and animation time. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
         withLock {
             // Update animation time
@@ -1257,16 +1394,73 @@ final class RenderSettings: @unchecked Sendable {
 
             // Accumulate polar rotation angle when enabled and fractal supports it
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
-                _polarRotationAccum += deltaTime * _polarRotationEffect.speed * _polarRotationEffect.direction.sign
+                _polarRotationAccum += deltaTime * _polarRotationEffect.speed * _polarRotationEffect.amplitude
+            }
+            
+            // Handle ongoing transition
+            if _colorSchemeTransitionProgress < 1.0 {
+                let step = deltaTime / _colorSchemeTransitionDuration
+                _colorSchemeTransitionProgress = min(1.0, _colorSchemeTransitionProgress + step)
+                
+                // When transition completes, update current scheme
+                if _colorSchemeTransitionProgress >= 1.0 {
+                    _colorScheme = _targetColorScheme
+                }
+            }
+            
+            // Handle auto-cycling
+            // OPTIMIZATION: Use rawValue arithmetic instead of allCases iteration
+            if _colorSchemeAutoTransition && _colorSchemeTransitionProgress >= 1.0 {
+                _colorSchemeAutoTimer += deltaTime
+                if _colorSchemeAutoTimer >= _colorSchemeAutoInterval {
+                    _colorSchemeAutoTimer = 0.0
+                    // Transition to next scheme using rawValue arithmetic (faster than allCases lookup)
+                    let currentRaw = _targetColorScheme.rawValue
+                    let nextRaw = (currentRaw + 1) % Int32(ColorScheme.allCases.count)
+                    if let nextScheme = ColorScheme(rawValue: nextRaw) {
+                        _colorScheme = _targetColorScheme
+                        _targetColorScheme = nextScheme
+                        _colorSchemeTransitionProgress = 0.0
+                        syncGradientPresetForColorSchemeLocked(nextScheme)
+                    }
+                }
             }
         }
     }
 
+    @inline(__always)
+    private func syncGradientPresetForColorSchemeLocked(_ scheme: ColorScheme) {
+        guard let preset = GradientPreset.fromColorScheme(scheme) else { return }
+        if _gradientState.gradientPreset != preset || !_gradientState.useGradientColoring {
+            _gradientState.applyPreset(preset)
+            _gradientState.useGradientColoring = true
+        }
+    }
+    
     private func makeColorSchemeParamsLocked() -> ColorSchemeParams {
-        // Neon intensity from gradient preset
-        let isNeon = _gradientState.gradientPreset?.isNeonMode ?? false
-        let neonIntensity: Float = isNeon ? 1.0 : 0.0
-        let neonParams = _gradientState.gradientPreset?.neonParams ?? (hueFreq: Float(1.5), hueOffset: Float(0.0), bandFreq: Float(2.0), stripeFreq: Float(0.0), stripeStrength: Float(0.0), glowSharpness: Float(3.0), satPower: Float(0.3))
+        let currentPal = _targetColorScheme.palette
+        let previousPal = _colorScheme.palette
+        let currentNeon = _targetColorScheme.neonParams
+        let previousNeon = _colorScheme.neonParams
+        
+        // Interpolate between previous and target palettes
+        let t = _colorSchemeTransitionProgress
+        let color1 = simd_mix(previousPal.color1, currentPal.color1, SIMD3<Float>(repeating: t))
+        let color2 = simd_mix(previousPal.color2, currentPal.color2, SIMD3<Float>(repeating: t))
+        let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
+        let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
+        
+        // Interpolate neon intensity (0 for non-neon, 1 for neon)
+        let prevNeonIntensity: Float = _colorScheme.isNeonMode ? 1.0 : 0.0
+        let currNeonIntensity: Float = _targetColorScheme.isNeonMode ? 1.0 : 0.0
+        let neonIntensity = prevNeonIntensity + (currNeonIntensity - prevNeonIntensity) * t
+        
+        // Interpolate neon parameters
+        let hueFreq = previousNeon.hueFreq + (currentNeon.hueFreq - previousNeon.hueFreq) * t
+        let hueOffset = previousNeon.hueOffset + (currentNeon.hueOffset - previousNeon.hueOffset) * t
+        let bandFreq = previousNeon.bandFreq + (currentNeon.bandFreq - previousNeon.bandFreq) * t
+        let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
+        let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
         
         // === Build gradient stop data for shader ===
         let gradState = _gradientState
@@ -1278,6 +1472,10 @@ final class RenderSettings: @unchecked Sendable {
         )
         
         return ColorSchemeParams(
+            color1: color1,
+            color2: color2,
+            color3: color3,
+            altMixFactors: altMixFactors,
             saturation: _colorSchemeSaturation,
             contrast: _colorSchemeContrast,
             gamma: _colorSchemeGamma,
@@ -1287,23 +1485,20 @@ final class RenderSettings: @unchecked Sendable {
             shadows: _colorSchemeShadows,
             highlights: _colorSchemeHighlights,
             neonIntensity: neonIntensity,
-            hueFrequency: neonParams.hueFreq,
-            hueOffset: neonParams.hueOffset,
-            bandFrequency: neonParams.bandFreq,
-            glowSharpness: neonParams.glowSharpness,
-            saturationPower: neonParams.satPower,
+            hueFrequency: hueFreq,
+            hueOffset: hueOffset,
+            bandFrequency: bandFreq,
+            glowSharpness: glowSharpness,
+            saturationPower: satPower,
             // === GRADIENT COLORING ===
             gradientStops: gs,
             gradientStopCount: Int32(gradCount),
             colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
             gradientRepeat: gradState.gradient.repeatCount,
-            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled
-                ? (_gradientCycleEffect.mirrorLoop
-                    ? (1.0 - abs(2.0 * fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) - 1.0))
-                    : fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0))
-                : 0),
+            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
+            useGradientColoring: gradState.useGradientColoring ? 1 : 0,
             gradientSmoothing: gradState.gradient.smoothing,
-            gradientLoopSmooth: 1,
+            gradientLoopSmooth: _gradientCycleEffect.smoothLoop ? 1 : 0,
             _gradPad: (0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: _colorAnimTime,
@@ -1316,9 +1511,7 @@ final class RenderSettings: @unchecked Sendable {
             glowEnabled: _glowEffect.enabled ? 1 : 0,
             glowIntensity: _glowEffect.intensity,
             bloomEnabled: _bloomEffect.enabled ? 1 : 0,
-            bloomStrength: _bloomEffect.strength,
-            beatFlashEnabled: _beatFlashEffect.enabled ? 1 : 0,
-            beatFlashIntensity: _beatFlashEffect.intensity
+            bloomStrength: _bloomEffect.strength
         )
     }
     
@@ -1377,9 +1570,6 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
-                safetyBubbleFadeEnabled: _safetyBubbleFadeEnabled,
-                safetyBubbleFadeWidth: _safetyBubbleFadeWidth,
-                safetyBubbleStrength: _safetyBubbleStrength,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogIntensity: _fogEffect.intensity,
@@ -1389,6 +1579,19 @@ final class RenderSettings: @unchecked Sendable {
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier
             )
+        }
+    }
+    
+    /// Manually trigger a transition to a new scheme
+    func transitionToColorScheme(_ scheme: ColorScheme) {
+        withLock {
+            if _targetColorScheme != scheme {
+                // Current becomes previous
+                _colorScheme = _targetColorScheme
+                _targetColorScheme = scheme
+                _colorSchemeTransitionProgress = 0.0
+            }
+            syncGradientPresetForColorSchemeLocked(scheme)
         }
     }
     
@@ -1583,51 +1786,6 @@ final class RenderSettings: @unchecked Sendable {
             }
             
             // ═══════════════════════════════════════════════════════════════════════════
-            // ANIMATION GATE: Skip smoothDamp when animation is driving parameters
-            // AnimationManager.applyKeyframe() sets immediate values directly each frame.
-            // Running smoothDamp on top of those values causes a tug-of-war flicker
-            // because: (a) residual spring velocities push values away from the
-            // animation's intended position, and (b) applyKeyframe writes properties
-            // with individual lock acquisitions while interpolateToTargets reads them
-            // atomically, creating partial-state races on the render thread.
-            // Zero velocities so there's no accumulated overshoot when animation stops.
-            // ═══════════════════════════════════════════════════════════════════════════
-            if _isAnimationPlaying {
-                // Kill spring velocities — animation handles its own interpolation
-                _velocityMinDistance = 0.0
-                _velocityFoldingLimit = 0.0
-                _velocitySphereRadius = 0.0
-                _velocityFractalScale = 0.0
-                _velocityPosition = .zero
-                
-                // Safety bubble is NOT driven by animation — still interpolate it
-                // OPTIMIZATION: When blend is 100%, snap strength to 1.0 directly.
-                // This ensures the shader gets exactly 1.0 and takes the fast path
-                // (skipping the per-pixel mix in applySafetyBubble, saving ~6fps).
-                if _safetyBubbleEnabled && _safetyBubbleBlend >= 1.0 {
-                    _safetyBubbleStrength = 1.0
-                    _safetyBubbleStrengthVelocity = 0.0
-                } else {
-                    _safetyBubbleStrength = smoothDamp(
-                        current: _safetyBubbleStrength,
-                        target: _safetyBubbleStrengthTarget,
-                        velocity: &_safetyBubbleStrengthVelocity,
-                        smoothTime: 0.25,
-                        maxSpeed: 8.0,
-                        deltaTime: clampedDT
-                    )
-                    _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
-                }
-                
-                // Keep geometry state machine in dynamic mode during animation
-                _geometryState = .dynamic
-                _geometryStableFrameCount = 0
-                _stepMultiplier += (1.0 - _stepMultiplier) * 0.1
-                
-                return
-            }
-            
-            // ═══════════════════════════════════════════════════════════════════════════
             // GMT-FRACTALS PATTERN: Convergence Lock
             // Like VirtualSpace.updateSmoothing which skips computation when distSq < 1e-21,
             // skip the expensive smoothDamp calls when all parameters have converged AND
@@ -1768,26 +1926,6 @@ final class RenderSettings: @unchecked Sendable {
                 deltaTime: clampedDT
             )
             
-            // Safety bubble strength: smooth ramp on enable/disable
-            // Uses slower smoothTime for visible temporal fade (~0.3s)
-            // OPTIMIZATION: When blend is 100%, snap strength to 1.0 directly.
-            // This ensures the shader gets exactly 1.0 and takes the fast path
-            // (skipping the per-pixel mix in applySafetyBubble, saving ~6fps).
-            if _safetyBubbleEnabled && _safetyBubbleBlend >= 1.0 {
-                _safetyBubbleStrength = 1.0
-                _safetyBubbleStrengthVelocity = 0.0
-            } else {
-                _safetyBubbleStrength = smoothDamp(
-                    current: _safetyBubbleStrength,
-                    target: _safetyBubbleStrengthTarget,
-                    velocity: &_safetyBubbleStrengthVelocity,
-                    smoothTime: 0.25,
-                    maxSpeed: 8.0,
-                    deltaTime: clampedDT
-                )
-                _safetyBubbleStrength = max(0.0, min(1.0, _safetyBubbleStrength))
-            }
-
             // Smooth interpolation for world rotation (slerp) and grab scale (exp lerp)
             let rotLerpT = 1.0 - exp(-12.0 * clampedDT)  // Same speed as main smoothing
             _worldRotation = simd_slerp(_worldRotation, _targetWorldRotation, rotLerpT)
@@ -1916,21 +2054,15 @@ final class RenderSettings: @unchecked Sendable {
     /// Much faster than the full smooth-damp pipeline but takes the edge off
     /// hand-tracking jitter. Uses an adaptive rate: slower for tiny movements
     /// (dead-zone on noise), faster for clear intentional motion.
-    ///
-    /// - Parameter responsiveness: 0 = default smooth (jitter-damped),
-    ///   1 = near-direct 1:1 tracking for true grab feel. Intermediate values
-    ///   blend between the two extremes.
-    func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float, responsiveness: Float = 0.0) {
+    func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float) {
         withLock {
-            // Adaptive lerp: base/max ramp with responsiveness boost.
-            // responsiveness 0 → (0.30 … 0.55)  default smooth
-            // responsiveness 1 → (0.85 … 0.95)  near-direct 1:1
-            let r = simd_clamp(responsiveness, 0.0, 1.0)
+            // Adaptive lerp: base 0.30 (smoother), ramp up to 0.55 for large motions.
+            // This damps hand-tracking micro-jitter while keeping big gestures snappy.
             let positionDelta = simd_length(position - _position)
             let scaleDelta = abs(log(max(detailScale, 1e-6)) - log(max(_detailScale, 1e-6)))
             let motionMag = positionDelta + scaleDelta * 0.5  // rough combined metric
-            let tBase: Float = 0.30 + r * 0.55   // 0.30 → 0.85
-            let tMax:  Float = 0.55 + r * 0.40   // 0.55 → 0.95
+            let tBase: Float = 0.30
+            let tMax:  Float = 0.55
             let rampStart: Float = 0.001   // below this → mostly noise
             let rampEnd:   Float = 0.02    // above this → full response
             let rampT = simd_clamp((motionMag - rampStart) / (rampEnd - rampStart), 0, 1)
@@ -2042,6 +2174,61 @@ final class RenderSettings: @unchecked Sendable {
             iz: cr * cp * sy - sr * sp * cy,
             r:  cr * cp * cy + sr * sp * sy
         ).normalized
+    }
+
+    // === REFINING PARAMETERS ===
+    // Over-relaxation multiplier (Keinert 2014)
+    var relaxFactor: Float {
+        get { withLock { _relaxFactor } }
+        set { 
+            withLock { _relaxFactor = newValue }
+            print("[REFINE] relaxFactor = \(newValue)")
+        }
+    }
+    
+    // Backtrack factor when overshooting
+    var relaxBacktrack: Float {
+        get { withLock { _relaxBacktrack } }
+        set { 
+            withLock { _relaxBacktrack = newValue }
+            print("[REFINE] relaxBacktrack = \(newValue)")
+        }
+    }
+    
+    // SDF scaling for coarse pass (Polychronakis 2024)
+    var sdfScaleCoarse: Float {
+        get { withLock { _sdfScaleCoarse } }
+        set { 
+            withLock { _sdfScaleCoarse = newValue }
+            print("[REFINE] sdfScaleCoarse = \(newValue)")
+        }
+    }
+    
+    // SDF scaling for super-coarse pass
+    var sdfScaleSuperCoarse: Float {
+        get { withLock { _sdfScaleSuperCoarse } }
+        set { 
+            withLock { _sdfScaleSuperCoarse = newValue }
+            print("[REFINE] sdfScaleSuperCoarse = \(newValue)")
+        }
+    }
+    
+    // Early termination convergence ratio
+    var earlyTermRatio: Float {
+        get { withLock { _earlyTermRatio } }
+        set { 
+            withLock { _earlyTermRatio = newValue }
+            print("[REFINE] earlyTermRatio = \(newValue)")
+        }
+    }
+    
+    // Steps before early termination
+    var earlyTermCount: Int {
+        get { withLock { _earlyTermCount } }
+        set { 
+            withLock { _earlyTermCount = newValue }
+            print("[REFINE] earlyTermCount = \(newValue)")
+        }
     }
 
 }

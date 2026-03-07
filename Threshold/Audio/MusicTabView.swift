@@ -137,7 +137,7 @@ struct MusicTabContent: View {
     private var nowPlayingCard: some View {
         let music = appModel.musicService!
         return VStack(spacing: 10) {
-            if let track = music.nowPlayingUnified {
+            if let track = music.nowPlaying {
                 // Track info
                 HStack(spacing: 12) {
                     // Album art
@@ -145,12 +145,12 @@ struct MusicTabContent: View {
                         AsyncImage(url: artURL) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
-                            artPlaceholder()
+                            artPlaceholder(for: track.source)
                         }
                         .frame(width: 56, height: 56)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
-                        artPlaceholder()
+                        artPlaceholder(for: track.source)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -227,12 +227,12 @@ struct MusicTabContent: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
     }
 
-    private func artPlaceholder() -> some View {
+    private func artPlaceholder(for source: SongSource) -> some View {
         RoundedRectangle(cornerRadius: 8)
             .fill(.quaternary)
             .overlay(
-                Image(systemName: "apple.logo")
-                    .foregroundStyle(.pink.opacity(0.6))
+                Image(systemName: source == .appleMusic ? "apple.logo" : "music.note")
+                    .foregroundStyle(source == .appleMusic ? .pink.opacity(0.6) : .secondary)
             )
             .frame(width: 56, height: 56)
     }
@@ -661,14 +661,35 @@ struct MusicTabContent: View {
                             .foregroundStyle(.secondary)
                         Spacer()
                         Menu {
-                            ForEach(availableMappingTargetsToAdd, id: \.self) { target in
-                                Button {
-                                    addMapping(target)
-                                } label: {
-                                    Label(target.displayName, systemImage: target.icon)
+                            let available = availableMappingTargetsToAdd
+                            let universalTargets = available.filter { !$0.isFormulaParam }
+                            let formulaTargets = available.filter { $0.isFormulaParam }
+
+                            if !universalTargets.isEmpty {
+                                Section("Universal") {
+                                    ForEach(universalTargets, id: \.self) { target in
+                                        Button {
+                                            addMapping(target)
+                                        } label: {
+                                            Label(target.displayName, systemImage: target.icon)
+                                        }
+                                    }
                                 }
                             }
-                            if availableMappingTargetsToAdd.isEmpty {
+
+                            if !formulaTargets.isEmpty {
+                                Section("\(cache.fractalType.displayName) Params") {
+                                    ForEach(formulaTargets, id: \.self) { target in
+                                        Button {
+                                            addMapping(target)
+                                        } label: {
+                                            Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
+                                        }
+                                    }
+                                }
+                            }
+
+                            if available.isEmpty {
                                 Text("All targets added")
                             }
                         } label: {
@@ -690,11 +711,11 @@ struct MusicTabContent: View {
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
 
-                                Image(systemName: mapping.target.icon)
+                                Image(systemName: mapping.target.icon(for: cache.fractalType))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
 
-                                Text(mapping.target.displayName)
+                                Text(mapping.target.displayName(for: cache.fractalType))
                                     .font(.caption.bold())
 
                                 Spacer()
@@ -720,24 +741,24 @@ struct MusicTabContent: View {
                             .pickerStyle(.segmented)
 
                             sliderRow(label: "Min", value: Binding(
-                                get: { mappingAt(index)?.rangeMin ?? mapping.target.defaultRange.lowerBound },
+                                get: { mappingAt(index)?.rangeMin ?? mapping.target.defaultRange(for: cache.fractalType).lowerBound },
                                 set: { newValue in
                                     updateMapping(index) { m in
                                         m.rangeMin = newValue
-                                        m.sanitizeInPlace()
+                                        m.sanitizeInPlace(for: cache.fractalType)
                                     }
                                 }
-                            ), range: mapping.target.allowedRange)
+                            ), range: mapping.target.allowedRange(for: cache.fractalType))
 
                             sliderRow(label: "Max", value: Binding(
-                                get: { mappingAt(index)?.rangeMax ?? mapping.target.defaultRange.upperBound },
+                                get: { mappingAt(index)?.rangeMax ?? mapping.target.defaultRange(for: cache.fractalType).upperBound },
                                 set: { newValue in
                                     updateMapping(index) { m in
                                         m.rangeMax = newValue
-                                        m.sanitizeInPlace()
+                                        m.sanitizeInPlace(for: cache.fractalType)
                                     }
                                 }
-                            ), range: mapping.target.allowedRange)
+                            ), range: mapping.target.allowedRange(for: cache.fractalType))
 
                             sliderRow(label: "Response", value: Binding(
                                 get: { mappingAt(index)?.responseSpeed ?? 0.12 },
@@ -822,13 +843,20 @@ struct MusicTabContent: View {
         cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
         cache.push(\.beatSensitivity, value: s.beatSensitivity)
         
-        cache.musicReactiveMappings = preset.defaultMappings
-        cache.push(\.musicReactiveMappings, value: preset.defaultMappings)
+        let mappings = preset.defaultMappings(for: cache.fractalType)
+        cache.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
     }
 
     private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
         let existing = Set(cache.musicReactiveMappings.map(\.target))
-        return MusicReactiveTarget.allCases.filter { !existing.contains($0) }
+        let formulaCount = MusicReactiveTarget.floatFormulaParams(for: cache.fractalType).count
+        return MusicReactiveTarget.availableCases.filter { target in
+            if existing.contains(target) { return false }
+            // Hide formula param slots beyond what this fractal supports
+            if let slot = target.formulaParamSlot, slot >= formulaCount { return false }
+            return true
+        }
     }
 
     private func mappingAt(_ index: Int) -> MusicReactiveMapping? {
@@ -848,7 +876,7 @@ struct MusicTabContent: View {
     private func addMapping(_ target: MusicReactiveTarget) {
         var mappings = cache.musicReactiveMappings
         guard !mappings.contains(where: { $0.target == target }) else { return }
-        mappings.append(target.defaultMapping(enabled: true))
+        mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
         cache.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }

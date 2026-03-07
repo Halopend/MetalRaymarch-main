@@ -738,9 +738,8 @@ actor Renderer {
             if settings.fractalAudioReactiveEnabled {
                 if !musicFractalAnchorValid {
                     let anchorFP = settings.formulaParams
+                    let activeFractalType = settings.fractalType
                     musicAnchorByTarget[.fractalScale] = settings.targetFractalScale
-                    musicAnchorByTarget[.foldingLimit] = FormulaCatalog.getParam(anchorFP, index: 1)
-                    musicAnchorByTarget[.sphereRadius] = FormulaCatalog.getParam(anchorFP, index: 2)
                     musicAnchorByTarget[.colorMix] = settings.colorMix
                     musicAnchorByTarget[.glow] = settings.glowEffect.intensity
                     musicAnchorByTarget[.fog] = settings.fogEffect.intensity
@@ -748,6 +747,13 @@ actor Renderer {
                     musicAnchorByTarget[.hueSpeed] = settings.hueRotationEffect.speed
                     musicAnchorByTarget[.saturation] = settings.colorSchemeSaturation
                     musicAnchorByTarget[.iterations] = Float(settings.fractalIterations)
+                    // Dynamic formula param anchors — resolve slot index via catalog
+                    let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
+                    for target in [MusicReactiveTarget.formulaParam0, .formulaParam1, .formulaParam2] {
+                        if let slot = target.formulaParamSlot, slot < floatParams.count {
+                            musicAnchorByTarget[target] = FormulaCatalog.getParam(anchorFP, index: floatParams[slot].index)
+                        }
+                    }
                     musicFractalAnchorValid = true
                 }
 
@@ -779,6 +785,7 @@ actor Renderer {
                     )
                 }
 
+                let activeFractalType = settings.fractalType
                 let mappings = settings.musicReactiveMappings
                 for mapping in mappings where mapping.isEnabled {
                     let sourceValue: Float
@@ -799,7 +806,7 @@ actor Renderer {
                     let maxValue = max(mapping.rangeMin, mapping.rangeMax)
                     let targetValue = minValue + (maxValue - minValue) * normalized
 
-                    guard let targetID = mapping.target.parameterTargetID else { continue }
+                    guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
                     let anchor = musicAnchorByTarget[mapping.target] ?? targetValue
                     enqueue(targetID, target: targetValue, anchor: anchor, smoothingTime: mapping.responseSpeed)
                 }

@@ -28,6 +28,7 @@ struct FractalPreset: Codable, Identifiable {
 
     // Scene-style settings
     var fractalType: FractalModelType
+    var colorScheme: ColorScheme
     var colorSchemeSaturation: Float
     var colorSchemeContrast: Float
     var colorSchemeGamma: Float
@@ -54,7 +55,6 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
     var safetyBubbleShape: Float?
-    var safetyBubbleBlend: Float?
     
     // === MODULAR LIGHTING EFFECTS (v2.0) ===
     // Card-based lighting system with presets
@@ -66,40 +66,38 @@ struct FractalPreset: Codable, Identifiable {
     var bloomEffect: BloomEffect?
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
-    var beatFlashEffect: BeatFlashEffect?
     
-    // === DETAIL TRANSFORM (grab gesture orientation/scale) ===
-    var worldRotation: simd_quatf?
-    var detailScale: Float?
+    // === DOPPELGANGER MODE ===
+    var doppelgangerEnabled: Bool?
+    var doppelgangerPlane: SIMD3<Float>?
+    var doppelgangerOffset: Float?
+    
+    // === COLOR SCHEME AUTO-TRANSITION ===
+    var colorSchemeAutoTransition: Bool?
+    var colorSchemeAutoInterval: Float?
+    var colorSchemeTransitionDuration: Float?
     
     // === GRADIENT COLORING SYSTEM (v2.1) ===
     var gradientState: GradientState?
     var lightingSoftness: Float?
     var musicReactiveMappings: [MusicReactiveMapping]?
 
-    // === GESTURE BINDINGS (v2.2) ===
-    // Per-fractal finger-to-action assignments, restored when loading a preset.
-    var indexFingerBinding: GestureActionBinding?
-    var middleFingerBinding: GestureActionBinding?
-    var ringFingerBinding: GestureActionBinding?
-    var pinkyFingerBinding: GestureActionBinding?
-
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
-        case fractalType, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
+        case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
-        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
+        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape
         // v2.0 modular lighting effects
-        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, beatFlashEffect
-        // Detail transform
-        case worldRotation, detailScale
+        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
+        // Doppelganger
+        case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
+        // Color scheme auto-transition
+        case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
         case gradientState, lightingSoftness
         case musicReactiveMappings
-        // v2.2 gesture bindings
-        case indexFingerBinding, middleFingerBinding, ringFingerBinding, pinkyFingerBinding
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -118,6 +116,7 @@ struct FractalPreset: Codable, Identifiable {
         self.scale = 1.0
 
         self.fractalType = .mandelbox
+        self.colorScheme = .classic
         self.colorSchemeSaturation = 1.5
         self.colorSchemeContrast = 1.02
         self.colorSchemeGamma = 0.75
@@ -146,6 +145,7 @@ struct FractalPreset: Codable, Identifiable {
         position = try container.decode(SIMD3<Float>.self, forKey: .position)
         scale = try container.decode(Float.self, forKey: .scale)
         fractalType = try container.decodeIfPresent(FractalModelType.self, forKey: .fractalType) ?? .mandelbox
+        colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
         colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 1.5
         colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.02
         colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.75
@@ -163,7 +163,6 @@ struct FractalPreset: Codable, Identifiable {
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         safetyBubbleShape = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
-        safetyBubbleBlend = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
         
         // v2.0 modular lighting effects
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
@@ -174,26 +173,22 @@ struct FractalPreset: Codable, Identifiable {
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
-        beatFlashEffect = try container.decodeIfPresent(BeatFlashEffect.self, forKey: .beatFlashEffect)
         
-        // Detail transform
-        if let wrComponents = try container.decodeIfPresent([Float].self, forKey: .worldRotation), wrComponents.count == 4 {
-            worldRotation = simd_quatf(ix: wrComponents[0], iy: wrComponents[1], iz: wrComponents[2], r: wrComponents[3])
-        } else {
-            worldRotation = nil
-        }
-        detailScale = try container.decodeIfPresent(Float.self, forKey: .detailScale)
+        // Doppelganger
+        doppelgangerEnabled = try container.decodeIfPresent(Bool.self, forKey: .doppelgangerEnabled)
+        doppelgangerPlane = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .doppelgangerPlane)
+        doppelgangerOffset = try container.decodeIfPresent(Float.self, forKey: .doppelgangerOffset)
+        
+        // Color scheme auto-transition
+        colorSchemeAutoTransition = try container.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition)
+        colorSchemeAutoInterval = try container.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval)
+        colorSchemeTransitionDuration = try container.decodeIfPresent(Float.self, forKey: .colorSchemeTransitionDuration)
         
         // v2.1 gradient coloring system
         gradientState = try container.decodeIfPresent(GradientState.self, forKey: .gradientState)
         lightingSoftness = try container.decodeIfPresent(Float.self, forKey: .lightingSoftness)
         musicReactiveMappings = try container.decodeIfPresent([MusicReactiveMapping].self, forKey: .musicReactiveMappings)
-
-        // v2.2 gesture bindings
-        indexFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .indexFingerBinding)
-        middleFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .middleFingerBinding)
-        ringFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .ringFingerBinding)
-        pinkyFingerBinding = try container.decodeIfPresent(GestureActionBinding.self, forKey: .pinkyFingerBinding)
+            .map { MusicReactiveMapping.migrateLegacy($0) }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -210,6 +205,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encode(position, forKey: .position)
         try container.encode(scale, forKey: .scale)
         try container.encode(fractalType, forKey: .fractalType)
+        try container.encode(colorScheme, forKey: .colorScheme)
         try container.encode(colorSchemeSaturation, forKey: .colorSchemeSaturation)
         try container.encode(colorSchemeContrast, forKey: .colorSchemeContrast)
         try container.encode(colorSchemeGamma, forKey: .colorSchemeGamma)
@@ -227,7 +223,6 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
         try container.encodeIfPresent(safetyBubbleShape, forKey: .safetyBubbleShape)
-        try container.encodeIfPresent(safetyBubbleBlend, forKey: .safetyBubbleBlend)
         
         // v2.0 modular lighting effects
         try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
@@ -238,24 +233,21 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
-        try container.encodeIfPresent(beatFlashEffect, forKey: .beatFlashEffect)
         
-        // Detail transform
-        if let wr = worldRotation {
-            try container.encode([wr.imag.x, wr.imag.y, wr.imag.z, wr.real], forKey: .worldRotation)
-        }
-        try container.encodeIfPresent(detailScale, forKey: .detailScale)
+        // Doppelganger
+        try container.encodeIfPresent(doppelgangerEnabled, forKey: .doppelgangerEnabled)
+        try container.encodeIfPresent(doppelgangerPlane, forKey: .doppelgangerPlane)
+        try container.encodeIfPresent(doppelgangerOffset, forKey: .doppelgangerOffset)
+        
+        // Color scheme auto-transition
+        try container.encodeIfPresent(colorSchemeAutoTransition, forKey: .colorSchemeAutoTransition)
+        try container.encodeIfPresent(colorSchemeAutoInterval, forKey: .colorSchemeAutoInterval)
+        try container.encodeIfPresent(colorSchemeTransitionDuration, forKey: .colorSchemeTransitionDuration)
         
         // v2.1 gradient coloring system
         try container.encodeIfPresent(gradientState, forKey: .gradientState)
         try container.encodeIfPresent(lightingSoftness, forKey: .lightingSoftness)
         try container.encodeIfPresent(musicReactiveMappings, forKey: .musicReactiveMappings)
-
-        // v2.2 gesture bindings
-        try container.encodeIfPresent(indexFingerBinding, forKey: .indexFingerBinding)
-        try container.encodeIfPresent(middleFingerBinding, forKey: .middleFingerBinding)
-        try container.encodeIfPresent(ringFingerBinding, forKey: .ringFingerBinding)
-        try container.encodeIfPresent(pinkyFingerBinding, forKey: .pinkyFingerBinding)
     }
     
     // MARK: - Function Constant Derivation
@@ -284,8 +276,7 @@ struct FractalPreset: Codable, Identifiable {
         neonModeEnabled: Bool,
         colorIterations: Int32,
         safetyBubbleEnabled: Bool,
-        qualityMode: Int32,
-        mandelbulbPower: Int32?
+        qualityMode: Int32
     ) {
         // Derive quality mode from iteration count
         let qualityMode: Int32
@@ -299,22 +290,10 @@ struct FractalPreset: Codable, Identifiable {
             fractalIterations: Int32(fractalIterations),
             shadowIterations: Int32(max(fractalIterations - 2, 2)),
             maxRaySteps: Int32(maxRaySteps),
-            neonModeEnabled: gradientState?.gradientPreset?.isNeonMode ?? false,
+            neonModeEnabled: colorScheme.isNeonMode,
             colorIterations: Int32(colorIterations),
             safetyBubbleEnabled: safetyBubbleEnabled ?? true,
-            qualityMode: qualityMode,
-            mandelbulbPower: {
-                guard fractalType == .mandelbulb,
-                      let vals = formulaParamValues,
-                      !vals.isEmpty else { return nil }
-                let rawPower = vals[0]
-                let rounded = roundf(rawPower)
-                guard abs(rawPower - rounded) < 0.01,
-                      [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
-                    return nil
-                }
-                return Int32(rounded)
-            }()
+            qualityMode: qualityMode
         )
     }
     
@@ -322,8 +301,7 @@ struct FractalPreset: Codable, Identifiable {
     /// Presets with identical function constant values can share pipelines.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
-        let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
-        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)\(powerKey)"
+        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
     }
     
     /// Create a preset from current render settings
@@ -338,6 +316,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.scale = settings.scale
 
         preset.fractalType = settings.fractalType
+        preset.colorScheme = settings.colorScheme
         preset.colorSchemeSaturation = settings.colorSchemeSaturation
         preset.colorSchemeContrast = settings.colorSchemeContrast
         preset.colorSchemeGamma = settings.colorSchemeGamma
@@ -363,7 +342,6 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
         preset.safetyBubbleShape = settings.safetyBubbleShape
-        preset.safetyBubbleBlend = settings.safetyBubbleBlend
         
         // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
@@ -374,22 +352,21 @@ struct FractalPreset: Codable, Identifiable {
         preset.bloomEffect = settings.bloomEffect
         preset.fogEffect = settings.fogEffect
         preset.gradientCycleEffect = settings.gradientCycleEffect
-        preset.beatFlashEffect = settings.beatFlashEffect
         
-        // Detail transform (grab gesture orientation/scale)
-        preset.worldRotation = settings.worldRotation
-        preset.detailScale = settings.detailScale
+        // Doppelganger
+        preset.doppelgangerEnabled = settings.doppelgangerEnabled
+        preset.doppelgangerPlane = settings.doppelgangerPlane
+        preset.doppelgangerOffset = settings.doppelgangerOffset
+        
+        // Color scheme auto-transition
+        preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
+        preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
+        preset.colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
         
         // v2.1 gradient coloring system
         preset.gradientState = settings.gradientState
         preset.lightingSoftness = settings.lightingSoftness
         preset.musicReactiveMappings = settings.musicReactiveMappings
-
-        // v2.2 gesture bindings
-        preset.indexFingerBinding = settings.indexFingerBinding
-        preset.middleFingerBinding = settings.middleFingerBinding
-        preset.ringFingerBinding = settings.ringFingerBinding
-        preset.pinkyFingerBinding = settings.pinkyFingerBinding
         
         return preset
     }
@@ -404,6 +381,7 @@ struct FractalPreset: Codable, Identifiable {
         settings.scale = scale
 
         settings.fractalType = fractalType
+        settings.transitionToColorScheme(colorScheme)
         settings.colorSchemeSaturation = colorSchemeSaturation
         settings.colorSchemeContrast = colorSchemeContrast
         settings.colorSchemeGamma = colorSchemeGamma
@@ -436,14 +414,12 @@ struct FractalPreset: Codable, Identifiable {
             position: position
         )
         
-        // Restore detail transform (grab gesture orientation/scale)
-        // Falls back to identity/1.0 for presets saved before this field existed
-        let wr = worldRotation ?? simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-        settings.worldRotation = wr
-        settings.targetWorldRotation = wr
-        let ds = detailScale ?? 1.0
-        settings.detailScale = ds
-        settings.targetDetailScale = ds
+        // Reset detail transform to identity when loading a preset
+        let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        settings.worldRotation = identity
+        settings.targetWorldRotation = identity
+        settings.detailScale = 1.0
+        settings.targetDetailScale = 1.0
         
         if includePerformance {
             if let resolutionScale = resolutionScale {
@@ -462,9 +438,6 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let safetyBubbleShape = safetyBubbleShape {
             settings.safetyBubbleShape = safetyBubbleShape
-        }
-        if let safetyBubbleBlend = safetyBubbleBlend {
-            settings.safetyBubbleBlend = safetyBubbleBlend
         }
         
         // v2.0 modular lighting effects
@@ -492,8 +465,27 @@ struct FractalPreset: Codable, Identifiable {
         if let gradientCycleEffect = gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
         }
-        if let beatFlashEffect = beatFlashEffect {
-            settings.beatFlashEffect = beatFlashEffect
+        
+        // Doppelganger
+        if let doppelgangerEnabled = doppelgangerEnabled {
+            settings.doppelgangerEnabled = doppelgangerEnabled
+        }
+        if let doppelgangerPlane = doppelgangerPlane {
+            settings.doppelgangerPlane = doppelgangerPlane
+        }
+        if let doppelgangerOffset = doppelgangerOffset {
+            settings.doppelgangerOffset = doppelgangerOffset
+        }
+        
+        // Color scheme auto-transition
+        if let colorSchemeAutoTransition = colorSchemeAutoTransition {
+            settings.colorSchemeAutoTransition = colorSchemeAutoTransition
+        }
+        if let colorSchemeAutoInterval = colorSchemeAutoInterval {
+            settings.colorSchemeAutoInterval = colorSchemeAutoInterval
+        }
+        if let colorSchemeTransitionDuration = colorSchemeTransitionDuration {
+            settings.colorSchemeTransitionDuration = colorSchemeTransitionDuration
         }
         
         // v2.1 gradient coloring system
@@ -506,14 +498,20 @@ struct FractalPreset: Codable, Identifiable {
         if let musicReactiveMappings = musicReactiveMappings {
             settings.musicReactiveMappings = musicReactiveMappings
         }
-
-        // v2.2 gesture bindings — restore per-fractal finger assignments
-        if let b = indexFingerBinding  { settings.indexFingerBinding = b }
-        if let b = middleFingerBinding { settings.middleFingerBinding = b }
-        if let b = ringFingerBinding   { settings.ringFingerBinding = b }
-        if let b = pinkyFingerBinding  { settings.pinkyFingerBinding = b }
         
-
+        // Log preset load for debugging
+        print("""
+        📂 PRESET LOADED: "\(name)"
+        ─────────────────────────────────────────
+        Position: (\(position.x), \(position.y), \(position.z))
+        Scale: \(scale)
+        ─────────────────────────────────────────
+        Fractal Scale: \(fractalScale)
+        Folding Limit: \(foldingLimit)
+        Sphere Radius: \(sphereRadius)
+        Min Distance: \(minDistance)
+        ─────────────────────────────────────────
+        """)
     }
     
     /// Get the thumbnail as a UIImage (visionOS/iOS) or NSImage (macOS)
