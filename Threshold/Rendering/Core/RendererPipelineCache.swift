@@ -1,6 +1,58 @@
 import Metal
 
 extension Renderer {
+    @inline(__always)
+    fileprivate func recordPipelineTelemetry(renderHit: Bool? = nil,
+                                             computeHit: Bool? = nil,
+                                             renderMissKey: String? = nil,
+                                             computeMissKey: String? = nil) {
+        if let renderHit {
+            if renderHit { renderPipelineCacheHits += 1 } else { renderPipelineCacheMisses += 1 }
+        }
+        if let computeHit {
+            if computeHit { computePipelineCacheHits += 1 } else { computePipelineCacheMisses += 1 }
+        }
+        if let renderMissKey {
+            renderPipelineMissKeyCounts[renderMissKey, default: 0] += 1
+        }
+        if let computeMissKey {
+            computePipelineMissKeyCounts[computeMissKey, default: 0] += 1
+        }
+
+        guard RENDERER_DEBUG else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+
+        if now - lastPipelineTelemetryLogTime >= 5.0 {
+            lastPipelineTelemetryLogTime = now
+
+            let renderTotal = renderPipelineCacheHits + renderPipelineCacheMisses
+            let computeTotal = computePipelineCacheHits + computePipelineCacheMisses
+            let renderHitRate = renderTotal > 0 ? (Double(renderPipelineCacheHits) / Double(renderTotal)) * 100.0 : 0.0
+            let computeHitRate = computeTotal > 0 ? (Double(computePipelineCacheHits) / Double(computeTotal)) * 100.0 : 0.0
+
+            print("📊 [PipelineTelemetry] render hitRate=\(String(format: "%.1f", renderHitRate))% (H:\(renderPipelineCacheHits) M:\(renderPipelineCacheMisses)) | compute hitRate=\(String(format: "%.1f", computeHitRate))% (H:\(computePipelineCacheHits) M:\(computePipelineCacheMisses))")
+        }
+
+        if now - lastPipelineMissHistogramLogTime >= 10.0 {
+            lastPipelineMissHistogramLogTime = now
+
+            let topRenderMisses = renderPipelineMissKeyCounts
+                .sorted { $0.value > $1.value }
+                .prefix(5)
+                .map { "\($0.key):\($0.value)" }
+                .joined(separator: ", ")
+            let topComputeMisses = computePipelineMissKeyCounts
+                .sorted { $0.value > $1.value }
+                .prefix(5)
+                .map { "\($0.key):\($0.value)" }
+                .joined(separator: ", ")
+
+            if !topRenderMisses.isEmpty || !topComputeMisses.isEmpty {
+                print("🧪 [PipelineMissTop] render=[\(topRenderMisses.isEmpty ? "none" : topRenderMisses)] | compute=[\(topComputeMisses.isEmpty ? "none" : topComputeMisses)]")
+            }
+        }
+    }
+
     // MARK: - Unified Pipeline Management
 
     /// Gets or builds a specialized pipeline for a given preset.
@@ -163,6 +215,7 @@ extension Renderer {
            neonMode == lastSelectNeon &&
            fractalType.rawValue == lastSelectFT &&
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
+            recordPipelineTelemetry(renderHit: true)
             appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
             return cached
         }
@@ -177,6 +230,7 @@ extension Renderer {
 
         // 1. Check unified cache (includes both quality presets and saved presets)
         if let pipeline = pipelineCache[cacheKey] {
+            recordPipelineTelemetry(renderHit: true)
             if RENDERER_DEBUG && lastLoggedPipelineKey != cacheKey {
                 print("🎯 [Pipeline] Using cached pipeline: \(cacheKey)")
                 lastLoggedPipelineKey = cacheKey
@@ -187,6 +241,7 @@ extension Renderer {
         else {
             let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
             if let pipeline = pipelineCache[fallbackKey] {
+                recordPipelineTelemetry(renderHit: true)
                 if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
                     print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
                     lastLoggedPipelineKey = fallbackKey
@@ -197,6 +252,7 @@ extension Renderer {
                 // 3. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
                 let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
                 if let pipeline = pipelineCache[sharedExactKey] {
+                    recordPipelineTelemetry(renderHit: true)
                     if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
                         print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
                         lastLoggedPipelineKey = sharedExactKey
@@ -207,6 +263,7 @@ extension Renderer {
                 else {
                     let sharedFallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
                     if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
+                        recordPipelineTelemetry(renderHit: true)
                         if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
                             print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
                             lastLoggedPipelineKey = sharedFallbackKey
@@ -215,6 +272,7 @@ extension Renderer {
                     }
                     // 5. Ultimate fallback to generic pipeline
                     else {
+                        recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
                         if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
                             print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
                             lastLoggedPipelineKey = "fallback"
@@ -376,6 +434,7 @@ extension Renderer {
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower,
            let cached = lastSelectedComputePipeline {
+            recordPipelineTelemetry(computeHit: true)
             return cached
         }
 
@@ -383,6 +442,7 @@ extension Renderer {
 
         // 1. Exact match — FC values match precomputed absScalePow
         if let pipeline = computePipelineCache[exactKey] {
+            recordPipelineTelemetry(computeHit: true)
             if RENDERER_DEBUG && lastComputePipelineKey != exactKey {
                 print("🎯 [ComputeCache] Exact hit: \(exactKey)")
                 lastComputePipelineKey = exactKey
@@ -397,6 +457,7 @@ extension Renderer {
 
         let sharedKey = "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
         if let pipeline = computePipelineCache[sharedKey] {
+            recordPipelineTelemetry(computeHit: true)
             if RENDERER_DEBUG && lastComputePipelineKey != sharedKey {
                 print("🎯 [ComputeCache] Shared quality hit: \(sharedKey) for FT=\(fractalType.rawValue)")
                 lastComputePipelineKey = sharedKey
@@ -423,6 +484,7 @@ extension Renderer {
                                                             fractalType: ft, fractalIterations: fi, shadowIterations: si, maxRaySteps: rs,
                                                             mandelbulbPower: mbPowerInt) {
                 computePipelineCache[exactKey] = pipeline
+                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey)
                 if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
                 lastComputePipelineKey = exactKey
                 lastComputeFT = fractalType.rawValue
@@ -440,6 +502,7 @@ extension Renderer {
             print("⚠️ [ComputeCache] Using fallback generic compute pipeline")
             lastComputePipelineKey = "fallback"
         }
+        recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey)
         let fallback = adaptiveHierarchicalPipeline8x8
         lastComputeFT = fractalType.rawValue
         lastComputeFI = fractalIterations

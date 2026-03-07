@@ -55,6 +55,7 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
     var safetyBubbleShape: Float?
+    var safetyBubbleBlend: Float?
     
     // === MODULAR LIGHTING EFFECTS (v2.0) ===
     // Card-based lighting system with presets
@@ -88,7 +89,7 @@ struct FractalPreset: Codable, Identifiable {
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
-        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape
+        case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
         // Doppelganger
@@ -163,6 +164,7 @@ struct FractalPreset: Codable, Identifiable {
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         safetyBubbleShape = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
+        safetyBubbleBlend = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
         
         // v2.0 modular lighting effects
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
@@ -223,6 +225,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
         try container.encodeIfPresent(safetyBubbleShape, forKey: .safetyBubbleShape)
+        try container.encodeIfPresent(safetyBubbleBlend, forKey: .safetyBubbleBlend)
         
         // v2.0 modular lighting effects
         try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
@@ -276,7 +279,8 @@ struct FractalPreset: Codable, Identifiable {
         neonModeEnabled: Bool,
         colorIterations: Int32,
         safetyBubbleEnabled: Bool,
-        qualityMode: Int32
+        qualityMode: Int32,
+        mandelbulbPower: Int32?
     ) {
         // Derive quality mode from iteration count
         let qualityMode: Int32
@@ -285,6 +289,17 @@ struct FractalPreset: Codable, Identifiable {
         case 8...9: qualityMode = 1   // Medium  
         default: qualityMode = 0      // High
         }
+
+        let mandelbulbPower: Int32? = {
+            guard fractalType == .mandelbulb,
+                  let rawPower = formulaParamValues?.first else { return nil }
+            let rounded = roundf(rawPower)
+            guard abs(rawPower - rounded) < 0.01,
+                  [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
+                return nil
+            }
+            return Int32(rounded)
+        }()
         
         return (
             fractalIterations: Int32(fractalIterations),
@@ -293,7 +308,8 @@ struct FractalPreset: Codable, Identifiable {
             neonModeEnabled: colorScheme.isNeonMode,
             colorIterations: Int32(colorIterations),
             safetyBubbleEnabled: safetyBubbleEnabled ?? true,
-            qualityMode: qualityMode
+            qualityMode: qualityMode,
+            mandelbulbPower: mandelbulbPower
         )
     }
     
@@ -301,7 +317,8 @@ struct FractalPreset: Codable, Identifiable {
     /// Presets with identical function constant values can share pipelines.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
-        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
+        let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
+        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)\(powerKey)"
     }
     
     /// Create a preset from current render settings
@@ -342,6 +359,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
         preset.safetyBubbleRadius = settings.safetyBubbleRadius
         preset.safetyBubbleShape = settings.safetyBubbleShape
+        preset.safetyBubbleBlend = settings.safetyBubbleBlend
         
         // v2.0 modular lighting effects
         preset.lightingMode = settings.lightingMode
@@ -438,6 +456,9 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let safetyBubbleShape = safetyBubbleShape {
             settings.safetyBubbleShape = safetyBubbleShape
+        }
+        if let safetyBubbleBlend = safetyBubbleBlend {
+            settings.safetyBubbleBlend = safetyBubbleBlend
         }
         
         // v2.0 modular lighting effects

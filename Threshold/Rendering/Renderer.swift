@@ -47,30 +47,16 @@ actor Renderer {
     var lastComputeFT: Int32 = -1
     var lastComputeFI: Int = -1
     var lastComputeRS: Int = -1
+    var lastComputePower: Int32?
     var lastSelectedComputePipeline: MTLComputePipelineState?
     
     // === UI UPDATE COORDINATION ===
     /// Coordinates UI updates without blocking MainActor during heavy rendering
     private(set) var uiUpdateCoordinator: UIUpdateCoordinator?
-    
-<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
-<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
-<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
-=======
+
     /// Coordinates parameter smoothing and animation updates without blocking MainActor
     private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
-    
->>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
-=======
-    /// Coordinates parameter smoothing and animation updates without blocking MainActor
-    private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
-    
->>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
-=======
-    /// Coordinates parameter smoothing and animation updates without blocking MainActor
-    private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
-    
->>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
+
     // Cached default Metal library — avoids device.makeDefaultLibrary() on every compute cache miss
     var cachedDefaultLibrary: MTLLibrary?
     
@@ -247,25 +233,10 @@ actor Renderer {
         
         // Initialize UI update coordinator to prevent UI blocking during heavy rendering
         self.uiUpdateCoordinator = UIUpdateCoordinator(appModel: appModel)
-        
-<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
-<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
-<<<<<<< /Users/halopend/Documents/GitHub/Polinate/TEMP/MetalRaymarch-main/Threshold/Rendering/Renderer.swift
-=======
+
         // Initialize parameter update coordinator to batch smoothing/animation updates
         self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
-        
->>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
-=======
-        // Initialize parameter update coordinator to batch smoothing/animation updates
-        self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
-        
->>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
-=======
-        // Initialize parameter update coordinator to batch smoothing/animation updates
-        self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
-        
->>>>>>> /Users/halopend/.windsurf/worktrees/MetalRaymarch-main/MetalRaymarch-main-791c1037/Threshold/Rendering/Renderer.swift
+
         // Pre-compute constant rotation matrix (never changes)
         self.cachedRotationMatrix = matrix4x4_rotation(radians: -.pi/2, axis: [0, 1, 0])
 
@@ -525,6 +496,16 @@ actor Renderer {
 
     /// Cached Metal library for static pipeline builds — avoids redundant `makeDefaultLibrary()` calls.
     nonisolated(unsafe) static var _cachedLibrary: MTLLibrary?
+
+    // Pipeline cache telemetry (debug-only logging in selection paths)
+    var renderPipelineCacheHits: Int = 0
+    var renderPipelineCacheMisses: Int = 0
+    var computePipelineCacheHits: Int = 0
+    var computePipelineCacheMisses: Int = 0
+    var lastPipelineTelemetryLogTime: TimeInterval = 0
+    var lastPipelineMissHistogramLogTime: TimeInterval = 0
+    var renderPipelineMissKeyCounts: [String: Int] = [:]
+    var computePipelineMissKeyCounts: [String: Int] = [:]
     
     // Track last logged pipeline to avoid spam
     var lastLoggedPipelineKey: String = ""
@@ -536,6 +517,8 @@ actor Renderer {
     var lastSelectRS: Int = -1
     var lastSelectQS: Bool = false
     var lastSelectNeon: Bool = false
+    var lastSelectFT: Int32 = -1
+    var lastSelectPower: Int32?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     
@@ -678,6 +661,7 @@ actor Renderer {
         // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
         // Apple Music BPM-based synthesis — blend whatever is available.
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
+        let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
         let shouldUpdateAnimation = settings.isAnimationPlaying
         let fractalType = settings.fractalType
         
@@ -686,7 +670,7 @@ actor Renderer {
         // Prevents per-frame MainActor blocking that causes UI lag during heavy rendering
         parameterUpdateCoordinator?.scheduleParameterUpdates(
             shouldUpdateAnimation: shouldUpdateAnimation,
-            shouldUpdateAudio: isAudioMode,
+            shouldUpdateAudio: isAudioMode && hasActiveAudioSources,
             deltaTime: animDelta,
             currentTime: time,
             fractalType: fractalType
@@ -694,11 +678,9 @@ actor Renderer {
         
         if isAudioMode {
             let mic = appModel.audioAnalyzer
-            let spotifyManager = appModel.spotifyManager
             let appleMusicManager = appModel.appleMusicManager
             // Auto-detect: use whatever sources are currently active
             let micActive = mic.isCapturing
-            let spotifyActive = spotifyManager.beatSyncActive
             let appleMusicActive = appleMusicManager.isActive
             
             // Sensitivity multipliers from user settings
@@ -718,14 +700,6 @@ actor Renderer {
                 totalTreble += mic.trebleLevel
                 totalBeat = max(totalBeat, mic.peakLevel * 0.7)
                 totalLevel += mic.level
-                sourceCount += 1
-            }
-            if spotifyActive {
-                totalBass += spotifyManager.bassLevel
-                totalMid += spotifyManager.midLevel
-                totalTreble += spotifyManager.trebleLevel
-                totalBeat = max(totalBeat, spotifyManager.beatIntensity)
-                totalLevel += spotifyManager.overallLevel
                 sourceCount += 1
             }
             if appleMusicActive {
@@ -866,7 +840,7 @@ actor Renderer {
         // When in Buddhabrot mode, skip fractal raymarching entirely and instead
         // run the 3D volume accumulation + render pipeline.
         // ═══════════════════════════════════════════════════════════════════════
-        if appModel.runtimeViewMode == .buddhabrot {
+        if appModel.runtimeViewModeForRenderer == .buddhabrot {
             // Lazy-init the Buddhabrot renderer on first use
             if buddhabrotRenderer == nil {
                 buddhabrotRenderer = BuddhabrotRenderer(
@@ -881,7 +855,8 @@ actor Renderer {
                 let rendered = bbrot.renderFrame(
                     commandBuffer: commandBuffer,
                     drawable: drawable,
-                    time: bbrotTime
+                    time: bbrotTime,
+                    settingsSnapshot: settingsSnapshot
                 )
                 
                 if rendered {
@@ -1086,6 +1061,9 @@ actor Renderer {
         let computePrecomputedAudio = cachedPrecomputedAudio
         let computePrecomputedFog = cachedPrecomputedFog
         let frameTime = cachedFrameTime
+        let effectiveScale = smoothedScale * settingsSnapshot.detailScale
+        let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(effectiveScale, 0.001)
+        let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
@@ -1096,9 +1074,12 @@ actor Renderer {
             minDistance: settingsSnapshot.minDistance,
             fractalScale: settingsSnapshot.fractalScale,
             sphereRadius: settingsSnapshot.sphereRadius,
-            safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
-            safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
+            safetyBubbleRadius: scaleCorrectedBubbleRadius,
+            safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
+            safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
+            safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
+            safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
             foldingLimit: settingsSnapshot.foldingLimit,
             glowIntensity: settingsSnapshot.colorSchemeParams.glowIntensity,
             colorMix: settingsSnapshot.colorMix,

@@ -25,8 +25,12 @@ final class UISettingsCache {
     var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
     
     // Color & effects
+    var colorScheme: ColorScheme = .nebula
     var colorMix: Float = 0.5
     var colorIterations: Float = 8.0
+    var colorSchemeAutoTransition: Bool = false
+    var colorSchemeAutoInterval: Float = 30.0
+    var colorSchemeTransitionDuration: Float = 2.0
     var colorSchemeSaturation: Float = 2.0
     var colorSchemeContrast: Float = 1.05
     var colorSchemeGamma: Float = 0.5
@@ -52,7 +56,7 @@ final class UISettingsCache {
     var bloomEffect: BloomEffect = .off
     var fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     var gradientCycleEffect: GradientCycleEffect = .off
-    var polarRotationEffect: PolarRotationEffect = PolarRotationEffect(direction: .clockwise, speed: 0.2)
+    var polarRotationEffect: PolarRotationEffect = .off
     var beatFlashEffect: BeatFlashEffect = .off
     
     // === SAVED CUSTOM GRADIENTS (persisted via UserDefaults) ===
@@ -126,43 +130,33 @@ final class UISettingsCache {
     var fractalAudioReactiveEnabled: Bool = true
     var fractalAudioAmount: Float = 0.6
     var fractalBeatPunch: Float = 0.7
+    var fractalAudioAffectsScale: Bool = true
+    var fractalAudioAffectsFolding: Bool = true
+    var fractalAudioAffectsRadius: Bool = true
+    var fractalAudioAffectsColorMix: Bool = true
+    
+    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
+    var fractalAudioAffectsGlow: Bool = true
+    var fractalAudioAffectsFog: Bool = true
+    var fractalAudioAffectsBloom: Bool = true
+    var fractalAudioAffectsHueSpeed: Bool = true
+    var fractalAudioAffectsSaturation: Bool = true
+    var fractalAudioAffectsIterations: Bool = false
     var musicReactiveMappings: [MusicReactiveMapping] = MusicReactiveMapping.defaultMappings()
     
     // Safety & display
-    var showHUD: Bool = false
+    var showHUD: Bool = true
     var safetyBubbleEnabled: Bool = false
     var safetyBubbleRadius: Float = 1.8
     var safetyBubbleShape: Float = 0.0
-    var safetyBubbleBlend: Float = 1.0
-    
-    // MARK: - Blend Slider Curve
-    // 92% of slider range covers the 0…0.08 value range (fine control),
-    // remaining 8% covers 0.08…1.0 (coarse / full-strength).
-    
-    /// Maps linear slider position (0…1) to actual blend value (0…1)
-    static func blendSliderToValue(_ slider: Float) -> Float {
-        if slider <= 0.92 {
-            return slider * (0.08 / 0.92)
-        } else {
-            return 0.08 + (slider - 0.92) * (0.92 / 0.08)
-        }
-    }
-    
-    /// Maps actual blend value (0…1) back to slider position (0…1)
-    static func blendValueToSlider(_ value: Float) -> Float {
-        if value <= 0.08 {
-            return value * (0.92 / 0.08)
-        } else {
-            return 0.92 + (value - 0.08) * (0.08 / 0.92)
-        }
-    }
+    var safetyBubbleBlend: Float = 0.5
     var useRelativeGestures: Bool = true
     var extendedGestureRange: Bool = true
-    var rotationAutoSnap: Bool = true
-    var rotationBreakawayDegrees: Float = 15.0
+    var rotationAutoSnap: Bool = false
     var rotationSnapWindowDegrees: Float = 6.0
+    var rotationBreakawayDegrees: Float = 12.0
     var gestureSensitivity: Float = 3.0
-    var gestureSmoothingFactor: Float = 0.0
+    var gestureSmoothingFactor: Float = 0.5
     var menuToggleGestureEnabled: Bool = true
     var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
     // Configurable finger → action assignments
@@ -214,9 +208,7 @@ final class UISettingsCache {
         self._appModel = appModel
         loadFromSettings()
         syncTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.syncLiveStats()
-            }
+            self?.syncLiveStats()
         }
     }
     
@@ -227,10 +219,6 @@ final class UISettingsCache {
     
     private func syncLiveStats() {
         guard let settings else { return }
-        if fractalType != settings.fractalType {
-            loadFromSettings()
-            return
-        }
         currentRenderQuality = settings.currentRenderQuality
         liveFractalIterations = settings.fractalIterations
         liveMaxRaySteps = settings.maxRaySteps
@@ -253,8 +241,12 @@ final class UISettingsCache {
         targetSphereRadius = settings.targetSphereRadius
         baseFractalIterations = settings.baseFractalIterations
         baseMaxRaySteps = settings.baseMaxRaySteps
+        colorScheme = settings.colorScheme
         colorMix = settings.colorMix
         colorIterations = settings.colorIterations
+        colorSchemeAutoTransition = settings.colorSchemeAutoTransition
+        colorSchemeAutoInterval = settings.colorSchemeAutoInterval
+        colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
         colorSchemeSaturation = settings.colorSchemeSaturation
         colorSchemeContrast = settings.colorSchemeContrast
         colorSchemeGamma = settings.colorSchemeGamma
@@ -287,6 +279,16 @@ final class UISettingsCache {
         fractalAudioReactiveEnabled = settings.fractalAudioReactiveEnabled
         fractalAudioAmount = settings.fractalAudioAmount
         fractalBeatPunch = settings.fractalBeatPunch
+        fractalAudioAffectsScale = settings.fractalAudioAffectsScale
+        fractalAudioAffectsFolding = settings.fractalAudioAffectsFolding
+        fractalAudioAffectsRadius = settings.fractalAudioAffectsRadius
+        fractalAudioAffectsColorMix = settings.fractalAudioAffectsColorMix
+        fractalAudioAffectsGlow = settings.fractalAudioAffectsGlow
+        fractalAudioAffectsFog = settings.fractalAudioAffectsFog
+        fractalAudioAffectsBloom = settings.fractalAudioAffectsBloom
+        fractalAudioAffectsHueSpeed = settings.fractalAudioAffectsHueSpeed
+        fractalAudioAffectsSaturation = settings.fractalAudioAffectsSaturation
+        fractalAudioAffectsIterations = settings.fractalAudioAffectsIterations
         musicReactiveMappings = settings.musicReactiveMappings
         showHUD = settings.showHUD
         safetyBubbleEnabled = settings.safetyBubbleEnabled
@@ -296,8 +298,8 @@ final class UISettingsCache {
         useRelativeGestures = settings.useRelativeGestures
         extendedGestureRange = settings.extendedGestureRange
         rotationAutoSnap = settings.rotationAutoSnap
-        rotationBreakawayDegrees = settings.rotationBreakawayDegrees
         rotationSnapWindowDegrees = settings.rotationSnapWindowDegrees
+        rotationBreakawayDegrees = settings.rotationBreakawayDegrees
         gestureSensitivity = settings.gestureSensitivity
         gestureSmoothingFactor = settings.gestureSmoothingFactor
         menuToggleGestureEnabled = settings.menuToggleGestureEnabled
@@ -341,7 +343,7 @@ final class UISettingsCache {
     /// Convenience: dispatch a core/effect parameter write through the UI layer.
     /// Use for slider-driven changes to core.*, effect.* targets.
     func dispatchCoreWrite(targetID: String, value: Float) {
-        guard settings != nil else { return }
+        guard let settings else { return }
         let op = ParameterOperation(
             targetID: targetID,
             source: .slider,
@@ -387,6 +389,11 @@ final class UISettingsCache {
             gestureController?.applyFractalDefaults()
             loadFromSettings()
         }
+    }
+    
+    func pushColorScheme(_ scheme: ColorScheme) {
+        settings?.transitionToColorScheme(scheme)
+        colorScheme = scheme
     }
     
     func pushGradientEnabled(_ enabled: Bool) {
@@ -440,5 +447,17 @@ final class UISettingsCache {
         fogEffect = settings.fogEffect
         gradientCycleEffect = settings.gradientCycleEffect
         polarRotationEffect = settings.polarRotationEffect
+        beatFlashEffect = settings.beatFlashEffect
+    }
+}
+
+extension UISettingsCache {
+    static func blendValueToSlider(_ value: Float) -> Float {
+        sqrt(max(0.0, min(1.0, value)))
+    }
+
+    static func blendSliderToValue(_ slider: Float) -> Float {
+        let clamped = max(0.0, min(1.0, slider))
+        return clamped * clamped
     }
 }

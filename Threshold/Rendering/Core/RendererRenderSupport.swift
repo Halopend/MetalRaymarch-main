@@ -7,6 +7,19 @@ enum RenderFramePath {
     case fragment(useQuadShared: Bool)
 }
 
+struct FramePhaseBreakdown {
+    var backgroundCpuMs: Double = 0
+    var dynamicQualityMs: Double = 0
+    var handTrackingMs: Double = 0
+    var settingsUpdateMs: Double = 0
+    var snapshotMs: Double = 0
+    var updateGameStateMs: Double = 0
+    var renderPathEncodeMs: Double = 0
+    var mainActorDispatchCount: Int = 0
+
+    static let zero = FramePhaseBreakdown()
+}
+
 extension Renderer {
     func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {
         if settingsSnapshot.prefersAdaptiveComputePath,
@@ -50,6 +63,28 @@ extension Renderer {
         if layerRenderer.configuration.layout == .layered {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
+    }
+
+    func recordFramePerf(
+        nowTime: TimeInterval,
+        frameTimeSeconds: Double,
+        cpuEncodeMs: Double,
+        gpuMs: Double?,
+        settingsSnapshot: RenderSettingsSnapshot,
+        useAdaptiveCompute: Bool,
+        viewCount: Int
+    ) {
+        let shouldLogSlowFrame = consumeSlowFrameLogPermit(nowTime: nowTime, frameTimeSeconds: frameTimeSeconds)
+        Self.recordFramePerf(
+            frameTimeSeconds: frameTimeSeconds,
+            cpuEncodeMs: cpuEncodeMs,
+            gpuMs: gpuMs,
+            frameBreakdown: .zero,
+            shouldLogSlowFrame: shouldLogSlowFrame,
+            settingsSnapshot: settingsSnapshot,
+            useAdaptiveCompute: useAdaptiveCompute,
+            viewCount: viewCount
+        )
     }
 
     nonisolated static func recordFramePerf(

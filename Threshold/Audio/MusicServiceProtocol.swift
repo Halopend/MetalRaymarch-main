@@ -85,6 +85,11 @@ struct UnifiedTrack: Identifiable, Equatable, Hashable {
     var trackID: UnifiedTrackID {
         UnifiedTrackID(serviceID: serviceID, nativeID: id)
     }
+
+    /// Backward-compatible source mapping used by older UI code.
+    var source: SongSource {
+        SongSource(serviceID: serviceID) ?? .appleMusic
+    }
 }
 
 /// A service-agnostic playlist.

@@ -165,7 +165,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
     private var _rotationAutoSnap: Bool = false       // Snap rotation to nearest 45° multiple within snap window
     private var _rotationSnapWindowDegrees: Float = 6.0  // ±halfWindow snap threshold per axis (degrees)
+    private var _rotationBreakawayDegrees: Float = loadFloat("rotationBreakawayDegrees", default: 12.0)
     private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
+    private var _gestureSmoothingFactor: Float       = loadFloat("gestureSmoothingFactor", default: 0.5)
     private var _menuToggleGestureEnabled: Bool        = loadBool("menuToggleGestureEnabled", default: true)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
@@ -197,6 +199,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
     private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
+    private var _safetyBubbleFadeEnabled: Bool = true
+    private var _safetyBubbleFadeWidth: Float = 0.1
+    private var _safetyBubbleStrength: Float = 0.5
     
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
@@ -227,6 +232,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     private var _gradientCycleEffect: GradientCycleEffect = .off
     private var _polarRotationEffect: PolarRotationEffect = .off
+    private var _beatFlashEffect: BeatFlashEffect = .off
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
     
     // === DOPPELGANGER MODE ===
@@ -822,6 +828,15 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _rotationSnapWindowDegrees = max(1.0, min(30.0, newValue)) } }
     }
 
+    var rotationBreakawayDegrees: Float {
+        get { withLock { _rotationBreakawayDegrees } }
+        set {
+            let clamped = max(0.0, min(45.0, newValue))
+            withLock { _rotationBreakawayDegrees = clamped }
+            UserDefaults.standard.set(clamped, forKey: "rotationBreakawayDegrees")
+        }
+    }
+
     /// Gesture sensitivity (1-10, where 1 = 10x slower, 10 = normal speed)
     var gestureSensitivity: Float {
         get { withLock { _gestureSensitivity } }
@@ -829,6 +844,15 @@ final class RenderSettings: @unchecked Sendable {
             let clamped = max(1.0, min(10.0, newValue))
             withLock { _gestureSensitivity = clamped }
             UserDefaults.standard.set(clamped, forKey: "gestureSensitivity")
+        }
+    }
+
+    var gestureSmoothingFactor: Float {
+        get { withLock { _gestureSmoothingFactor } }
+        set {
+            let clamped = max(0.0, min(1.0, newValue))
+            withLock { _gestureSmoothingFactor = clamped }
+            UserDefaults.standard.set(clamped, forKey: "gestureSmoothingFactor")
         }
     }
 
@@ -1046,6 +1070,28 @@ final class RenderSettings: @unchecked Sendable {
     var safetyBubbleShape: Float {
         get { withLock { _safetyBubbleShape } }
         set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
+    }
+
+    /// Compatibility alias for the legacy safety-bubble blend slider.
+    /// Maps onto the shader's temporal bubble-strength control.
+    var safetyBubbleBlend: Float {
+        get { withLock { _safetyBubbleStrength } }
+        set { withLock { _safetyBubbleStrength = max(0.0, min(1.0, newValue)) } }
+    }
+
+    var safetyBubbleFadeEnabled: Bool {
+        get { withLock { _safetyBubbleFadeEnabled } }
+        set { withLock { _safetyBubbleFadeEnabled = newValue } }
+    }
+
+    var safetyBubbleFadeWidth: Float {
+        get { withLock { _safetyBubbleFadeWidth } }
+        set { withLock { _safetyBubbleFadeWidth = max(0.0, min(1.0, newValue)) } }
+    }
+
+    var safetyBubbleStrength: Float {
+        get { withLock { _safetyBubbleStrength } }
+        set { withLock { _safetyBubbleStrength = max(0.0, min(1.0, newValue)) } }
     }
     
     // === COLOR SCHEME SETTINGS ===
@@ -1302,6 +1348,17 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Beat flash effect (music-driven edge flash)
+    var beatFlashEffect: BeatFlashEffect {
+        get { withLock { _beatFlashEffect } }
+        set {
+            withLock {
+                _beatFlashEffect = newValue
+                _lightingPreset = .custom
+            }
+        }
+    }
+
     /// Polar rotation effect (animates polar angle for Mandelbulb / Quaternion Julia)
     var polarRotationEffect: PolarRotationEffect {
         get { withLock { _polarRotationEffect } }
@@ -1415,9 +1472,9 @@ final class RenderSettings: @unchecked Sendable {
                 if _colorSchemeAutoTimer >= _colorSchemeAutoInterval {
                     _colorSchemeAutoTimer = 0.0
                     // Transition to next scheme using rawValue arithmetic (faster than allCases lookup)
-                    let currentRaw = _targetColorScheme.rawValue
-                    let nextRaw = (currentRaw + 1) % Int32(ColorScheme.allCases.count)
-                    if let nextScheme = ColorScheme(rawValue: nextRaw) {
+                    let allSchemes = ColorScheme.allCases
+                    if let currentIndex = allSchemes.firstIndex(of: _targetColorScheme), !allSchemes.isEmpty {
+                        let nextScheme = allSchemes[(currentIndex + 1) % allSchemes.count]
                         _colorScheme = _targetColorScheme
                         _targetColorScheme = nextScheme
                         _colorSchemeTransitionProgress = 0.0
@@ -1438,17 +1495,9 @@ final class RenderSettings: @unchecked Sendable {
     }
     
     private func makeColorSchemeParamsLocked() -> ColorSchemeParams {
-        let currentPal = _targetColorScheme.palette
-        let previousPal = _colorScheme.palette
         let currentNeon = _targetColorScheme.neonParams
         let previousNeon = _colorScheme.neonParams
-        
-        // Interpolate between previous and target palettes
         let t = _colorSchemeTransitionProgress
-        let color1 = simd_mix(previousPal.color1, currentPal.color1, SIMD3<Float>(repeating: t))
-        let color2 = simd_mix(previousPal.color2, currentPal.color2, SIMD3<Float>(repeating: t))
-        let color3 = simd_mix(previousPal.color3, currentPal.color3, SIMD3<Float>(repeating: t))
-        let altMixFactors = simd_mix(previousPal.altMixFactors, currentPal.altMixFactors, SIMD3<Float>(repeating: t))
         
         // Interpolate neon intensity (0 for non-neon, 1 for neon)
         let prevNeonIntensity: Float = _colorScheme.isNeonMode ? 1.0 : 0.0
@@ -1472,10 +1521,6 @@ final class RenderSettings: @unchecked Sendable {
         )
         
         return ColorSchemeParams(
-            color1: color1,
-            color2: color2,
-            color3: color3,
-            altMixFactors: altMixFactors,
             saturation: _colorSchemeSaturation,
             contrast: _colorSchemeContrast,
             gamma: _colorSchemeGamma,
@@ -1496,9 +1541,8 @@ final class RenderSettings: @unchecked Sendable {
             colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
             gradientRepeat: gradState.gradient.repeatCount,
             gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
-            useGradientColoring: gradState.useGradientColoring ? 1 : 0,
             gradientSmoothing: gradState.gradient.smoothing,
-            gradientLoopSmooth: _gradientCycleEffect.smoothLoop ? 1 : 0,
+            gradientLoopSmooth: _gradientCycleEffect.mirrorLoop ? 1 : 0,
             _gradPad: (0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: _colorAnimTime,
@@ -1511,7 +1555,9 @@ final class RenderSettings: @unchecked Sendable {
             glowEnabled: _glowEffect.enabled ? 1 : 0,
             glowIntensity: _glowEffect.intensity,
             bloomEnabled: _bloomEffect.enabled ? 1 : 0,
-            bloomStrength: _bloomEffect.strength
+            bloomStrength: _bloomEffect.strength,
+            beatFlashEnabled: _beatFlashEffect.enabled ? 1 : 0,
+            beatFlashIntensity: _beatFlashEffect.intensity
         )
     }
     
@@ -1570,6 +1616,9 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
                 safetyBubbleShape: _safetyBubbleShape,
+                safetyBubbleFadeEnabled: _safetyBubbleFadeEnabled,
+                safetyBubbleFadeWidth: _safetyBubbleFadeWidth,
+                safetyBubbleStrength: _safetyBubbleStrength,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
                 fogIntensity: _fogEffect.intensity,
@@ -2054,7 +2103,7 @@ final class RenderSettings: @unchecked Sendable {
     /// Much faster than the full smooth-damp pipeline but takes the edge off
     /// hand-tracking jitter. Uses an adaptive rate: slower for tiny movements
     /// (dead-zone on noise), faster for clear intentional motion.
-    func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float) {
+    func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float, responsiveness: Float = 0.75) {
         withLock {
             // Adaptive lerp: base 0.30 (smoother), ramp up to 0.55 for large motions.
             // This damps hand-tracking micro-jitter while keeping big gestures snappy.
@@ -2066,7 +2115,9 @@ final class RenderSettings: @unchecked Sendable {
             let rampStart: Float = 0.001   // below this → mostly noise
             let rampEnd:   Float = 0.02    // above this → full response
             let rampT = simd_clamp((motionMag - rampStart) / (rampEnd - rampStart), 0, 1)
-            let t = tBase + (tMax - tBase) * rampT
+            let baseT = tBase + (tMax - tBase) * rampT
+            let responsivenessClamped = simd_clamp(responsiveness, 0.0, 1.0)
+            let t = simd_clamp(baseT * (0.5 + 0.5 * responsivenessClamped), 0.0, 1.0)
             
             // Position: lerp current toward new value, keep target = raw input
             _position = _position + (position - _position) * t

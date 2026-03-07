@@ -12,11 +12,19 @@ import Observation
 /// Coordinates UI updates from the render thread without blocking MainActor
 /// Uses rate limiting and batching to minimize observation invalidation
 final class UIUpdateCoordinator: @unchecked Sendable {
+    private struct PendingUIWork {
+        let fps: Double?
+        let analyticsFPS: Double?
+        let shouldUpdateAnalytics: Bool
+    }
+
     private let updateQueue = DispatchQueue(label: "ui.update.coordinator", qos: .userInitiated)
-    private var lastFPSUpdate: TimeInterval = 0
-    private var lastAnalyticsUpdate: TimeInterval = 0
-    private var pendingFPSUpdate: Double = 0
-    private var hasPendingFPSUpdate = false
+    private var lastFPSScheduleTime: TimeInterval = 0
+    private var lastAnalyticsScheduleTime: TimeInterval = 0
+    private var pendingFPSUpdate: Double?
+    private var pendingAnalyticsFPS: Double?
+    private var hasPendingAnalyticsUpdate = false
+    private var isMainActorDispatchScheduled = false
     
     // Rate limiting constants
     private let fpsUpdateInterval: TimeInterval = 0.5  // 2Hz FPS display
@@ -37,37 +45,59 @@ final class UIUpdateCoordinator: @unchecked Sendable {
     }
     
     private func processPendingUpdates(fps: Double, currentTime: TimeInterval) {
-        let shouldUpdateFPS = currentTime - lastFPSUpdate >= fpsUpdateInterval
-        let shouldUpdateAnalytics = currentTime - lastAnalyticsUpdate >= analyticsInterval
+        let shouldUpdateFPS = currentTime - lastFPSScheduleTime >= fpsUpdateInterval
+        let shouldUpdateAnalytics = currentTime - lastAnalyticsScheduleTime >= analyticsInterval
         
         if shouldUpdateFPS {
             pendingFPSUpdate = fps
-            hasPendingFPSUpdate = true
-            lastFPSUpdate = currentTime
+            lastFPSScheduleTime = currentTime
+        }
+
+        if shouldUpdateAnalytics {
+            pendingAnalyticsFPS = fps
+            hasPendingAnalyticsUpdate = true
+            lastAnalyticsScheduleTime = currentTime
         }
         
-        if shouldUpdateAnalytics || hasPendingFPSUpdate {
-            // Batch updates to minimize MainActor dispatches
-            Task { @MainActor [weak self] in
-                self?.applyPendingUpdates(currentTime: currentTime)
-            }
+        guard (pendingFPSUpdate != nil || hasPendingAnalyticsUpdate), !isMainActorDispatchScheduled else {
+            return
+        }
+
+        isMainActorDispatchScheduled = true
+
+        // Batch updates to minimize MainActor dispatches and coalesce bursts.
+        Task { @MainActor [weak self] in
+            self?.applyPendingUpdates()
         }
     }
     
     @MainActor
-    private func applyPendingUpdates(currentTime: TimeInterval) {
+    private func applyPendingUpdates() {
+        let pendingWork = updateQueue.sync { () -> PendingUIWork in
+            defer {
+                pendingFPSUpdate = nil
+                pendingAnalyticsFPS = nil
+                hasPendingAnalyticsUpdate = false
+                isMainActorDispatchScheduled = false
+            }
+
+            return PendingUIWork(
+                fps: pendingFPSUpdate,
+                analyticsFPS: pendingAnalyticsFPS,
+                shouldUpdateAnalytics: hasPendingAnalyticsUpdate
+            )
+        }
+
         guard let appModel = appModel else { return }
         
         // Apply FPS update if pending
-        if hasPendingFPSUpdate {
-            appModel.fps = pendingFPSUpdate
-            hasPendingFPSUpdate = false
+        if let fps = pendingWork.fps {
+            appModel.fps = fps
         }
         
         // Update analytics at separate rate
-        if currentTime - lastAnalyticsUpdate >= analyticsInterval {
-            updateAnalytics(appModel: appModel, fps: pendingFPSUpdate)
-            lastAnalyticsUpdate = currentTime
+        if pendingWork.shouldUpdateAnalytics {
+            updateAnalytics(appModel: appModel, fps: pendingWork.analyticsFPS ?? pendingWork.fps ?? appModel.fps)
         }
     }
     

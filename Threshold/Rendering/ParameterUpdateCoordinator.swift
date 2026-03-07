@@ -12,6 +12,14 @@ import Observation
 /// Coordinates parameter updates without blocking MainActor
 /// Batches smoothing operations and defers non-critical updates
 final class ParameterUpdateCoordinator: @unchecked Sendable {
+    private struct PendingParameterWork {
+        let shouldUpdateAnimation: Bool
+        let shouldUpdateAudio: Bool
+        let shouldUpdateSmoothing: Bool
+        let deltaTime: TimeInterval
+        let fractalType: FractalModelType
+    }
+
     private let updateQueue = DispatchQueue(label: "parameter.update.coordinator", qos: .userInitiated)
     private weak var appModel: AppModel?
     
@@ -19,10 +27,18 @@ final class ParameterUpdateCoordinator: @unchecked Sendable {
     private var lastAnimationUpdate: TimeInterval = 0
     private var lastAudioUpdate: TimeInterval = 0
     private var lastSmoothingUpdate: TimeInterval = 0
+    private var pendingAnimationUpdate = false
+    private var pendingAudioUpdate = false
+    private var pendingSmoothingUpdate = false
+    private var pendingDeltaTime: TimeInterval = 1.0 / 90.0
+    private var pendingFractalType: FractalModelType = .mandelbulb
+    private var isMainActorDispatchScheduled = false
     
     private let animationUpdateInterval: TimeInterval = 1.0 / 90.0  // 90Hz
     private let audioUpdateInterval: TimeInterval = 1.0 / 60.0      // 60Hz
-    private let smoothingUpdateInterval: TimeInterval = 1.0 / 120.0  // 120Hz
+    // Smoothing does not need to run every frame; 45Hz is a good balance between
+    // responsiveness and MainActor/CPU overhead under heavy rendering load.
+    private let smoothingUpdateInterval: TimeInterval = 1.0 / 45.0
     
     nonisolated init(appModel: AppModel) {
         self.appModel = appModel
@@ -57,7 +73,8 @@ final class ParameterUpdateCoordinator: @unchecked Sendable {
     ) {
         let needsAnimationUpdate = shouldUpdateAnimation && (currentTime - lastAnimationUpdate >= animationUpdateInterval)
         let needsAudioUpdate = shouldUpdateAudio && (currentTime - lastAudioUpdate >= audioUpdateInterval)
-        let needsSmoothingUpdate = currentTime - lastSmoothingUpdate >= smoothingUpdateInterval
+        let needsSmoothingUpdate = (shouldUpdateAnimation || shouldUpdateAudio)
+            && (currentTime - lastSmoothingUpdate >= smoothingUpdateInterval)
         
         // Only dispatch to MainActor if there's actual work to do
         guard needsAnimationUpdate || needsAudioUpdate || needsSmoothingUpdate else { return }
@@ -71,41 +88,55 @@ final class ParameterUpdateCoordinator: @unchecked Sendable {
         if needsSmoothingUpdate {
             lastSmoothingUpdate = currentTime
         }
+
+        pendingAnimationUpdate = pendingAnimationUpdate || needsAnimationUpdate
+        pendingAudioUpdate = pendingAudioUpdate || needsAudioUpdate
+        pendingSmoothingUpdate = pendingSmoothingUpdate || needsSmoothingUpdate
+        pendingDeltaTime = deltaTime
+        pendingFractalType = fractalType
         
-        // Single batched MainActor dispatch
+        guard !isMainActorDispatchScheduled else { return }
+
+        isMainActorDispatchScheduled = true
+
+        // Single batched MainActor dispatch.
         Task { @MainActor [weak self] in
-            self?.applyParameterUpdates(
-                shouldUpdateAnimation: needsAnimationUpdate,
-                shouldUpdateAudio: needsAudioUpdate,
-                shouldUpdateSmoothing: needsSmoothingUpdate,
-                deltaTime: Float(deltaTime),
-                fractalType: fractalType
-            )
+            self?.applyParameterUpdates()
         }
     }
     
     @MainActor
-    private func applyParameterUpdates(
-        shouldUpdateAnimation: Bool,
-        shouldUpdateAudio: Bool,
-        shouldUpdateSmoothing: Bool,
-        deltaTime: Float,
-        fractalType: FractalModelType
-    ) {
+    private func applyParameterUpdates() {
+        let pendingWork = updateQueue.sync { () -> PendingParameterWork in
+            defer {
+                pendingAnimationUpdate = false
+                pendingAudioUpdate = false
+                pendingSmoothingUpdate = false
+                isMainActorDispatchScheduled = false
+            }
+
+            return PendingParameterWork(
+                shouldUpdateAnimation: pendingAnimationUpdate,
+                shouldUpdateAudio: pendingAudioUpdate,
+                shouldUpdateSmoothing: pendingSmoothingUpdate,
+                deltaTime: pendingDeltaTime,
+                fractalType: pendingFractalType
+            )
+        }
+
         guard let appModel = appModel else { return }
         
-        if shouldUpdateAnimation {
-            appModel.animationManager?.update(deltaTime: TimeInterval(deltaTime))
+        if pendingWork.shouldUpdateAnimation {
+            appModel.animationManager?.update(deltaTime: pendingWork.deltaTime)
         }
         
-        if shouldUpdateAudio {
-            appModel.spotifyManager.updateFrame()
+        if pendingWork.shouldUpdateAudio {
             appModel.appleMusicManager.updateFrame()
         }
         
-        if shouldUpdateSmoothing {
-            ParameterNodeRegistry.shared.updateSmoothing(deltaTime: deltaTime, for: fractalType)
-            let _ = ParameterNodeRegistry.shared.consumeDirtyNodes(for: fractalType)
+        if pendingWork.shouldUpdateSmoothing {
+            let smoothingDelta = Float(pendingWork.deltaTime)
+            ParameterNodeRegistry.shared.updateSmoothing(deltaTime: smoothingDelta, for: pendingWork.fractalType)
         }
     }
 }

@@ -13,6 +13,20 @@
 import Foundation
 import simd
 
+// MARK: - Legacy Color Scheme Compatibility
+
+/// Backwards-compatible palette shape used by the shader parameter packing code.
+struct LegacyColorSchemePalette {
+    var color1: SIMD3<Float>
+    var color2: SIMD3<Float>
+    var color3: SIMD3<Float>
+    var altMixFactors: SIMD3<Float>
+}
+
+/// `ColorScheme` used to be a separate enum. Keep the old API surface mapped to
+/// the new gradient preset system so older preset/scene code continues to compile.
+typealias ColorScheme = GradientPreset
+
 // MARK: - Gradient Stop
 
 /// A single color stop in a gradient, with position and color.
@@ -247,6 +261,43 @@ enum GradientPreset: String, CaseIterable, Codable {
         case .neonMatrix: return (0.5, 0.0, 6.0, 0.0, 0.0, 5.0, 0.15)
         default:          return (1.5, 0.0, 2.0, 0.0, 0.0, 3.0, 0.3)
         }
+    }
+
+    static func fromColorScheme(_ scheme: ColorScheme) -> GradientPreset? {
+        scheme
+    }
+
+    /// Compatibility palette used by legacy color interpolation code.
+    /// Samples the gradient at three stable positions and preserves the old mix layout.
+    var palette: LegacyColorSchemePalette {
+        let gradient = makeGradient()
+
+        func sample(_ position: Float) -> SIMD3<Float> {
+            let stops = gradient.stops.sorted { $0.position < $1.position }
+            guard let first = stops.first else { return SIMD3<Float>(repeating: 0) }
+            guard let last = stops.last else { return first.color }
+
+            if position <= first.position { return first.color }
+            if position >= last.position { return last.color }
+
+            for index in 0..<(stops.count - 1) {
+                let lhs = stops[index]
+                let rhs = stops[index + 1]
+                guard position >= lhs.position, position <= rhs.position else { continue }
+                let span = max(rhs.position - lhs.position, 0.0001)
+                let t = (position - lhs.position) / span
+                return simd_mix(lhs.color, rhs.color, SIMD3<Float>(repeating: t))
+            }
+
+            return last.color
+        }
+
+        return LegacyColorSchemePalette(
+            color1: sample(0.12),
+            color2: sample(0.50),
+            color3: sample(0.88),
+            altMixFactors: SIMD3<Float>(0.15, 0.50, 0.85)
+        )
     }
     
     /// Create the gradient color map for this preset

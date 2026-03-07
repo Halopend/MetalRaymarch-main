@@ -124,6 +124,11 @@ final class MusicService {
         activeProvider?.nowPlaying
     }
 
+    /// Backward-compatible alias for older UI code.
+    var nowPlaying: UnifiedTrack? {
+        nowPlayingUnified
+    }
+
     var isPlaying: Bool {
         providers.contains { $0.isPlaying }
     }
