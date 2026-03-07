@@ -45,42 +45,6 @@
           ]
         }
       ]
-    },
-    {
-      "id": "flame",
-      "name": "Flame (Draves)",
-      "summary": "2D/2.5D iterated function systems using weighted non-linear variations.",
-      "historicalInfo": "Fractal Flames were introduced by Scott Draves and Erik Reckase (early 2000s) and popularized via flam3 and Electric Sheep.",
-      "types": [
-        {
-          "id": "flam3-core",
-          "title": "Fractal Flame (flam3)",
-          "icon": "flame.fill",
-          "subtitle": "Reference implementation and XML ecosystem",
-          "historicalInfo": "flam3 defines transform sets, variation weights, affine coefficients, and rendering metadata in XML.",
-          "externalReferenceURL": "https://github.com/scottdraves/flam3",
-          "variants": [
-            {
-              "id": "flam3-repo",
-              "name": "flam3 Project",
-              "summary": "Open the canonical flam3 repository and docs.",
-              "externalURL": "https://github.com/scottdraves/flam3"
-            },
-            {
-              "id": "flame-wiki",
-              "name": "Fractal Flame Overview",
-              "summary": "Algorithm background and references.",
-              "externalURL": "https://en.wikipedia.org/wiki/Fractal_flame"
-            },
-            {
-              "id": "electric-sheep",
-              "name": "Electric Sheep",
-              "summary": "Community-driven flame animation project.",
-              "externalURL": "https://electricsheep.org/"
-            }
-          ]
-        }
-      ]
     }
   ]
 }

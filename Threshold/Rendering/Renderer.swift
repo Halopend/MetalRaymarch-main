@@ -25,9 +25,7 @@ actor Renderer {
     
     // === UNIFIED PIPELINE CACHE ===
     // All specialized pipelines stored in a single cache with consistent key format.
-    // Key formats:
-    // - FT-specific: "FT{type}_FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
-    // - Shared quality fallback: "FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
+    // Key format: "FI{iterations}_RS{raySteps}_N{0|1}_Q{0|1|2}[_QS]"
     // This allows preset pipelines and quality preset pipelines to be looked up uniformly.
     //
     // Pipeline specialization strategy:
@@ -38,8 +36,7 @@ actor Renderer {
     /// Unified pipeline cache - all specialized pipelines keyed by function constant signature
     var pipelineCache: [String: MTLRenderPipelineState] = [:]
     
-    /// Compute pipeline cache - specialized compute kernels keyed by either
-    /// "FT{type}_FI{n}_RS{n}" (exact) or "FI{n}_RS{n}" (shared quality fallback)
+    /// Compute pipeline cache - specialized compute kernels keyed by "FI{n}_RS{n}"
     /// Mirrors the render pipeline cache but for the adaptive hierarchical compute path.
     /// Each entry has Map()/Shadow loops fully unrolled for that iteration count.
     var computePipelineCache: [String: MTLComputePipelineState] = [:]
@@ -50,7 +47,6 @@ actor Renderer {
     var lastComputeFT: Int32 = -1
     var lastComputeFI: Int = -1
     var lastComputeRS: Int = -1
-    var lastComputePower: Int32? = nil
     var lastSelectedComputePipeline: MTLComputePipelineState?
     
     /// Cached default Metal library — avoids device.makeDefaultLibrary() on every compute cache miss
@@ -281,23 +277,9 @@ actor Renderer {
         // For features like neon, use saved presets which build fully-specialized pipelines.
         
         let qualityPresets = QualityPreset.allCases
-        // Keep startup work bounded while still warming the most important FT-specialized variants.
-        // This removes first-use stutter for the active fractal and Theli-specific paths.
-        let startupFractalTypes: [FractalModelType] = {
-            var ordered: [FractalModelType] = []
-            var seen = Set<Int32>()
-            let warmTargets: [FractalModelType] = [appModel.renderSettings.fractalType]
-            for type in warmTargets where seen.insert(type.rawValue).inserted {
-                ordered.append(type)
-            }
-            return ordered
-        }()
         
         var pipelineCount = 0
-        if RENDERER_DEBUG {
-            let targets = startupFractalTypes.map(\.displayName).joined(separator: ", ")
-            print("Building specialized pipelines for \(qualityPresets.count) quality presets (+ FT warm targets: \(targets))...")
-        }
+        if RENDERER_DEBUG { print("Building specialized pipelines for \(qualityPresets.count) quality presets...") }
         
         for preset in qualityPresets {
             let iterCount = preset.fractalIterations
@@ -333,37 +315,6 @@ actor Renderer {
             ) {
                 pipelineCache[unifiedKey + "_QS"] = pipeline
             }
-
-            // FT-specific warmup keys hit selectPipeline() fast path directly (no shared fallback).
-            for fractalType in startupFractalTypes {
-                var ftConfig = config
-                ftConfig.fractalType = fractalType.rawValue
-                let ftConstants = ftConfig.toMTLConstants()
-                let ftKey = "FT\(fractalType.rawValue)_FI\(iterCount)_RS\(raySteps)_N0_Q\(qualityMode)"
-
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: rasterSampleCount,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    functionConstants: ftConstants
-                ) {
-                    pipelineCache[ftKey] = pipeline
-                    pipelineCount += 1
-                    if RENDERER_DEBUG { print("  ✓ FT \(fractalType.rawValue): FI=\(iterCount), RS=\(raySteps) [\(ftKey)]") }
-                }
-
-                if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
-                    device: device,
-                    layerRenderer: layerRenderer,
-                    rasterSampleCount: rasterSampleCount,
-                    mtlVertexDescriptor: mtlVertexDescriptor,
-                    fragmentFunctionName: "fragmentShaderQuadShared",
-                    functionConstants: ftConstants
-                ) {
-                    pipelineCache[ftKey + "_QS"] = pipeline
-                }
-            }
         }
         if RENDERER_DEBUG { print("✓ Built \(pipelineCount) specialized pipelines (\(pipelineCache.count) total with quad-shared)") }
 
@@ -395,10 +346,7 @@ actor Renderer {
             // Build specialized compute pipelines for each quality preset.
             // Each pipeline bakes FC_FRACTAL_ITERATIONS / FC_SHADOW_ITERATIONS / FC_MAX_RAY_STEPS
             // so the Map() inner loop is fully unrolled per iteration count.
-            if RENDERER_DEBUG {
-                let targets = startupFractalTypes.map(\.displayName).joined(separator: ", ")
-                print("Building specialized compute pipelines for \(QualityPreset.allCases.count) quality presets (+ FT warm targets: \(targets))...")
-            }
+            if RENDERER_DEBUG { print("Building specialized compute pipelines for \(QualityPreset.allCases.count) quality presets...") }
             var computeBuilt = 0
             for preset in QualityPreset.allCases {
                 let fi = Int32(preset.fractalIterations)
@@ -411,17 +359,6 @@ actor Renderer {
                     computePipelineCache[key] = pipeline
                     computeBuilt += 1
                     if RENDERER_DEBUG { print("  ✓ Compute \(preset.rawValue): FI=\(fi), RS=\(rs) [\(key)]") }
-                }
-
-                for fractalType in startupFractalTypes {
-                    let ftKey = "FT\(fractalType.rawValue)_FI\(fi)_RS\(rs)"
-                    if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
-                                                                    fractalType: fractalType.rawValue,
-                                                                    fractalIterations: fi, shadowIterations: si, maxRaySteps: rs) {
-                        computePipelineCache[ftKey] = pipeline
-                        computeBuilt += 1
-                        if RENDERER_DEBUG { print("  ✓ Compute FT\(fractalType.rawValue): FI=\(fi), RS=\(rs) [\(ftKey)]") }
-                    }
                 }
             }
             // Build a GENERIC fallback pipeline (no function constants baked in).
@@ -556,8 +493,6 @@ actor Renderer {
     var lastSelectRS: Int = -1
     var lastSelectQS: Bool = false
     var lastSelectNeon: Bool = false
-    var lastSelectFT: Int32 = -1
-    var lastSelectPower: Int32? = nil
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     
@@ -712,7 +647,7 @@ actor Renderer {
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
         
         // === AUDIO PIPELINE ===
-        // Auto-detect active sources: use mic FFT and/or
+        // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
         // Apple Music BPM-based synthesis — blend whatever is available.
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
         
@@ -726,6 +661,7 @@ actor Renderer {
                     self.appModel.animationManager?.update(deltaTime: animDelta)
                 }
                 if isAudioMode {
+                    self.appModel.spotifyManager.updateFrame()
                     self.appModel.appleMusicManager.updateFrame()
                 }
                 // Advance per-node smoothing and consume dirty flags
@@ -743,9 +679,11 @@ actor Renderer {
         
         if isAudioMode {
             let mic = appModel.audioAnalyzer
+            let spotifyManager = appModel.spotifyManager
             let appleMusicManager = appModel.appleMusicManager
             // Auto-detect: use whatever sources are currently active
             let micActive = mic.isCapturing
+            let spotifyActive = spotifyManager.beatSyncActive
             let appleMusicActive = appleMusicManager.isActive
             
             // Sensitivity multipliers from user settings
@@ -765,6 +703,14 @@ actor Renderer {
                 totalTreble += mic.trebleLevel
                 totalBeat = max(totalBeat, mic.peakLevel * 0.7)
                 totalLevel += mic.level
+                sourceCount += 1
+            }
+            if spotifyActive {
+                totalBass += spotifyManager.bassLevel
+                totalMid += spotifyManager.midLevel
+                totalTreble += spotifyManager.trebleLevel
+                totalBeat = max(totalBeat, spotifyManager.beatIntensity)
+                totalLevel += spotifyManager.overallLevel
                 sourceCount += 1
             }
             if appleMusicActive {
@@ -898,7 +844,7 @@ actor Renderer {
         // When in Buddhabrot mode, skip fractal raymarching entirely and instead
         // run the 3D volume accumulation + render pipeline.
         // ═══════════════════════════════════════════════════════════════════════
-        if appModel.runtimeViewModeForRenderer == .buddhabrot {
+        if appModel.runtimeViewMode == .buddhabrot {
             // Lazy-init the Buddhabrot renderer on first use
             if buddhabrotRenderer == nil {
                 buddhabrotRenderer = BuddhabrotRenderer(
@@ -913,8 +859,7 @@ actor Renderer {
                 let rendered = bbrot.renderFrame(
                     commandBuffer: commandBuffer,
                     drawable: drawable,
-                    time: bbrotTime,
-                    settingsSnapshot: settingsSnapshot
+                    time: bbrotTime
                 )
                 
                 if rendered {
@@ -1112,12 +1057,6 @@ actor Renderer {
         // Get color scheme parameters
         let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
-        // Scale-relative safety bubble: divide radius/fadeWidth by effectiveScale so it stays
-        // constant in user/world space regardless of detail zoom level.
-        let tileEffectiveScale = max(smoothedScale * settingsSnapshot.detailScale, 0.001)
-        let tileScaledBubbleRadius = settingsSnapshot.safetyBubbleRadius / tileEffectiveScale
-        let tileScaledFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / tileEffectiveScale
-        
         // === REUSE PRECOMPUTED VALUES from updateGameState() ===
         // These are frame-uniform (identical for both eyes), computed once per frame.
         let computePrecomputedFractal = cachedPrecomputedFractal
@@ -1125,7 +1064,6 @@ actor Renderer {
         let computePrecomputedAudio = cachedPrecomputedAudio
         let computePrecomputedFog = cachedPrecomputedFog
         let frameTime = cachedFrameTime
-        let boundingSphereRadius = settingsSnapshot.estimatedBoundingSphereRadius
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
@@ -1136,14 +1074,9 @@ actor Renderer {
             minDistance: settingsSnapshot.minDistance,
             fractalScale: settingsSnapshot.fractalScale,
             sphereRadius: settingsSnapshot.sphereRadius,
-            safetyBubbleRadius: tileScaledBubbleRadius,
-            // Mandelbulb: force safety bubble off — its geometry is compact and
-            // the bubble blend/fade creates visible artifacts when zooming deep.
-            safetyBubbleEnabled: (settingsSnapshot.fractalType == .mandelbulb) ? 0 : (settingsSnapshot.safetyBubbleEnabled ? 1 : 0),
+            safetyBubbleRadius: settingsSnapshot.safetyBubbleRadius,
+            safetyBubbleEnabled: settingsSnapshot.safetyBubbleEnabled ? 1 : 0,
             safetyBubbleShape: settingsSnapshot.safetyBubbleShape,
-            safetyBubbleFadeEnabled: settingsSnapshot.safetyBubbleFadeEnabled ? 1 : 0,
-            safetyBubbleFadeWidth: tileScaledFadeWidth,
-            safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
             foldingLimit: settingsSnapshot.foldingLimit,
             glowIntensity: settingsSnapshot.colorSchemeParams.glowIntensity,
             colorMix: settingsSnapshot.colorMix,
@@ -1159,12 +1092,8 @@ actor Renderer {
             lightingSoftness: settingsSnapshot.lightingSoftness,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
-            boundingSphereRadius: boundingSphereRadius,
-            // Mandelbulb: disable temporal color blending — fine surface detail gets
-            // softened by history accumulation, and reprojection artifacts are more
-            // visible on its smooth/spherical geometry. Temporal reprojection for
-            // ray-start optimization (startT) still works (separate system).
-            blendFactor: (settingsSnapshot.fractalType == .mandelbulb || settingsSnapshot.isGeometryGestureActive) ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
+            boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
+            blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
             jitterOffset: currentJitterOffset(),
             accumulationFrame: Int32(accumulationFrameCount),
             pad_gmt: 0.0,

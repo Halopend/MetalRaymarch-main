@@ -25,7 +25,6 @@ class AppModel {
 
     enum RuntimeViewMode: String {
         case raymarch
-        case flame
         case buddhabrot
     }
     
@@ -106,12 +105,6 @@ class AppModel {
     // Error reporting for transient banners
     let errorReporter = ErrorReporter()
 
-    // Flame runtime state (shared between browser + main panel)
-    var importedFlame: FlameDocument?
-    var importedFlamePreviewImage: CGImage?
-    var importedFlameStatusText: String = ""
-    var importedFlameErrorText: String?
-    
     // Animation/Scene playback manager
     var animationManager: AnimationManager?
     
@@ -199,18 +192,6 @@ class AppModel {
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
 
-        // Load default flame from bundled library
-        loadDefaultFlame()
-    }
-
-    /// Load the first flame in the bundled library as the default flame.
-    private func loadDefaultFlame() {
-        let library = FlameLibrary.shared
-        library.loadIfNeeded()
-        if let flame = library.defaultFlame {
-            importedFlame = flame
-            importedFlameStatusText = "Loaded bundled flame: \(flame.name)"
-        }
     }
     
     /// Save current state for restore on next launch

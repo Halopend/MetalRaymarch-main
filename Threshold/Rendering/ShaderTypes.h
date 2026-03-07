@@ -11,9 +11,15 @@
 #ifdef __METAL_VERSION__
 #define NS_ENUM(_type, _name) enum _name : _type _name; enum _name : _type
 typedef metal::int32_t EnumBackingType;
-#else
-#import <Foundation/Foundation.h>
+#elif defined(__OBJC__)
+#include <Foundation/Foundation.h>
 typedef NSInteger EnumBackingType;
+#else
+#include <stdint.h>
+#ifndef NS_ENUM
+    #define NS_ENUM(_type, _name) enum _name
+#endif
+typedef int32_t EnumBackingType;
 #endif
 
 #include <simd/simd.h>

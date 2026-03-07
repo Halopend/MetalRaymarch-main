@@ -16,6 +16,16 @@ extension Renderer {
         return .fragment(useQuadShared: settingsSnapshot.tileSize == 2)
     }
 
+    /// Actor-isolated throttle gate for slow-frame logging.
+    /// Evaluate on the render loop thread before command buffer commit.
+    func consumeSlowFrameLogPermit(nowTime: TimeInterval, frameTimeSeconds: Double) -> Bool {
+        let frameMs = frameTimeSeconds * 1000.0
+        guard frameMs >= perfLogFrameMsThreshold else { return false }
+        guard nowTime - lastPerfLogTime >= 0.5 else { return false }
+        lastPerfLogTime = nowTime
+        return true
+    }
+
     func configureDirectRenderTargets(renderPassDescriptor: MTLRenderPassDescriptor, drawable: LayerRenderer.Drawable) {
         renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
         renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
@@ -42,11 +52,12 @@ extension Renderer {
         }
     }
 
-    func recordFramePerf(
-        nowTime: TimeInterval,
+    nonisolated static func recordFramePerf(
         frameTimeSeconds: Double,
         cpuEncodeMs: Double,
         gpuMs: Double?,
+        frameBreakdown: FramePhaseBreakdown,
+        shouldLogSlowFrame: Bool,
         settingsSnapshot: RenderSettingsSnapshot,
         useAdaptiveCompute: Bool,
         viewCount: Int
@@ -65,15 +76,20 @@ extension Renderer {
         )
 #endif
 
-        if frameMs < perfLogFrameMsThreshold { return }
-        if nowTime - lastPerfLogTime < 0.5 { return }
-        lastPerfLogTime = nowTime
+        guard shouldLogSlowFrame else { return }
 
         let gpuText = gpuMs.map { String(format: "%.2f", $0) } ?? "n/a"
+        let backgroundCpuText = String(format: "%.2f", frameBreakdown.backgroundCpuMs)
+        let dynamicQualityText = String(format: "%.2f", frameBreakdown.dynamicQualityMs)
+        let handTrackingText = String(format: "%.2f", frameBreakdown.handTrackingMs)
+        let settingsUpdateText = String(format: "%.2f", frameBreakdown.settingsUpdateMs)
+        let snapshotText = String(format: "%.2f", frameBreakdown.snapshotMs)
+        let gameStateText = String(format: "%.2f", frameBreakdown.updateGameStateMs)
+        let renderEncodeText = String(format: "%.2f", frameBreakdown.renderPathEncodeMs)
 
         let pathText = useAdaptiveCompute ? "compute" : "fragment"
         let fps = frameTimeSeconds > 0 ? (1.0 / frameTimeSeconds) : 0
-        if RENDERER_DEBUG { print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms path=\(pathText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)") }
+        print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms bg=\(backgroundCpuText)ms dq=\(dynamicQualityText)ms hand=\(handTrackingText)ms settings=\(settingsUpdateText)ms snap=\(snapshotText)ms game=\(gameStateText)ms encode=\(renderEncodeText)ms tasks=\(frameBreakdown.mainActorDispatchCount) path=\(pathText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)")
     }
 }
 

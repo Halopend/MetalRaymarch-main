@@ -23,6 +23,8 @@
 #ifndef DE_TheliPseudoKleinian_h
 #define DE_TheliPseudoKleinian_h
 
+#ifdef __METAL_VERSION__
+
 FORCE_INLINE float DE_TheliHybridMengerShape(float3 z, int mnIterations, float mnScale, float3 mnOffset) {
     const float kOneThird = 1.0f / 3.0f;
     float invScalePow = 1.0f;
@@ -204,5 +206,7 @@ FORCE_INLINE float DE_TheliPseudoKleinian_Dist(float3 pos, FormulaParams fp, flo
     float invDeFactor = 0.5f / max(p.w, 1e-6f);
     return abs(baseShape * invDeFactor - deOffset);
 }
+
+#endif // __METAL_VERSION__
 
 #endif /* DE_TheliPseudoKleinian_h */

@@ -1,14 +1,26 @@
 import Foundation
 
 extension Renderer {
+    // Track previous fractal complexity parameters to avoid per-frame hintSceneComplexity() calls.
+    // hintSceneComplexity() unconditionally nudges quality down by 0.05 and bypasses the
+    // update cooldown — calling it every frame drains quality at 4.5/s (0.05 * 90fps),
+    // which overwhelms the 0.08/s increase rate and prevents recovery.
+    private static var _lastHintedIterations: Int = -1
+    private static var _lastHintedRaySteps: Int = -1
+    private static var _lastHintedTileSize: Int = -1
+
     /// Update dynamic render quality based on FPS performance (visionOS 26+)
-    /// This implements Apple's WWDC25 Session 294 dynamic render quality API,
-    /// extended to also dynamically adjust shader parameters (iterations, ray steps).
+    /// This implements Apple's WWDC25 Session 294 dynamic render quality API
+    /// using resolution scaling only (geometry-preserving).
     func updateDynamicRenderQuality(fps: Double, deltaTime: TimeInterval) {
         if #available(visionOS 26.0, *) {
             guard let manager = dynamicRenderQualityManager as? DynamicRenderQualityManager else { return }
 
             let settings = appModel.renderSettings
+
+            // Keep fractal geometry stable: dynamic quality must not mutate DE/raymarch geometry knobs.
+            settings.fractalIterations = settings.baseFractalIterations
+            settings.maxRaySteps = settings.baseMaxRaySteps
 
             // Sync manager settings with RenderSettings (in case user changed them)
             manager.isEnabled = settings.dynamicRenderQualityEnabled
@@ -29,8 +41,12 @@ extension Renderer {
                 let clampedQuality = max(settings.dynamicRenderQualityMin, min(settings.dynamicRenderQualityMax, interactionQuality))
                 manager.setQuality(clampedQuality, layerRenderer: canUseResolutionScaling ? layerRenderer : nil)
                 settings.currentRenderQuality = manager.currentQuality
-                settings.fractalIterations = manager.effectiveIterations(base: settings.baseFractalIterations)
-                settings.maxRaySteps = manager.effectiveRaySteps(base: settings.baseMaxRaySteps)
+                return
+            }
+
+            guard canUseResolutionScaling else {
+                // No foveation support means no runtime quality lever here.
+                settings.currentRenderQuality = manager.currentQuality
                 return
             }
 
@@ -41,31 +57,34 @@ extension Renderer {
             // Sync current quality back to settings for UI display
             settings.currentRenderQuality = manager.currentQuality
 
-            // === APPLY EFFECTIVE SHADER PARAMETERS ===
-            // This is where the quality percentage actually affects rendering!
-            // Scale iterations and ray steps based on current quality level.
-            if manager.isEnabled {
-                let effectiveIterations = manager.effectiveIterations(base: settings.baseFractalIterations)
-                let effectiveRaySteps = manager.effectiveRaySteps(base: settings.baseMaxRaySteps)
-                settings.fractalIterations = effectiveIterations
-                settings.maxRaySteps = effectiveRaySteps
-            }
-
             // Log status once
             if !hasLoggedDynamicQualityStatus && manager.isEnabled {
                 hasLoggedDynamicQualityStatus = true
-                let mode = canUseResolutionScaling ? "resolution + shader params" : "shader params only"
+                let mode = "resolution scaling only"
                 if RENDERER_DEBUG { print("✓ Dynamic render quality active (\(mode)): adjusting based on FPS") }
             }
 
-            // Optionally hint scene complexity when fractal parameters change significantly
-            // This helps the manager anticipate quality needs
-            let complexity = DynamicRenderQualityManager.estimateFractalComplexity(
-                iterations: settings.baseFractalIterations,
-                raySteps: settings.baseMaxRaySteps,
-                tileSize: settings.tileSize
-            )
-            manager.hintSceneComplexity(complexity, layerRenderer: layerRenderer)
+            // Hint scene complexity only when fractal parameters actually change.
+            // hintSceneComplexity() nudges currentQuality down by 0.05 and bypasses the
+            // update cooldown — calling it every frame would drain quality faster than
+            // the increase rate can recover.
+            let currentIters = settings.baseFractalIterations
+            let currentSteps = settings.baseMaxRaySteps
+            let currentTile = settings.tileSize
+            if currentIters != Self._lastHintedIterations ||
+               currentSteps != Self._lastHintedRaySteps ||
+               currentTile != Self._lastHintedTileSize {
+                Self._lastHintedIterations = currentIters
+                Self._lastHintedRaySteps = currentSteps
+                Self._lastHintedTileSize = currentTile
+
+                let complexity = DynamicRenderQualityManager.estimateFractalComplexity(
+                    iterations: currentIters,
+                    raySteps: currentSteps,
+                    tileSize: currentTile
+                )
+                manager.hintSceneComplexity(complexity, layerRenderer: layerRenderer)
+            }
         }
     }
 }

@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct FractalVariant: Identifiable, Hashable {
     let id: String
@@ -331,42 +330,8 @@ enum FractalBrowserCatalog {
             id: "experimental",
             name: "Experimental",
             summary: "Alternative rendering techniques and work-in-progress fractal systems.",
-            historicalInfo: "These renderers use fundamentally different approaches — Flame uses 2D IFS with non-linear variations, Buddhabrot uses orbit density histograms. Both are experimental and may have limited feature support.",
+            historicalInfo: "Buddhabrot uses orbit density histograms — an experimental rendering technique with limited feature support.",
             types: [
-                FractalTypeBrowserInfo(
-                    id: "flam3-core",
-                    title: "Fractal Flame (flam3)",
-                    icon: "flame.fill",
-                    subtitle: "2D/2.5D IFS with weighted non-linear variations",
-                    historicalInfo: "Fractal Flames were introduced by Scott Draves and Erik Reckase (early 2000s). flam3 defines transform sets, variation weights, affine coefficients, and rendering metadata in XML.",
-                    variants: [
-                        FractalVariant(
-                            id: "flam3-repo",
-                            name: "flam3 Project",
-                            summary: "Open the canonical flam3 repository and docs.",
-                            formulaOverrides: [],
-                            targetFractalScale: nil,
-                            externalURL: "https://github.com/scottdraves/flam3"
-                        ),
-                        FractalVariant(
-                            id: "flame-wiki",
-                            name: "Fractal Flame Overview",
-                            summary: "Background and algorithm references.",
-                            formulaOverrides: [],
-                            targetFractalScale: nil,
-                            externalURL: "https://en.wikipedia.org/wiki/Fractal_flame"
-                        ),
-                        FractalVariant(
-                            id: "electric-sheep",
-                            name: "Electric Sheep",
-                            summary: "Community-driven flame animation project.",
-                            formulaOverrides: [],
-                            targetFractalScale: nil,
-                            externalURL: "https://electricsheep.org/"
-                        )
-                    ],
-                    externalReferenceURL: "https://github.com/scottdraves/flam3"
-                ),
                 FractalTypeBrowserInfo(
                     id: "buddhabrot-3d",
                     title: "3D Buddhabrot",
@@ -393,22 +358,6 @@ struct FractalBrowserWindow: View {
 
     @State private var selectedFamilyID: String = FractalBrowserCatalog.families.first?.id ?? ""
     @State private var selectedTypeID: String = "native-0"
-    @State private var showFlameImporter = false
-    @State private var importedFlame: FlameDocument?
-    @State private var flamePreviewImage: CGImage?
-    @State private var isRenderingFlame = false
-    @State private var flameStatusText = ""
-    @State private var flameErrorText: String?
-    @State private var activeFlameRenderToken = UUID()
-    @StateObject private var flameLibrary = FlameLibrary.shared
-
-    private var flameImportTypes: [UTType] {
-        var types: [UTType] = [.xml]
-        if let flam3Type = UTType(filenameExtension: "flam3") {
-            types.append(flam3Type)
-        }
-        return types
-    }
 
     private var selectedFamily: FractalFamilyInfo? {
         FractalBrowserCatalog.families.first { $0.id == selectedFamilyID }
@@ -427,26 +376,6 @@ struct FractalBrowserWindow: View {
             selectedTypeID = "native-\(currentType.rawValue)"
             if let family = FractalBrowserCatalog.family(for: currentType) {
                 selectedFamilyID = family.id
-            }
-
-            // Rehydrate local preview panel from shared app state when reopening.
-            importedFlame = appModel.importedFlame
-            flamePreviewImage = appModel.importedFlamePreviewImage
-            flameStatusText = appModel.importedFlameStatusText
-            flameErrorText = appModel.importedFlameErrorText
-        }
-        .fileImporter(
-            isPresented: $showFlameImporter,
-            allowedContentTypes: flameImportTypes,
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                importFlame(from: url)
-            case .failure(let error):
-                flameErrorText = error.localizedDescription
-                appModel.importedFlameErrorText = error.localizedDescription
             }
         }
     }
@@ -508,7 +437,6 @@ struct FractalBrowserWindow: View {
             .foregroundStyle(.secondary)
 
         if family.id == "experimental" {
-            flameToolsPanel
             buddhabrotToolsPanel
         }
 
@@ -613,106 +541,6 @@ struct FractalBrowserWindow: View {
         }
     }
 
-    @ViewBuilder
-    private var flameToolsPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Flame Import + Render", systemImage: "flame")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    showFlameImporter = true
-                } label: {
-                    Label("Import .flam3", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            if isRenderingFlame {
-                ProgressView("Rendering flame preview…")
-            } else if let image = flamePreviewImage {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .interpolation(.none)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxHeight: 260)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-            } else {
-                Text("Import a .flam3 XML file to generate a first-pass native flame accumulation preview.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let importedFlame {
-                Text("Loaded: \(importedFlame.name) • \(importedFlame.transforms.count) transforms")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            if !flameStatusText.isEmpty {
-                Text(flameStatusText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            if let flameErrorText {
-                Text(flameErrorText)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-            }
-
-            // ── Flame Library ─────────────────────────────────────────────
-            if !flameLibrary.entries.isEmpty {
-                Divider()
-                Text("Flame Library")
-                    .font(.subheadline.bold())
-                Text("Bundled reference flames — tap to load and render.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-
-                let columns = [GridItem(.adaptive(minimum: 130), spacing: 8)]
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(flameLibrary.entries) { entry in
-                        Button {
-                            loadLibraryFlame(entry.flame)
-                        } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: "flame.fill")
-                                    .font(.title3)
-                                    .foregroundStyle(.orange.gradient)
-                                Text(entry.flame.name)
-                                    .font(.caption2)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                Text("\(entry.flame.transforms.count) xforms")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(importedFlame?.name == entry.flame.name
-                                          ? Color.orange.opacity(0.18)
-                                          : Color.clear)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(.quaternary)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.ultraThinMaterial))
-        .onAppear {
-            flameLibrary.loadIfNeeded()
-        }
-    }
-
     private var buddhabrotToolsPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -759,161 +587,5 @@ struct FractalBrowserWindow: View {
         appModel.gestureController?.syncWithSettings()
         selectedTypeID = "native-\(type.rawValue)"
         NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
-    }
-
-    /// Load a flame from the built-in library and start rendering + realtime mode.
-    private func loadLibraryFlame(_ flame: FlameDocument) {
-        let renderToken = UUID()
-        activeFlameRenderToken = renderToken
-
-        importedFlame = flame
-        appModel.importedFlame = flame
-        flameErrorText = nil
-        flameStatusText = "Rendering quick preview…"
-        appModel.importedFlameErrorText = nil
-        appModel.importedFlameStatusText = flameStatusText
-        isRenderingFlame = true
-
-        Task {
-            let quickOutput = await Task.detached(priority: .userInitiated) {
-                FlameRenderer.render(
-                    flame: flame,
-                    width: 360,
-                    height: 360,
-                    iterations: 260_000,
-                    burnIn: 8_000
-                )
-            }.value
-
-            await MainActor.run {
-                guard activeFlameRenderToken == renderToken else { return }
-                flamePreviewImage = quickOutput?.image
-                appModel.importedFlamePreviewImage = quickOutput?.image
-                if let quickOutput {
-                    flameStatusText = "Quick preview: \(quickOutput.sampleCount) samples • refining…"
-                } else {
-                    flameStatusText = "Quick preview produced no output • refining…"
-                }
-                appModel.importedFlameStatusText = flameStatusText
-                appModel.runtimeViewMode = .flame
-            }
-
-            let fullOutput = await Task.detached(priority: .userInitiated) {
-                FlameRenderer.render(
-                    flame: flame,
-                    width: 720,
-                    height: 720,
-                    iterations: 1_200_000,
-                    burnIn: 18_000
-                )
-            }.value
-
-            await MainActor.run {
-                guard activeFlameRenderToken == renderToken else { return }
-                flamePreviewImage = fullOutput?.image
-                if let fullOutput {
-                    flameStatusText = "Rendered \(fullOutput.sampleCount) samples"
-                } else {
-                    flameStatusText = "Render produced no output"
-                }
-                appModel.importedFlame = flame
-                appModel.importedFlamePreviewImage = fullOutput?.image ?? quickOutput?.image
-                appModel.importedFlameStatusText = flameStatusText
-                appModel.importedFlameErrorText = nil
-                appModel.runtimeViewMode = .flame
-                isRenderingFlame = false
-            }
-        }
-    }
-
-    private func importFlame(from url: URL) {
-        let renderToken = UUID()
-        activeFlameRenderToken = renderToken
-
-        flameErrorText = nil
-        flameStatusText = "Parsing .flam3…"
-        isRenderingFlame = true
-        appModel.importedFlameErrorText = nil
-        appModel.importedFlameStatusText = flameStatusText
-
-        Task {
-            do {
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer {
-                    if accessed { url.stopAccessingSecurityScopedResource() }
-                }
-
-                let data = try Data(contentsOf: url)
-                let parser = FlameXMLParser()
-                let flame = try parser.parse(data: data)
-
-                await MainActor.run {
-                    guard activeFlameRenderToken == renderToken else { return }
-                    importedFlame = flame
-                    appModel.importedFlame = flame
-                    flameStatusText = "Rendering quick preview…"
-                    appModel.importedFlameStatusText = flameStatusText
-                }
-
-                let quickOutput = await Task.detached(priority: .userInitiated) {
-                    FlameRenderer.render(
-                        flame: flame,
-                        width: 360,
-                        height: 360,
-                        iterations: 260_000,
-                        burnIn: 8_000
-                    )
-                }.value
-
-                await MainActor.run {
-                    guard activeFlameRenderToken == renderToken else { return }
-                    flamePreviewImage = quickOutput?.image
-                    appModel.importedFlamePreviewImage = quickOutput?.image
-                    if let quickOutput {
-                        flameStatusText = "Quick preview: \(quickOutput.sampleCount) samples • refining…"
-                    } else {
-                        flameStatusText = "Quick preview produced no output • refining…"
-                    }
-                    appModel.importedFlameStatusText = flameStatusText
-                    appModel.runtimeViewMode = .flame
-                }
-
-                let fullOutput = await Task.detached(priority: .userInitiated) {
-                    FlameRenderer.render(
-                        flame: flame,
-                        width: 720,
-                        height: 720,
-                        iterations: 1_200_000,
-                        burnIn: 18_000
-                    )
-                }.value
-
-                await MainActor.run {
-                    guard activeFlameRenderToken == renderToken else { return }
-                    importedFlame = flame
-                    flamePreviewImage = fullOutput?.image
-                    if let fullOutput {
-                        flameStatusText = "Rendered \(fullOutput.sampleCount) samples"
-                    } else {
-                        flameStatusText = "Render produced no output"
-                    }
-
-                    // Promote to global runtime state so Flame can be the active mode.
-                    appModel.importedFlame = flame
-                    appModel.importedFlamePreviewImage = fullOutput?.image ?? quickOutput?.image
-                    appModel.importedFlameStatusText = flameStatusText
-                    appModel.importedFlameErrorText = nil
-                    appModel.runtimeViewMode = .flame
-                    isRenderingFlame = false
-                }
-            } catch {
-                await MainActor.run {
-                    guard activeFlameRenderToken == renderToken else { return }
-                    flameErrorText = error.localizedDescription
-                    appModel.importedFlameErrorText = error.localizedDescription
-                    isRenderingFlame = false
-                }
-            }
-        }
     }
 }

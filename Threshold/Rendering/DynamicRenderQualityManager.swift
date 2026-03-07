@@ -112,8 +112,15 @@ final class DynamicRenderQualityManager {
         
         // Apply cooldown to prevent rapid oscillation
         let currentTime = CACurrentMediaTime()
-        guard currentTime - lastUpdateTime >= updateCooldown else { return }
+        let elapsed = currentTime - lastUpdateTime
+        guard elapsed >= updateCooldown else { return }
         lastUpdateTime = currentTime
+        
+        // Use actual elapsed time since last quality adjustment (not raw frame delta).
+        // The cooldown gate blocks most frames, so `deltaTime` (one frame, ~11ms) is much
+        // shorter than the real interval since the last adjustment (~100ms). Using frame
+        // delta makes the effective adjustment rate ~11x slower than configured.
+        let adjustmentDelta = Float(min(elapsed, 0.5))  // Clamp to prevent huge jumps after stalls
         
         // Calculate quality adjustment
         let previousQuality = currentQuality
@@ -121,13 +128,13 @@ final class DynamicRenderQualityManager {
         if smoothedFPS < decreaseThreshold {
             // Below target: decrease quality to improve performance
             let deficit = Float((decreaseThreshold - smoothedFPS) / decreaseThreshold)
-            let adjustment = decreaseRate * Float(deltaTime) * (1.0 + deficit * 2.0)
+            let adjustment = decreaseRate * adjustmentDelta * (1.0 + deficit * 2.0)
             currentQuality = max(minQuality, currentQuality - adjustment)
             timeBelowThreshold += deltaTime
         } else if smoothedFPS > increaseThreshold && currentQuality < maxQuality {
             // Above target with headroom: gradually increase quality
             let surplus = Float((smoothedFPS - increaseThreshold) / targetFPS)
-            let adjustment = increaseRate * Float(deltaTime) * (1.0 + surplus)
+            let adjustment = increaseRate * adjustmentDelta * (1.0 + surplus)
             currentQuality = min(maxQuality, currentQuality + adjustment)
         }
         
@@ -143,22 +150,6 @@ final class DynamicRenderQualityManager {
                 print("[DynQuality] FPS: \(String(format: "%.1f", smoothedFPS)) → Quality: \(String(format: "%.2f", currentQuality))")
             }
         }
-    }
-    
-    /// Get the effective iteration count based on current quality and base value.
-    /// Lower quality = fewer iterations for better performance.
-    func effectiveIterations(base: Int) -> Int {
-        // Scale iterations: at 1.0 quality use full, at minQuality use ~60%
-        let scale = 0.6 + 0.4 * currentQuality
-        return max(4, Int(Float(base) * scale))
-    }
-    
-    /// Get the effective ray steps based on current quality and base value.
-    /// Lower quality = fewer ray steps for better performance.
-    func effectiveRaySteps(base: Int) -> Int {
-        // Scale ray steps: at 1.0 quality use full, at minQuality use ~50%
-        let scale = 0.5 + 0.5 * currentQuality
-        return max(24, Int(Float(base) * scale))
     }
     
     /// Force a specific quality level (bypasses automatic adjustment temporarily)

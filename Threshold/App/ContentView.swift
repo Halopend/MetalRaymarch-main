@@ -197,9 +197,7 @@ struct ContentView: View {
     
     private var contentPanel: some View {
         Group {
-            if appModel.runtimeViewMode == .flame {
-                FlameRuntimeView()
-            } else if appModel.runtimeViewMode == .buddhabrot {
+            if appModel.runtimeViewMode == .buddhabrot {
                 BuddhabrotControlsView()
             } else {
                 switch selectedTab {
