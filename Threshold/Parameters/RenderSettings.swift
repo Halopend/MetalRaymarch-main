@@ -722,6 +722,10 @@ final class RenderSettings: @unchecked Sendable {
                         if descriptor.fractalType != newValue {
                             binding = .core(.none)
                         }
+                    case .parameterTriplet(let triplet):
+                        if triplet.fractalType != newValue {
+                            binding = .core(.none)
+                        }
                     }
                 }
                 sanitize(&_indexFingerBinding)

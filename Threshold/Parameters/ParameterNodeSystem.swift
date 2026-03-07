@@ -775,6 +775,57 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         formulaBatch(for: type).floatNodeByFormulaIndex[formulaIndex]
     }
 
+    func gestureBindableTriplets(for type: FractalModelType) -> [GestureBindableTriplet] {
+        guard let descriptor = FormulaCatalog.shared.descriptor(for: type) else { return [] }
+        let batch = formulaBatch(for: type)
+
+        // Detect xyz groups by looking for params with names ending in .x, .y, .z
+        // that share the same prefix (e.g. "Mins.x", "Mins.y", "Mins.z")
+        var prefixGroups: [String: [(FormulaParamDescriptor, FloatParameterNode)]] = [:]
+        for param in descriptor.params {
+            guard !(param.isBool ?? false) else { continue }
+            let name = param.name
+            for suffix in [".x", ".y", ".z"] {
+                if name.hasSuffix(suffix) {
+                    let prefix = String(name.dropLast(suffix.count))
+                    if let node = batch.floatNodeByFormulaIndex[param.index] {
+                        prefixGroups[prefix, default: []].append((param, node))
+                    }
+                }
+            }
+        }
+
+        var triplets: [GestureBindableTriplet] = []
+        for (prefix, members) in prefixGroups.sorted(by: { $0.key < $1.key }) {
+            guard members.count == 3 else { continue }
+            let xMember = members.first { $0.0.name.hasSuffix(".x") }
+            let yMember = members.first { $0.0.name.hasSuffix(".y") }
+            let zMember = members.first { $0.0.name.hasSuffix(".z") }
+            guard let x = xMember, let y = yMember, let z = zMember else { continue }
+
+            let lo = min(x.0.min, y.0.min, z.0.min)
+            let hi = max(x.0.max, y.0.max, z.0.max)
+
+            triplets.append(GestureBindableTriplet(
+                fractalType: type,
+                groupName: prefix,
+                xNodeID: x.1.id,
+                yNodeID: y.1.id,
+                zNodeID: z.1.id,
+                xFormulaIndex: x.0.index,
+                yFormulaIndex: y.0.index,
+                zFormulaIndex: z.0.index,
+                range: lo...hi,
+                display: GestureDisplayMetadata(
+                    title: "\(prefix) XYZ",
+                    subtitle: descriptor.name,
+                    icon: "move.3d"
+                )
+            ))
+        }
+        return triplets
+    }
+
     func gestureBindableParameters(for type: FractalModelType) -> [GestureBindableParameter] {
         formulaBatch(for: type).floatNodes.map { node in
             let pieces = node.id.split(separator: ".")

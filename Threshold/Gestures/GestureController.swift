@@ -507,7 +507,7 @@ final class GestureController {
     // breakaway angle. Once broken away, rotation tracks 1:1. Resets on each new grab.
     private var rotationBrokenAway: Bool = false
     
-    // Single-hand drag state
+    // Single-hand drag state (index finger → position translation)
     private var rightIndexDragActive: Bool = false
     private var rightIndexDragStartPos: SIMD3<Float> = .zero
     private var rightIndexPrevPos: SIMD3<Float> = .zero
@@ -515,6 +515,13 @@ final class GestureController {
     
     // Accumulated position from drag gestures (target position)
     private var accumulatedPosition: SIMD3<Float> = .zero
+
+    // Triplet drag state (any finger → xyz formula param pinch-drag)
+    private var tripletDragActive: Bool = false
+    private var tripletDragDigit: Int = 0
+    private var tripletDragBinding: GestureBindableTriplet?
+    private var tripletDragStartValues: SIMD3<Float> = .zero
+    private var tripletDragPrevPos: SIMD3<Float> = .zero
 
     // Left hand tracking stability: prevents two-hand gesture false triggers when
     // the left hand briefly enters ARKit's tracking field without the user intending
@@ -569,6 +576,8 @@ final class GestureController {
         grabEndCooldown = 0
         grabMapping = nil
         rightIndexDragActive = false
+        tripletDragActive = false
+        tripletDragBinding = nil
         menuToggleActive = false
         menuToggleHoldTimer = 0
         menuToggleCooldown = 0
@@ -783,6 +792,7 @@ final class GestureController {
             }
             if grabActive                  { grabActive = false; grabMapping = nil }
             if rightIndexDragActive        { rightIndexDragActive = false }
+            if tripletDragActive           { tripletDragActive = false; tripletDragBinding = nil }
             settings.activeGestureIndex = 0
             settings.isGeometryGestureActive = false
             return
@@ -800,6 +810,14 @@ final class GestureController {
 
         for digit in 1...4 {
             let binding = settings.bindingForDigit(digit)
+
+            if case .parameterTriplet(let triplet) = binding {
+                // Triplet bindings use single-hand (right) pinch-drag on this finger.
+                // Skip two-hand processing for this digit entirely.
+                processTripletDrag(digit: digit, triplet: triplet)
+                if tripletDragActive && tripletDragDigit == digit { activeDigit = digit }
+                continue
+            }
 
             if case .parameter(let descriptor) = binding,
                let formulaIndex = descriptor.formulaIndex,
@@ -1283,6 +1301,80 @@ final class GestureController {
         }
     }
     
+    /// Right-hand single-finger pinch drag → xyz formula param triplet.
+    /// Similar to processRightIndexDrag but writes to 3 formula params instead of position.
+    private func processTripletDrag(digit: Int, triplet: GestureBindableTriplet) {
+        guard let settings = renderSettings else { return }
+        let activateThresh = settings.twoHandPinchActivateThreshold
+        let releaseThresh = settings.twoHandPinchReleaseThreshold
+
+        // Block if left hand is attempting any pinch (likely a two-hand gesture)
+        let leftAttemptingPinch = leftHand.isTracked && (
+            leftHand.indexPinch >= 0.4 || leftHand.middlePinch >= 0.4 ||
+            leftHand.ringPinch >= 0.3 || leftHand.pinkyPinch >= 0.3
+        )
+
+        let rightPinch = rightHand.pinchStrength(digit: digit)
+        let active: Bool
+        if tripletDragActive && tripletDragDigit == digit {
+            active = rightHand.isTracked && rightPinch >= releaseThresh && !leftAttemptingPinch
+        } else {
+            active = rightHand.isTracked && rightPinch >= activateThresh && !leftAttemptingPinch && !grabActive
+        }
+
+        // Gesture started
+        if active && !(tripletDragActive && tripletDragDigit == digit) {
+            tripletDragActive = true
+            tripletDragDigit = digit
+            tripletDragBinding = triplet
+            let fp = settings.formulaParams
+            tripletDragStartValues = SIMD3<Float>(
+                FormulaCatalog.getParam(fp, index: triplet.xFormulaIndex),
+                FormulaCatalog.getParam(fp, index: triplet.yFormulaIndex),
+                FormulaCatalog.getParam(fp, index: triplet.zFormulaIndex)
+            )
+            tripletDragPrevPos = rightHand.pinchPosition(digit: digit)
+        }
+
+        // Gesture active — update param values
+        if active && tripletDragActive && tripletDragDigit == digit {
+            let currentPos = rightHand.pinchPosition(digit: digit)
+            let rawDelta = currentPos - tripletDragPrevPos
+            let deltaLength = simd_length(rawDelta)
+
+            let maxStep: Float = 0.15
+            let sensitivity: Float = settings.gestureSensitivity
+            let rangeSpan = triplet.range.upperBound - triplet.range.lowerBound
+
+            if deltaLength > 0 {
+                let direction = rawDelta / deltaLength
+                let scaledLength = min(deltaLength * sensitivity, maxStep)
+                let scaledDelta = direction * scaledLength * rangeSpan
+
+                tripletDragStartValues.x = simd_clamp(tripletDragStartValues.x + scaledDelta.x, triplet.range.lowerBound, triplet.range.upperBound)
+                tripletDragStartValues.y = simd_clamp(tripletDragStartValues.y + scaledDelta.y, triplet.range.lowerBound, triplet.range.upperBound)
+                tripletDragStartValues.z = simd_clamp(tripletDragStartValues.z + scaledDelta.z, triplet.range.lowerBound, triplet.range.upperBound)
+
+                var ops: [ParameterOperation] = []
+                ops.append(ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: .absolute(tripletDragStartValues.x), frameIndex: operationFrameCounter, smoothing: .init()))
+                ops.append(ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(tripletDragStartValues.y), frameIndex: operationFrameCounter, smoothing: .init()))
+                ops.append(ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: .absolute(tripletDragStartValues.z), frameIndex: operationFrameCounter, smoothing: .init()))
+                operationDispatcher.dispatch(
+                    ParameterTransaction(frameIndex: operationFrameCounter, operations: ops),
+                    settings: settings
+                )
+                UsageAnalytics.shared.trackHandGestureUsed()
+            }
+            tripletDragPrevPos = currentPos
+        }
+
+        // Gesture ended
+        if !active && tripletDragActive && tripletDragDigit == digit {
+            tripletDragActive = false
+            tripletDragBinding = nil
+        }
+    }
+
     /// Right-hand index pinch drag → position translate (XYZ)
     private func processRightIndexDrag() {
         guard let settings = renderSettings else { return }
