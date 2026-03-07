@@ -42,6 +42,8 @@ extension Renderer {
 
     /// Function constant configuration for shader specialization
     struct FunctionConstantConfig {
+        static let disableHighQualityPipeline = true
+
         var fractalIterations: Int32?      // FC index 0
         var shadowIterations: Int32?       // FC index 1
         var safetyBubbleEnabled: Bool?     // FC index 2
@@ -55,17 +57,17 @@ extension Renderer {
         var shadowsEnabled: Bool?          // FC index 11 - GMT-fractals: compile-out shadows entirely
         var mandelbulbPower: Int32?        // FC index 12 - bakes integer power for fastPowR optimization
 
-                static func specializedMandelbulbPower(fractalType: FractalModelType,
-                                                                                             formulaParams: FormulaParams) -> Int32? {
-                        guard fractalType == .mandelbulb else { return nil }
-                        let rawPower = FormulaCatalog.getParam(formulaParams, index: 0)
-                        let rounded = roundf(rawPower)
-                        guard abs(rawPower - rounded) < 0.01,
-                                    [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
-                                return nil
-                        }
-                        return Int32(rounded)
+            static func specializedMandelbulbPower(fractalType: FractalModelType,
+                                   formulaParams: FormulaParams) -> Int32? {
+                guard fractalType == .mandelbulb else { return nil }
+                let rawPower = FormulaCatalog.getParam(formulaParams, index: 0)
+                let rounded = roundf(rawPower)
+                guard abs(rawPower - rounded) < 0.01,
+                  [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
+                return nil
                 }
+                return Int32(rounded)
+            }
 
         /// Creates MTLFunctionConstantValues from this config
         func toMTLConstants() -> MTLFunctionConstantValues {
@@ -130,6 +132,10 @@ extension Renderer {
         /// Creates a config for high quality rendering (Ultra quality preset: FI=12, RS=100)
         /// All optional features available.
         static var highQuality: FunctionConstantConfig {
+            if disableHighQualityPipeline {
+                return .highPerformance
+            }
+
             return FunctionConstantConfig(
                 fractalIterations: 12,
                 shadowIterations: 10,

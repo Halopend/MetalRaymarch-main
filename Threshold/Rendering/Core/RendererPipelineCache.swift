@@ -208,6 +208,13 @@ extension Renderer {
             fractalType: fractalType,
             formulaParams: appModel.renderSettings.formulaParams
         )
+        if RENDERER_DEBUG,
+           fractalType == .mandelbulb,
+           mandelbulbPower != lastSelectPower {
+            let previousPower = lastSelectPower.map { String($0) } ?? "runtime"
+            let nextPower = mandelbulbPower.map { String($0) } ?? "runtime"
+            print("🔀 [Pipeline] Mandelbulb power changed: \(previousPower) → \(nextPower)")
+        }
 
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
@@ -224,6 +231,11 @@ extension Renderer {
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        if RENDERER_DEBUG,
+           fractalType == .mandelbulb,
+           mandelbulbPower != lastSelectPower {
+            print("🔀 [Pipeline] Mandelbulb requested key: \(cacheKey)")
+        }
 
         let result: MTLRenderPipelineState
         var isSpecialized = true
@@ -237,48 +249,86 @@ extension Renderer {
             }
             result = pipeline
         }
-        // 2. Try fallback to neon=off variant (quality preset)
+        // 2. Attempt on-demand build for exact FT/power/neon config (prevents
+        // Mandelbulb power switching from silently falling back to non-power keys).
         else {
-            let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
-            if let pipeline = pipelineCache[fallbackKey] {
+            var exactBuiltPipeline: MTLRenderPipelineState?
+            let colorIters = appModel.renderSettings.colorIterations
+            let exactConfig = FunctionConstantConfig(
+                fractalIterations: Int32(iterations),
+                shadowIterations: Int32(max(iterations - 2, 2)),
+                safetyBubbleEnabled: nil,
+                showHUD: true,
+                qualityMode: Int32(qualityMode),
+                debugHierarchical: false,
+                maxRaySteps: Int32(raySteps),
+                fractalType: fractalType.rawValue,
+                neonModeEnabled: neonMode,
+                colorIterations: Int32(colorIters),
+                mandelbulbPower: mandelbulbPower
+            )
+            if let built = try? Renderer.buildSpecializedPipeline(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: mtlVertexDescriptor,
+                config: exactConfig,
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+            ) {
+                pipelineCache[cacheKey] = built
+                exactBuiltPipeline = built
+                if RENDERER_DEBUG && lastLoggedPipelineKey != cacheKey {
+                    print("🔧 [Pipeline] Built exact on-demand pipeline: \(cacheKey)")
+                    lastLoggedPipelineKey = cacheKey
+                }
+            }
+
+            if let pipeline = exactBuiltPipeline {
+                recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
+                result = pipeline
+            }
+            // 3. Try fallback to neon=off variant (quality preset)
+            else {
+                let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                if let pipeline = pipelineCache[fallbackKey] {
                 recordPipelineTelemetry(renderHit: true)
                 if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
                     print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
                     lastLoggedPipelineKey = fallbackKey
                 }
                 result = pipeline
-            }
-            else {
-                // 3. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
-                let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
-                if let pipeline = pipelineCache[sharedExactKey] {
-                    recordPipelineTelemetry(renderHit: true)
-                    if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
-                        print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
-                        lastLoggedPipelineKey = sharedExactKey
-                    }
-                    result = pipeline
-                }
-                // 4. Try shared neon=off quality key
                 else {
-                    let sharedFallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
-                    if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
+                    // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
+                    let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                    if let pipeline = pipelineCache[sharedExactKey] {
                         recordPipelineTelemetry(renderHit: true)
-                        if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
-                            print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
-                            lastLoggedPipelineKey = sharedFallbackKey
+                        if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
+                            print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
+                            lastLoggedPipelineKey = sharedExactKey
                         }
                         result = pipeline
                     }
-                    // 5. Ultimate fallback to generic pipeline
+                    // 5. Try shared neon=off quality key
                     else {
-                        recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
-                        if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
-                            print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
-                            lastLoggedPipelineKey = "fallback"
+                        let sharedFallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                        if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
+                            recordPipelineTelemetry(renderHit: true)
+                            if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
+                                print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
+                                lastLoggedPipelineKey = sharedFallbackKey
+                            }
+                            result = pipeline
                         }
-                        isSpecialized = false
-                        result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+                        // 6. Ultimate fallback to generic pipeline
+                        else {
+                            recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
+                            if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
+                                print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
+                                lastLoggedPipelineKey = "fallback"
+                            }
+                            isSpecialized = false
+                            result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+                        }
                     }
                 }
             }

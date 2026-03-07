@@ -20,11 +20,6 @@ import simd
 
 private let customFractalDefaultsKey = "customFractalDefaults.v1"
 
-// MARK: - Debug Configuration
-
-/// Set to true to enable verbose hand tracking debug logging
-private let HAND_TRACKING_DEBUG = false
-
 // MARK: - Hand Tracking Data
 
 /// Lightweight hand tracking data extracted from ARKit
@@ -578,9 +573,6 @@ final class GestureController {
         menuToggleHoldTimer = 0
         menuToggleCooldown = 0
         
-        if HAND_TRACKING_DEBUG {
-            print("🔄 GestureController synced with settings")
-        }
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -596,9 +588,6 @@ final class GestureController {
         // Reset gesture states
         syncWithSettings()
         
-        #if DEBUG
-        print("🎛️ Applied defaults for \(settings.fractalType): minDist=\(ranges.defaultMinDistance), fold=\(ranges.defaultFoldingLimit), sphere=\(ranges.defaultSphereRadius)")
-        #endif
     }
     
     /// Get the parameter ranges for the current fractal type (for UI sliders)
@@ -749,7 +738,6 @@ final class GestureController {
         guard rightHand.isTracked else {
             if menuToggleActive {
                 menuToggleActive = false
-                if HAND_TRACKING_DEBUG { print("👆 Menu toggle: right hand tracking lost") }
             }
             menuToggleHoldTimer = 0
             return
@@ -758,10 +746,6 @@ final class GestureController {
         let mode = settings.menuToggleGestureMode
         let strength = menuToggleStrength(for: mode)
         let thresholds = menuToggleThresholds(for: mode, settings: settings)
-
-        if HAND_TRACKING_DEBUG && strength > 0.2 {
-            print("👆 Menu gesture [\(mode)] strength: \(String(format: "%.2f", strength)), active: \(menuToggleActive), hold: \(String(format: "%.2f", menuToggleHoldTimer)), cooldown: \(String(format: "%.2f", menuToggleCooldown))")
-        }
 
         let shouldBeActive: Bool = menuToggleActive
             ? (strength >= thresholds.release)
@@ -774,14 +758,12 @@ final class GestureController {
                     menuToggleActive = true
                     menuToggleHoldTimer = 0
                     menuToggleCooldown = settings.menuToggleCooldown
-                    if HAND_TRACKING_DEBUG { print("👆 Menu toggle ACTIVATED - calling onMenuToggle callback") }
                     onMenuToggle?()
                 }
             }
         } else {
             if menuToggleActive {
                 menuToggleActive = false
-                if HAND_TRACKING_DEBUG { print("👆 Menu toggle RELEASED") }
             }
             menuToggleHoldTimer = 0
         }
@@ -1085,9 +1067,6 @@ final class GestureController {
             grabOriginalAxis = grabMapping!.startAxis
             rotationBrokenAway = !settings.rotationAutoSnap  // If snap disabled, act as if already broken away
             
-            if HAND_TRACKING_DEBUG {
-                print("🤲✊ Two-point GRAB started: dist=\(grabMapping!.startDistance), mid=\(grabMapping!.startMidpoint)")
-            }
         }
         
         // === GESTURE ACTIVE ===
@@ -1169,17 +1148,6 @@ final class GestureController {
             // Apply rotation auto-snap on release
             settings.applyRotationSnap()
 
-            if HAND_TRACKING_DEBUG {
-                let reason: String
-                if !leftHand.isTracked || !rightHand.isTracked {
-                    reason = "hand tracking lost"
-                } else if leftPinch < releaseThresh || rightPinch < releaseThresh {
-                    reason = "pinch released"
-                } else {
-                    reason = "hands too far apart"
-                }
-                print("🤲✊ Two-point GRAB ended (\(reason))")
-            }
         }
     }
     
@@ -1252,17 +1220,6 @@ final class GestureController {
             // Track starting height (average Y of both hands) for vertical sensitivity scaling
             state.startHeight = (leftPos.y + rightPos.y) * 0.5
             
-            if HAND_TRACKING_DEBUG {
-                let binding = settings.bindingForDigit(digit)
-                let action: FingerGestureAction
-                if case .core(let coreAction) = binding {
-                    action = coreAction
-                } else {
-                    action = .none
-                }
-                let mode = settings.useRelativeGestures ? "RELATIVE" : "ABSOLUTE"
-                print("🤲 Two-hand \(action.displayName) gesture STARTED on digit \(digit) (\(mode)), startHeight: \(state.startHeight)")
-            }
         }
         
         // Gesture active - set TARGET directly (Renderer smooths to this value)
@@ -1323,24 +1280,6 @@ final class GestureController {
         // Gesture ended
         if !bothActive && state.isActive {
             state.isActive = false
-            if HAND_TRACKING_DEBUG {
-                let binding = settings.bindingForDigit(digit)
-                let action: FingerGestureAction
-                if case .core(let coreAction) = binding {
-                    action = coreAction
-                } else {
-                    action = .none
-                }
-                let reason: String
-                if !leftHand.isTracked || !rightHand.isTracked {
-                    reason = "hand tracking lost"
-                } else if leftPinch < releaseThresh || rightPinch < releaseThresh {
-                    reason = "pinch released"
-                } else {
-                    reason = "hands too far apart"
-                }
-                print("🤲 Two-hand \(action.displayName) gesture on digit \(digit) ENDED (\(reason))")
-            }
         }
     }
     
@@ -1383,9 +1322,6 @@ final class GestureController {
             rightIndexPrevPos = rightHand.pinchPosition(digit: 1)
             rightIndexPrevPalm = rightHand.palmPosition
             accumulatedPosition = settings.effectiveTargetPosition
-            #if DEBUG
-            print("👆 Right index drag STARTED")
-            #endif
         }
         
         // Gesture active - update target position directly
@@ -1442,9 +1378,6 @@ final class GestureController {
         // Gesture ended
         if !active && rightIndexDragActive {
             rightIndexDragActive = false
-            #if DEBUG
-            print("👆 Right index drag ENDED")
-            #endif
         }
     }
     
