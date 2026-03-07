@@ -124,14 +124,14 @@ extension Renderer {
                             showHUD: settingsSnapshot.showHUD ? 1 : 0,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
                             fractalType: settingsSnapshot.fractalType.rawValue,
-                            formulaParams: settingsSnapshot.formulaParams,
                             lightingSoftness: settingsSnapshot.lightingSoftness,
-                            // === GMT-FRACTALS OPTIMIZATIONS ===
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
                             jitterOffset: currentJitterOffset(),
-                            precomputedFractal: precomputedFractal,
-                            precomputedLighting: precomputedLighting,
+                            _pad_uniforms: [0, 0],
+                            formulaParams: settingsSnapshot.formulaParams,
+                            precomputedFractal: cachedPrecomputedFractal,
+                            precomputedLighting: cachedPrecomputedLighting,
                             precomputedAudio: precomputedAudio,
                             precomputedFog: precomputedFog,
                             colorScheme: colorSchemeParams)

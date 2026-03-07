@@ -225,12 +225,16 @@ typedef struct
     int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
-    FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
+    
     vector_float2 jitterOffset; // Sub-pixel jitter in pixels (±0.5 range)
+    vector_float2 _pad_uniforms; // Align to 16 bytes
+    
+    FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
+    
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig
@@ -273,7 +277,6 @@ typedef struct
     uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
     int fractalType;             // 0=Mandelbox, 1-14=formula types (see FractalType enum)
-    FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
@@ -282,13 +285,16 @@ typedef struct
     // === GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA ===
     vector_float2 jitterOffset;  // Sub-pixel jitter in pixels (±0.5 range)
     int accumulationFrame;       // Frame count since last parameter change (0 = first frame)
-    float pad_gmt;               // Alignment padding
+    int temporalReprojectionEnabled;         // 0 = off (first frame / parameter change), 1 = on
+    float _pad_tile[2];          // Align to 16 bytes
+    
+    FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
+    
     // === TEMPORAL REPROJECTION ===
     matrix_float4x4 currentViewProjMatrix;   // Current frame: modelView * projection (for depth write)
     matrix_float4x4 previousViewProjMatrix;  // Previous frame: modelView * projection (for reprojection)
     matrix_float4x4 currentInvViewProjMatrix; // Inverse of currentViewProjMatrix (pixel → model space)
-    int temporalReprojectionEnabled;         // 0 = off (first frame / parameter change), 1 = on
-    float pad_temporal[3];                   // Align to 16 bytes
+    
     // === PRECOMPUTED VALUES (frame-uniform, computed on CPU) ===
     PrecomputedFractalParams precomputedFractal;  // Eliminates per-pixel powr() and division
     PrecomputedLighting precomputedLighting;      // Eliminates per-pixel CameraPath() and trig

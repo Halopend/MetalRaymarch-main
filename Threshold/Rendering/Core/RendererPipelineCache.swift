@@ -291,12 +291,13 @@ extension Renderer {
             else {
                 let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
                 if let pipeline = pipelineCache[fallbackKey] {
-                recordPipelineTelemetry(renderHit: true)
-                if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
-                    print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
-                    lastLoggedPipelineKey = fallbackKey
+                    recordPipelineTelemetry(renderHit: true)
+                    if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
+                        print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
+                        lastLoggedPipelineKey = fallbackKey
+                    }
+                    result = pipeline
                 }
-                result = pipeline
                 else {
                     // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
                     let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
