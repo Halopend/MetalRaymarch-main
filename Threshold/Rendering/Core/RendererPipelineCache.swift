@@ -41,9 +41,14 @@ extension Renderer {
         // Build cache key matching the preset format
         let colorIters = appModel.renderSettings.colorIterations  // Direct read (own lock) — avoids full snapshot
         let fractalType = appModel.renderSettings.fractalType
+        let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
+            fractalType: fractalType,
+            formulaParams: appModel.renderSettings.formulaParams
+        )
         let neon = (appModel.renderSettings.gradientPreset?.isNeonMode ?? false) ? 1 : 0
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
+        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
 
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -61,7 +66,8 @@ extension Renderer {
             maxRaySteps: Int32(raySteps),
             fractalType: fractalType.rawValue,
             neonModeEnabled: neon == 1,
-            colorIterations: Int32(colorIters)  // Use actual color iterations, not fractal iterations
+            colorIterations: Int32(colorIters),  // Use actual color iterations, not fractal iterations
+            mandelbulbPower: mandelbulbPower
         )
 
         if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Building pipeline for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)...") }
@@ -146,19 +152,25 @@ extension Renderer {
     func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool = false) -> MTLRenderPipelineState {
         let fractalType = appModel.renderSettings.fractalType
+        let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
+            fractalType: fractalType,
+            formulaParams: appModel.renderSettings.formulaParams
+        )
 
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
            useQuadShared == lastSelectQS &&
            neonMode == lastSelectNeon &&
-           fractalType.rawValue == lastSelectFT, let cached = lastSelectedPipeline {
+           fractalType.rawValue == lastSelectFT &&
+           mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
             appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
             return cached
         }
 
         // Build unified cache key (only on parameter change)
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
+        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
 
         let result: MTLRenderPipelineState
         var isSpecialized = true
@@ -220,6 +232,7 @@ extension Renderer {
         lastSelectQS = useQuadShared
         lastSelectNeon = neonMode
         lastSelectFT = fractalType.rawValue
+        lastSelectPower = mandelbulbPower
         lastSelectedPipeline = result
         lastSelectedIsSpecialized = isSpecialized
         appModel.isUsingSpecializedPipeline = isSpecialized
@@ -232,8 +245,13 @@ extension Renderer {
     func ensurePipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool) {
         let fractalType = appModel.renderSettings.fractalType
+        let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
+            fractalType: fractalType,
+            formulaParams: appModel.renderSettings.formulaParams
+        )
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
-        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+        let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
+        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
 
         // Already cached
         if pipelineCache[cacheKey] != nil { return }
@@ -251,7 +269,8 @@ extension Renderer {
             maxRaySteps: Int32(raySteps),
             fractalType: fractalType.rawValue,
             neonModeEnabled: neonMode,
-            colorIterations: 8  // Color iterations are fixed for consistent coloring
+            colorIterations: 8,  // Color iterations are fixed for consistent coloring
+            mandelbulbPower: mandelbulbPower
         )
 
         do {

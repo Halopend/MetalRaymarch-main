@@ -146,6 +146,25 @@
         { "index": 14, "name": "MnOffset.y",   "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.05 },
         { "index": 15, "name": "MnOffset.z",   "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.05 }
       ]
+    },
+    {
+      "id": "kleinian",
+      "name": "Kleinian",
+      "fractalType": 17,
+      "category": "Julia Box",
+      "description": "Knighty's Pseudo Kleinian — box fold + sphere inversion with cylindrical cross-section.",
+      "params": [
+        { "index": 0,  "name": "Mins.x",      "default": -0.3252, "min": -2.0, "max": 2.0, "step": 0.01 },
+        { "index": 1,  "name": "Mins.y",      "default": -0.7862, "min": -2.0, "max": 2.0, "step": 0.01 },
+        { "index": 2,  "name": "Mins.z",      "default": -0.0948, "min": -2.0, "max": 2.0, "step": 0.01 },
+        { "index": 3,  "name": "SphFold",     "default": 0.69,    "min": 0.01, "max": 3.0, "step": 0.01 },
+        { "index": 4,  "name": "Maxs.x",      "default": 0.35,    "min": -2.0, "max": 2.0, "step": 0.01 },
+        { "index": 5,  "name": "Maxs.y",      "default": 1.0,     "min": -2.0, "max": 2.0, "step": 0.01 },
+        { "index": 6,  "name": "Maxs.z",      "default": 1.22,    "min": -2.0, "max": 2.0, "step": 0.01 },
+        { "index": 7,  "name": "CrossR",      "default": 0.84,    "min": 0.01, "max": 4.0, "step": 0.01 },
+        { "index": 8,  "name": "ColorOfs",    "default": 0.25,    "min": -2.0, "max": 2.0, "step": 0.01 },
+        { "index": 9,  "name": "ColorScale",  "default": 1.0,     "min": 0.0,  "max": 4.0, "step": 0.01 }
+      ]
     }
   ]
 }

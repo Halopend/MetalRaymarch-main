@@ -69,6 +69,7 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeOctahedron        = 11,
     FractalTypeMengerSphere        = 14,
     FractalTypeTheliPseudoKleinian = 15,
+    FractalTypeKleinian              = 17,
 };
 
 // === FORMULA PARAMETERS ===

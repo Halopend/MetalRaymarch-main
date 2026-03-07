@@ -38,6 +38,7 @@
 #include "Octahedron/Octahedron.h"
 #include "MengerSphere/MengerSphere.h"
 #include "TheliPseudoKleinian/TheliPseudoKleinian.h"
+#include "Kleinian/Kleinian.h"
 
 // ============================================================================
 // DISPATCH — distance only
@@ -62,6 +63,8 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_MengerSphere_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeTheliPseudoKleinian:
             return DE_TheliPseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
+        case FractalTypeKleinian:
+            return DE_Kleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         default:
             return 1e10f; // Unknown type — far away
     }
@@ -92,6 +95,8 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_MengerSphere(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeTheliPseudoKleinian:
             return DE_TheliPseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
+        case FractalTypeKleinian:
+            return DE_Kleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         default:
             orbit.trap = 1e20f;
             orbit.trapIteration = 0;

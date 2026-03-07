@@ -59,11 +59,6 @@
 
 using namespace metal;
 
-// Include the fractal formula library (15 non-Mandelbox DE functions + dispatch)
-// Must be after metal_stdlib and ShaderTypes.h
-// Each formula lives in Formulas/{Name}/{Name}.h; FractalFormulas.h is the master include.
-#include "../Formulas/FractalFormulas.h"
-
 // === FUNCTION CONSTANTS ===
 // These allow the Metal compiler to specialize shaders at pipeline creation time,
 // eliminating branches and enabling dead code elimination for significant performance gains.
@@ -111,6 +106,11 @@ constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
 // Mandelbulb power - when baked in, the compiler dead-code-eliminates all wrong
 // branches in fastPowR and constant-folds power multiplications in the inner loop.
 constant int FC_MANDELBULB_POWER [[function_constant(12)]];
+
+// Include the fractal formula library (non-Mandelbox DE functions + dispatch)
+// Must be after metal_stdlib, ShaderTypes.h, and function constants so that
+// formula headers can reference FC_* constants (e.g. FC_MANDELBULB_POWER).
+#include "../Formulas/FractalFormulas.h"
 
 typedef struct
 {

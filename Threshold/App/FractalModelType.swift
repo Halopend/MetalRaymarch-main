@@ -19,6 +19,7 @@ enum FractalModelType: Int32, CaseIterable {
     case octahedron        = 11
     case mengerSphere      = 14
     case theliPseudoKleinian = 15
+    case kleinian              = 17
     
     var displayName: String {
         switch self {
@@ -32,6 +33,7 @@ enum FractalModelType: Int32, CaseIterable {
         case .octahedron:      return "Octahedron"
         case .mengerSphere:    return "Menger Sphere"
         case .theliPseudoKleinian: return "Theli Pseudo Kleinian"
+        case .kleinian:            return "Kleinian"
         }
     }
     
@@ -62,6 +64,7 @@ enum FractalModelType: Int32, CaseIterable {
         case .octahedron:      return "diamond"
         case .mengerSphere:    return "circle.grid.cross"
         case .theliPseudoKleinian: return "cube"
+        case .kleinian:            return "wand.and.stars"
         }
     }
     
@@ -74,7 +77,7 @@ enum FractalModelType: Int32, CaseIterable {
             return "Power / Quaternion"
         case .menger, .sierpinski, .dodecahedron, .octahedron, .mengerSphere:
             return "Kaleidoscopic IFS"
-        case .sphereSponge, .theliPseudoKleinian:
+        case .sphereSponge, .theliPseudoKleinian, .kleinian:
             return "Julia Box"
         }
     }
@@ -150,6 +153,14 @@ enum FractalModelType: Int32, CaseIterable {
         case .mandelbox:
             // Min Distance=0.8, Folding Limit=1.0, Sphere Radius=0.5
             fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
+        case .kleinian:
+            // Mins=(-0.3252,-0.7862,-0.0948), SphFold=0.69,
+            // Maxs=(0.35,1.0,1.22), CrossR=0.84, ColorOfs=0.25, ColorScale=1.0
+            fp.params.0 = -0.3252; fp.params.1 = -0.7862; fp.params.2 = -0.0948
+            fp.params.3 = 0.69
+            fp.params.4 = 0.35; fp.params.5 = 1.0; fp.params.6 = 1.22
+            fp.params.7 = 0.84
+            fp.params.8 = 0.25; fp.params.9 = 1.0
         }
 
         FormulaCatalog.normalizeRotationFlags(&fp)
@@ -180,6 +191,7 @@ extension FractalModelType: Codable {
         case .octahedron:      return "octahedron"
         case .mengerSphere:    return "mengerSphere"
         case .theliPseudoKleinian: return "theliPseudoKleinian"
+        case .kleinian:            return "kleinian"
         }
     }
 
@@ -204,6 +216,7 @@ extension FractalModelType: Codable {
         12: .dodecahedron,         // icosahedron
         13: .mengerSphere,         // surfaceKIFS
         16: .theliPseudoKleinian,  // old apollonian
+        18: .kleinian,             // future alias
     ]
 
     private static let stringMap: [String: FractalModelType] = {

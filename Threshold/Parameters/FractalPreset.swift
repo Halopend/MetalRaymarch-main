@@ -284,7 +284,8 @@ struct FractalPreset: Codable, Identifiable {
         neonModeEnabled: Bool,
         colorIterations: Int32,
         safetyBubbleEnabled: Bool,
-        qualityMode: Int32
+        qualityMode: Int32,
+        mandelbulbPower: Int32?
     ) {
         // Derive quality mode from iteration count
         let qualityMode: Int32
@@ -301,7 +302,19 @@ struct FractalPreset: Codable, Identifiable {
             neonModeEnabled: gradientState?.gradientPreset?.isNeonMode ?? false,
             colorIterations: Int32(colorIterations),
             safetyBubbleEnabled: safetyBubbleEnabled ?? true,
-            qualityMode: qualityMode
+            qualityMode: qualityMode,
+            mandelbulbPower: {
+                guard fractalType == .mandelbulb,
+                      let vals = formulaParamValues,
+                      !vals.isEmpty else { return nil }
+                let rawPower = vals[0]
+                let rounded = roundf(rawPower)
+                guard abs(rawPower - rounded) < 0.01,
+                      [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
+                    return nil
+                }
+                return Int32(rounded)
+            }()
         )
     }
     
@@ -309,7 +322,8 @@ struct FractalPreset: Codable, Identifiable {
     /// Presets with identical function constant values can share pipelines.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
-        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)"
+        let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
+        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)\(powerKey)"
     }
     
     /// Create a preset from current render settings
