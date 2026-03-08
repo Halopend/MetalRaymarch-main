@@ -277,113 +277,6 @@ final class BoolParameterNode: BaseParameterNode<Bool>, @unchecked Sendable {
     }
 }
 
-// MARK: - Optional Smoothing Primitive
-
-final class FloatDelayBuffer {
-    private(set) var current: Float
-    private var target: Float
-    private(set) var responseTime: Float
-
-    init(initialValue: Float, responseTime: Float) {
-        self.current = initialValue
-        self.target = initialValue
-        self.responseTime = max(0.001, responseTime)
-    }
-
-    func setTarget(_ value: Float) { target = value }
-
-    func setResponseTime(_ value: Float) { responseTime = max(0.001, value) }
-
-    func snap(to value: Float) {
-        current = value
-        target = value
-    }
-
-    func update(deltaTime: Float) {
-        guard deltaTime > 0 else { return }
-        let alpha = 1 - exp(-deltaTime / max(0.001, responseTime))
-        current += (target - current) * alpha
-    }
-}
-
-final class SmoothedFloatParameterNode: FloatParameterNode, @unchecked Sendable {
-    private(set) var smoothedValue: Float
-    private var delayBuffer: FloatDelayBuffer
-    private var smoothingTime: Float
-
-    init(id: String,
-         name: String,
-         descriptionText: String,
-         section: ParameterSection,
-         group: ParameterGroup?,
-         source: ParameterNodeSource,
-         scope: ParameterScope = .formula,
-         bundle: ParameterBundle = .custom,
-         icon: String,
-         defaultValue: Float,
-         range: ClosedRange<Float>,
-         step: Float,
-         smoothingTime: Float,
-         isGestureMappable: Bool,
-         readValue: @MainActor @escaping (UISettingsCache) -> Float,
-         writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
-        self.smoothingTime = max(0, smoothingTime)
-        self.smoothedValue = defaultValue
-        self.delayBuffer = FloatDelayBuffer(initialValue: defaultValue, responseTime: max(0.001, smoothingTime))
-        super.init(id: id,
-                   name: name,
-                   descriptionText: descriptionText,
-                   section: section,
-                   group: group,
-                   source: source,
-                   scope: scope,
-                   bundle: bundle,
-                   icon: icon,
-                   defaultValue: defaultValue,
-                   range: range,
-                   step: step,
-                   isGestureMappable: isGestureMappable,
-                   readValue: readValue,
-                   writeValue: writeValue)
-    }
-
-    override var currentValue: Float {
-        didSet {
-            // Enforce range cap (matches FloatParameterNode's guardrail)
-            let clamped = min(range.upperBound, max(range.lowerBound, currentValue))
-            if clamped != currentValue {
-                super.currentValue = clamped
-            }
-            delayBuffer.setTarget(currentValue)
-            markDirty()
-        }
-    }
-
-    func updateSmoothing(deltaTime: Float) {
-        let previous = smoothedValue
-        if smoothingTime <= 0 {
-            delayBuffer.snap(to: currentValue)
-            smoothedValue = currentValue
-        } else {
-            delayBuffer.setResponseTime(smoothingTime)
-            delayBuffer.update(deltaTime: deltaTime)
-            smoothedValue = delayBuffer.current
-        }
-        if abs(previous - smoothedValue) > .ulpOfOne || abs(currentValue - smoothedValue) > .ulpOfOne {
-            markDirty()
-        } else {
-            markClean()
-        }
-    }
-
-    func snap(to value: Float) {
-        delayBuffer.snap(to: value)
-        smoothedValue = value
-        super.currentValue = value
-        markDirty()
-    }
-}
-
 // MARK: - Layered Value Stack
 
 private struct ParameterLayerEntry {
@@ -584,9 +477,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
     private(set) var effectNodes: [String: FloatParameterNode] = [:]
     private var batchRebuildCount: Int = 0
     private var nodeLookupCount: Int = 0
-    private var nodeLookupDuration: CFTimeInterval = 0
-    private var lastRebuildTimestamp: CFTimeInterval = 0
-    private let minRebuildInterval: CFTimeInterval = 0.25
 
     private init() {
         buildCoreAndEffectNodes()
@@ -597,7 +487,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         MetricsSnapshot(
             batchRebuildCount: batchRebuildCount,
             nodeLookupCount: nodeLookupCount,
-            nodeLookupDurationMs: nodeLookupDuration * 1000
+            nodeLookupDurationMs: 0
         )
     }
 
@@ -653,8 +543,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             range: 0.0...1.0,
             step: 0.01,
             isGestureMappable: true,
-            readValue: { $0.colorMix },
-            writeValue: { cache, v in cache.colorMix = v; cache.push(\.colorMix, value: v) }
+            readValue: { $0.color.colorMix },
+            writeValue: { cache, v in cache.color.colorMix = v; cache.push(\.colorMix, value: v) }
         )
 
         // --- Effect nodes ---
@@ -672,8 +562,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             range: 0.0...2.0,
             step: 0.01,
             isGestureMappable: false,
-            readValue: { $0.glowEffect.intensity },
-            writeValue: { cache, v in cache.glowEffect.intensity = v; cache.push(\.glowEffect, value: cache.glowEffect) }
+            readValue: { $0.lighting.glowEffect.intensity },
+            writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.push(\.glowEffect, value: cache.lighting.glowEffect) }
         )
 
         effectNodes["effect.fog"] = FloatParameterNode(
@@ -690,8 +580,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             range: 0.0...1.0,
             step: 0.01,
             isGestureMappable: false,
-            readValue: { $0.fogEffect.intensity },
-            writeValue: { cache, v in cache.fogEffect.intensity = v; cache.push(\.fogEffect, value: cache.fogEffect) }
+            readValue: { $0.lighting.fogEffect.intensity },
+            writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.push(\.fogEffect, value: cache.lighting.fogEffect) }
         )
 
         effectNodes["effect.bloom"] = FloatParameterNode(
@@ -708,8 +598,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             range: 0.0...2.0,
             step: 0.01,
             isGestureMappable: false,
-            readValue: { $0.bloomEffect.strength },
-            writeValue: { cache, v in cache.bloomEffect.strength = v; cache.push(\.bloomEffect, value: cache.bloomEffect) }
+            readValue: { $0.lighting.bloomEffect.strength },
+            writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.push(\.bloomEffect, value: cache.lighting.bloomEffect) }
         )
 
         effectNodes["effect.hueSpeed"] = FloatParameterNode(
@@ -726,8 +616,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             range: 0.0...0.5,
             step: 0.001,
             isGestureMappable: false,
-            readValue: { $0.hueRotationEffect.speed },
-            writeValue: { cache, v in cache.hueRotationEffect.speed = v; cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) }
+            readValue: { $0.lighting.hueRotationEffect.speed },
+            writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) }
         )
 
         effectNodes["effect.saturation"] = FloatParameterNode(
@@ -744,24 +634,18 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             range: 0.0...3.0,
             step: 0.01,
             isGestureMappable: false,
-            readValue: { $0.colorSchemeSaturation },
-            writeValue: { cache, v in cache.colorSchemeSaturation = v; cache.push(\.colorSchemeSaturation, value: v) }
+            readValue: { $0.color.colorSchemeSaturation },
+            writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.push(\.colorSchemeSaturation, value: v) }
         )
     }
 
-    func rebuildFormulaBatches(force: Bool = false) {
-        let now = CFAbsoluteTimeGetCurrent()
-        if !force, now - lastRebuildTimestamp < minRebuildInterval {
-            ParameterDebugLogGate.log("Skipped formula batch rebuild to avoid per-frame churn.")
-            return
-        }
+    private func rebuildFormulaBatches(force: Bool = false) {
         var newBatches: [FractalModelType: ParameterNodeBatch] = [:]
         for type in FractalModelType.allCases {
             newBatches[type] = buildFormulaBatch(for: type)
         }
         formulaBatches = newBatches
         batchRebuildCount += 1
-        lastRebuildTimestamp = now
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
@@ -849,32 +733,9 @@ final class ParameterNodeRegistry: @unchecked Sendable {
 
     // MARK: - Per-Frame Smoothing Tick
 
-    /// Call once per frame from the MainActor task to advance smoothing on all nodes.
+    /// Retained for call-site compatibility; no per-node smoothing is active.
     @MainActor
-    func updateSmoothing(deltaTime: Float, for type: FractalModelType) {
-        let batch = formulaBatch(for: type)
-        for node in batch.floatNodes {
-            if let smoothed = node as? SmoothedFloatParameterNode {
-                smoothed.updateSmoothing(deltaTime: deltaTime)
-            }
-        }
-    }
-
-    // MARK: - Dirty-Tracking Sync
-
-    /// Returns IDs of nodes that have been modified since last clean, then marks them clean.
-    @MainActor
-    func consumeDirtyNodes(for type: FractalModelType) -> [String] {
-        let batch = formulaBatch(for: type)
-        var dirtyIDs: [String] = []
-        for node in batch.nodes {
-            if node.isDirty {
-                dirtyIDs.append(node.id)
-                node.markClean()
-            }
-        }
-        return dirtyIDs
-    }
+    func updateSmoothing(deltaTime: Float, for type: FractalModelType) { }
 
     private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         guard let descriptor = FormulaCatalog.shared.descriptor(for: type) else {
@@ -915,7 +776,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 )
             }
 
-            let node = SmoothedFloatParameterNode(
+            let node = FloatParameterNode(
                 id: id,
                 name: label,
                 descriptionText: description,
@@ -927,7 +788,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 defaultValue: param.default,
                 range: param.min...param.max,
                 step: param.step,
-                smoothingTime: 0,
                 isGestureMappable: true,
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
                 writeValue: { cache, value in

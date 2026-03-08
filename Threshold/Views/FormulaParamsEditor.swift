@@ -287,7 +287,7 @@ private struct ParameterNodeRow: View {
             }
 
             // ── Row 2+: Music shortcuts (when enabled and param has a music target) ──
-            if cache.showMusicShortcuts, let target = musicReactiveTarget {
+            if cache.display.showMusicShortcuts, let target = musicReactiveTarget {
                 let mappingIndex = musicMappingIndex(for: target)
 
                 Divider()
@@ -299,9 +299,9 @@ private struct ParameterNodeRow: View {
                         .foregroundStyle(.pink)
                         .frame(width: 16)
 
-                    if let idx = mappingIndex, idx < cache.musicReactiveMappings.count {
+                    if let idx = mappingIndex, idx < cache.audioReactive.musicReactiveMappings.count {
                         Picker("", selection: Binding(
-                            get: { idx < cache.musicReactiveMappings.count ? cache.musicReactiveMappings[idx].source : .composite },
+                            get: { idx < cache.audioReactive.musicReactiveMappings.count ? cache.audioReactive.musicReactiveMappings[idx].source : .composite },
                             set: { src in updateMusicMapping(target) { $0.source = src } }
                         )) {
                             ForEach(MusicReactiveSource.allCases, id: \.self) { s in
@@ -377,19 +377,19 @@ private struct ParameterNodeRow: View {
     // MARK: - Music Mapping Inline Helpers
 
     private func musicMappingIndex(for target: MusicReactiveTarget) -> Int? {
-        cache.musicReactiveMappings.firstIndex(where: { $0.target == target })
+        cache.audioReactive.musicReactiveMappings.firstIndex(where: { $0.target == target })
     }
 
     private func musicMappingValue(for target: MusicReactiveTarget, _ keyPath: KeyPath<MusicReactiveMapping, Float>) -> Float? {
         guard let idx = musicMappingIndex(for: target) else { return nil }
-        return cache.musicReactiveMappings[idx][keyPath: keyPath]
+        return cache.audioReactive.musicReactiveMappings[idx][keyPath: keyPath]
     }
 
     private func updateMusicMapping(_ target: MusicReactiveTarget, _ mutate: (inout MusicReactiveMapping) -> Void) {
-        var mappings = cache.musicReactiveMappings
+        var mappings = cache.audioReactive.musicReactiveMappings
         if let idx = mappings.firstIndex(where: { $0.target == target }) {
             mutate(&mappings[idx])
-            cache.musicReactiveMappings = mappings
+            cache.audioReactive.musicReactiveMappings = mappings
             cache.push(\.musicReactiveMappings, value: mappings)
         }
     }
@@ -440,17 +440,17 @@ private struct ParameterNodeRow: View {
     }
 
     private func hasMusicMapping(_ target: MusicReactiveTarget) -> Bool {
-        cache.musicReactiveMappings.contains { $0.target == target && $0.isEnabled }
+        cache.audioReactive.musicReactiveMappings.contains { $0.target == target && $0.isEnabled }
     }
 
     private func toggleMusicMapping(_ target: MusicReactiveTarget) {
-        var mappings = cache.musicReactiveMappings
+        var mappings = cache.audioReactive.musicReactiveMappings
         if let idx = mappings.firstIndex(where: { $0.target == target }) {
             mappings.remove(at: idx)
         } else {
             mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
         }
-        cache.musicReactiveMappings = mappings
+        cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 }

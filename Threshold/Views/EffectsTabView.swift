@@ -19,22 +19,22 @@ struct EffectsStaticView: View {
             // ── Atmosphere ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "light.max", label: "Glow",
-                    value: Binding(get: { cache.glowEffect.intensity }, set: { cache.glowEffect.intensity = $0 }),
+                    value: Binding(get: { cache.lighting.glowEffect.intensity }, set: { cache.lighting.glowEffect.intensity = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.glowEffect.enabled }, set: { cache.glowEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.glowEffect, value: cache.glowEffect) })
+                    enabled: Binding(get: { cache.lighting.glowEffect.enabled }, set: { cache.lighting.glowEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.glowEffect, value: cache.lighting.glowEffect) })
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
-                    value: Binding(get: { cache.bloomEffect.strength }, set: { cache.bloomEffect.strength = $0 }),
+                    value: Binding(get: { cache.lighting.bloomEffect.strength }, set: { cache.lighting.bloomEffect.strength = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.bloomEffect.enabled }, set: { cache.bloomEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.bloomEffect, value: cache.bloomEffect) })
+                    enabled: Binding(get: { cache.lighting.bloomEffect.enabled }, set: { cache.lighting.bloomEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.bloomEffect, value: cache.lighting.bloomEffect) })
                 Divider().padding(.leading, 114)
                 EffectSliderRow(icon: "cloud.fog.fill", label: "Fog",
-                    value: Binding(get: { cache.fogEffect.intensity }, set: { cache.fogEffect.intensity = $0 }),
+                    value: Binding(get: { cache.lighting.fogEffect.intensity }, set: { cache.lighting.fogEffect.intensity = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.fogEffect.enabled }, set: { cache.fogEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.fogEffect, value: cache.fogEffect) })
+                    enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.fogEffect, value: cache.lighting.fogEffect) })
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
@@ -45,16 +45,16 @@ struct EffectsStaticView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(LightingPreset.allCases, id: \.self) { preset in
-                                PresetCardButton(preset: preset, isSelected: cache.lightingPreset == preset) {
-                                    cache.lightingPreset = preset
+                                PresetCardButton(preset: preset, isSelected: cache.lighting.lightingPreset == preset) {
+                                    cache.lighting.lightingPreset = preset
                                     cache.push(\.lightingPreset, value: preset)
                                     cache.reloadLightingEffects()
                                 }
                             }
                         }.padding(.horizontal, 4)
                     }
-                    if cache.lightingPreset != .custom {
-                        Text(cache.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
+                    if cache.lighting.lightingPreset != .custom {
+                        Text(cache.lighting.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.top, 8)
@@ -78,11 +78,11 @@ struct EffectsDynamicView: View {
             // ── Color Animation ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
-                    value: Binding(get: { cache.gradientCycleEffect.speed }, set: { cache.gradientCycleEffect.speed = $0 }),
+                    value: Binding(get: { cache.lighting.gradientCycleEffect.speed }, set: { cache.lighting.gradientCycleEffect.speed = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.gradientCycleEffect.enabled }, set: { cache.gradientCycleEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) })
-                if cache.gradientCycleEffect.enabled {
+                    enabled: Binding(get: { cache.lighting.gradientCycleEffect.enabled }, set: { cache.lighting.gradientCycleEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect) })
+                if cache.lighting.gradientCycleEffect.enabled {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.caption)
@@ -93,10 +93,10 @@ struct EffectsDynamicView: View {
                             .lineLimit(1)
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { cache.gradientCycleEffect.mirrorLoop },
+                            get: { cache.lighting.gradientCycleEffect.mirrorLoop },
                             set: { newVal in
-                                cache.gradientCycleEffect.mirrorLoop = newVal
-                                cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
+                                cache.lighting.gradientCycleEffect.mirrorLoop = newVal
+                                cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect)
                             }))
                             .labelsHidden()
                             .toggleStyle(.switch)
@@ -106,15 +106,15 @@ struct EffectsDynamicView: View {
                 }
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
-                    value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }),
+                    value: Binding(get: { cache.lighting.hueRotationEffect.speed }, set: { cache.lighting.hueRotationEffect.speed = $0 }),
                     range: 0...0.5,
-                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) })
+                    enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) })
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
-                    value: Binding(get: { cache.hueRotationEffect.intensity }, set: { cache.hueRotationEffect.intensity = $0 }),
+                    value: Binding(get: { cache.lighting.hueRotationEffect.intensity }, set: { cache.lighting.hueRotationEffect.intensity = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) },
+                    enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) },
                     showToggle: false)
             }
             .padding(10)
@@ -123,15 +123,15 @@ struct EffectsDynamicView: View {
             // ── Pulse ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "waveform.path.ecg", label: "Pulse Speed",
-                    value: Binding(get: { cache.pulseEffect.speed }, set: { cache.pulseEffect.speed = $0 }),
+                    value: Binding(get: { cache.lighting.pulseEffect.speed }, set: { cache.lighting.pulseEffect.speed = $0 }),
                     range: 0...2,
-                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) })
+                    enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.lighting.pulseEffect) })
                 EffectSliderRow(icon: "waveform.path", label: "Pulse Amount",
-                    value: Binding(get: { cache.pulseEffect.amount }, set: { cache.pulseEffect.amount = $0 }),
+                    value: Binding(get: { cache.lighting.pulseEffect.amount }, set: { cache.lighting.pulseEffect.amount = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) },
+                    enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.lighting.pulseEffect) },
                     showToggle: false)
             }
             .padding(10)
@@ -140,10 +140,10 @@ struct EffectsDynamicView: View {
             // ── Beat Flash (music-driven) ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "bolt.fill", label: "Beat Flash",
-                    value: Binding(get: { cache.beatFlashEffect.intensity }, set: { cache.beatFlashEffect.intensity = $0 }),
+                    value: Binding(get: { cache.lighting.beatFlashEffect.intensity }, set: { cache.lighting.beatFlashEffect.intensity = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.beatFlashEffect.enabled }, set: { cache.beatFlashEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.beatFlashEffect, value: cache.beatFlashEffect) })
+                    enabled: Binding(get: { cache.lighting.beatFlashEffect.enabled }, set: { cache.lighting.beatFlashEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.beatFlashEffect, value: cache.lighting.beatFlashEffect) })
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
@@ -156,10 +156,10 @@ struct EffectsDynamicView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Picker("", selection: Binding(
-                            get: { cache.polarRotationEffect.direction },
+                            get: { cache.lighting.polarRotationEffect.direction },
                             set: { newDir in
-                                cache.polarRotationEffect.direction = newDir
-                                cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                                cache.lighting.polarRotationEffect.direction = newDir
+                                cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
                             }
                         )) {
                             ForEach(PolarRotationDirection.allCases, id: \.self) { dir in
@@ -169,12 +169,12 @@ struct EffectsDynamicView: View {
                         .pickerStyle(.segmented)
                         .frame(maxWidth: 180)
                     }
-                    if cache.polarRotationEffect.enabled {
+                    if cache.lighting.polarRotationEffect.enabled {
                         EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Speed",
-                            value: Binding(get: { cache.polarRotationEffect.speed }, set: { cache.polarRotationEffect.speed = $0 }),
+                            value: Binding(get: { cache.lighting.polarRotationEffect.speed }, set: { cache.lighting.polarRotationEffect.speed = $0 }),
                             range: 0...1,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.polarRotationEffect, value: cache.polarRotationEffect) },
+                            onChanged: { cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect) },
                             showToggle: false)
                     }
                 }

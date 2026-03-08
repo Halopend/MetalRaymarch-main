@@ -18,9 +18,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
     var resolutionScale: Float = 1.0   // 0.5 - 1.0
     var tileSize: Int = 0              // 0=disabled, 2/4/8 adaptive hierarchical
 
-    // Halton jitter temporal AA
-    var haltonJitterEnabled: Bool = true
-
     // Dynamic render quality (WWDC25 Session 294)
     var dynamicRenderQualityEnabled: Bool = true
     var dynamicRenderQualityTarget: Float = 0.7   // 0.5 - 1.0

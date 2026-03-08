@@ -849,17 +849,6 @@ final class AnimationManager {
         }
     }
     
-    /// Export a scene to JSON string (for manual editing)
-    func exportScene(_ scene: AnimationScene) -> String? {
-        do {
-            let data = try prettySceneEncoder.encode(scene)
-            return String(data: data, encoding: .utf8)
-        } catch {
-            print("❌ Failed to export scene: \(error)")
-            return nil
-        }
-    }
-
     /// Export a scene to a shareable file URL
     func exportSceneToFile(_ scene: AnimationScene) -> URL? {
         let sanitizedName = scene.name.replacingOccurrences(of: " ", with: "_")
@@ -878,79 +867,4 @@ final class AnimationManager {
         }
     }
     
-    /// Import a scene from JSON string
-    func importScene(from json: String) -> AnimationScene? {
-        guard let data = json.data(using: .utf8) else { return nil }
-        
-        do {
-            let importedScene = try sceneDecoder.decode(AnimationScene.self, from: data)
-            
-            // Capture all keyframes and fractal type before re-creating with new ID
-            let originalKeyframes = importedScene.keyframes
-            let originalFractalType = importedScene.fractalType
-            
-            // Give it a new ID to avoid conflicts
-            var scene = AnimationScene(
-                name: importedScene.name + " (imported)",
-                initialKeyframe: originalKeyframes.first ?? AnimationKeyframe(
-                    name: "Default",
-                    duration: 0,
-                    minDistance: 0.8,
-                    foldingLimit: 1.0,
-                    sphereRadius: 0.5,
-                    fractalScale: 2.8,
-                    position: .zero
-                ),
-                fractalType: originalFractalType
-            )
-            
-            // Append remaining keyframes from the original
-            if originalKeyframes.count > 1 {
-                scene.keyframes.append(contentsOf: originalKeyframes.dropFirst())
-            }
-
-            // Restore scene-level values that are not part of keyframe payload.
-            scene.isLooping = importedScene.isLooping
-            scene.gradientPreset = importedScene.gradientPreset
-            scene.colorMappingMode = importedScene.colorMappingMode
-            scene.gradientRepeat = importedScene.gradientRepeat
-            scene.gradientOffset = importedScene.gradientOffset
-            scene.gradientSmoothing = importedScene.gradientSmoothing
-            scene.colorSchemeSaturation = importedScene.colorSchemeSaturation
-            scene.colorSchemeContrast = importedScene.colorSchemeContrast
-            scene.colorSchemeGamma = importedScene.colorSchemeGamma
-            scene.colorSchemeVibrance = importedScene.colorSchemeVibrance
-            scene.colorSchemeCurve = importedScene.colorSchemeCurve
-            scene.colorSchemeShadows = importedScene.colorSchemeShadows
-            scene.colorSchemeHighlights = importedScene.colorSchemeHighlights
-            scene.lightingSoftness = importedScene.lightingSoftness
-            scene.safetyBubbleEnabled = importedScene.safetyBubbleEnabled
-            scene.safetyBubbleRadius = importedScene.safetyBubbleRadius
-            scene.safetyBubbleShape = importedScene.safetyBubbleShape
-            scene.safetyBubbleBlend = importedScene.safetyBubbleBlend
-            scene.attachedSong = importedScene.attachedSong
-            
-            userScenes.append(scene)
-            saveScenes()
-            return scene
-        } catch {
-            print("❌ Failed to import scene: \(error)")
-            return nil
-        }
-    }
-
-    /// Import a scene from a previously exported .threshanim file URL
-    func importScene(from url: URL) -> AnimationScene? {
-        do {
-            let data = try Data(contentsOf: url)
-            guard let json = String(data: data, encoding: .utf8) else {
-                print("❌ Failed to decode scene file text")
-                return nil
-            }
-            return importScene(from: json)
-        } catch {
-            print("❌ Failed to import scene file: \(error)")
-            return nil
-        }
-    }
 }

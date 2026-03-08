@@ -18,255 +18,6 @@ import Foundation
 import ARKit
 import simd
 
-private let customFractalDefaultsKey = "customFractalDefaults.v1"
-
-// MARK: - Hand Tracking Data
-
-/// Lightweight hand tracking data extracted from ARKit
-struct HandData {
-    var isTracked: Bool = false
-    var thumbTip: SIMD3<Float> = .zero
-    var indexTip: SIMD3<Float> = .zero
-    var middleTip: SIMD3<Float> = .zero
-    var ringTip: SIMD3<Float> = .zero
-    var pinkyTip: SIMD3<Float> = .zero
-    var palmPosition: SIMD3<Float> = .zero
-    var palmCenter: SIMD3<Float> = .zero  // Center of palm for gesture detection
-    
-    // Pinch values (0-1, 1 = fully pinched)
-    var indexPinch: Float = 0
-    var middlePinch: Float = 0
-    var ringPinch: Float = 0
-    var pinkyPinch: Float = 0
-    
-    /// Get pinch position (midpoint between thumb and finger)
-    func pinchPosition(digit: Int) -> SIMD3<Float> {
-        let fingerTip: SIMD3<Float>
-        switch digit {
-        case 1: fingerTip = indexTip
-        case 2: fingerTip = middleTip
-        case 3: fingerTip = ringTip
-        case 4: fingerTip = pinkyTip
-        default: fingerTip = indexTip
-        }
-        return (thumbTip + fingerTip) * 0.5
-    }
-    
-    func pinchStrength(digit: Int) -> Float {
-        switch digit {
-        case 1: return indexPinch
-        case 2: return middlePinch
-        case 3: return ringPinch
-        case 4: return pinkyPinch
-        default: return indexPinch
-        }
-    }
-    
-    /// Calculate fist strength (0-1, 1 = fully closed fist)
-    /// Based on how close all fingertips are to the palm center
-    func fistStrength() -> Float {
-        guard simd_length_squared(palmCenter) > 1e-6 else { return 0 }
-        
-        // Measure distance from each fingertip to palm center
-        let indexDist = simd_length(indexTip - palmCenter)
-        let middleDist = simd_length(middleTip - palmCenter)
-        let ringDist = simd_length(ringTip - palmCenter)
-        let pinkyDist = simd_length(pinkyTip - palmCenter)
-        let thumbDist = simd_length(thumbTip - palmCenter)
-        
-        // Fist threshold distances (in meters)
-        let closedDist: Float = 0.03  // 3cm = fully closed
-        let openDist: Float = 0.12    // 12cm = fully open
-        
-        // Calculate strength for each finger
-        func fingerStrength(_ dist: Float) -> Float {
-            let normalized = 1.0 - ((dist - closedDist) / (openDist - closedDist))
-            return simd_clamp(normalized, 0, 1)
-        }
-        
-        let strengths = [
-            fingerStrength(indexDist),
-            fingerStrength(middleDist),
-            fingerStrength(ringDist),
-            fingerStrength(pinkyDist),
-            fingerStrength(thumbDist)
-        ]
-        
-        // Return minimum strength (all fingers must be curled for a fist)
-        return strengths.min() ?? 0
-    }
-    
-    /// Check if middle finger is touching palm (for menu toggle)
-    func middleFingerTouchingPalm() -> Float {
-        guard simd_length_squared(palmCenter) > 1e-6,
-              simd_length_squared(middleTip) > 1e-6 else { return 0 }
-        
-        let distance = simd_length(middleTip - palmCenter)
-        
-        // Touch threshold (in meters)
-        let touchDist: Float = 0.04   // 4cm = touching
-        let awayDist: Float = 0.10    // 10cm = clearly away
-        
-        let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
-        return simd_clamp(normalized, 0, 1)
-    }
-
-    /// Check if ring finger is touching palm (secondary menu-toggle gesture option)
-    func ringFingerTouchingPalm() -> Float {
-        guard simd_length_squared(palmCenter) > 1e-6,
-              simd_length_squared(ringTip) > 1e-6 else { return 0 }
-
-        let distance = simd_length(ringTip - palmCenter)
-
-        // Ring finger sits slightly farther from palm center than middle finger.
-        let touchDist: Float = 0.045
-        let awayDist: Float = 0.11
-
-        let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
-        return simd_clamp(normalized, 0, 1)
-    }
-    
-    static var zero: HandData { HandData() }
-}
-
-// MARK: - Two-Hand Gesture State
-
-/// State for a two-hand scale gesture
-struct TwoHandGestureState {
-    var isActive: Bool = false
-    var startDistance: Float = 0      // Distance between hands when gesture started
-    var startParameterValue: Float = 0  // Parameter value when gesture started
-    var startHeight: Float = 0          // Average Y position of hands when gesture started (for sensitivity scaling)
-}
-
-// MARK: - Grab Zoom Mapping
-
-/// Pre-computed inverse mapping from hand gesture space → fractal world transform.
-///
-/// Captured once when a two-point grab begins (and rebased at rotation breakaway).
-/// Each frame the mapping evaluates current hand positions into the target fractal
-/// transform using **true 1:1 scale tracking** with midpoint-grounded pivot:
-///
-/// ```
-///   scaleRatio    = currentHandDistance / startHandDistance
-///   newScale      = startDetailScale  × scaleRatio
-///   deltaRot      = quaternion(startAxis → currentAxis)
-///   newRotation   = deltaRot × startRotation
-///   newPosition   = currentMidpoint + deltaRot.act(scaleRatio × (startPos − startMid))
-/// ```
-///
-/// The position formula ensures the world-space point that was under the hand
-/// midpoint at gesture start stays pinned to wherever the midpoint moves, while
-/// scale and rotation expand / twist around that anchor.
-struct GrabZoomMapping {
-    // ── Hand-space snapshot ──────────────────────────────────────────────
-    var startMidpoint: SIMD3<Float>
-    var startDistance: Float           // clamped ≥ 0.01
-    var startAxis: SIMD3<Float>       // normalized right→left
-
-    // ── Fractal-space snapshot ───────────────────────────────────────────
-    var startPosition: SIMD3<Float>
-    var startRotation: simd_quatf
-    var startDetailScale: Float
-
-    // ── Factory ──────────────────────────────────────────────────────────
-    init(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
-         position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
-        self.startMidpoint = (leftPos + rightPos) * 0.5
-        self.startDistance = max(simd_length(leftPos - rightPos), 0.01)
-        let axis = rightPos - leftPos
-        let axisLen = simd_length(axis)
-        self.startAxis = axisLen > 1e-4 ? axis / axisLen : SIMD3<Float>(1, 0, 0)
-        self.startPosition = position
-        self.startRotation = rotation
-        self.startDetailScale = detailScale
-    }
-
-    /// Rebase to the current state — called at rotation breakaway so the
-    /// mapping continues smoothly from the current transform without a jump.
-    mutating func rebase(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
-                         position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
-        self = GrabZoomMapping(leftPos: leftPos, rightPos: rightPos,
-                               position: position, rotation: rotation, detailScale: detailScale)
-    }
-
-    // ── Evaluation ───────────────────────────────────────────────────────
-
-    /// Full evaluation: 1:1 scale + rotation + pivot-correct position.
-    func evaluate(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
-                  scaleClamp: ClosedRange<Float> = 0.001...500.0
-    ) -> (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
-        let currentMidpoint = (leftPos + rightPos) * 0.5
-        let currentDistance = simd_length(leftPos - rightPos)
-        let currentAxis = rightPos - leftPos
-        let currentAxisLen = simd_length(currentAxis)
-        let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : startAxis
-
-        // 1) SCALE — true 1:1 ratio of hand separation
-        let scaleRatio = currentDistance / startDistance
-        let newDetailScale = simd_clamp(startDetailScale * scaleRatio,
-                                        scaleClamp.lowerBound, scaleClamp.upperBound)
-        let effectiveScaleRatio = newDetailScale / max(startDetailScale, 1e-6)
-
-        // 2) ROTATION — quaternion from start axis → current axis
-        let deltaRotation = Self.quaternionBetweenAxes(from: startAxis, to: currentAxisNorm)
-        let newRotation = (deltaRotation * startRotation).normalized
-
-        // 3) POSITION — midpoint-grounded pivot
-        let startOffset = startPosition - startMidpoint
-        let scaledOffset = effectiveScaleRatio * startOffset
-        let rotatedOffset = deltaRotation.act(scaledOffset)
-        let newPosition = currentMidpoint + rotatedOffset
-
-        return (newPosition, newRotation, newDetailScale)
-    }
-
-    /// Scale-only evaluation: rotation stays at startRotation (pre-breakaway phase).
-    func evaluateScaleOnly(leftPos: SIMD3<Float>, rightPos: SIMD3<Float>,
-                           scaleClamp: ClosedRange<Float> = 0.001...500.0
-    ) -> (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float) {
-        let currentMidpoint = (leftPos + rightPos) * 0.5
-        let currentDistance = simd_length(leftPos - rightPos)
-
-        // 1) SCALE — true 1:1 ratio
-        let scaleRatio = currentDistance / startDistance
-        let newDetailScale = simd_clamp(startDetailScale * scaleRatio,
-                                        scaleClamp.lowerBound, scaleClamp.upperBound)
-        let effectiveScaleRatio = newDetailScale / max(startDetailScale, 1e-6)
-
-        // 2) ROTATION — identity delta (no rotation change)
-        let newRotation = startRotation
-
-        // 3) POSITION — midpoint-grounded pivot, no rotation component
-        let startOffset = startPosition - startMidpoint
-        let scaledOffset = effectiveScaleRatio * startOffset
-        let newPosition = currentMidpoint + scaledOffset
-
-        return (newPosition, newRotation, newDetailScale)
-    }
-
-    // ── Helpers ──────────────────────────────────────────────────────────
-
-    /// Shortest-arc quaternion rotating unit vector `from` to unit vector `to`.
-    static func quaternionBetweenAxes(from a: SIMD3<Float>, to b: SIMD3<Float>) -> simd_quatf {
-        let dot = simd_clamp(simd_dot(a, b), -1.0, 1.0)
-        let cross = simd_cross(a, b)
-        let crossLen = simd_length(cross)
-
-        if crossLen > 1e-6 {
-            return simd_quatf(angle: acos(dot), axis: cross / crossLen)
-        } else if dot < 0 {
-            // Anti-parallel: rotate π around any perpendicular axis
-            let perp: SIMD3<Float> = abs(a.x) < 0.9
-                ? simd_normalize(simd_cross(a, SIMD3<Float>(1, 0, 0)))
-                : simd_normalize(simd_cross(a, SIMD3<Float>(0, 1, 0)))
-            return simd_quatf(angle: .pi, axis: perp)
-        } else {
-            return simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // identity
-        }
-    }
-}
-
 // MARK: - Gesture Controller
 
 /// Processes hand tracking data and maps gestures to render parameters
@@ -280,200 +31,21 @@ final class GestureController {
     let operationDispatcher: ParameterOperationDispatcher
     private var operationFrameCounter: UInt64 = 0
 
-    private struct StoredFractalDefaults: Codable {
-        var minDistance: Float
-        var foldingLimit: Float
-        var sphereRadius: Float
-        var fractalScale: Float
-        var formulaParamsData: Data
-        var detailScale: Float
-        var position: [Float]
-        var worldRotation: [Float]
-        var safetyBubbleEnabled: Bool?
-    }
-    
     // ==========================================================================
-    // PER-FRACTAL PARAMETER RANGES
-    // Each fractal type has different optimal parameter ranges
+    // PER-FRACTAL PARAMETER RANGES  (via FractalTypeDescriptor)
     // ==========================================================================
-    
-    /// Parameter ranges for a specific fractal type
-    struct FractalParamRanges {
-        let minDistance: ClosedRange<Float>
-        let foldingLimit: ClosedRange<Float>
-        let sphereRadius: ClosedRange<Float>
-        let fractalScale: ClosedRange<Float>
-        
-        // Default values when switching to this fractal
-        let defaultMinDistance: Float
-        let defaultFoldingLimit: Float
-        let defaultSphereRadius: Float
-        let defaultFractalScale: Float
-    }
-    
-    /// Get parameter ranges for current fractal type
-    private func currentRanges() -> FractalParamRanges {
-        guard let settings = renderSettings else {
-            return Self.mandelboxRanges
-        }
-        
-        // Use extended ranges if enabled
-        if settings.extendedGestureRange {
-            return Self.mandelboxExtendedRanges
-        }
-        
-        return Self.mandelboxRanges
-    }
-    
-    // STANDARD MANDELBOX (positive scale ~2-3)
-    // - Large exploration ranges for dramatic parameter sweeps
-    // - Scale controls overall density, foldingLimit controls box boundaries
-    private static let mandelboxRanges = FractalParamRanges(
-        minDistance: -2.0...8.0,          // minRadius² - affects sphere fold cutoff (now includes negative for inverted effects)
-        foldingLimit: -5.0...20.0,        // Box fold boundary - wide range with negatives for unusual topology
-        sphereRadius: -3.0...4.0,         // Sphere inversion radius (negative for inverse effects)
-        fractalScale: -3.0...5.0,         // FAMOUS NEGATIVE SCALING FACTOR - creates stunning inverse fractals
-        defaultMinDistance: 0.8,
-        defaultFoldingLimit: 1.0,
-        defaultSphereRadius: 0.5,
-        defaultFractalScale: 2.8
-    )
-    
-    // EXTENDED MANDELBOX RANGES
-    // - Much wider ranges for extreme exploration
-    // - Allows reaching more unusual/exotic parameter combinations
-    private static let mandelboxExtendedRanges = FractalParamRanges(
-        minDistance: -5.0...15.0,         // Extended: extreme minRadius² range with deep negatives
-        foldingLimit: -10.0...30.0,       // Extended: allows very tight and very loose folds, deep inverse folding
-        sphereRadius: -5.0...8.0,         // Extended: from negative to large sphere inversions
-        fractalScale: -5.0...8.0,         // Extended: EXTREME negative scaling for wild inverse effects
-        defaultMinDistance: 0.8,
-        defaultFoldingLimit: 1.0,
-        defaultSphereRadius: 0.5,
-        defaultFractalScale: 2.8
-    )
 
-    private func makeFactoryDefaults(for fractalType: FractalModelType, ranges: FractalParamRanges) -> StoredFractalDefaults {
-        var formulaParams = fractalType.defaultFormulaParams()
-        let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-        var detailScale: Float = 1.0
-        var position = SIMD3<Float>.zero
-        var rotation = identity
-        var safetyBubbleEnabled: Bool? = nil
-
-        if fractalType == .mandelbulb {
-            let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
-            let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
-            let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
-            rotation = simd_normalize(qz * qy * qx)
-            detailScale = 0.25
-            position = SIMD3<Float>(0.1, 0.1, -0.9)
-            safetyBubbleEnabled = false
-        }
-
-        FormulaCatalog.normalizeRotationFlags(&formulaParams)
-        return StoredFractalDefaults(
-            minDistance: ranges.defaultMinDistance,
-            foldingLimit: ranges.defaultFoldingLimit,
-            sphereRadius: ranges.defaultSphereRadius,
-            fractalScale: ranges.defaultFractalScale,
-            formulaParamsData: Self.serializeFormulaParams(formulaParams),
-            detailScale: detailScale,
-            position: [position.x, position.y, position.z],
-            worldRotation: [rotation.vector.x, rotation.vector.y, rotation.vector.z, rotation.vector.w],
-            safetyBubbleEnabled: safetyBubbleEnabled
-        )
-    }
-
-    private static func serializeFormulaParams(_ formulaParams: FormulaParams) -> Data {
-        var copy = formulaParams
-        return withUnsafeBytes(of: &copy) { Data($0) }
-    }
-
-    private static func deserializeFormulaParams(_ data: Data) -> FormulaParams? {
-        let size = MemoryLayout<FormulaParams>.size
-        guard data.count == size else { return nil }
-        var formulaParams = FormulaParams()
-        data.withUnsafeBytes { rawBuffer in
-            guard let baseAddress = rawBuffer.baseAddress else { return }
-            memcpy(&formulaParams, baseAddress, size)
-        }
-        FormulaCatalog.normalizeRotationFlags(&formulaParams)
-        return formulaParams
-    }
-
-    private func loadStoredDefaultsMap() -> [String: StoredFractalDefaults] {
-        guard let data = UserDefaults.standard.data(forKey: customFractalDefaultsKey) else { return [:] }
-        return (try? JSONDecoder().decode([String: StoredFractalDefaults].self, from: data)) ?? [:]
-    }
-
-    private func saveStoredDefaultsMap(_ defaultsMap: [String: StoredFractalDefaults]) {
-        guard let data = try? JSONEncoder().encode(defaultsMap) else { return }
-        UserDefaults.standard.set(data, forKey: customFractalDefaultsKey)
-    }
-
-    private func applyStoredDefaults(_ stored: StoredFractalDefaults, to settings: RenderSettings) {
-        settings.targetMinDistance = stored.minDistance
-        settings.targetFoldingLimit = stored.foldingLimit
-        settings.targetSphereRadius = stored.sphereRadius
-        settings.targetFractalScale = stored.fractalScale
-
-        settings.minDistance = stored.minDistance
-        settings.foldingLimit = stored.foldingLimit
-        settings.sphereRadius = stored.sphereRadius
-        settings.fractalScale = stored.fractalScale
-
-        if let formulaParams = Self.deserializeFormulaParams(stored.formulaParamsData) {
-            settings.formulaParams = formulaParams
-        }
-
-        if stored.position.count == 3 {
-            let position = SIMD3<Float>(stored.position[0], stored.position[1], stored.position[2])
-            settings.position = position
-            settings.targetPosition = position
-        }
-
-        if stored.worldRotation.count == 4 {
-            let rotation = simd_quatf(ix: stored.worldRotation[0],
-                                      iy: stored.worldRotation[1],
-                                      iz: stored.worldRotation[2],
-                                      r: stored.worldRotation[3]).normalized
-            settings.worldRotation = rotation
-            settings.targetWorldRotation = rotation
-        }
-
-        settings.detailScale = stored.detailScale
-        settings.targetDetailScale = stored.detailScale
-
-        if let safetyBubbleEnabled = stored.safetyBubbleEnabled {
-            settings.safetyBubbleEnabled = safetyBubbleEnabled
-        }
+    /// Get parameter ranges for current fractal type from its descriptor.
+    private func currentRanges() -> GestureParamRanges {
+        guard let settings = renderSettings else { return .standard }
+        let desc = FractalTypeRegistry.descriptor(for: settings.fractalType)
+        return settings.extendedGestureRange ? desc.gestureRangesExtended : desc.gestureRanges
     }
 
     @discardableResult
     func saveCurrentAsFractalDefaults() -> Bool {
         guard let settings = renderSettings else { return false }
-
-        let fractalType = settings.fractalType
-        let stored = StoredFractalDefaults(
-            minDistance: settings.minDistance,
-            foldingLimit: settings.foldingLimit,
-            sphereRadius: settings.sphereRadius,
-            fractalScale: settings.fractalScale,
-            formulaParamsData: Self.serializeFormulaParams(settings.formulaParams),
-            detailScale: settings.detailScale,
-            position: [settings.position.x, settings.position.y, settings.position.z],
-            worldRotation: [settings.worldRotation.vector.x,
-                            settings.worldRotation.vector.y,
-                            settings.worldRotation.vector.z,
-                            settings.worldRotation.vector.w],
-            safetyBubbleEnabled: settings.safetyBubbleEnabled
-        )
-
-        var defaultsMap = loadStoredDefaultsMap()
-        defaultsMap[String(fractalType.rawValue)] = stored
-        saveStoredDefaultsMap(defaultsMap)
-        return true
+        return FractalDefaultsStore.saveCurrentAsFractalDefaults(from: settings)
     }
     
     /// When true, parameter-changing gestures (two-hand pinch, single-hand drag) are
@@ -577,11 +149,7 @@ final class GestureController {
     /// Call this when switching fractal types to get good starting values.
     func applyFractalDefaults() {
         guard let settings = renderSettings else { return }
-        let ranges = currentRanges()
-        let defaultsMap = loadStoredDefaultsMap()
-        let storedDefaults = defaultsMap[String(settings.fractalType.rawValue)]
-            ?? makeFactoryDefaults(for: settings.fractalType, ranges: ranges)
-        applyStoredDefaults(storedDefaults, to: settings)
+        FractalDefaultsStore.applyFractalDefaults(for: settings.fractalType, to: settings)
         
         // Reset gesture states
         syncWithSettings()
@@ -905,7 +473,7 @@ final class GestureController {
     private func processMandelboxShapeGesture(
         digit: Int,
         action: FingerGestureAction,
-        ranges: FractalParamRanges,
+        ranges: GestureParamRanges,
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
@@ -978,7 +546,7 @@ final class GestureController {
     /// applies to every fractal type.
     private func processCoreScaleGesture(
         digit: Int,
-        ranges: FractalParamRanges,
+        ranges: GestureParamRanges,
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
@@ -1113,12 +681,8 @@ final class GestureController {
                 }
             }
             
-            // ── Per-fractal scale clamp ─────────────────────────────────
-            // Mandelbulb starts at detailScale 0.25 and needs deep zoom;
-            // give it a much wider clamp range.
-            let scaleClamp: ClosedRange<Float> = (settings.fractalType == .mandelbulb)
-                ? 0.0005...2000.0
-                : 0.001...500.0
+            // ── Per-fractal scale clamp (from descriptor) ────────────────
+            let scaleClamp = FractalTypeRegistry.descriptor(for: settings.fractalType).grabScaleClamp
 
             // ── Evaluate the mapping ─────────────────────────────────────
             let result: (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float)

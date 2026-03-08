@@ -2,8 +2,7 @@
 //  GeometryConfig.swift
 //  Threshold
 //
-//  Domain config: fractal type, formula params, position, scale, rotation,
-//  and doppelganger settings.
+//  Domain config: fractal type, formula params, position, scale, rotation.
 //  Part of the RenderSettings decomposition (Phase 1).
 //
 
@@ -29,10 +28,6 @@ struct GeometryConfig: Codable, Sendable {
     var worldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
     var detailScale: Float = 1.0
 
-    // Doppelganger (structural twin via pre-fold mirror)
-    var doppelgangerEnabled: Bool = false
-    var doppelgangerPlane: SIMD3<Float> = SIMD3<Float>(1, 0, 0)
-    var doppelgangerOffset: Float = 0.0
 
     // MARK: - Validation
 
@@ -45,7 +40,6 @@ struct GeometryConfig: Codable, Sendable {
         position.x = max(-maxPos, min(maxPos, position.x))
         position.y = max(-maxPos, min(maxPos, position.y))
         position.z = max(-maxPos, min(maxPos, position.z))
-        doppelgangerPlane = simd_normalize(doppelgangerPlane)
     }
 
     // MARK: - Codable
@@ -59,7 +53,6 @@ struct GeometryConfig: Codable, Sendable {
         case position, scale
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW
         case detailScale
-        case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
     }
 
     func encode(to encoder: Encoder) throws {
@@ -83,10 +76,6 @@ struct GeometryConfig: Codable, Sendable {
         try c.encode(worldRotation.imag.z, forKey: .worldRotationZ)
         try c.encode(worldRotation.real, forKey: .worldRotationW)
         try c.encode(detailScale, forKey: .detailScale)
-
-        try c.encode(doppelgangerEnabled, forKey: .doppelgangerEnabled)
-        try c.encode(doppelgangerPlane, forKey: .doppelgangerPlane)
-        try c.encode(doppelgangerOffset, forKey: .doppelgangerOffset)
     }
 
     init(from decoder: Decoder) throws {
@@ -115,10 +104,6 @@ struct GeometryConfig: Codable, Sendable {
         let rw = try c.decode(Float.self, forKey: .worldRotationW)
         worldRotation = simd_quatf(ix: rx, iy: ry, iz: rz, r: rw).normalized
         detailScale = try c.decode(Float.self, forKey: .detailScale)
-
-        doppelgangerEnabled = try c.decodeIfPresent(Bool.self, forKey: .doppelgangerEnabled) ?? false
-        doppelgangerPlane = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .doppelgangerPlane) ?? SIMD3<Float>(1, 0, 0)
-        doppelgangerOffset = try c.decodeIfPresent(Float.self, forKey: .doppelgangerOffset) ?? 0.0
     }
 
     init() {}
@@ -136,10 +121,7 @@ extension GeometryConfig: Equatable {
               lhs.sphereRadius == rhs.sphereRadius,
               lhs.position == rhs.position,
               lhs.scale == rhs.scale,
-              lhs.detailScale == rhs.detailScale,
-              lhs.doppelgangerEnabled == rhs.doppelgangerEnabled,
-              lhs.doppelgangerPlane == rhs.doppelgangerPlane,
-              lhs.doppelgangerOffset == rhs.doppelgangerOffset
+              lhs.detailScale == rhs.detailScale
         else { return false }
 
         // Compare simd_quatf component-wise

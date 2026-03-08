@@ -75,40 +75,6 @@ enum SettingsPersistence {
         return decoded
     }
 
-    // MARK: Convenience typed accessors
-
-    static func loadGeometryConfig() -> GeometryConfig? {
-        load(GeometryConfig.self, domain: .geometry)
-    }
-
-    static func loadQualityConfig() -> QualityConfig? {
-        load(QualityConfig.self, domain: .quality)
-    }
-
-    static func loadColorConfig() -> ColorConfig? {
-        load(ColorConfig.self, domain: .color)
-    }
-
-    static func loadLightingConfig() -> LightingConfig? {
-        load(LightingConfig.self, domain: .lighting)
-    }
-
-    static func loadAudioReactiveConfig() -> AudioReactiveConfig? {
-        load(AudioReactiveConfig.self, domain: .audioReactive)
-    }
-
-    static func loadGestureConfig() -> GestureConfig? {
-        load(GestureConfig.self, domain: .gesture)
-    }
-
-    static func loadSafetyBubbleConfig() -> SafetyBubbleConfig? {
-        load(SafetyBubbleConfig.self, domain: .safetyBubble)
-    }
-
-    static func loadDisplayConfig() -> DisplayConfig? {
-        load(DisplayConfig.self, domain: .display)
-    }
-
     // MARK: Save All
 
     /// Persist all domains from a RenderSettings instance.
@@ -127,22 +93,13 @@ enum SettingsPersistence {
     /// Only overwrites fields that were previously persisted (returns silently
     /// if a domain has never been saved, preserving the hard-coded defaults).
     static func restoreAll(into settings: RenderSettings) {
-        if let c = loadGeometryConfig()      { settings.geometryConfig = c }
-        if let c = loadQualityConfig()       { settings.qualityConfig = c }
-        if let c = loadColorConfig()         { settings.colorConfig = c }
-        if let c = loadLightingConfig()      { settings.lightingConfig = c }
-        if let c = loadAudioReactiveConfig() { settings.audioReactiveConfig = c }
-        if let c = loadGestureConfig()       { settings.gestureConfig = c }
-        if let c = loadSafetyBubbleConfig()  { settings.safetyBubbleConfig = c }
-        if let c = loadDisplayConfig()       { settings.displayConfig = c }
-    }
-
-    // MARK: Migration
-
-    /// Check whether the new config-struct persistence format has been written.
-    /// Used to gate one-time migration from legacy per-key UserDefaults.
-    static var hasPerformedConfigMigration: Bool {
-        get { defaults.bool(forKey: "cfg.migrated") }
-        set { defaults.set(newValue, forKey: "cfg.migrated") }
+        if let c = load(GeometryConfig.self,      domain: .geometry)      { settings.geometryConfig = c }
+        if let c = load(QualityConfig.self,       domain: .quality)       { settings.qualityConfig = c }
+        if let c = load(ColorConfig.self,         domain: .color)         { settings.colorConfig = c }
+        if let c = load(LightingConfig.self,      domain: .lighting)      { settings.lightingConfig = c }
+        if let c = load(AudioReactiveConfig.self, domain: .audioReactive) { settings.audioReactiveConfig = c }
+        if let c = load(GestureConfig.self,       domain: .gesture)       { settings.gestureConfig = c }
+        if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = c }
+        if let c = load(DisplayConfig.self,       domain: .display)       { settings.displayConfig = c }
     }
 }

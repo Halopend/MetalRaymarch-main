@@ -11,6 +11,48 @@
 import Foundation
 import simd
 
+// MARK: - Gesture Parameter Ranges
+
+/// Clamping ranges for gesture-driven parameter changes.
+struct GestureParamRanges {
+    let minDistance: ClosedRange<Float>
+    let foldingLimit: ClosedRange<Float>
+    let sphereRadius: ClosedRange<Float>
+    let fractalScale: ClosedRange<Float>
+
+    static let standard = GestureParamRanges(
+        minDistance: -2.0...8.0,
+        foldingLimit: -5.0...20.0,
+        sphereRadius: -3.0...4.0,
+        fractalScale: -3.0...5.0
+    )
+
+    static let extended = GestureParamRanges(
+        minDistance: -5.0...15.0,
+        foldingLimit: -10.0...30.0,
+        sphereRadius: -5.0...8.0,
+        fractalScale: -5.0...8.0
+    )
+}
+
+/// Default camera/view state when switching to a fractal type.
+struct FractalViewDefaults {
+    var position: SIMD3<Float> = .zero
+    var rotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    var detailScale: Float = 1.0
+    var safetyBubbleEnabled: Bool? = nil
+}
+
+/// Default shape/scale parameter values when switching to a fractal type.
+/// Only meaningful for Mandelbox (which exposes minDistance/foldingLimit/sphereRadius
+/// as user-facing gesture-controllable parameters). Other types use neutral defaults.
+struct FractalShapeDefaults {
+    var minDistance: Float = 0.8
+    var foldingLimit: Float = 1.0
+    var sphereRadius: Float = 0.5
+    var fractalScale: Float = 2.8
+}
+
 // MARK: - Protocol
 
 protocol FractalTypeDescriptor {
@@ -23,6 +65,13 @@ protocol FractalTypeDescriptor {
     var supportedEffectTags: Set<EffectTag> { get }
     var isSelectableInUI: Bool { get }
     func defaultFormulaParams() -> FormulaParams
+
+    // Gesture configuration
+    var gestureRanges: GestureParamRanges { get }
+    var gestureRangesExtended: GestureParamRanges { get }
+    var grabScaleClamp: ClosedRange<Float> { get }
+    var defaultViewState: FractalViewDefaults { get }
+    var defaultShapeParams: FractalShapeDefaults { get }
 }
 
 // MARK: - Shared constants
@@ -46,6 +95,13 @@ extension FractalTypeDescriptor {
         fp.params = (0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0)
         return fp
     }
+
+    // ── Gesture defaults ──────────────────────────────────────────────
+    var gestureRanges: GestureParamRanges { .standard }
+    var gestureRangesExtended: GestureParamRanges { .extended }
+    var grabScaleClamp: ClosedRange<Float> { 0.001...500.0 }
+    var defaultViewState: FractalViewDefaults { FractalViewDefaults() }
+    var defaultShapeParams: FractalShapeDefaults { FractalShapeDefaults() }
 }
 
 // MARK: - Registry
@@ -111,6 +167,18 @@ private struct MandelbulbDescriptor: FractalTypeDescriptor {
         fp.params.0 = 8.0; fp.params.1 = 4.0; fp.params.2 = 1.0
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
+    }
+    var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
+    var defaultViewState: FractalViewDefaults {
+        let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+        let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
+        let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
+        return FractalViewDefaults(
+            position: SIMD3<Float>(0.1, 0.1, -0.9),
+            rotation: simd_normalize(qz * qy * qx),
+            detailScale: 0.25,
+            safetyBubbleEnabled: false
+        )
     }
 }
 

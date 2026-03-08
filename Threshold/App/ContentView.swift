@@ -347,12 +347,6 @@ struct ContentView: View {
                 }
             }
 
-            EffectSliderRow(icon: "waveform.path.ecg", label: "Gesture Smoothing",
-                value: $cache.gestureSmoothingFactor, range: 0.0...1.0,
-                enabled: .constant(true),
-                onChanged: { cache.push(\.gestureSmoothingFactor, value: cache.gestureSmoothingFactor) },
-                showToggle: false)
-
             Divider()
 
             // Scale slider with icon
@@ -376,26 +370,26 @@ struct ContentView: View {
                 HStack {
                     Label("Safety Bubble", systemImage: "shield.lefthalf.filled").font(.headline)
                     Spacer()
-                    Toggle("", isOn: $cache.safetyBubbleEnabled)
+                    Toggle("", isOn: $cache.safetyBubble.enabled)
                         .labelsHidden()
-                        .onChange(of: cache.safetyBubbleEnabled) { _, val in
+                        .onChange(of: cache.safetyBubble.enabled) { _, val in
                             cache.push(\.safetyBubbleEnabled, value: val)
                         }
                 }
                 Text("Prevents the camera from entering the fractal geometry. Works with all fractal types.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                if cache.safetyBubbleEnabled {
+                if cache.safetyBubble.enabled {
                     EffectSliderRow(icon: "circle.dashed", label: "Inner Radius",
-                        value: $cache.safetyBubbleRadius, range: 0.5...2.5,
+                        value: $cache.safetyBubble.radius, range: 0.5...2.5,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubbleRadius) },
+                        onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubble.radius) },
                         showToggle: false)
                     HStack {
                         Text("Shape"); Spacer()
                         Picker("Shape", selection: Binding<Int>(
-                            get: { cache.safetyBubbleShape < 0.5 ? 0 : 1 },
-                            set: { cache.safetyBubbleShape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubbleShape) }
+                            get: { cache.safetyBubble.shape < 0.5 ? 0 : 1 },
+                            set: { cache.safetyBubble.shape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubble.shape) }
                         )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
                         .pickerStyle(.segmented).frame(maxWidth: 160)
                     }
@@ -404,11 +398,11 @@ struct ContentView: View {
                     
                     EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
                         value: Binding<Float>(
-                            get: { UISettingsCache.blendValueToSlider(cache.safetyBubbleBlend) },
-                            set: { cache.safetyBubbleBlend = UISettingsCache.blendSliderToValue($0) }
+                            get: { UISettingsCache.blendValueToSlider(cache.safetyBubble.strength) },
+                            set: { cache.safetyBubble.strength = UISettingsCache.blendSliderToValue($0) }
                         ), range: 0.0...1.0,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubbleBlend) },
+                        onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubble.strength) },
                         showToggle: false)
                     Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
                         .font(.caption2)
@@ -513,8 +507,8 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
                     Button {
-                        cache.baseFractalIterations = preset.fractalIterations
-                        cache.baseMaxRaySteps = preset.raySteps
+                        cache.quality.baseFractalIterations = preset.fractalIterations
+                        cache.quality.baseMaxRaySteps = preset.raySteps
                         cache.push(\.baseFractalIterations, value: preset.fractalIterations)
                         cache.push(\.baseMaxRaySteps, value: preset.raySteps)
                         appModel.preparePipeline(iterations: preset.fractalIterations, raySteps: preset.raySteps)
@@ -526,25 +520,23 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 6)
                     }
                     .buttonStyle(.bordered)
-                    .tint(QualityPreset.detect(fractalIterations: cache.baseFractalIterations, raySteps: cache.baseMaxRaySteps) == preset ? .blue : .secondary)
+                    .tint(QualityPreset.detect(fractalIterations: cache.quality.baseFractalIterations, raySteps: cache.quality.baseMaxRaySteps) == preset ? .blue : .secondary)
                 }
             }
             Divider()
-            Toggle("Halton Jitter TAA", isOn: $cache.haltonJitterEnabled)
-                .onChange(of: cache.haltonJitterEnabled) { _, v in cache.push(\.haltonJitterEnabled, value: v) }
-            Toggle("Dynamic Render Quality", isOn: $cache.dynamicRenderQualityEnabled)
-                .onChange(of: cache.dynamicRenderQualityEnabled) { _, v in cache.push(\.dynamicRenderQualityEnabled, value: v) }
-            if cache.dynamicRenderQualityEnabled {
+            Toggle("Dynamic Render Quality", isOn: $cache.quality.dynamicRenderQualityEnabled)
+                .onChange(of: cache.quality.dynamicRenderQualityEnabled) { _, v in cache.push(\.dynamicRenderQualityEnabled, value: v) }
+            if cache.quality.dynamicRenderQualityEnabled {
                 qualityIndicator
                 HStack {
                     Text("Min Quality:").font(.caption)
-                    Slider(value: $cache.dynamicRenderQualityMin, in: 0.4...0.8, onEditingChanged: { e in if !e { cache.push(\.dynamicRenderQualityMin, value: cache.dynamicRenderQualityMin) } })
-                    Text("\(Int(cache.dynamicRenderQualityMin * 100))%").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
+                    Slider(value: $cache.quality.dynamicRenderQualityMin, in: 0.4...0.8, onEditingChanged: { e in if !e { cache.push(\.dynamicRenderQualityMin, value: cache.quality.dynamicRenderQualityMin) } })
+                    Text("\(Int(cache.quality.dynamicRenderQualityMin * 100))%").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
                 }
                 HStack {
                     Text("Max Quality:").font(.caption)
-                    Slider(value: $cache.dynamicRenderQualityMax, in: 0.8...1.0, onEditingChanged: { e in if !e { cache.push(\.dynamicRenderQualityMax, value: cache.dynamicRenderQualityMax) } })
-                    Text("\(Int(cache.dynamicRenderQualityMax * 100))%").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
+                    Slider(value: $cache.quality.dynamicRenderQualityMax, in: 0.8...1.0, onEditingChanged: { e in if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) } })
+                    Text("\(Int(cache.quality.dynamicRenderQualityMax * 100))%").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
                 }
             }
         }
@@ -765,7 +757,7 @@ struct ContentView: View {
     private var coloringGradientContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Gradient Coloring", systemImage: "paintbrush.fill").font(.headline)
-            GradientPreviewBar(gradient: cache.gradientColorMap)
+            GradientPreviewBar(gradient: cache.color.gradientState.gradient)
                 .frame(height: 28).clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(RoundedRectangle(cornerRadius: 6))
                 .onTapGesture { showStopsPopover = true }
@@ -782,7 +774,7 @@ struct ContentView: View {
                             Text(preset.displayName).font(.caption2).lineLimit(1)
                         }.frame(maxWidth: .infinity).padding(.vertical, 4)
                     }
-                    .buttonStyle(.bordered).tint(cache.gradientPreset == preset ? .blue : .secondary)
+                    .buttonStyle(.bordered).tint(cache.color.gradientState.gradientPreset == preset ? .blue : .secondary)
                 }
             }
             
@@ -796,7 +788,7 @@ struct ContentView: View {
                 .padding(.top, 4)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                     ForEach(Array(cache.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
-                        let isActive = cache.gradientPreset == nil && cache.gradientColorMap.id == saved.id
+                        let isActive = cache.color.gradientState.gradientPreset == nil && cache.color.gradientState.gradient.id == saved.id
                         Button {
                             cache.applySavedGradient(saved)
                         } label: {
@@ -843,7 +835,7 @@ struct ContentView: View {
                     Label("Edit Gradient", systemImage: "slider.horizontal.3")
                         .font(.caption)
                 }
-                .buttonStyle(.bordered).tint(cache.gradientPreset == nil ? .blue : .secondary)
+                .buttonStyle(.bordered).tint(cache.color.gradientState.gradientPreset == nil ? .blue : .secondary)
             }
         }
         .alert("Rename Gradient", isPresented: .init(
@@ -868,30 +860,30 @@ struct ContentView: View {
             HStack {
                 Label("Mapping Mode", systemImage: "target").font(.headline)
                 Spacer()
-                Picker("Mapping", selection: $cache.colorMappingMode) {
+                Picker("Mapping", selection: $cache.color.gradientState.gradient.mappingMode) {
                     ForEach(ColorMappingMode.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
                 }.pickerStyle(.menu).frame(maxWidth: 140)
-                .onChange(of: cache.colorMappingMode) { _, v in cache.push(\.colorMappingMode, value: v) }
+                .onChange(of: cache.color.gradientState.gradient.mappingMode) { _, v in cache.push(\.colorMappingMode, value: v) }
             }
 
             // Gradient transform controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "repeat", label: "Repeat",
-                    value: $cache.gradientRepeat, range: 0.1...5.0,
+                    value: $cache.color.gradientState.gradient.repeatCount, range: 0.1...5.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.gradientRepeat, value: cache.gradientRepeat) },
+                    onChanged: { cache.push(\.gradientRepeat, value: cache.color.gradientState.gradient.repeatCount) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "arrow.right", label: "Offset",
-                    value: $cache.gradientOffset, range: 0...1,
+                    value: $cache.color.gradientState.gradient.offset, range: 0...1,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.gradientOffset, value: cache.gradientOffset) },
+                    onChanged: { cache.push(\.gradientOffset, value: cache.color.gradientState.gradient.offset) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Smoothing",
-                    value: $cache.gradientSmoothing, range: 0...1,
+                    value: $cache.color.gradientState.gradient.smoothing, range: 0...1,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) },
+                    onChanged: { cache.push(\.gradientSmoothing, value: cache.color.gradientState.gradient.smoothing) },
                     showToggle: false)
             }
             .padding(10)
@@ -902,15 +894,15 @@ struct ContentView: View {
             // Color blend controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Color Mix",
-                    value: $cache.colorMix, range: 0...1.0,
+                    value: $cache.color.colorMix, range: 0...1.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorMix, value: cache.colorMix) },
+                    onChanged: { cache.push(\.colorMix, value: cache.color.colorMix) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "number", label: "Iterations",
-                    value: $cache.colorIterations, range: 4...16,
+                    value: $cache.color.colorIterations, range: 4...16,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorIterations, value: cache.colorIterations) },
+                    onChanged: { cache.push(\.colorIterations, value: cache.color.colorIterations) },
                     showToggle: false)
             }
             .padding(10)
@@ -926,21 +918,21 @@ struct ContentView: View {
             // Tone controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Contrast",
-                    value: $cache.colorSchemeContrast, range: 0.95...1.15,
+                    value: $cache.color.colorSchemeContrast, range: 0.95...1.15,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) },
+                    onChanged: { cache.push(\.colorSchemeContrast, value: cache.color.colorSchemeContrast) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
-                    value: $cache.colorSchemeVibrance, range: 0...1.0,
+                    value: $cache.color.colorSchemeVibrance, range: 0...1.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) },
+                    onChanged: { cache.push(\.colorSchemeVibrance, value: cache.color.colorSchemeVibrance) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Midtone Curve",
-                    value: $cache.colorSchemeCurve, range: -1.0...1.0,
+                    value: $cache.color.colorSchemeCurve, range: -1.0...1.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) },
+                    onChanged: { cache.push(\.colorSchemeCurve, value: cache.color.colorSchemeCurve) },
                     showToggle: false)
             }
             .padding(10)
@@ -949,15 +941,15 @@ struct ContentView: View {
             // Shadows & Highlights
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "shadow", label: "Shadows",
-                    value: $cache.colorSchemeShadows, range: -0.05...0.05,
+                    value: $cache.color.colorSchemeShadows, range: -0.05...0.05,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) },
+                    onChanged: { cache.push(\.colorSchemeShadows, value: cache.color.colorSchemeShadows) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Highlights",
-                    value: $cache.colorSchemeHighlights, range: -0.5...1.0,
+                    value: $cache.color.colorSchemeHighlights, range: -0.5...1.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) },
+                    onChanged: { cache.push(\.colorSchemeHighlights, value: cache.color.colorSchemeHighlights) },
                     showToggle: false)
             }
             .padding(10)
@@ -996,22 +988,22 @@ struct ContentView: View {
             // ── Atmosphere ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "light.max", label: "Glow",
-                    value: Binding(get: { cache.glowEffect.intensity }, set: { cache.glowEffect.intensity = $0 }),
+                    value: Binding(get: { cache.lighting.glowEffect.intensity }, set: { cache.lighting.glowEffect.intensity = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.glowEffect.enabled }, set: { cache.glowEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.glowEffect, value: cache.glowEffect) })
+                    enabled: Binding(get: { cache.lighting.glowEffect.enabled }, set: { cache.lighting.glowEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.glowEffect, value: cache.lighting.glowEffect) })
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
-                    value: Binding(get: { cache.bloomEffect.strength }, set: { cache.bloomEffect.strength = $0 }),
+                    value: Binding(get: { cache.lighting.bloomEffect.strength }, set: { cache.lighting.bloomEffect.strength = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.bloomEffect.enabled }, set: { cache.bloomEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.bloomEffect, value: cache.bloomEffect) })
+                    enabled: Binding(get: { cache.lighting.bloomEffect.enabled }, set: { cache.lighting.bloomEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.bloomEffect, value: cache.lighting.bloomEffect) })
                 Divider().padding(.leading, 114)
                 EffectSliderRow(icon: "cloud.fog.fill", label: "Fog",
-                    value: Binding(get: { cache.fogEffect.intensity }, set: { cache.fogEffect.intensity = $0 }),
+                    value: Binding(get: { cache.lighting.fogEffect.intensity }, set: { cache.lighting.fogEffect.intensity = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.fogEffect.enabled }, set: { cache.fogEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.fogEffect, value: cache.fogEffect) })
+                    enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.fogEffect, value: cache.lighting.fogEffect) })
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
@@ -1022,16 +1014,16 @@ struct ContentView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(LightingPreset.allCases, id: \.self) { preset in
-                                PresetCardButton(preset: preset, isSelected: cache.lightingPreset == preset) {
-                                    cache.lightingPreset = preset
+                                PresetCardButton(preset: preset, isSelected: cache.lighting.lightingPreset == preset) {
+                                    cache.lighting.lightingPreset = preset
                                     cache.push(\.lightingPreset, value: preset)
                                     cache.reloadLightingEffects()
                                 }
                             }
                         }.padding(.horizontal, 4)
                     }
-                    if cache.lightingPreset != .custom {
-                        Text(cache.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
+                    if cache.lighting.lightingPreset != .custom {
+                        Text(cache.lighting.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.top, 8)
@@ -1049,11 +1041,11 @@ struct ContentView: View {
             // ── Color Animation ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
-                    value: Binding(get: { cache.gradientCycleEffect.speed }, set: { cache.gradientCycleEffect.speed = $0 }),
+                    value: Binding(get: { cache.lighting.gradientCycleEffect.speed }, set: { cache.lighting.gradientCycleEffect.speed = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.gradientCycleEffect.enabled }, set: { cache.gradientCycleEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect) })
-                if cache.gradientCycleEffect.enabled {
+                    enabled: Binding(get: { cache.lighting.gradientCycleEffect.enabled }, set: { cache.lighting.gradientCycleEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect) })
+                if cache.lighting.gradientCycleEffect.enabled {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.caption)
@@ -1064,10 +1056,10 @@ struct ContentView: View {
                             .lineLimit(1)
                         Spacer()
                         Toggle("", isOn: Binding(
-                            get: { cache.gradientCycleEffect.mirrorLoop },
+                            get: { cache.lighting.gradientCycleEffect.mirrorLoop },
                             set: { newVal in
-                                cache.gradientCycleEffect.mirrorLoop = newVal
-                                cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
+                                cache.lighting.gradientCycleEffect.mirrorLoop = newVal
+                                cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect)
                             }))
                             .labelsHidden()
                             .toggleStyle(.switch)
@@ -1077,15 +1069,15 @@ struct ContentView: View {
                 }
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Hue Rotation",
-                    value: Binding(get: { cache.hueRotationEffect.speed }, set: { cache.hueRotationEffect.speed = $0 }),
+                    value: Binding(get: { cache.lighting.hueRotationEffect.speed }, set: { cache.lighting.hueRotationEffect.speed = $0 }),
                     range: 0...0.5,
-                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) })
+                    enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) })
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
-                    value: Binding(get: { cache.hueRotationEffect.intensity }, set: { cache.hueRotationEffect.intensity = $0 }),
+                    value: Binding(get: { cache.lighting.hueRotationEffect.intensity }, set: { cache.lighting.hueRotationEffect.intensity = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.hueRotationEffect.enabled }, set: { cache.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.hueRotationEffect) },
+                    enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) },
                     showToggle: false)
             }
             .padding(10)
@@ -1094,15 +1086,15 @@ struct ContentView: View {
             // ── Pulse ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "waveform.path.ecg", label: "Pulse Speed",
-                    value: Binding(get: { cache.pulseEffect.speed }, set: { cache.pulseEffect.speed = $0 }),
+                    value: Binding(get: { cache.lighting.pulseEffect.speed }, set: { cache.lighting.pulseEffect.speed = $0 }),
                     range: 0...2,
-                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) })
+                    enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.lighting.pulseEffect) })
                 EffectSliderRow(icon: "waveform.path", label: "Pulse Amount",
-                    value: Binding(get: { cache.pulseEffect.amount }, set: { cache.pulseEffect.amount = $0 }),
+                    value: Binding(get: { cache.lighting.pulseEffect.amount }, set: { cache.lighting.pulseEffect.amount = $0 }),
                     range: 0...1,
-                    enabled: Binding(get: { cache.pulseEffect.enabled }, set: { cache.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.pulseEffect) },
+                    enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
+                    onChanged: { cache.push(\.pulseEffect, value: cache.lighting.pulseEffect) },
                     showToggle: false)
             }
             .padding(10)
@@ -1116,10 +1108,10 @@ struct ContentView: View {
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Picker("", selection: Binding(
-                            get: { cache.polarRotationEffect.direction },
+                            get: { cache.lighting.polarRotationEffect.direction },
                             set: { newDir in
-                                cache.polarRotationEffect.direction = newDir
-                                cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                                cache.lighting.polarRotationEffect.direction = newDir
+                                cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
                             }
                         )) {
                             ForEach(PolarRotationDirection.allCases, id: \.self) { dir in
@@ -1129,12 +1121,12 @@ struct ContentView: View {
                         .pickerStyle(.segmented)
                         .frame(maxWidth: 180)
                     }
-                    if cache.polarRotationEffect.enabled {
+                    if cache.lighting.polarRotationEffect.enabled {
                         EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Speed",
-                            value: Binding(get: { cache.polarRotationEffect.speed }, set: { cache.polarRotationEffect.speed = $0 }),
+                            value: Binding(get: { cache.lighting.polarRotationEffect.speed }, set: { cache.lighting.polarRotationEffect.speed = $0 }),
                             range: 0...1,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.polarRotationEffect, value: cache.polarRotationEffect) },
+                            onChanged: { cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect) },
                             showToggle: false)
                     }
                 }
@@ -1178,9 +1170,9 @@ struct ContentView: View {
                     Label("Display", systemImage: "eye").font(.headline)
                     Spacer()
                 }
-                Toggle("Show Music Shortcuts", isOn: $cache.showMusicShortcuts)
-                    .onChange(of: cache.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
-                if cache.showMusicShortcuts {
+                Toggle("Show Music Shortcuts", isOn: $cache.display.showMusicShortcuts)
+                    .onChange(of: cache.display.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
+                if cache.display.showMusicShortcuts {
                     Text("Shows music reactivity controls in the parameter sensitivity panel.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -1253,17 +1245,17 @@ struct ContentView: View {
                         Label("Core Behavior", systemImage: "slider.horizontal.3")
                             .font(.subheadline.weight(.semibold))
 
-                    Toggle("Relative Gestures", isOn: $cache.useRelativeGestures)
-                        .onChange(of: cache.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
-                    Toggle("Extended Range", isOn: $cache.extendedGestureRange)
-                        .onChange(of: cache.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
-                    Toggle("Rotation Auto-Snap", isOn: $cache.rotationAutoSnap)
-                        .onChange(of: cache.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
-                    if cache.rotationAutoSnap {
+                    Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
+                        .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
+                    Toggle("Extended Range", isOn: $cache.gesture.extendedGestureRange)
+                        .onChange(of: cache.gesture.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+                    Toggle("Rotation Auto-Snap", isOn: $cache.gesture.rotationAutoSnap)
+                        .onChange(of: cache.gesture.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
+                    if cache.gesture.rotationAutoSnap {
                         EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Breakaway Angle (°)",
-                            value: $cache.rotationBreakawayDegrees, range: 0...45,
+                            value: $cache.gesture.rotationBreakawayDegrees, range: 0...45,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.rotationBreakawayDegrees, value: cache.rotationBreakawayDegrees) },
+                            onChanged: { cache.push(\.rotationBreakawayDegrees, value: cache.gesture.rotationBreakawayDegrees) },
                             showToggle: false)
                         Text("Rotation stays locked until your hands rotate past this angle, then engages smoothly.")
                             .font(.caption2)
@@ -1271,28 +1263,22 @@ struct ContentView: View {
                     }
 
                     EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Global Sensitivity",
-                        value: $cache.gestureSensitivity, range: 1...10,
+                        value: $cache.gesture.gestureSensitivity, range: 1...10,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) },
-                        showToggle: false)
-
-                    EffectSliderRow(icon: "waveform.path.ecg", label: "Gesture Smoothing",
-                        value: $cache.gestureSmoothingFactor, range: 0.0...1.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureSmoothingFactor, value: cache.gestureSmoothingFactor) },
+                        onChanged: { cache.push(\.gestureSensitivity, value: cache.gesture.gestureSensitivity) },
                         showToggle: false)
 
                     EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",
-                        value: $cache.translationSensitivity, range: 0.2...3.0,
+                        value: $cache.gesture.translationSensitivity, range: 0.2...3.0,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.translationSensitivity, value: cache.translationSensitivity) },
+                        onChanged: { cache.push(\.translationSensitivity, value: cache.gesture.translationSensitivity) },
                         showToggle: false)
 
-                    if cache.rotationAutoSnap {
+                    if cache.gesture.rotationAutoSnap {
                         EffectSliderRow(icon: "rotate.3d", label: "Snap Window (°)",
-                            value: $cache.rotationSnapWindowDegrees, range: 2...30,
+                            value: $cache.gesture.rotationSnapWindowDegrees, range: 2...30,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.rotationSnapWindowDegrees, value: cache.rotationSnapWindowDegrees) },
+                            onChanged: { cache.push(\.rotationSnapWindowDegrees, value: cache.gesture.rotationSnapWindowDegrees) },
                             showToggle: false)
                     }
                     }
@@ -1301,24 +1287,24 @@ struct ContentView: View {
 
                     // ── Menu Toggle (compact) ──
                     VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Menu Toggle Gesture", isOn: $cache.menuToggleGestureEnabled)
-                            .onChange(of: cache.menuToggleGestureEnabled) { _, v in
+                        Toggle("Menu Toggle Gesture", isOn: $cache.gesture.menuToggleGestureEnabled)
+                            .onChange(of: cache.gesture.menuToggleGestureEnabled) { _, v in
                                 cache.push(\.menuToggleGestureEnabled, value: v)
                             }
 
-                        if cache.menuToggleGestureEnabled {
+                        if cache.gesture.menuToggleGestureEnabled {
                             HStack {
-                                Label("Gesture", systemImage: cache.menuToggleGestureMode.icon)
+                                Label("Gesture", systemImage: cache.gesture.menuToggleGestureMode.icon)
                                     .font(.subheadline)
                                 Spacer()
-                                Picker("", selection: $cache.menuToggleGestureMode) {
+                                Picker("", selection: $cache.gesture.menuToggleGestureMode) {
                                     ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
                                         Text(mode.displayName).tag(mode)
                                     }
                                 }
                                 .pickerStyle(.menu)
                                 .frame(maxWidth: 180)
-                                .onChange(of: cache.menuToggleGestureMode) { _, v in
+                                .onChange(of: cache.gesture.menuToggleGestureMode) { _, v in
                                     cache.push(\.menuToggleGestureMode, value: v)
                                 }
                             }
@@ -1334,27 +1320,27 @@ struct ContentView: View {
                                 .font(.caption.weight(.semibold))
 
                             EffectSliderRow(icon: "hand.tap", label: "Hold Time",
-                                value: $cache.menuToggleHoldDuration, range: 0.05...0.6,
-                                enabled: .constant(cache.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.menuToggleHoldDuration) },
+                                value: $cache.gesture.menuToggleHoldDuration, range: 0.05...0.6,
+                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.gesture.menuToggleHoldDuration) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "timer", label: "Cooldown",
-                                value: $cache.menuToggleCooldown, range: 0.1...2.5,
-                                enabled: .constant(cache.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleCooldown, value: cache.menuToggleCooldown) },
+                                value: $cache.gesture.menuToggleCooldown, range: 0.1...2.5,
+                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleCooldown, value: cache.gesture.menuToggleCooldown) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "bolt.horizontal", label: "Activate",
-                                value: $cache.menuToggleActivateThreshold, range: 0.2...0.95,
-                                enabled: .constant(cache.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.menuToggleActivateThreshold) },
+                                value: $cache.gesture.menuToggleActivateThreshold, range: 0.2...0.95,
+                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.gesture.menuToggleActivateThreshold) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "arrow.down.to.line", label: "Release",
-                                value: $cache.menuToggleReleaseThreshold, range: 0.1...0.9,
-                                enabled: .constant(cache.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.menuToggleReleaseThreshold) },
+                                value: $cache.gesture.menuToggleReleaseThreshold, range: 0.1...0.9,
+                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.gesture.menuToggleReleaseThreshold) },
                                 showToggle: false)
 
                             Divider()
@@ -1363,51 +1349,51 @@ struct ContentView: View {
                                 .font(.caption.weight(.semibold))
 
                             EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Distance",
-                                value: $cache.gestureMinHandDistance, range: 0.02...0.25,
+                                value: $cache.gesture.gestureMinHandDistance, range: 0.02...0.25,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gestureMinHandDistance) },
+                                onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gesture.gestureMinHandDistance) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "arrow.left.and.right", label: "Max Distance",
-                                value: $cache.gestureMaxHandDistance, range: 0.2...1.2,
+                                value: $cache.gesture.gestureMaxHandDistance, range: 0.2...1.2,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gestureMaxHandDistance) },
+                                onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gesture.gestureMaxHandDistance) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "hand.draw", label: "Pinch Activate",
-                                value: $cache.twoHandPinchActivateThreshold, range: 0.2...0.98,
+                                value: $cache.gesture.twoHandPinchActivateThreshold, range: 0.2...0.98,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.twoHandPinchActivateThreshold) },
+                                onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.gesture.twoHandPinchActivateThreshold) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "hand.raised", label: "Pinch Release",
-                                value: $cache.twoHandPinchReleaseThreshold, range: 0.1...0.95,
+                                value: $cache.gesture.twoHandPinchReleaseThreshold, range: 0.1...0.95,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.twoHandPinchReleaseThreshold) },
+                                onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.gesture.twoHandPinchReleaseThreshold) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "hand.point.up.left", label: "Ring Activate",
-                                value: $cache.ringPinchActivateThreshold, range: 0.1...0.95,
+                                value: $cache.gesture.ringPinchActivateThreshold, range: 0.1...0.95,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.ringPinchActivateThreshold) },
+                                onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.gesture.ringPinchActivateThreshold) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "hand.point.up.braille", label: "Ring Release",
-                                value: $cache.ringPinchReleaseThreshold, range: 0.05...0.9,
+                                value: $cache.gesture.ringPinchReleaseThreshold, range: 0.05...0.9,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.ringPinchReleaseThreshold) },
+                                onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.gesture.ringPinchReleaseThreshold) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "play.circle", label: "Start Guard",
-                                value: $cache.gestureMaxStartHandDistance, range: 0.08...1.0,
+                                value: $cache.gesture.gestureMaxStartHandDistance, range: 0.08...1.0,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gestureMaxStartHandDistance) },
+                                onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gesture.gestureMaxStartHandDistance) },
                                 showToggle: false)
 
                             EffectSliderRow(icon: "checkmark.circle", label: "Active Guard",
-                                value: $cache.gestureMaxActiveHandDistance, range: 0.1...1.5,
+                                value: $cache.gesture.gestureMaxActiveHandDistance, range: 0.1...1.5,
                                 enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gestureMaxActiveHandDistance) },
+                                onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gesture.gestureMaxActiveHandDistance) },
                                 showToggle: false)
                         }
                     } label: {
@@ -1439,7 +1425,7 @@ struct ContentView: View {
     
     private var themeColor: Color {
         // Derive theme color from the current gradient preset
-        switch cache.gradientPreset {
+        switch cache.color.gradientState.gradientPreset {
         case .classic:    return Color(red: 0.8, green: 0.5, blue: 0.2)
         case .ocean:      return Color(red: 0.1, green: 0.5, blue: 0.9)
         case .fire:       return Color(red: 1.0, green: 0.4, blue: 0.1)
@@ -1633,30 +1619,30 @@ struct ContentView: View {
                 HStack { Image(systemName: "slider.horizontal.3").foregroundStyle(themeColor); Text("Quality Constraints").font(.headline) }
                 VStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
+                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
-                            get: { Float(cache.baseFractalIterations) },
-                            set: { cache.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
+                            get: { Float(cache.quality.baseFractalIterations) },
+                            set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
                         ), in: 4...32, step: 1)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
+                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
-                            get: { Float(cache.baseMaxRaySteps) },
-                            set: { cache.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
+                            get: { Float(cache.quality.baseMaxRaySteps) },
+                            set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
                         ), in: 32...1024, step: 16)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", cache.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
-                        Slider(value: $cache.dynamicRenderQualityMin, in: 0.1...0.8, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMin, value: cache.dynamicRenderQualityMin) }
+                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
+                        Slider(value: $cache.quality.dynamicRenderQualityMin, in: 0.1...0.8, step: 0.05, onEditingChanged: { e in
+                            if !e { cache.push(\.dynamicRenderQualityMin, value: cache.quality.dynamicRenderQualityMin) }
                         })
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", cache.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
-                        Slider(value: $cache.dynamicRenderQualityMax, in: 0.8...1.0, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMax, value: cache.dynamicRenderQualityMax) }
+                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
+                        Slider(value: $cache.quality.dynamicRenderQualityMax, in: 0.8...1.0, step: 0.05, onEditingChanged: { e in
+                            if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) }
                         })
                     }
                 }

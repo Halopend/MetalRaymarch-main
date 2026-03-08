@@ -14,7 +14,6 @@ struct GestureConfig: Codable, Equatable, Sendable {
 
     // Sensitivity & smoothing
     var gestureSensitivity: Float = 5.0          // 1.0 - 10.0
-    var gestureSmoothingFactor: Float = 0.5      // 0.0 - 1.0
     var useRelativeGestures: Bool = false
     var extendedGestureRange: Bool = false
     var translationSensitivity: Float = 1.0      // 0.2 - 3.0
@@ -64,7 +63,6 @@ struct GestureConfig: Codable, Equatable, Sendable {
 
     mutating func clamp() {
         gestureSensitivity = max(1.0, min(10.0, gestureSensitivity))
-        gestureSmoothingFactor = max(0.0, min(1.0, gestureSmoothingFactor))
         translationSensitivity = max(0.2, min(3.0, translationSensitivity))
         rotationSnapWindowDegrees = max(1.0, min(30.0, rotationSnapWindowDegrees))
         rotationBreakawayDegrees = max(0.0, min(45.0, rotationBreakawayDegrees))

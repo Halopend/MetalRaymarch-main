@@ -76,9 +76,9 @@ struct LightingEffectsSection: View {
                         ForEach(LightingPreset.allCases, id: \.self) { preset in
                             PresetCardButton(
                                 preset: preset,
-                                isSelected: cache.lightingPreset == preset
+                                isSelected: cache.lighting.lightingPreset == preset
                             ) {
-                                cache.lightingPreset = preset
+                                cache.lighting.lightingPreset = preset
                                 cache.push(\.lightingPreset, value: preset)
                                 // Reload effect values when preset changes
                                 cache.reloadLightingEffects()
@@ -88,8 +88,8 @@ struct LightingEffectsSection: View {
                     .padding(.horizontal, 4)
                 }
                 
-                if cache.lightingPreset != .custom {
-                    Text(cache.lightingPreset.description)
+                if cache.lighting.lightingPreset != .custom {
+                    Text(cache.lighting.lightingPreset.description)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -103,7 +103,7 @@ struct LightingEffectsSection: View {
                     Label("Lighting Style", systemImage: "sun.max.fill")
                         .font(.subheadline.weight(.medium))
                     Spacer()
-                    Text(cache.lightingSoftness < 0.3 ? "Sharp" : cache.lightingSoftness > 0.7 ? "Classic" : "Blended")
+                    Text(cache.color.lightingSoftness < 0.3 ? "Sharp" : cache.color.lightingSoftness > 0.7 ? "Classic" : "Blended")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -113,11 +113,11 @@ struct LightingEffectsSection: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Slider(value: Binding(
-                        get: { cache.lightingSoftness },
-                        set: { cache.lightingSoftness = $0 }
+                        get: { cache.color.lightingSoftness },
+                        set: { cache.color.lightingSoftness = $0 }
                     ), in: 0...1, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.lightingSoftness, value: cache.lightingSoftness)
+                            cache.push(\.lightingSoftness, value: cache.color.lightingSoftness)
                         }
                     })
                     Image(systemName: "cloud.fill")
@@ -151,33 +151,33 @@ struct LightingEffectsSection: View {
                 icon: "paintpalette.fill",
                 enabled: hueEnabledBinding,
                 onToggle: {
-                    cache.push(\.hueRotationEffect, value: cache.hueRotationEffect)
+                    cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect)
                 }
             ) {
                 VStack(spacing: 6) {
                     HStack {
                         Text("Speed")
                         Spacer()
-                        Text("\(cache.hueRotationEffect.speed, specifier: "%.2f")")
+                        Text("\(cache.lighting.hueRotationEffect.speed, specifier: "%.2f")")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     Slider(value: hueSpeedBinding, in: 0...0.5, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.hueRotationEffect, value: cache.hueRotationEffect)
+                            cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect)
                         }
                     })
                     
                     HStack {
                         Text("Intensity")
                         Spacer()
-                        Text("\(cache.hueRotationEffect.intensity, specifier: "%.2f")")
+                        Text("\(cache.lighting.hueRotationEffect.intensity, specifier: "%.2f")")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     Slider(value: hueIntensityBinding, in: 0...1, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.hueRotationEffect, value: cache.hueRotationEffect)
+                            cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect)
                         }
                     })
                 }
@@ -189,33 +189,33 @@ struct LightingEffectsSection: View {
                 icon: "waveform.path.ecg",
                 enabled: pulseEnabledBinding,
                 onToggle: {
-                    cache.push(\.pulseEffect, value: cache.pulseEffect)
+                    cache.push(\.pulseEffect, value: cache.lighting.pulseEffect)
                 }
             ) {
                 VStack(spacing: 6) {
                     HStack {
                         Text("Speed")
                         Spacer()
-                        Text("\(cache.pulseEffect.speed, specifier: "%.2f")")
+                        Text("\(cache.lighting.pulseEffect.speed, specifier: "%.2f")")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     Slider(value: pulseSpeedBinding, in: 0...2, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.pulseEffect, value: cache.pulseEffect)
+                            cache.push(\.pulseEffect, value: cache.lighting.pulseEffect)
                         }
                     })
                     
                     HStack {
                         Text("Amount")
                         Spacer()
-                        Text("\(cache.pulseEffect.amount, specifier: "%.2f")")
+                        Text("\(cache.lighting.pulseEffect.amount, specifier: "%.2f")")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                     Slider(value: pulseAmountBinding, in: 0...1, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.pulseEffect, value: cache.pulseEffect)
+                            cache.push(\.pulseEffect, value: cache.lighting.pulseEffect)
                         }
                     })
                 }
@@ -227,19 +227,19 @@ struct LightingEffectsSection: View {
                 icon: "light.max",
                 enabled: glowEnabledBinding,
                 onToggle: {
-                    cache.push(\.glowEffect, value: cache.glowEffect)
+                    cache.push(\.glowEffect, value: cache.lighting.glowEffect)
                 }
             ) {
                 HStack {
                     Text("Intensity")
                     Spacer()
-                    Text("\(cache.glowEffect.intensity, specifier: "%.2f")")
+                    Text("\(cache.lighting.glowEffect.intensity, specifier: "%.2f")")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(value: glowIntensityBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.glowEffect, value: cache.glowEffect)
+                        cache.push(\.glowEffect, value: cache.lighting.glowEffect)
                     }
                 })
             }
@@ -250,19 +250,19 @@ struct LightingEffectsSection: View {
                 icon: "sun.max.fill",
                 enabled: bloomEnabledBinding,
                 onToggle: {
-                    cache.push(\.bloomEffect, value: cache.bloomEffect)
+                    cache.push(\.bloomEffect, value: cache.lighting.bloomEffect)
                 }
             ) {
                 HStack {
                     Text("Strength")
                     Spacer()
-                    Text("\(cache.bloomEffect.strength, specifier: "%.2f")")
+                    Text("\(cache.lighting.bloomEffect.strength, specifier: "%.2f")")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(value: bloomStrengthBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.bloomEffect, value: cache.bloomEffect)
+                        cache.push(\.bloomEffect, value: cache.lighting.bloomEffect)
                     }
                 })
             }
@@ -273,19 +273,19 @@ struct LightingEffectsSection: View {
                 icon: "bolt.fill",
                 enabled: beatFlashEnabledBinding,
                 onToggle: {
-                    cache.push(\.beatFlashEffect, value: cache.beatFlashEffect)
+                    cache.push(\.beatFlashEffect, value: cache.lighting.beatFlashEffect)
                 }
             ) {
                 HStack {
                     Text("Intensity")
                     Spacer()
-                    Text("\(cache.beatFlashEffect.intensity, specifier: "%.2f")")
+                    Text("\(cache.lighting.beatFlashEffect.intensity, specifier: "%.2f")")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(value: beatFlashIntensityBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.beatFlashEffect, value: cache.beatFlashEffect)
+                        cache.push(\.beatFlashEffect, value: cache.lighting.beatFlashEffect)
                     }
                 })
                 Text("Orange edge glow synced to music beat")
@@ -299,19 +299,19 @@ struct LightingEffectsSection: View {
                 icon: "cloud.fog.fill",
                 enabled: fogEnabledBinding,
                 onToggle: {
-                    cache.push(\.fogEffect, value: cache.fogEffect)
+                    cache.push(\.fogEffect, value: cache.lighting.fogEffect)
                 }
             ) {
                 HStack {
                     Text("Density")
                     Spacer()
-                    Text("\(cache.fogEffect.intensity, specifier: "%.2f")")
+                    Text("\(cache.lighting.fogEffect.intensity, specifier: "%.2f")")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(value: fogIntensityBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.fogEffect, value: cache.fogEffect)
+                        cache.push(\.fogEffect, value: cache.lighting.fogEffect)
                     }
                 })
             }
@@ -322,19 +322,19 @@ struct LightingEffectsSection: View {
                 icon: "arrow.trianglehead.2.clockwise.rotate.90",
                 enabled: gradientCycleEnabledBinding,
                 onToggle: {
-                    cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
+                    cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect)
                 }
             ) {
                 HStack {
                     Text("Speed")
                     Spacer()
-                    Text("\(cache.gradientCycleEffect.speed, specifier: "%.2f")")
+                    Text("\(cache.lighting.gradientCycleEffect.speed, specifier: "%.2f")")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
                 Slider(value: gradientCycleSpeedBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.gradientCycleEffect, value: cache.gradientCycleEffect)
+                        cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect)
                     }
                 })
             }
@@ -348,7 +348,7 @@ struct LightingEffectsSection: View {
                     icon: "arrow.trianglehead.counterclockwise.rotate.90",
                     enabled: polarRotationEnabledBinding,
                     onToggle: {
-                        cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                        cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
                     }
                 ) {
                     VStack(spacing: 6) {
@@ -357,10 +357,10 @@ struct LightingEffectsSection: View {
                             Text("Direction")
                             Spacer()
                             Picker("", selection: Binding(
-                                get: { cache.polarRotationEffect.direction },
+                                get: { cache.lighting.polarRotationEffect.direction },
                                 set: { newDir in
-                                    cache.polarRotationEffect.direction = newDir
-                                    cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                                    cache.lighting.polarRotationEffect.direction = newDir
+                                    cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
                                 }
                             )) {
                                 ForEach(PolarRotationDirection.allCases, id: \.self) { dir in
@@ -371,17 +371,17 @@ struct LightingEffectsSection: View {
                             .frame(maxWidth: 180)
                         }
 
-                        if cache.polarRotationEffect.enabled {
+                        if cache.lighting.polarRotationEffect.enabled {
                             HStack {
                                 Text("Speed")
                                 Spacer()
-                                Text("\(cache.polarRotationEffect.speed, specifier: "%.2f")")
+                                Text("\(cache.lighting.polarRotationEffect.speed, specifier: "%.2f")")
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
                             }
                             Slider(value: polarRotationSpeedBinding, in: 0...1, onEditingChanged: { editing in
                                 if !editing {
-                                    cache.push(\.polarRotationEffect, value: cache.polarRotationEffect)
+                                    cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
                                 }
                             })
                         }
@@ -396,71 +396,71 @@ struct LightingEffectsSection: View {
     
     private var hueEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.hueRotationEffect.enabled },
-            set: { cache.hueRotationEffect.enabled = $0 }
+            get: { cache.lighting.hueRotationEffect.enabled },
+            set: { cache.lighting.hueRotationEffect.enabled = $0 }
         )
     }
     
     private var hueSpeedBinding: Binding<Float> {
         Binding(
-            get: { cache.hueRotationEffect.speed },
-            set: { cache.hueRotationEffect.speed = $0 }
+            get: { cache.lighting.hueRotationEffect.speed },
+            set: { cache.lighting.hueRotationEffect.speed = $0 }
         )
     }
     
     private var hueIntensityBinding: Binding<Float> {
         Binding(
-            get: { cache.hueRotationEffect.intensity },
-            set: { cache.hueRotationEffect.intensity = $0 }
+            get: { cache.lighting.hueRotationEffect.intensity },
+            set: { cache.lighting.hueRotationEffect.intensity = $0 }
         )
     }
     
     private var pulseEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.pulseEffect.enabled },
-            set: { cache.pulseEffect.enabled = $0 }
+            get: { cache.lighting.pulseEffect.enabled },
+            set: { cache.lighting.pulseEffect.enabled = $0 }
         )
     }
     
     private var pulseSpeedBinding: Binding<Float> {
         Binding(
-            get: { cache.pulseEffect.speed },
-            set: { cache.pulseEffect.speed = $0 }
+            get: { cache.lighting.pulseEffect.speed },
+            set: { cache.lighting.pulseEffect.speed = $0 }
         )
     }
     
     private var pulseAmountBinding: Binding<Float> {
         Binding(
-            get: { cache.pulseEffect.amount },
-            set: { cache.pulseEffect.amount = $0 }
+            get: { cache.lighting.pulseEffect.amount },
+            set: { cache.lighting.pulseEffect.amount = $0 }
         )
     }
     
     private var glowEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.glowEffect.enabled },
-            set: { cache.glowEffect.enabled = $0 }
+            get: { cache.lighting.glowEffect.enabled },
+            set: { cache.lighting.glowEffect.enabled = $0 }
         )
     }
     
     private var glowIntensityBinding: Binding<Float> {
         Binding(
-            get: { cache.glowEffect.intensity },
-            set: { cache.glowEffect.intensity = $0 }
+            get: { cache.lighting.glowEffect.intensity },
+            set: { cache.lighting.glowEffect.intensity = $0 }
         )
     }
     
     private var bloomEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.bloomEffect.enabled },
-            set: { cache.bloomEffect.enabled = $0 }
+            get: { cache.lighting.bloomEffect.enabled },
+            set: { cache.lighting.bloomEffect.enabled = $0 }
         )
     }
     
     private var bloomStrengthBinding: Binding<Float> {
         Binding(
-            get: { cache.bloomEffect.strength },
-            set: { cache.bloomEffect.strength = $0 }
+            get: { cache.lighting.bloomEffect.strength },
+            set: { cache.lighting.bloomEffect.strength = $0 }
         )
     }
     
@@ -468,43 +468,43 @@ struct LightingEffectsSection: View {
 
     private var beatFlashEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.beatFlashEffect.enabled },
-            set: { cache.beatFlashEffect.enabled = $0 }
+            get: { cache.lighting.beatFlashEffect.enabled },
+            set: { cache.lighting.beatFlashEffect.enabled = $0 }
         )
     }
 
     private var beatFlashIntensityBinding: Binding<Float> {
         Binding(
-            get: { cache.beatFlashEffect.intensity },
-            set: { cache.beatFlashEffect.intensity = $0 }
+            get: { cache.lighting.beatFlashEffect.intensity },
+            set: { cache.lighting.beatFlashEffect.intensity = $0 }
         )
     }
     
     private var fogEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.fogEffect.enabled },
-            set: { cache.fogEffect.enabled = $0 }
+            get: { cache.lighting.fogEffect.enabled },
+            set: { cache.lighting.fogEffect.enabled = $0 }
         )
     }
     
     private var fogIntensityBinding: Binding<Float> {
         Binding(
-            get: { cache.fogEffect.intensity },
-            set: { cache.fogEffect.intensity = $0 }
+            get: { cache.lighting.fogEffect.intensity },
+            set: { cache.lighting.fogEffect.intensity = $0 }
         )
     }
     
     private var gradientCycleEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.gradientCycleEffect.enabled },
-            set: { cache.gradientCycleEffect.enabled = $0 }
+            get: { cache.lighting.gradientCycleEffect.enabled },
+            set: { cache.lighting.gradientCycleEffect.enabled = $0 }
         )
     }
     
     private var gradientCycleSpeedBinding: Binding<Float> {
         Binding(
-            get: { cache.gradientCycleEffect.speed },
-            set: { cache.gradientCycleEffect.speed = $0 }
+            get: { cache.lighting.gradientCycleEffect.speed },
+            set: { cache.lighting.gradientCycleEffect.speed = $0 }
         )
     }
 
@@ -512,15 +512,15 @@ struct LightingEffectsSection: View {
 
     private var polarRotationEnabledBinding: Binding<Bool> {
         Binding(
-            get: { cache.polarRotationEffect.enabled },
-            set: { cache.polarRotationEffect.enabled = $0 }
+            get: { cache.lighting.polarRotationEffect.enabled },
+            set: { cache.lighting.polarRotationEffect.enabled = $0 }
         )
     }
 
     private var polarRotationSpeedBinding: Binding<Float> {
         Binding(
-            get: { cache.polarRotationEffect.speed },
-            set: { cache.polarRotationEffect.speed = $0 }
+            get: { cache.lighting.polarRotationEffect.speed },
+            set: { cache.lighting.polarRotationEffect.speed = $0 }
         )
     }
 }

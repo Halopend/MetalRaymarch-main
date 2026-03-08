@@ -3,7 +3,7 @@
 //  Threshold
 //
 //  Extracted from ContentView: gesture diagnostic status, finger assignments,
-//  and calibration controls with progressive disclosure.
+//  and controls with progressive disclosure.
 //
 
 import SwiftUI
@@ -73,26 +73,26 @@ struct GestureSettingsView: View {
                         .font(.subheadline.weight(.semibold))
 
                     Toggle("Relative Gestures", isOn: Binding(
-                        get: { cache.useRelativeGestures },
-                        set: { cache.useRelativeGestures = $0; cache.push(\.useRelativeGestures, value: $0) }
+                        get: { cache.gesture.useRelativeGestures },
+                        set: { cache.gesture.useRelativeGestures = $0; cache.push(\.useRelativeGestures, value: $0) }
                     ))
                     Toggle("Extended Range", isOn: Binding(
-                        get: { cache.extendedGestureRange },
-                        set: { cache.extendedGestureRange = $0; cache.push(\.extendedGestureRange, value: $0) }
+                        get: { cache.gesture.extendedGestureRange },
+                        set: { cache.gesture.extendedGestureRange = $0; cache.push(\.extendedGestureRange, value: $0) }
                     ))
 
                     EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Global Sensitivity",
-                        value: Binding(get: { cache.gestureSensitivity }, set: { cache.gestureSensitivity = $0 }),
+                        value: Binding(get: { cache.gesture.gestureSensitivity }, set: { cache.gesture.gestureSensitivity = $0 }),
                         range: 1...10,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureSensitivity, value: cache.gestureSensitivity) },
+                        onChanged: { cache.push(\.gestureSensitivity, value: cache.gesture.gestureSensitivity) },
                         showToggle: false)
 
                     EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",
-                        value: Binding(get: { cache.translationSensitivity }, set: { cache.translationSensitivity = $0 }),
+                        value: Binding(get: { cache.gesture.translationSensitivity }, set: { cache.gesture.translationSensitivity = $0 }),
                         range: 0.2...3.0,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.translationSensitivity, value: cache.translationSensitivity) },
+                        onChanged: { cache.push(\.translationSensitivity, value: cache.gesture.translationSensitivity) },
                         showToggle: false)
                 }
 
@@ -102,17 +102,17 @@ struct GestureSettingsView: View {
                 DisclosureGroup(isExpanded: $showMenuToggle) {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Menu Toggle Gesture", isOn: Binding(
-                            get: { cache.menuToggleGestureEnabled },
-                            set: { cache.menuToggleGestureEnabled = $0; cache.push(\.menuToggleGestureEnabled, value: $0) }
+                            get: { cache.gesture.menuToggleGestureEnabled },
+                            set: { cache.gesture.menuToggleGestureEnabled = $0; cache.push(\.menuToggleGestureEnabled, value: $0) }
                         ))
 
                         HStack {
-                            Label("Menu Gesture", systemImage: cache.menuToggleGestureMode.icon)
+                            Label("Menu Gesture", systemImage: cache.gesture.menuToggleGestureMode.icon)
                                 .font(.subheadline)
                             Spacer()
                             Picker("Menu Gesture", selection: Binding(
-                                get: { cache.menuToggleGestureMode },
-                                set: { cache.menuToggleGestureMode = $0; cache.push(\.menuToggleGestureMode, value: $0) }
+                                get: { cache.gesture.menuToggleGestureMode },
+                                set: { cache.gesture.menuToggleGestureMode = $0; cache.push(\.menuToggleGestureMode, value: $0) }
                             )) {
                                 ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
                                     Text(mode.displayName).tag(mode)
@@ -120,35 +120,35 @@ struct GestureSettingsView: View {
                             }
                             .pickerStyle(.menu)
                             .frame(maxWidth: 220)
-                            .disabled(!cache.menuToggleGestureEnabled)
+                            .disabled(!cache.gesture.menuToggleGestureEnabled)
                         }
 
                         EffectSliderRow(icon: "hand.tap", label: "Hold Time",
-                            value: Binding(get: { cache.menuToggleHoldDuration }, set: { cache.menuToggleHoldDuration = $0 }),
+                            value: Binding(get: { cache.gesture.menuToggleHoldDuration }, set: { cache.gesture.menuToggleHoldDuration = $0 }),
                             range: 0.05...0.6,
-                            enabled: .constant(cache.menuToggleGestureEnabled),
-                            onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.menuToggleHoldDuration) },
+                            enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                            onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.gesture.menuToggleHoldDuration) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "timer", label: "Cooldown",
-                            value: Binding(get: { cache.menuToggleCooldown }, set: { cache.menuToggleCooldown = $0 }),
+                            value: Binding(get: { cache.gesture.menuToggleCooldown }, set: { cache.gesture.menuToggleCooldown = $0 }),
                             range: 0.1...2.5,
-                            enabled: .constant(cache.menuToggleGestureEnabled),
-                            onChanged: { cache.push(\.menuToggleCooldown, value: cache.menuToggleCooldown) },
+                            enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                            onChanged: { cache.push(\.menuToggleCooldown, value: cache.gesture.menuToggleCooldown) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "bolt.horizontal", label: "Activate Threshold",
-                            value: Binding(get: { cache.menuToggleActivateThreshold }, set: { cache.menuToggleActivateThreshold = $0 }),
+                            value: Binding(get: { cache.gesture.menuToggleActivateThreshold }, set: { cache.gesture.menuToggleActivateThreshold = $0 }),
                             range: 0.2...0.95,
-                            enabled: .constant(cache.menuToggleGestureEnabled),
-                            onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.menuToggleActivateThreshold) },
+                            enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                            onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.gesture.menuToggleActivateThreshold) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "arrow.down.to.line", label: "Release Threshold",
-                            value: Binding(get: { cache.menuToggleReleaseThreshold }, set: { cache.menuToggleReleaseThreshold = $0 }),
+                            value: Binding(get: { cache.gesture.menuToggleReleaseThreshold }, set: { cache.gesture.menuToggleReleaseThreshold = $0 }),
                             range: 0.1...0.9,
-                            enabled: .constant(cache.menuToggleGestureEnabled),
-                            onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.menuToggleReleaseThreshold) },
+                            enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                            onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.gesture.menuToggleReleaseThreshold) },
                             showToggle: false)
                     }
                     .padding(.top, 6)
@@ -169,31 +169,31 @@ struct GestureSettingsView: View {
                             .padding(.top, 4)
 
                         EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Hand Distance",
-                            value: Binding(get: { cache.gestureMinHandDistance }, set: { cache.gestureMinHandDistance = $0 }),
+                            value: Binding(get: { cache.gesture.gestureMinHandDistance }, set: { cache.gesture.gestureMinHandDistance = $0 }),
                             range: 0.02...0.25,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gestureMinHandDistance) },
+                            onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gesture.gestureMinHandDistance) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "arrow.left.and.right", label: "Max Hand Distance",
-                            value: Binding(get: { cache.gestureMaxHandDistance }, set: { cache.gestureMaxHandDistance = $0 }),
+                            value: Binding(get: { cache.gesture.gestureMaxHandDistance }, set: { cache.gesture.gestureMaxHandDistance = $0 }),
                             range: 0.2...1.2,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gestureMaxHandDistance) },
+                            onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gesture.gestureMaxHandDistance) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "play.circle", label: "Start Distance Guard",
-                            value: Binding(get: { cache.gestureMaxStartHandDistance }, set: { cache.gestureMaxStartHandDistance = $0 }),
+                            value: Binding(get: { cache.gesture.gestureMaxStartHandDistance }, set: { cache.gesture.gestureMaxStartHandDistance = $0 }),
                             range: 0.08...1.0,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gestureMaxStartHandDistance) },
+                            onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gesture.gestureMaxStartHandDistance) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "checkmark.circle", label: "Active Distance Guard",
-                            value: Binding(get: { cache.gestureMaxActiveHandDistance }, set: { cache.gestureMaxActiveHandDistance = $0 }),
+                            value: Binding(get: { cache.gesture.gestureMaxActiveHandDistance }, set: { cache.gesture.gestureMaxActiveHandDistance = $0 }),
                             range: 0.1...1.5,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gestureMaxActiveHandDistance) },
+                            onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gesture.gestureMaxActiveHandDistance) },
                             showToggle: false)
 
                         Divider().padding(.vertical, 2)
@@ -204,31 +204,31 @@ struct GestureSettingsView: View {
                             .foregroundStyle(.secondary)
 
                         EffectSliderRow(icon: "hand.draw", label: "Pinch Activate",
-                            value: Binding(get: { cache.twoHandPinchActivateThreshold }, set: { cache.twoHandPinchActivateThreshold = $0 }),
+                            value: Binding(get: { cache.gesture.twoHandPinchActivateThreshold }, set: { cache.gesture.twoHandPinchActivateThreshold = $0 }),
                             range: 0.2...0.98,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.twoHandPinchActivateThreshold) },
+                            onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.gesture.twoHandPinchActivateThreshold) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "hand.raised", label: "Pinch Release",
-                            value: Binding(get: { cache.twoHandPinchReleaseThreshold }, set: { cache.twoHandPinchReleaseThreshold = $0 }),
+                            value: Binding(get: { cache.gesture.twoHandPinchReleaseThreshold }, set: { cache.gesture.twoHandPinchReleaseThreshold = $0 }),
                             range: 0.1...0.95,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.twoHandPinchReleaseThreshold) },
+                            onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.gesture.twoHandPinchReleaseThreshold) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "hand.point.up.left", label: "Ring Activate",
-                            value: Binding(get: { cache.ringPinchActivateThreshold }, set: { cache.ringPinchActivateThreshold = $0 }),
+                            value: Binding(get: { cache.gesture.ringPinchActivateThreshold }, set: { cache.gesture.ringPinchActivateThreshold = $0 }),
                             range: 0.1...0.95,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.ringPinchActivateThreshold) },
+                            onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.gesture.ringPinchActivateThreshold) },
                             showToggle: false)
 
                         EffectSliderRow(icon: "hand.point.up.braille", label: "Ring Release",
-                            value: Binding(get: { cache.ringPinchReleaseThreshold }, set: { cache.ringPinchReleaseThreshold = $0 }),
+                            value: Binding(get: { cache.gesture.ringPinchReleaseThreshold }, set: { cache.gesture.ringPinchReleaseThreshold = $0 }),
                             range: 0.05...0.9,
                             enabled: .constant(true),
-                            onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.ringPinchReleaseThreshold) },
+                            onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.gesture.ringPinchReleaseThreshold) },
                             showToggle: false)
                     }
                     .padding(.top, 6)

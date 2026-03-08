@@ -19,8 +19,6 @@ struct RenderSettingsSnapshot {
     let midLevel: Float
     let trebleLevel: Float
     let beatIntensity: Float
-    let visualizerMode: Int32
-    let visualizerIntensity: Float
     let foldingLimit: Float
     let sphereRadius: Float
     let colorIterations: Float

@@ -36,7 +36,7 @@ extension Renderer {
             // Menu interaction: 0.65 quality (UI responsiveness priority)
             // Gesture interaction: 0.55 quality (more aggressive — gestures cause rapid parameter
             // changes that invalidate per-frame work faster than menu hover)
-            if settings.isMenuInteractionActive || (settings.isGeometryGestureActive && settings.haltonJitterEnabled) {
+            if settings.isMenuInteractionActive || settings.isGeometryGestureActive {
                 let interactionQuality: Float = settings.isGeometryGestureActive ? 0.55 : 0.65
                 let clampedQuality = max(settings.dynamicRenderQualityMin, min(settings.dynamicRenderQualityMax, interactionQuality))
                 manager.setQuality(clampedQuality, layerRenderer: canUseResolutionScaling ? layerRenderer : nil)

@@ -606,19 +606,19 @@ struct MusicTabContent: View {
 
             // Master toggle
             Toggle("React to Music", isOn: Binding(
-                get: { cache.fractalAudioReactiveEnabled },
+                get: { cache.audioReactive.fractalAudioReactiveEnabled },
                 set: { isOn in
-                    cache.fractalAudioReactiveEnabled = isOn
+                    cache.audioReactive.fractalAudioReactiveEnabled = isOn
                     cache.push(\.fractalAudioReactiveEnabled, value: isOn)
                     if isOn {
                         // Auto-enable audio-reactive lighting
-                        cache.lightingMode = .audioReactive
+                        cache.display.lightingMode = .audioReactive
                         cache.push(\.lightingMode, value: .audioReactive)
                     }
                 }
             ))
 
-            if cache.fractalAudioReactiveEnabled {
+            if cache.audioReactive.fractalAudioReactiveEnabled {
                 // Genre presets (Fractal Forge–inspired)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Genre Presets")
@@ -644,14 +644,14 @@ struct MusicTabContent: View {
 
                 // Amount slider
                 sliderRow(label: "Amount", value: Binding(
-                    get: { cache.fractalAudioAmount },
-                    set: { v in cache.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
+                    get: { cache.audioReactive.fractalAudioAmount },
+                    set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
                 ), range: 0...1)
 
                 // Beat Punch slider
                 sliderRow(label: "Beat Punch", value: Binding(
-                    get: { cache.fractalBeatPunch },
-                    set: { v in cache.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
+                    get: { cache.audioReactive.fractalBeatPunch },
+                    set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
                 ), range: 0...1)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -700,7 +700,7 @@ struct MusicTabContent: View {
                         .controlSize(.small)
                     }
 
-                    ForEach(Array(cache.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                    ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
                         VStack(spacing: 6) {
                             // ── Header: toggle + name + trash ──
                             HStack(spacing: 8) {
@@ -899,12 +899,12 @@ struct MusicTabContent: View {
     private func applyPreset(_ preset: ReactivityPreset) {
         // Core sensitivity settings
         let s = preset.settings
-        cache.fractalAudioAmount = s.audioAmount
-        cache.fractalBeatPunch = s.beatPunch
-        cache.bassSensitivity = s.bassSensitivity
-        cache.midSensitivity = s.midSensitivity
-        cache.trebleSensitivity = s.trebleSensitivity
-        cache.beatSensitivity = s.beatSensitivity
+        cache.audioReactive.fractalAudioAmount = s.audioAmount
+        cache.audioReactive.fractalBeatPunch = s.beatPunch
+        cache.audioReactive.bassSensitivity = s.bassSensitivity
+        cache.audioReactive.midSensitivity = s.midSensitivity
+        cache.audioReactive.trebleSensitivity = s.trebleSensitivity
+        cache.audioReactive.beatSensitivity = s.beatSensitivity
         cache.push(\.fractalAudioAmount, value: s.audioAmount)
         cache.push(\.fractalBeatPunch, value: s.beatPunch)
         cache.push(\.bassSensitivity, value: s.bassSensitivity)
@@ -913,12 +913,12 @@ struct MusicTabContent: View {
         cache.push(\.beatSensitivity, value: s.beatSensitivity)
         
         let mappings = preset.defaultMappings(for: cache.fractalType)
-        cache.musicReactiveMappings = mappings
+        cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 
     private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
-        let existing = Set(cache.musicReactiveMappings.map(\.target))
+        let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.target))
         let formulaCount = MusicReactiveTarget.floatFormulaParams(for: cache.fractalType).count
         return MusicReactiveTarget.availableCases.filter { target in
             if existing.contains(target) { return false }
@@ -929,32 +929,32 @@ struct MusicTabContent: View {
     }
 
     private func mappingAt(_ index: Int) -> MusicReactiveMapping? {
-        guard cache.musicReactiveMappings.indices.contains(index) else { return nil }
-        return cache.musicReactiveMappings[index]
+        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return nil }
+        return cache.audioReactive.musicReactiveMappings[index]
     }
 
     private func updateMapping(_ index: Int, mutate: (inout MusicReactiveMapping) -> Void) {
-        guard cache.musicReactiveMappings.indices.contains(index) else { return }
-        var mappings = cache.musicReactiveMappings
+        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
+        var mappings = cache.audioReactive.musicReactiveMappings
         mutate(&mappings[index])
         mappings[index].sanitizeInPlace()
-        cache.musicReactiveMappings = mappings
+        cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 
     private func addMapping(_ target: MusicReactiveTarget) {
-        var mappings = cache.musicReactiveMappings
+        var mappings = cache.audioReactive.musicReactiveMappings
         guard !mappings.contains(where: { $0.target == target }) else { return }
         mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
-        cache.musicReactiveMappings = mappings
+        cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 
     private func removeMapping(at index: Int) {
-        guard cache.musicReactiveMappings.indices.contains(index) else { return }
-        var mappings = cache.musicReactiveMappings
+        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
+        var mappings = cache.audioReactive.musicReactiveMappings
         mappings.remove(at: index)
-        cache.musicReactiveMappings = mappings
+        cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 
@@ -979,13 +979,13 @@ struct MusicTabContent: View {
         guard !trimmed.isEmpty else { return }
         let preset = MusicReactivePreset(
             name: trimmed,
-            audioAmount: cache.fractalAudioAmount,
-            beatPunch: cache.fractalBeatPunch,
-            bassSensitivity: cache.bassSensitivity,
-            midSensitivity: cache.midSensitivity,
-            trebleSensitivity: cache.trebleSensitivity,
-            beatSensitivity: cache.beatSensitivity,
-            mappings: cache.musicReactiveMappings
+            audioAmount: cache.audioReactive.fractalAudioAmount,
+            beatPunch: cache.audioReactive.fractalBeatPunch,
+            bassSensitivity: cache.audioReactive.bassSensitivity,
+            midSensitivity: cache.audioReactive.midSensitivity,
+            trebleSensitivity: cache.audioReactive.trebleSensitivity,
+            beatSensitivity: cache.audioReactive.beatSensitivity,
+            mappings: cache.audioReactive.musicReactiveMappings
         )
         musicPresets.append(preset)
         persistMusicPresets()
@@ -993,13 +993,13 @@ struct MusicTabContent: View {
     }
 
     private func loadMusicPreset(_ preset: MusicReactivePreset) {
-        cache.fractalAudioAmount = preset.audioAmount
-        cache.fractalBeatPunch = preset.beatPunch
-        cache.bassSensitivity = preset.bassSensitivity
-        cache.midSensitivity = preset.midSensitivity
-        cache.trebleSensitivity = preset.trebleSensitivity
-        cache.beatSensitivity = preset.beatSensitivity
-        cache.musicReactiveMappings = preset.mappings
+        cache.audioReactive.fractalAudioAmount = preset.audioAmount
+        cache.audioReactive.fractalBeatPunch = preset.beatPunch
+        cache.audioReactive.bassSensitivity = preset.bassSensitivity
+        cache.audioReactive.midSensitivity = preset.midSensitivity
+        cache.audioReactive.trebleSensitivity = preset.trebleSensitivity
+        cache.audioReactive.beatSensitivity = preset.beatSensitivity
+        cache.audioReactive.musicReactiveMappings = preset.mappings
 
         cache.push(\.fractalAudioAmount, value: preset.audioAmount)
         cache.push(\.fractalBeatPunch, value: preset.beatPunch)

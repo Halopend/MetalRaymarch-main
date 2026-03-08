@@ -124,8 +124,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _midLevel: Float = 0.0              // Mid frequency energy (0-1)
     private var _trebleLevel: Float = 0.0           // Treble frequency energy (0-1)
     private var _beatIntensity: Float = 0.0         // Beat onset intensity (0-1)
-    private var _visualizerMode: Int32 = 0          // 0=off, 1=pulse, 2=waveform, 3=spectrum
-    private var _visualizerIntensity: Float = 0.5   // How much audio affects visuals (0-1)
     private var _bassSensitivity: Float = 1.0        // Multiplier for bass band (0-2)
     private var _midSensitivity: Float = 1.0         // Multiplier for mid band (0-2)
     private var _trebleSensitivity: Float = 1.0      // Multiplier for treble band (0-2)
@@ -133,18 +131,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioReactiveEnabled: Bool = loadBool("fractalAudioReactiveEnabled", default: true)
     private var _fractalAudioAmount: Float              = loadFloat("fractalAudioAmount", default: 0.6)
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
-    private var _fractalAudioAffectsScale: Bool         = loadBool("fractalAudioAffectsScale", default: true)
-    private var _fractalAudioAffectsFolding: Bool       = loadBool("fractalAudioAffectsFolding", default: true)
-    private var _fractalAudioAffectsRadius: Bool        = loadBool("fractalAudioAffectsRadius", default: true)
-    private var _fractalAudioAffectsColorMix: Bool      = loadBool("fractalAudioAffectsColorMix", default: true)
-    
-    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
-    private var _fractalAudioAffectsGlow: Bool          = loadBool("fractalAudioAffectsGlow", default: true)
-    private var _fractalAudioAffectsFog: Bool           = loadBool("fractalAudioAffectsFog", default: true)
-    private var _fractalAudioAffectsBloom: Bool         = loadBool("fractalAudioAffectsBloom", default: true)
-    private var _fractalAudioAffectsHueSpeed: Bool      = loadBool("fractalAudioAffectsHueSpeed", default: true)
-    private var _fractalAudioAffectsSaturation: Bool    = loadBool("fractalAudioAffectsSaturation", default: true)
-    private var _fractalAudioAffectsIterations: Bool    = loadBool("fractalAudioAffectsIterations", default: false)
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
     
     private var _foldingLimit: Float = 1.0
@@ -169,7 +155,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _rotationSnapWindowDegrees: Float = 6.0  // ±halfWindow snap threshold per axis (degrees)
     private var _rotationBreakawayDegrees: Float = loadFloat("rotationBreakawayDegrees", default: 12.0)
     private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
-    private var _gestureSmoothingFactor: Float       = loadFloat("gestureSmoothingFactor", default: 0.5)
     private var _menuToggleGestureEnabled: Bool        = loadBool("menuToggleGestureEnabled", default: true)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
@@ -306,11 +291,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _beatFlashEffect: BeatFlashEffect = .off
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
     
-    // === DOPPELGANGER MODE ===
-    private var _doppelgangerEnabled: Bool = false              // Pre-fold mirror creates structural twin
-    private var _doppelgangerPlane: SIMD3<Float> = SIMD3<Float>(1, 0, 0)  // Mirror plane normal (x-axis default)
-    private var _doppelgangerOffset: Float = 0.0               // Mirror plane distance from origin
-    
     // === GEOMETRY STABILITY STATE ===
     // Tracks whether geometry parameters have settled for optimization
     private var _geometryState: GeometryState = .dynamic
@@ -326,10 +306,6 @@ final class RenderSettings: @unchecked Sendable {
     // === GRADIENT COLORING SYSTEM ===
     // Replaces hardcoded palettes with user-editable gradient stops.
     private var _gradientState: GradientState = GradientState()
-    
-    // === GMT-FRACTALS: HALTON JITTER TEMPORAL AA ===
-    // Sub-pixel jitter for free temporal supersampling when geometry is stable
-    private var _haltonJitterEnabled: Bool = RenderSettings.loadBool("haltonJitterEnabled", default: true)
     
     // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
     // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
@@ -506,16 +482,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _beatIntensity = max(0.0, min(1.0, newValue)) } }
     }
     
-    var visualizerMode: Int32 {
-        get { withLock { _visualizerMode } }
-        set { withLock { _visualizerMode = newValue } }
-    }
-    
-    var visualizerIntensity: Float {
-        get { withLock { _visualizerIntensity } }
-        set { withLock { _visualizerIntensity = max(0.0, min(1.0, newValue)) } }
-    }
-    
     var bassSensitivity: Float {
         get { withLock { _bassSensitivity } }
         set { withLock { _bassSensitivity = max(0.0, min(2.0, newValue)) } }
@@ -562,142 +528,11 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    private func mappingEnabledLocked(_ target: MusicReactiveTarget) -> Bool {
-        _musicReactiveMappings.first(where: { $0.target == target })?.isEnabled ?? false
-    }
-
-    private func setMappingEnabledLocked(_ target: MusicReactiveTarget, enabled: Bool) {
-        if let index = _musicReactiveMappings.firstIndex(where: { $0.target == target }) {
-            _musicReactiveMappings[index].isEnabled = enabled
-        } else if enabled {
-            _musicReactiveMappings.append(target.defaultMapping(enabled: true))
-        }
-        _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(_musicReactiveMappings)
-    }
-
     var musicReactiveMappings: [MusicReactiveMapping] {
         get { withLock { _musicReactiveMappings } }
         set {
             withLock {
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-
-    var fractalAudioAffectsScale: Bool {
-        get { withLock { mappingEnabledLocked(.fractalScale) } }
-        set {
-            withLock {
-                _fractalAudioAffectsScale = newValue
-                setMappingEnabledLocked(.fractalScale, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-
-    var fractalAudioAffectsFolding: Bool {
-        get { withLock { mappingEnabledLocked(.formulaParam1) } }
-        set {
-            withLock {
-                _fractalAudioAffectsFolding = newValue
-                setMappingEnabledLocked(.formulaParam1, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-
-    var fractalAudioAffectsRadius: Bool {
-        get { withLock { mappingEnabledLocked(.formulaParam2) } }
-        set {
-            withLock {
-                _fractalAudioAffectsRadius = newValue
-                setMappingEnabledLocked(.formulaParam2, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-
-    var fractalAudioAffectsColorMix: Bool {
-        get { withLock { mappingEnabledLocked(.colorMix) } }
-        set {
-            withLock {
-                _fractalAudioAffectsColorMix = newValue
-                setMappingEnabledLocked(.colorMix, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-    
-    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
-    
-    /// Glow intensity responds to RMS energy + beat pulses (Fractal Forge: glow)
-    var fractalAudioAffectsGlow: Bool {
-        get { withLock { mappingEnabledLocked(.glow) } }
-        set {
-            withLock {
-                _fractalAudioAffectsGlow = newValue
-                setMappingEnabledLocked(.glow, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-    
-    /// Fog clears on loud passages, thickens on quiet (Fractal Forge: inverse energy)
-    var fractalAudioAffectsFog: Bool {
-        get { withLock { mappingEnabledLocked(.fog) } }
-        set {
-            withLock {
-                _fractalAudioAffectsFog = newValue
-                setMappingEnabledLocked(.fog, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-    
-    /// Bloom strength pulses with beats (Fractal Forge: beat bloom)
-    var fractalAudioAffectsBloom: Bool {
-        get { withLock { mappingEnabledLocked(.bloom) } }
-        set {
-            withLock {
-                _fractalAudioAffectsBloom = newValue
-                setMappingEnabledLocked(.bloom, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-    
-    /// Hue rotation speed driven by treble (Fractal Forge: brilliance → color speed)
-    var fractalAudioAffectsHueSpeed: Bool {
-        get { withLock { mappingEnabledLocked(.hueSpeed) } }
-        set {
-            withLock {
-                _fractalAudioAffectsHueSpeed = newValue
-                setMappingEnabledLocked(.hueSpeed, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-    
-    /// Color saturation responds to tonal/harmonic energy
-    var fractalAudioAffectsSaturation: Bool {
-        get { withLock { mappingEnabledLocked(.saturation) } }
-        set {
-            withLock {
-                _fractalAudioAffectsSaturation = newValue
-                setMappingEnabledLocked(.saturation, enabled: newValue)
-            }
-            persistAudioReactive()
-        }
-    }
-    
-    /// Fractal iterations increase with mid energy (detail on transients — caution: performance)
-    var fractalAudioAffectsIterations: Bool {
-        get { withLock { mappingEnabledLocked(.iterations) } }
-        set {
-            withLock {
-                _fractalAudioAffectsIterations = newValue
-                setMappingEnabledLocked(.iterations, enabled: newValue)
             }
             persistAudioReactive()
         }
@@ -944,14 +779,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    var gestureSmoothingFactor: Float {
-        get { withLock { _gestureSmoothingFactor } }
-        set {
-            let clamped = max(0.0, min(1.0, newValue))
-            withLock { _gestureSmoothingFactor = clamped }
-            persistGesture()
-        }
-    }
 
     /// Enable/disable the menu toggle gesture without disabling parameter gestures.
     var menuToggleGestureEnabled: Bool {
@@ -1549,38 +1376,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    // === DOPPELGANGER MODE ===
-    
-    /// Enable doppelganger pre-fold (creates structural twin)
-    var doppelgangerEnabled: Bool {
-        get { withLock { _doppelgangerEnabled } }
-        set { withLock { _doppelgangerEnabled = newValue } }
-    }
-    
-    /// Mirror plane normal (normalized direction vector)
-    var doppelgangerPlane: SIMD3<Float> {
-        get { withLock { _doppelgangerPlane } }
-        set { withLock { _doppelgangerPlane = simd_normalize(newValue) } }
-    }
-    
-    /// Mirror plane offset from origin along the plane normal
-    var doppelgangerOffset: Float {
-        get { withLock { _doppelgangerOffset } }
-        set { withLock { _doppelgangerOffset = newValue } }
-    }
-    
-    // === GMT-FRACTALS: HALTON JITTER TEMPORAL AA ===
-    
-    /// Enable Halton sub-pixel jitter for temporal anti-aliasing when geometry is stable.
-    /// Provides free supersampling at 90Hz via display persistence.
-    var haltonJitterEnabled: Bool {
-        get { withLock { _haltonJitterEnabled } }
-        set {
-            withLock { _haltonJitterEnabled = newValue }
-            SettingsPersistence.save(qualityConfig, domain: .quality)
-        }
-    }
-    
     // === GEOMETRY STABILITY STATE (read-only) ===
     
     /// Whether a geometry-affecting gesture is currently active (read-only).
@@ -1779,8 +1574,6 @@ final class RenderSettings: @unchecked Sendable {
                 midLevel: _midLevel,
                 trebleLevel: _trebleLevel,
                 beatIntensity: _beatIntensity,
-                visualizerMode: _visualizerMode,
-                visualizerIntensity: _visualizerIntensity,
                 foldingLimit: _foldingLimit,
                 sphereRadius: _sphereRadius,
                 colorIterations: _colorIterations,
@@ -1823,9 +1616,54 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    // === GESTURE TARGET VALUES ===
-    // UI/gestures set these asynchronously. Renderer interpolates current → target each frame.
-    // This cleanly separates: (1) intent (targets) from (2) animation (smoothing)
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Smoothing Pipeline (Target → Current → Snapshot → GPU)
+    // ═══════════════════════════════════════════════════════════════════════════
+    //
+    // ARCHITECTURE: Unified smoothing for gesture, music, and animation streams.
+    //
+    //   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+    //   │   Gesture    │   │    Music     │   │  Animation  │
+    //   │ Controller   │   │  Renderer   │   │   Manager   │
+    //   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘
+    //          │                   │                   │
+    //          ▼                   ▼                   ▼
+    //   ParameterOperation  ParameterOperation  Direct write
+    //          │                   │            to current values
+    //          ▼                   ▼                   │
+    //   ┌──────────────────────────────┐               │
+    //   │     ParameterLayerStack      │               │
+    //   │  (priority + exp lerp)       │               │
+    //   │  Geometry: bypass lerp (→0)  │               │
+    //   │  Effects:  apply lerp        │               │
+    //   └──────────────┬───────────────┘               │
+    //                  │                               │
+    //                  ▼                               │
+    //          _target* properties ◄────────────────────┘
+    //                  │
+    //                  ▼
+    //   ┌──────────────────────────┐
+    //   │   interpolateToTargets() │  ← called every frame @90Hz
+    //   │   smoothDamp (crit.      │
+    //   │   damped spring)         │
+    //   └──────────────┬───────────┘
+    //                  │
+    //                  ▼
+    //          _current values
+    //                  │
+    //                  ▼
+    //           snapshot() → GPU
+    //
+    // Key design decisions:
+    //  • Geometry params (minDist, fold, sphere, scale, position) use smoothDamp
+    //    for critically-damped spring physics — the smoothest possible motion.
+    //  • Effect params (glow, fog, bloom, hue, saturation) use LayerStack's
+    //    exponential lerp directly — adequate for non-positional values.
+    //  • Mandelbox bridge: formulaParams[0-2] → _target{MinDist,Fold,Sphere}
+    //    because the shader reads dedicated uniform fields, not formulaParams.
+    //  • Animation offset decay: when animation plays, gesture perturbations
+    //    exponentially decay to zero so animation reasserts as source of truth.
+    // ═══════════════════════════════════════════════════════════════════════════
     
     var targetMinDistance: Float {
         get { withLock { _targetMinDistance } }
@@ -2560,9 +2398,6 @@ final class RenderSettings: @unchecked Sendable {
                 c.scale = _scale
                 c.worldRotation = _worldRotation
                 c.detailScale = _detailScale
-                c.doppelgangerEnabled = _doppelgangerEnabled
-                c.doppelgangerPlane = _doppelgangerPlane
-                c.doppelgangerOffset = _doppelgangerOffset
                 return c
             }
         }
@@ -2578,9 +2413,6 @@ final class RenderSettings: @unchecked Sendable {
                 _scale = newValue.scale
                 _worldRotation = newValue.worldRotation
                 _detailScale = newValue.detailScale
-                _doppelgangerEnabled = newValue.doppelgangerEnabled
-                _doppelgangerPlane = newValue.doppelgangerPlane
-                _doppelgangerOffset = newValue.doppelgangerOffset
             }
         }
     }
@@ -2593,7 +2425,6 @@ final class RenderSettings: @unchecked Sendable {
                 c.baseMaxRaySteps = _baseMaxRaySteps
                 c.resolutionScale = _resolutionScale
                 c.tileSize = _tileSize
-                c.haltonJitterEnabled = _haltonJitterEnabled
                 c.dynamicRenderQualityEnabled = _dynamicRenderQualityEnabled
                 c.dynamicRenderQualityTarget = _dynamicRenderQualityTarget
                 c.dynamicRenderQualityMin = _dynamicRenderQualityMin
@@ -2616,7 +2447,6 @@ final class RenderSettings: @unchecked Sendable {
                 _maxRaySteps = newValue.baseMaxRaySteps
                 _resolutionScale = newValue.resolutionScale
                 _tileSize = newValue.tileSize
-                _haltonJitterEnabled = newValue.haltonJitterEnabled
                 _dynamicRenderQualityEnabled = newValue.dynamicRenderQualityEnabled
                 _dynamicRenderQualityTarget = newValue.dynamicRenderQualityTarget
                 _dynamicRenderQualityMin = newValue.dynamicRenderQualityMin
@@ -2721,19 +2551,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.midSensitivity = _midSensitivity
                 c.trebleSensitivity = _trebleSensitivity
                 c.beatSensitivity = _beatSensitivity
-                c.visualizerMode = _visualizerMode
-                c.visualizerIntensity = _visualizerIntensity
                 c.musicReactiveMappings = _musicReactiveMappings
-                c.fractalAudioAffectsScale = _fractalAudioAffectsScale
-                c.fractalAudioAffectsFolding = _fractalAudioAffectsFolding
-                c.fractalAudioAffectsRadius = _fractalAudioAffectsRadius
-                c.fractalAudioAffectsColorMix = _fractalAudioAffectsColorMix
-                c.fractalAudioAffectsGlow = _fractalAudioAffectsGlow
-                c.fractalAudioAffectsFog = _fractalAudioAffectsFog
-                c.fractalAudioAffectsBloom = _fractalAudioAffectsBloom
-                c.fractalAudioAffectsHueSpeed = _fractalAudioAffectsHueSpeed
-                c.fractalAudioAffectsSaturation = _fractalAudioAffectsSaturation
-                c.fractalAudioAffectsIterations = _fractalAudioAffectsIterations
                 return c
             }
         }
@@ -2746,19 +2564,7 @@ final class RenderSettings: @unchecked Sendable {
                 _midSensitivity = newValue.midSensitivity
                 _trebleSensitivity = newValue.trebleSensitivity
                 _beatSensitivity = newValue.beatSensitivity
-                _visualizerMode = newValue.visualizerMode
-                _visualizerIntensity = newValue.visualizerIntensity
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue.musicReactiveMappings)
-                _fractalAudioAffectsScale = newValue.fractalAudioAffectsScale
-                _fractalAudioAffectsFolding = newValue.fractalAudioAffectsFolding
-                _fractalAudioAffectsRadius = newValue.fractalAudioAffectsRadius
-                _fractalAudioAffectsColorMix = newValue.fractalAudioAffectsColorMix
-                _fractalAudioAffectsGlow = newValue.fractalAudioAffectsGlow
-                _fractalAudioAffectsFog = newValue.fractalAudioAffectsFog
-                _fractalAudioAffectsBloom = newValue.fractalAudioAffectsBloom
-                _fractalAudioAffectsHueSpeed = newValue.fractalAudioAffectsHueSpeed
-                _fractalAudioAffectsSaturation = newValue.fractalAudioAffectsSaturation
-                _fractalAudioAffectsIterations = newValue.fractalAudioAffectsIterations
             }
         }
     }
@@ -2769,7 +2575,6 @@ final class RenderSettings: @unchecked Sendable {
                 var c = GestureConfig()
                 c.gestureBindings = _gestureBindings
                 c.gestureSensitivity = _gestureSensitivity
-                c.gestureSmoothingFactor = _gestureSmoothingFactor
                 c.useRelativeGestures = _useRelativeGestures
                 c.extendedGestureRange = _extendedGestureRange
                 c.translationSensitivity = _translationSensitivity
@@ -2797,7 +2602,6 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 _gestureBindings = newValue.gestureBindings
                 _gestureSensitivity = newValue.gestureSensitivity
-                _gestureSmoothingFactor = newValue.gestureSmoothingFactor
                 _useRelativeGestures = newValue.useRelativeGestures
                 _extendedGestureRange = newValue.extendedGestureRange
                 _translationSensitivity = newValue.translationSensitivity

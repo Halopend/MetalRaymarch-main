@@ -195,31 +195,12 @@ class PresetManager {
 
     }
     
-    /// Update an existing preset
-    func updatePreset(_ preset: FractalPreset, settings: RenderSettings, thumbnailData: Data? = nil) {
-        guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
-        
-        // Recreate preset with proper ID preservation
-        var updated = createPresetWithID(preset.id, name: preset.name, createdAt: preset.createdAt, settings: settings, thumbnailData: thumbnailData ?? preset.thumbnailData)
-        updated.rating = presets[index].rating  // Preserve rating when updating settings
-        presets[index] = updated
-        FractalPreset.clearThumbnailCache(for: preset.id)
-        
-        scheduleSavePresets()
-    }
-
     /// Update rating for a preset (0-5)
     func updateRating(_ preset: FractalPreset, rating: Int) {
         guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
         let clamped = max(0, min(5, rating))
         presets[index].rating = clamped
         scheduleSavePresets()
-    }
-    
-    /// Helper to create preset with specific ID.
-    /// Delegates to FractalPreset.fromSettings() (uses config struct accessors).
-    private func createPresetWithID(_ id: UUID, name: String, createdAt: Date, settings: RenderSettings, thumbnailData: Data?) -> FractalPreset {
-        FractalPreset.fromSettings(settings, name: name, id: id, createdAt: createdAt, thumbnailData: thumbnailData)
     }
     
     /// Rename a preset
@@ -274,72 +255,6 @@ class PresetManager {
         }
     }
     
-    /// Import a preset from a file URL
-    func importPreset(from url: URL) -> FractalPreset? {
-        do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let importedPreset = try decoder.decode(FractalPreset.self, from: data)
-
-            // Generate new ID to avoid conflicts
-            var newPreset = FractalPreset(
-                id: UUID(),
-                name: importedPreset.name,
-                createdAt: Date(),
-                thumbnailData: importedPreset.thumbnailData
-            )
-
-            // Copy all settings from imported preset while keeping new id/date
-            newPreset.fractalIterations = importedPreset.fractalIterations
-            newPreset.maxRaySteps = importedPreset.maxRaySteps
-            newPreset.colorMix = importedPreset.colorMix
-            newPreset.colorIterations = importedPreset.colorIterations
-            newPreset.position = importedPreset.position
-            newPreset.scale = importedPreset.scale
-            newPreset.minDistance = importedPreset.minDistance
-            newPreset.fractalScale = importedPreset.fractalScale
-            newPreset.foldingLimit = importedPreset.foldingLimit
-            newPreset.sphereRadius = importedPreset.sphereRadius
-            newPreset.resolutionScale = importedPreset.resolutionScale
-            newPreset.tileSize = importedPreset.tileSize
-            newPreset.safetyBubbleEnabled = importedPreset.safetyBubbleEnabled
-            newPreset.safetyBubbleRadius = importedPreset.safetyBubbleRadius
-            newPreset.safetyBubbleShape = importedPreset.safetyBubbleShape
-            newPreset.safetyBubbleBlend = importedPreset.safetyBubbleBlend
-            newPreset.fractalType = importedPreset.fractalType
-            newPreset.colorSchemeSaturation = importedPreset.colorSchemeSaturation
-            newPreset.colorSchemeContrast = importedPreset.colorSchemeContrast
-            newPreset.colorSchemeGamma = importedPreset.colorSchemeGamma
-            newPreset.colorSchemeVibrance = importedPreset.colorSchemeVibrance
-            newPreset.colorSchemeCurve = importedPreset.colorSchemeCurve
-            newPreset.colorSchemeShadows = importedPreset.colorSchemeShadows
-            newPreset.colorSchemeHighlights = importedPreset.colorSchemeHighlights
-            newPreset.rating = importedPreset.rating
-            
-            // v2.0 modular lighting effects
-            newPreset.lightingMode = importedPreset.lightingMode
-            newPreset.lightingPreset = importedPreset.lightingPreset
-            newPreset.hueRotationEffect = importedPreset.hueRotationEffect
-            newPreset.pulseEffect = importedPreset.pulseEffect
-            newPreset.glowEffect = importedPreset.glowEffect
-            newPreset.bloomEffect = importedPreset.bloomEffect
-            newPreset.fogEffect = importedPreset.fogEffect
-            newPreset.gradientCycleEffect = importedPreset.gradientCycleEffect
-
-            // v2.1 gradient coloring system
-            newPreset.gradientState = importedPreset.gradientState
-            newPreset.lightingSoftness = importedPreset.lightingSoftness
-            
-            presets.insert(newPreset, at: 0)
-            scheduleSavePresets()
-            
-            return newPreset
-        } catch {
-            print("Failed to import preset: \(error)")
-            return nil
-        }
-    }
 }
 
 // MARK: - Default Presets (loaded from bundled preset JSON files)

@@ -23,7 +23,7 @@ struct GradientBrowserView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Gradient Coloring", systemImage: "paintbrush.fill").font(.headline)
-            GradientPreviewBar(gradient: cache.gradientColorMap)
+            GradientPreviewBar(gradient: cache.color.gradientState.gradient)
                 .frame(height: 28).clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(RoundedRectangle(cornerRadius: 6))
                 .onTapGesture { showStopsPopover = true }
@@ -40,7 +40,7 @@ struct GradientBrowserView: View {
                             Text(preset.displayName).font(.caption2).lineLimit(1)
                         }.frame(maxWidth: .infinity).padding(.vertical, 4)
                     }
-                    .buttonStyle(.bordered).tint(cache.gradientPreset == preset ? .blue : .secondary)
+                    .buttonStyle(.bordered).tint(cache.color.gradientState.gradientPreset == preset ? .blue : .secondary)
                 }
             }
 
@@ -54,7 +54,7 @@ struct GradientBrowserView: View {
                 .padding(.top, 4)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                     ForEach(Array(cache.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
-                        let isActive = cache.gradientPreset == nil && cache.gradientColorMap.id == saved.id
+                        let isActive = cache.color.gradientState.gradientPreset == nil && cache.color.gradientState.gradient.id == saved.id
                         Button {
                             cache.applySavedGradient(saved)
                         } label: {
@@ -101,7 +101,7 @@ struct GradientBrowserView: View {
                     Label("Edit Gradient", systemImage: "slider.horizontal.3")
                         .font(.caption)
                 }
-                .buttonStyle(.bordered).tint(cache.gradientPreset == nil ? .blue : .secondary)
+                .buttonStyle(.bordered).tint(cache.color.gradientState.gradientPreset == nil ? .blue : .secondary)
             }
         }
         .alert("Rename Gradient", isPresented: .init(
@@ -133,8 +133,8 @@ struct ColorMappingView: View {
                 Label("Mapping Mode", systemImage: "target").font(.headline)
                 Spacer()
                 Picker("Mapping", selection: Binding(
-                    get: { cache.colorMappingMode },
-                    set: { cache.colorMappingMode = $0; cache.push(\.colorMappingMode, value: $0) }
+                    get: { cache.color.gradientState.gradient.mappingMode },
+                    set: { cache.color.gradientState.gradient.mappingMode = $0; cache.push(\.colorMappingMode, value: $0) }
                 )) {
                     ForEach(ColorMappingMode.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
                 }.pickerStyle(.menu).frame(maxWidth: 140)
@@ -143,24 +143,24 @@ struct ColorMappingView: View {
             // Gradient transform controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "repeat", label: "Repeat",
-                    value: Binding(get: { cache.gradientRepeat }, set: { cache.gradientRepeat = $0 }),
+                    value: Binding(get: { cache.color.gradientState.gradient.repeatCount }, set: { cache.color.gradientState.gradient.repeatCount = $0 }),
                     range: 0.1...5.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.gradientRepeat, value: cache.gradientRepeat) },
+                    onChanged: { cache.push(\.gradientRepeat, value: cache.color.gradientState.gradient.repeatCount) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "arrow.right", label: "Offset",
-                    value: Binding(get: { cache.gradientOffset }, set: { cache.gradientOffset = $0 }),
+                    value: Binding(get: { cache.color.gradientState.gradient.offset }, set: { cache.color.gradientState.gradient.offset = $0 }),
                     range: 0...1,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.gradientOffset, value: cache.gradientOffset) },
+                    onChanged: { cache.push(\.gradientOffset, value: cache.color.gradientState.gradient.offset) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Smoothing",
-                    value: Binding(get: { cache.gradientSmoothing }, set: { cache.gradientSmoothing = $0 }),
+                    value: Binding(get: { cache.color.gradientState.gradient.smoothing }, set: { cache.color.gradientState.gradient.smoothing = $0 }),
                     range: 0...1,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.gradientSmoothing, value: cache.gradientSmoothing) },
+                    onChanged: { cache.push(\.gradientSmoothing, value: cache.color.gradientState.gradient.smoothing) },
                     showToggle: false)
             }
             .padding(10)
@@ -171,17 +171,17 @@ struct ColorMappingView: View {
             // Color blend controls
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Color Mix",
-                    value: Binding(get: { cache.colorMix }, set: { cache.colorMix = $0 }),
+                    value: Binding(get: { cache.color.colorMix }, set: { cache.color.colorMix = $0 }),
                     range: 0...1.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorMix, value: cache.colorMix) },
+                    onChanged: { cache.push(\.colorMix, value: cache.color.colorMix) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "number", label: "Iterations",
-                    value: Binding(get: { cache.colorIterations }, set: { cache.colorIterations = $0 }),
+                    value: Binding(get: { cache.color.colorIterations }, set: { cache.color.colorIterations = $0 }),
                     range: 4...16,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorIterations, value: cache.colorIterations) },
+                    onChanged: { cache.push(\.colorIterations, value: cache.color.colorIterations) },
                     showToggle: false)
             }
             .padding(10)
@@ -204,24 +204,24 @@ struct ColorGradingView: View {
             // Tone controls (always visible)
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Contrast",
-                    value: Binding(get: { cache.colorSchemeContrast }, set: { cache.colorSchemeContrast = $0 }),
+                    value: Binding(get: { cache.color.colorSchemeContrast }, set: { cache.color.colorSchemeContrast = $0 }),
                     range: 0.95...1.15,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeContrast, value: cache.colorSchemeContrast) },
+                    onChanged: { cache.push(\.colorSchemeContrast, value: cache.color.colorSchemeContrast) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "paintpalette.fill", label: "Vibrance",
-                    value: Binding(get: { cache.colorSchemeVibrance }, set: { cache.colorSchemeVibrance = $0 }),
+                    value: Binding(get: { cache.color.colorSchemeVibrance }, set: { cache.color.colorSchemeVibrance = $0 }),
                     range: 0...1.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeVibrance, value: cache.colorSchemeVibrance) },
+                    onChanged: { cache.push(\.colorSchemeVibrance, value: cache.color.colorSchemeVibrance) },
                     showToggle: false)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "waveform.path", label: "Midtone Curve",
-                    value: Binding(get: { cache.colorSchemeCurve }, set: { cache.colorSchemeCurve = $0 }),
+                    value: Binding(get: { cache.color.colorSchemeCurve }, set: { cache.color.colorSchemeCurve = $0 }),
                     range: -1.0...1.0,
                     enabled: .constant(true),
-                    onChanged: { cache.push(\.colorSchemeCurve, value: cache.colorSchemeCurve) },
+                    onChanged: { cache.push(\.colorSchemeCurve, value: cache.color.colorSchemeCurve) },
                     showToggle: false)
             }
             .padding(10)
@@ -231,17 +231,17 @@ struct ColorGradingView: View {
             DisclosureGroup(isExpanded: $showShadowsHighlights) {
                 VStack(spacing: 4) {
                     EffectSliderRow(icon: "shadow", label: "Shadows",
-                        value: Binding(get: { cache.colorSchemeShadows }, set: { cache.colorSchemeShadows = $0 }),
+                        value: Binding(get: { cache.color.colorSchemeShadows }, set: { cache.color.colorSchemeShadows = $0 }),
                         range: -0.05...0.05,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.colorSchemeShadows, value: cache.colorSchemeShadows) },
+                        onChanged: { cache.push(\.colorSchemeShadows, value: cache.color.colorSchemeShadows) },
                         showToggle: false)
                     Divider().padding(.leading, 159)
                     EffectSliderRow(icon: "sun.max.fill", label: "Highlights",
-                        value: Binding(get: { cache.colorSchemeHighlights }, set: { cache.colorSchemeHighlights = $0 }),
+                        value: Binding(get: { cache.color.colorSchemeHighlights }, set: { cache.color.colorSchemeHighlights = $0 }),
                         range: -0.5...1.0,
                         enabled: .constant(true),
-                        onChanged: { cache.push(\.colorSchemeHighlights, value: cache.colorSchemeHighlights) },
+                        onChanged: { cache.push(\.colorSchemeHighlights, value: cache.color.colorSchemeHighlights) },
                         showToggle: false)
                 }
                 .padding(.top, 6)

@@ -351,10 +351,6 @@ class UsageAnalytics: ObservableObject {
         usedHandGestures = true
     }
     
-    /// Mark that recording was used
-    func trackRecordingUsed() {
-        usedRecording = true
-    }
     
     /// Mark that SharePlay was used
     func trackSharePlayUsed() {
@@ -601,37 +597,4 @@ class UsageAnalytics: ObservableObject {
         await uploadSnapshot()
     }
     
-    /// Reset accumulators for new session
-    func startNewSession() {
-        sessionStartTime = Date()
-        lastSampleTime = Date()
-        totalSessionTime = 0
-        qualityTimeAccum = [:]
-        gradientPresetUsageAccum = [:]
-        fractalTypeTimeAccum = [:]
-        gradientPresetTimeAccum = [:]
-        lightingPresetTimeAccum = [:]
-        fractalScaleAccum = 0
-        foldingLimitAccum = 0
-        sphereRadiusAccum = 0
-        minDistanceAccum = 0
-        colorMixAccum = 0
-        glowIntensityAccum = 0
-        safetyBubbleRadiusAccum = 0
-        bloomStrengthAccum = 0
-        fogIntensityAccum = 0
-        fpsAccum = 0
-        renderQualityAccum = 0
-        sampleCount = 0
-        usedAudioReactive = false
-        usedHandGestures = false
-        usedRecording = false
-        usedSharePlay = false
-        usedGradientColoring = false
-        usedAnimation = false
-        presetsLoaded = 0
-        presetsSaved = 0
-        presetLoadCounts = [:]
-        lastUploadTime = Date()
-    }
 }

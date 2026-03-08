@@ -32,36 +32,36 @@ struct DeveloperToolsView: View {
                 HStack { Image(systemName: "slider.horizontal.3").foregroundStyle(themeColor); Text("Quality Constraints").font(.headline) }
                 VStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
+                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
-                            get: { Float(cache.baseFractalIterations) },
-                            set: { cache.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
+                            get: { Float(cache.quality.baseFractalIterations) },
+                            set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
                         ), in: 4...32, step: 1)
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
+                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
-                            get: { Float(cache.baseMaxRaySteps) },
-                            set: { cache.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
+                            get: { Float(cache.quality.baseMaxRaySteps) },
+                            set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
                         ), in: 32...1024, step: 16)
                     }
                     Divider()
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", cache.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
+                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
                         Slider(value: Binding(
-                            get: { cache.dynamicRenderQualityMin },
-                            set: { cache.dynamicRenderQualityMin = $0 }
+                            get: { cache.quality.dynamicRenderQualityMin },
+                            set: { cache.quality.dynamicRenderQualityMin = $0 }
                         ), in: 0.1...0.8, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMin, value: cache.dynamicRenderQualityMin) }
+                            if !e { cache.push(\.dynamicRenderQualityMin, value: cache.quality.dynamicRenderQualityMin) }
                         })
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", cache.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
+                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
                         Slider(value: Binding(
-                            get: { cache.dynamicRenderQualityMax },
-                            set: { cache.dynamicRenderQualityMax = $0 }
+                            get: { cache.quality.dynamicRenderQualityMax },
+                            set: { cache.quality.dynamicRenderQualityMax = $0 }
                         ), in: 0.8...1.0, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMax, value: cache.dynamicRenderQualityMax) }
+                            if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) }
                         })
                     }
                 }

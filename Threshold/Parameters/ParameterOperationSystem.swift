@@ -290,18 +290,13 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         applyCore(operation, settings: settings, layer: layer)
     }
 
-    /// Core parameters that already have smoothDamp in `interpolateToTargets()`.
-    /// For these, the layer stack resolves priority (which source wins) but does NOT
-    /// add its own exponential lerp — that caused double-smoothing and stall bugs
-    /// where the partially-lerped value froze when operations stopped arriving.
-    private static let smoothDampedCoreIDs: Set<String> = [
-        "core.targetFractalScale"
-    ]
-
-    /// IDs of core parameters that the animation system drives directly.
-    /// During animation playback, non-animation sources are blocked from writing
-    /// these to prevent flicker from competing writes.
-    private static let animationControlledCoreIDs: Set<String> = [
+    /// Core parameters that use smoothDamp in `interpolateToTargets()` instead of
+    /// the layer stack's exponential lerp. For these IDs:
+    /// 1. Layer stack smoothing is bypassed (smoothingTime=0) to avoid double-smoothing.
+    /// 2. Non-animation writes are blocked during animation playback to prevent flicker.
+    /// NOTE: Mandelbox formula params 0-2 share this same semantic but are handled
+    /// in the formula path via `useSmoothDampBridge` (see `apply()`).
+    private static let smoothDampBridgedCoreIDs: Set<String> = [
         "core.targetFractalScale"
     ]
 
@@ -309,17 +304,13 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         guard let settings else { return }
         guard let descriptor = coreDescriptors[operation.targetID] else { return }
 
-        // During animation playback, block non-animation writes to parameters
-        // the animation system controls. This prevents the tug-of-war flicker
-        // where a slider/gesture overwrites a target that the animation is
-        // actively driving each frame.
-        if settings.isAnimationPlaying && operation.source != .animation {
-            if Self.animationControlledCoreIDs.contains(operation.targetID) {
-                return
-            }
-        }
+        let isSmoothDampBridged = Self.smoothDampBridgedCoreIDs.contains(operation.targetID)
 
-        let bypassLayerSmoothing = Self.smoothDampedCoreIDs.contains(operation.targetID)
+        // smoothDamp-bridged params are driven by animation via interpolateToTargets().
+        // Block non-animation writes during playback to prevent tug-of-war flicker.
+        if isSmoothDampBridged && settings.isAnimationPlaying && operation.source != .animation {
+            return
+        }
 
         var stack = coreStacks[operation.targetID]
 
@@ -333,12 +324,11 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let current = stack?.resolvedValue(at: operation.timestamp) ?? descriptor.read(settings)
         let incoming = operation.value.resolved(from: current)
 
-        if bypassLayerSmoothing {
-            // smoothDamp in interpolateToTargets() handles animation, so bypass the
-            // layer stack's own exponential lerp (smoothingTime=0). However, use the
-            // stack's *resolved* value for the write so that the music layer's
-            // additive offset is correctly combined with the base (gesture/slider)
-            // value instead of overwriting it with the raw incoming offset.
+        if isSmoothDampBridged {
+            // smoothDamp in interpolateToTargets() handles smoothing, so bypass the
+            // layer stack's own exponential lerp (smoothingTime=0). Still use the
+            // stack's *resolved* value so music layer offsets combine correctly
+            // with the base (gesture/slider) value.
             let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: 0, timestamp: operation.timestamp)
                 ?? min(descriptor.range.upperBound, max(descriptor.range.lowerBound, incoming))
             descriptor.write(settings, resolved)

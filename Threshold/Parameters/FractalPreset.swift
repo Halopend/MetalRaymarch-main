@@ -68,11 +68,6 @@ struct FractalPreset: Codable, Identifiable {
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
     
-    // === DOPPELGANGER MODE ===
-    var doppelgangerEnabled: Bool?
-    var doppelgangerPlane: SIMD3<Float>?
-    var doppelgangerOffset: Float?
-    
     // === COLOR SCHEME AUTO-TRANSITION ===
     var colorSchemeAutoTransition: Bool?
     var colorSchemeAutoInterval: Float?
@@ -92,8 +87,6 @@ struct FractalPreset: Codable, Identifiable {
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
-        // Doppelganger
-        case doppelgangerEnabled, doppelgangerPlane, doppelgangerOffset
         // Color scheme auto-transition
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
@@ -176,11 +169,6 @@ struct FractalPreset: Codable, Identifiable {
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
         
-        // Doppelganger
-        doppelgangerEnabled = try container.decodeIfPresent(Bool.self, forKey: .doppelgangerEnabled)
-        doppelgangerPlane = try container.decodeIfPresent(SIMD3<Float>.self, forKey: .doppelgangerPlane)
-        doppelgangerOffset = try container.decodeIfPresent(Float.self, forKey: .doppelgangerOffset)
-        
         // Color scheme auto-transition
         colorSchemeAutoTransition = try container.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition)
         colorSchemeAutoInterval = try container.decodeIfPresent(Float.self, forKey: .colorSchemeAutoInterval)
@@ -236,11 +224,6 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
-        
-        // Doppelganger
-        try container.encodeIfPresent(doppelgangerEnabled, forKey: .doppelgangerEnabled)
-        try container.encodeIfPresent(doppelgangerPlane, forKey: .doppelgangerPlane)
-        try container.encodeIfPresent(doppelgangerOffset, forKey: .doppelgangerOffset)
         
         // Color scheme auto-transition
         try container.encodeIfPresent(colorSchemeAutoTransition, forKey: .colorSchemeAutoTransition)
@@ -334,9 +317,6 @@ struct FractalPreset: Codable, Identifiable {
         preset.sphereRadius = geo.sphereRadius
         preset.position = geo.position
         preset.scale = geo.scale
-        preset.doppelgangerEnabled = geo.doppelgangerEnabled
-        preset.doppelgangerPlane = geo.doppelgangerPlane
-        preset.doppelgangerOffset = geo.doppelgangerOffset
         // Capture formula params as [Float] for Codable
         var vals = [Float](repeating: 0, count: 16)
         for i in 0..<16 { vals[i] = FormulaCatalog.getParam(geo.formulaParams, index: i) }
@@ -490,17 +470,6 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let gradientCycleEffect = gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
-        }
-        
-        // Doppelganger
-        if let doppelgangerEnabled = doppelgangerEnabled {
-            settings.doppelgangerEnabled = doppelgangerEnabled
-        }
-        if let doppelgangerPlane = doppelgangerPlane {
-            settings.doppelgangerPlane = doppelgangerPlane
-        }
-        if let doppelgangerOffset = doppelgangerOffset {
-            settings.doppelgangerOffset = doppelgangerOffset
         }
         
         // Color scheme auto-transition

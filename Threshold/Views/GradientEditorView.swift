@@ -48,7 +48,7 @@ struct GradientStopsPopover: View {
             }
             
             // ── Gradient live preview ──
-            GradientPreviewBar(gradient: cache.gradientColorMap)
+            GradientPreviewBar(gradient: cache.color.gradientState.gradient)
                 .frame(height: 24)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
@@ -63,13 +63,13 @@ struct GradientStopsPopover: View {
                 Text("Color Stops")
                     .font(.subheadline.weight(.medium))
                 Spacer()
-                Text("\(cache.gradientColorMap.stops.count)/8")
+                Text("\(cache.color.gradientState.gradient.stops.count)/8")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             
             // ── Stop rows ──
-            ForEach(Array(cache.gradientColorMap.stops.enumerated()), id: \.element.id) { index, stop in
+            ForEach(Array(cache.color.gradientState.gradient.stops.enumerated()), id: \.element.id) { index, stop in
                 GradientStopRow(
                     stop: stop,
                     index: index,
@@ -79,7 +79,7 @@ struct GradientStopsPopover: View {
                     onDelete: {
                         deleteStop(at: index)
                     },
-                    canDelete: cache.gradientColorMap.stops.count > 2
+                    canDelete: cache.color.gradientState.gradient.stops.count > 2
                 )
             }
             
@@ -97,7 +97,7 @@ struct GradientStopsPopover: View {
             }
             .buttonStyle(.bordered)
             .tint(.blue)
-            .disabled(cache.gradientColorMap.stops.count >= 8)
+            .disabled(cache.color.gradientState.gradient.stops.count >= 8)
             
             // ── Saved confirmation ──
             if showSavedConfirmation {
@@ -114,7 +114,7 @@ struct GradientStopsPopover: View {
         .padding(16)
         .frame(minWidth: 320, idealWidth: 370)
         .onAppear {
-            gradientName = cache.gradientColorMap.name
+            gradientName = cache.color.gradientState.gradient.name
         }
         .animation(.easeInOut(duration: 0.25), value: showSavedConfirmation)
     }
@@ -124,11 +124,11 @@ struct GradientStopsPopover: View {
         guard !trimmed.isEmpty else { return }
         
         // Update the live gradient name first
-        var map = cache.gradientColorMap
+        var map = cache.color.gradientState.gradient
         map = GradientColorMap(name: trimmed, stops: map.stops,
                                 mappingMode: map.mappingMode, repeatCount: map.repeatCount,
                                 offset: map.offset, smoothing: map.smoothing)
-        cache.gradientColorMap = map
+        cache.color.gradientState.gradient = map
         cache.pushGradientMap(map)
         
         // Save to custom list
@@ -143,14 +143,14 @@ struct GradientStopsPopover: View {
     }
     
     private func addStop() {
-        var map = cache.gradientColorMap
+        var map = cache.color.gradientState.gradient
         // Place new stop at the midpoint of the largest gap
         let newPos = findLargestGap(in: map.stops)
         let color = map.evaluate(at: newPos)  // Sample existing gradient for a sensible default
         let newStop = GradientStop(position: newPos, color: color)
         map.stops.append(newStop)
         map.sortStops()
-        cache.gradientColorMap = map
+        cache.color.gradientState.gradient = map
         cache.pushGradientMap(map)
     }
     
@@ -179,19 +179,19 @@ struct GradientStopsPopover: View {
     }
     
     private func updateStop(at index: Int, with stop: GradientStop) {
-        var map = cache.gradientColorMap
+        var map = cache.color.gradientState.gradient
         guard index < map.stops.count else { return }
         map.stops[index] = stop
         map.sortStops()
-        cache.gradientColorMap = map
+        cache.color.gradientState.gradient = map
         cache.pushGradientMap(map)
     }
     
     private func deleteStop(at index: Int) {
-        var map = cache.gradientColorMap
+        var map = cache.color.gradientState.gradient
         guard map.stops.count > 2, index < map.stops.count else { return }
         map.stops.remove(at: index)
-        cache.gradientColorMap = map
+        cache.color.gradientState.gradient = map
         cache.pushGradientMap(map)
     }
 }

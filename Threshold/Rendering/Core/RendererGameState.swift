@@ -127,7 +127,7 @@ extension Renderer {
                             lightingSoftness: settingsSnapshot.lightingSoftness,
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
-                            jitterOffset: currentJitterOffset(),
+                            jitterOffset: .zero,
                             _pad_uniforms: [0, 0],
                             formulaParams: settingsSnapshot.formulaParams,
                             precomputedFractal: cachedPrecomputedFractal,
