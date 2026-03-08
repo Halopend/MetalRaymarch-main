@@ -2,29 +2,10 @@ import Foundation
 
 // MARK: - Shared Parameter Taxonomy
 
-// High-level bundles describe which conceptual group a parameter belongs to. This allows
-// UI, gesture, and modulation layers to address related parameters consistently.
-enum ParameterBundle: String, Codable, Sendable {
-    case camera           // user/world transforms
-    case position         // world position / translation
-    case scale            // fractal/world scale
-    case rotation         // world rotation
-    case julia            // Julia set seeds / offsets
-    case polarRotation    // polar phase / bulb rotations
-    case color            // palette, color mix
-    case lighting         // lighting/effects
-    case fractalCore      // minDistance, folding limit, sphere radius
-    case custom           // fallback when no specific bundle fits
-}
-
-// Layer ordering: UI defines the base, gesture overrides, precompute can override derived
-// values, music applies an offset, and system sits at the top for authoritative writes.
 enum ParameterLayer: String, Codable, Sendable {
     case ui
     case gesture
-    case precompute
     case music
-    case system
 }
 
 struct ParameterGroup: Hashable, Codable, Sendable {
@@ -34,68 +15,27 @@ struct ParameterGroup: Hashable, Codable, Sendable {
 
 // MARK: - Core Node Protocol
 
-protocol ParameterNode: AnyObject, Identifiable {
-    associatedtype Value
-
-    var id: String { get }
-    var name: String { get }
-    var descriptionText: String { get }
-    var group: ParameterGroup? { get }
-
-    var isGestureMappable: Bool { get }
-    var currentValue: Value { get set }
-    var defaultValue: Value { get }
-}
-
 class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     let id: String
     let name: String
-    let descriptionText: String
     let group: ParameterGroup?
     let icon: String
     let isGestureMappable: Bool
 
     init(id: String,
          name: String,
-         descriptionText: String,
          group: ParameterGroup?,
          icon: String,
          isGestureMappable: Bool) {
         self.id = id
         self.name = name
-        self.descriptionText = descriptionText
         self.group = group
         self.icon = icon
         self.isGestureMappable = isGestureMappable
     }
 }
 
-class BaseParameterNode<Value>: AnyParameterNodeBase, @unchecked Sendable, ParameterNode {
-    var currentValue: Value
-
-    let defaultValue: Value
-
-    init(id: String,
-         name: String,
-         descriptionText: String,
-         group: ParameterGroup?,
-         icon: String,
-         isGestureMappable: Bool,
-         defaultValue: Value) {
-        self.defaultValue = defaultValue
-        self.currentValue = defaultValue
-        super.init(
-            id: id,
-            name: name,
-            descriptionText: descriptionText,
-            group: group,
-            icon: icon,
-            isGestureMappable: isGestureMappable
-        )
-    }
-}
-
-class FloatParameterNode: BaseParameterNode<Float>, @unchecked Sendable {
+class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let range: ClosedRange<Float>
     let step: Float
     let readValue: @MainActor (UISettingsCache) -> Float
@@ -104,7 +44,6 @@ class FloatParameterNode: BaseParameterNode<Float>, @unchecked Sendable {
 
     init(id: String,
          name: String,
-         descriptionText: String,
          group: ParameterGroup?,
          icon: String,
          defaultValue: Float,
@@ -120,11 +59,9 @@ class FloatParameterNode: BaseParameterNode<Float>, @unchecked Sendable {
         self.layerStack = ParameterLayerStack(defaultValue: defaultValue, range: range)
         super.init(id: id,
                    name: name,
-                   descriptionText: descriptionText,
                    group: group,
                    icon: icon,
-                   isGestureMappable: isGestureMappable,
-                   defaultValue: defaultValue)
+                   isGestureMappable: isGestureMappable)
     }
 
     @discardableResult
@@ -132,40 +69,24 @@ class FloatParameterNode: BaseParameterNode<Float>, @unchecked Sendable {
                     value: Float,
                     smoothingTime: Float? = nil,
                     timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
-        let resolved = layerStack.apply(layer: layer, value: value, smoothingTime: smoothingTime, timestamp: timestamp)
-        super.currentValue = resolved
-        return resolved
+        layerStack.apply(layer: layer, value: value, smoothingTime: smoothingTime, timestamp: timestamp)
     }
 
     func resolvedValue(timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
-        let resolved = layerStack.resolvedValue(at: timestamp)
-        super.currentValue = resolved
-        return resolved
+        layerStack.resolvedValue(at: timestamp)
     }
 
     func bootstrapBaseIfNeeded(from value: Float, timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) {
         layerStack.setBaseIfNeeded(value, timestamp: timestamp)
-        super.currentValue = layerStack.resolvedValue(at: timestamp)
-    }
-
-    /// Clamp direct writes to the node's declared range.
-    override var currentValue: Float {
-        didSet {
-            let clamped = min(range.upperBound, max(range.lowerBound, currentValue))
-            if clamped != currentValue {
-                super.currentValue = clamped
-            }
-        }
     }
 }
 
-final class BoolParameterNode: BaseParameterNode<Bool>, @unchecked Sendable {
+final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let readValue: @MainActor (UISettingsCache) -> Bool
     let writeValue: @MainActor (UISettingsCache, Bool) -> Void
 
     init(id: String,
          name: String,
-         descriptionText: String,
          group: ParameterGroup?,
          icon: String,
          defaultValue: Bool,
@@ -176,11 +97,9 @@ final class BoolParameterNode: BaseParameterNode<Bool>, @unchecked Sendable {
         self.writeValue = writeValue
         super.init(id: id,
                    name: name,
-                   descriptionText: descriptionText,
                    group: group,
                    icon: icon,
-                   isGestureMappable: isGestureMappable,
-                   defaultValue: defaultValue)
+                   isGestureMappable: isGestureMappable)
     }
 }
 
@@ -226,9 +145,7 @@ struct ParameterLayerStack {
 
     private var ui: ParameterLayerEntry?
     private var gesture: ParameterLayerEntry?
-    private var precompute: ParameterLayerEntry?
     private var music: ParameterLayerEntry?
-    private var system: ParameterLayerEntry?
 
     private(set) var defaultValue: Float
     private(set) var range: ClosedRange<Float>
@@ -285,22 +202,12 @@ struct ParameterLayerStack {
         // Copy layer entries to locals to avoid overlapping access on self
         var uiEntry = ui
         var gestureEntry = gesture
-        var precomputeEntry = precompute
-        var systemEntry = system
         var musicEntry = music
 
         var value = Self.resolve(entry: &uiEntry, at: timestamp) ?? defaultValue
 
         if let g = Self.resolve(entry: &gestureEntry, at: timestamp) {
             value = g
-        }
-
-        if let p = Self.resolve(entry: &precomputeEntry, at: timestamp) {
-            value = p
-        }
-
-        if let s = Self.resolve(entry: &systemEntry, at: timestamp) {
-            value = s
         }
 
         if let m = Self.resolve(entry: &musicEntry, at: timestamp) {
@@ -310,8 +217,6 @@ struct ParameterLayerStack {
         // Write back smoothed state
         ui = uiEntry
         gesture = gestureEntry
-        precompute = precomputeEntry
-        system = systemEntry
         music = musicEntry
 
         return min(range.upperBound, max(range.lowerBound, value))
@@ -323,9 +228,7 @@ struct ParameterLayerStack {
         switch layer {
         case .ui: return ui
         case .gesture: return gesture
-        case .precompute: return precompute
         case .music: return music
-        case .system: return system
         }
     }
 
@@ -340,9 +243,7 @@ struct ParameterLayerStack {
         switch layer {
         case .ui: ui = entry
         case .gesture: gesture = entry
-        case .precompute: precompute = entry
         case .music: music = entry
-        case .system: system = entry
         }
     }
 }
@@ -351,18 +252,22 @@ struct ParameterLayerStack {
 
 struct ParameterNodeBatch {
     let fractalType: FractalModelType
-    let nodes: [AnyParameterNodeBase]
     let floatNodes: [FloatParameterNode]
     let boolNodes: [BoolParameterNode]
     let floatNodeByFormulaIndex: [Int: FloatParameterNode]
 
+    /// Combined view for UI iteration (float + bool nodes in original order).
+    var allNodes: [AnyParameterNodeBase] {
+        (floatNodes as [AnyParameterNodeBase]) + (boolNodes as [AnyParameterNodeBase])
+    }
+
     init(fractalType: FractalModelType,
-         nodes: [AnyParameterNodeBase],
+         floatNodes: [FloatParameterNode] = [],
+         boolNodes: [BoolParameterNode] = [],
          floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]) {
         self.fractalType = fractalType
-        self.nodes = nodes
-        self.floatNodes = nodes.compactMap { $0 as? FloatParameterNode }
-        self.boolNodes = nodes.compactMap { $0 as? BoolParameterNode }
+        self.floatNodes = floatNodes
+        self.boolNodes = boolNodes
         self.floatNodeByFormulaIndex = floatNodeByFormulaIndex
     }
 }
@@ -370,42 +275,16 @@ struct ParameterNodeBatch {
 final class ParameterNodeRegistry: @unchecked Sendable {
     static let shared = ParameterNodeRegistry()
 
-    struct MetricsSnapshot: Sendable {
-        let batchRebuildCount: Int
-        let nodeLookupCount: Int
-        let nodeLookupDurationMs: Double
-    }
-
     private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
     /// Core parameter nodes (fractalScale, colorMix).
     /// Keyed by their targetID string (e.g. "core.fractalScale").
     private(set) var coreNodes: [String: FloatParameterNode] = [:]
     /// Effect parameter nodes (glow, fog, bloom, hueSpeed, saturation).
     private(set) var effectNodes: [String: FloatParameterNode] = [:]
-    private var batchRebuildCount: Int = 0
-    private var nodeLookupCount: Int = 0
 
     private init() {
         buildCoreAndEffectNodes()
-        rebuildFormulaBatches(force: true)
-    }
-
-    func metricsSnapshot() -> MetricsSnapshot {
-        MetricsSnapshot(
-            batchRebuildCount: batchRebuildCount,
-            nodeLookupCount: nodeLookupCount,
-            nodeLookupDurationMs: 0
-        )
-    }
-
-    // MARK: - Core & Effect Node Registration
-
-    func coreNode(id: String) -> FloatParameterNode? {
-        coreNodes[id]
-    }
-
-    func effectNode(id: String) -> FloatParameterNode? {
-        effectNodes[id]
+        rebuildFormulaBatches()
     }
 
     /// One-time build of engine-level parameter nodes for core geometry and effects.
@@ -421,7 +300,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         coreNodes["core.fractalScale"] = FloatParameterNode(
             id: "core.fractalScale",
             name: "Fractal Scale",
-            descriptionText: "Global fractal scale multiplier",
             group: coreGroup,
             icon: "arrow.up.left.and.arrow.down.right",
             defaultValue: 2.0,
@@ -435,7 +313,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         coreNodes["core.colorMix"] = FloatParameterNode(
             id: "core.colorMix",
             name: "Color Mix",
-            descriptionText: "Iteration-based color mix factor",
             group: coreGroup,
             icon: "paintpalette",
             defaultValue: 0.5,
@@ -450,7 +327,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         effectNodes["effect.glow"] = FloatParameterNode(
             id: "effect.glow",
             name: "Glow",
-            descriptionText: "Glow effect intensity",
             group: effectGroup,
             icon: "sun.max",
             defaultValue: 0.0,
@@ -464,7 +340,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         effectNodes["effect.fog"] = FloatParameterNode(
             id: "effect.fog",
             name: "Fog",
-            descriptionText: "Fog effect intensity",
             group: effectGroup,
             icon: "cloud.fog",
             defaultValue: 0.32,
@@ -478,7 +353,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         effectNodes["effect.bloom"] = FloatParameterNode(
             id: "effect.bloom",
             name: "Bloom",
-            descriptionText: "Bloom strength",
             group: effectGroup,
             icon: "sparkle",
             defaultValue: 0.0,
@@ -492,7 +366,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         effectNodes["effect.hueSpeed"] = FloatParameterNode(
             id: "effect.hueSpeed",
             name: "Hue Speed",
-            descriptionText: "Hue rotation speed",
             group: effectGroup,
             icon: "arrow.trianglehead.2.clockwise.rotate.90",
             defaultValue: 0.0,
@@ -506,7 +379,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         effectNodes["effect.saturation"] = FloatParameterNode(
             id: "effect.saturation",
             name: "Saturation",
-            descriptionText: "Color scheme saturation",
             group: effectGroup,
             icon: "drop.halffull",
             defaultValue: 2.0,
@@ -518,13 +390,12 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         )
     }
 
-    private func rebuildFormulaBatches(force: Bool = false) {
+    private func rebuildFormulaBatches() {
         var newBatches: [FractalModelType: ParameterNodeBatch] = [:]
         for type in FractalModelType.allCases {
             newBatches[type] = buildFormulaBatch(for: type)
         }
         formulaBatches = newBatches
-        batchRebuildCount += 1
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
@@ -612,14 +483,16 @@ final class ParameterNodeRegistry: @unchecked Sendable {
 
     private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         guard let descriptor = FormulaCatalog.shared.descriptor(for: type) else {
-            return ParameterNodeBatch(fractalType: type, nodes: [])
+            return ParameterNodeBatch(fractalType: type)
         }
 
         let group = ParameterGroup(id: descriptor.id, title: descriptor.name)
         var seenFormulaIndices: Set<Int> = []
+        var floatNodes: [FloatParameterNode] = []
+        var boolNodes: [BoolParameterNode] = []
         var floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]
 
-        let nodes: [AnyParameterNodeBase] = descriptor.params.map { param in
+        for param in descriptor.params {
             assert(
                 seenFormulaIndices.insert(param.index).inserted,
                 "Duplicate formula parameter index \(param.index) for fractal type \(type.rawValue)"
@@ -628,13 +501,11 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             let label = displayLabel(for: param.name)
             let icon = icon(for: param.name)
             let id = "formula.\(type.rawValue).\(param.index).\(param.name)"
-            let description = "\(descriptor.name) • \(param.name)"
 
             if param.isBool == true {
-                return BoolParameterNode(
+                boolNodes.append(BoolParameterNode(
                     id: id,
                     name: label,
-                    descriptionText: description,
                     group: group,
                     icon: icon,
                     defaultValue: param.default > 0.5,
@@ -644,13 +515,13 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                         FormulaCatalog.setParam(&cache.formulaParams, index: param.index, value: value ? 1 : 0)
                         cache.renderSettings?.formulaParams = cache.formulaParams
                     }
-                )
+                ))
+                continue
             }
 
             let node = FloatParameterNode(
                 id: id,
                 name: label,
-                descriptionText: description,
                 group: group,
                 icon: icon,
                 defaultValue: param.default,
@@ -664,13 +535,14 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 }
             )
 
+            floatNodes.append(node)
             floatNodeByFormulaIndex[param.index] = node
-            return node
         }
 
         return ParameterNodeBatch(
             fractalType: type,
-            nodes: nodes,
+            floatNodes: floatNodes,
+            boolNodes: boolNodes,
             floatNodeByFormulaIndex: floatNodeByFormulaIndex
         )
     }

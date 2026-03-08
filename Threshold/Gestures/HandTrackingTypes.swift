@@ -26,7 +26,6 @@ struct HandData {
     var indexPinch: Float = 0
     var middlePinch: Float = 0
     var ringPinch: Float = 0
-    var pinkyPinch: Float = 0
     
     /// Get pinch position (midpoint between thumb and finger)
     func pinchPosition(digit: Int) -> SIMD3<Float> {
@@ -35,7 +34,6 @@ struct HandData {
         case 1: fingerTip = indexTip
         case 2: fingerTip = middleTip
         case 3: fingerTip = ringTip
-        case 4: fingerTip = pinkyTip
         default: fingerTip = indexTip
         }
         return (thumbTip + fingerTip) * 0.5
@@ -46,7 +44,6 @@ struct HandData {
         case 1: return indexPinch
         case 2: return middlePinch
         case 3: return ringPinch
-        case 4: return pinkyPinch
         default: return indexPinch
         }
     }

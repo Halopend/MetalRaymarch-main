@@ -324,11 +324,9 @@ class UsageAnalytics: ObservableObject {
         fractalTypeTimeAccum[geo.fractalType.displayName, default: 0] += dt
         
         // Accumulate gradient preset distribution
-        if col.gradientState.useGradientColoring {
-            usedGradientColoring = true
-            let gradName = col.gradientState.gradientPreset?.rawValue ?? "Custom"
-            gradientPresetTimeAccum[gradName, default: 0] += dt
-        }
+        usedGradientColoring = true
+        let gradName = col.gradientState.gradientPreset?.rawValue ?? "Custom"
+        gradientPresetTimeAccum[gradName, default: 0] += dt
         
         // Accumulate lighting preset distribution
         lightingPresetTimeAccum[lit.lightingPreset.displayName, default: 0] += dt

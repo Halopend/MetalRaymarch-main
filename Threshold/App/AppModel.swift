@@ -85,13 +85,6 @@ class AppModel {
     /// Whether the hand tracking ARKit provider is actively running.
     var handTrackingRunning: Bool = false
 
-    /// Internal diagnostics for cross-source parameter arbitration.
-    var showParameterDebugPanel: Bool = false {
-        didSet {
-            UserDefaults.standard.set(showParameterDebugPanel, forKey: "showParameterDebugPanel")
-        }
-    }
-
     
     // Gesture controller for mapping hand gestures to parameters
     var gestureController: GestureController?
@@ -271,11 +264,6 @@ class AppModel {
         let interacting = isMenuWindowVisible && (isMenuHovering || menuAdjustmentDepth > 0)
         renderSettings.isMenuInteractionActive = interacting
         gestureController?.suppressParameterGestures = interacting
-    }
-
-    func parameterDiagnosticsText() -> String {
-        let registry = ParameterNodeRegistry.shared.metricsSnapshot()
-        return "Batch rebuilds: \(registry.batchRebuildCount) • Node lookups: \(registry.nodeLookupCount) in \(String(format: "%.2f", registry.nodeLookupDurationMs))ms"
     }
 
     /// Capture a screenshot for preset thumbnails

@@ -1159,15 +1159,6 @@ final class RenderSettings: @unchecked Sendable {
     // GRADIENT COLORING SYSTEM
     // ═══════════════════════════════════════════════════════════════════════════
     
-    /// Whether gradient coloring is enabled (vs legacy 3-color palette)
-    var useGradientColoring: Bool {
-        get { withLock { _gradientState.useGradientColoring } }
-        set {
-            withLock { _gradientState.useGradientColoring = newValue }
-            persistColor()
-        }
-    }
-    
     /// Current gradient color map
     var gradientColorMap: GradientColorMap {
         get { withLock { _gradientState.gradient } }
@@ -1222,7 +1213,6 @@ final class RenderSettings: @unchecked Sendable {
     func applyGradientPreset(_ preset: GradientPreset) {
         withLock {
             _gradientState.applyPreset(preset)
-            _gradientState.useGradientColoring = true
             
             // Also update post-processing to match preset suggestion
             let pp = preset.postProcessing
@@ -1453,10 +1443,9 @@ final class RenderSettings: @unchecked Sendable {
 
     @inline(__always)
     private func syncGradientPresetForColorSchemeLocked(_ scheme: ColorScheme) {
-        guard let preset = GradientPreset.fromColorScheme(scheme) else { return }
-        if _gradientState.gradientPreset != preset || !_gradientState.useGradientColoring {
+        let preset = scheme
+        if _gradientState.gradientPreset != preset {
             _gradientState.applyPreset(preset)
-            _gradientState.useGradientColoring = true
         }
     }
     

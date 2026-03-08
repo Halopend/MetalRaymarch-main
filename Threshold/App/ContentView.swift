@@ -1686,17 +1686,6 @@ struct ContentView: View {
                 }.buttonStyle(.borderedProminent).tint(isTestAnimationPlaying ? .red : themeColor)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             
-            VStack(alignment: .leading, spacing: 8) {
-                HStack { Image(systemName: "scope").foregroundStyle(themeColor); Text("Parameter Debug Logs").font(.headline) }
-                Toggle("Enable Debug Logs + Metrics", isOn: $appModel.showParameterDebugPanel)
-
-                if appModel.showParameterDebugPanel {
-                    Text(appModel.parameterDiagnosticsText())
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-
 #if DEBUG
             VStack(alignment: .leading, spacing: 8) {
                 HStack { Image(systemName: "timer").foregroundStyle(themeColor); Text("Benchmarking").font(.headline) }

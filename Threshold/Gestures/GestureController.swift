@@ -153,12 +153,6 @@ final class GestureController {
         syncWithSettings()
     }
     
-    /// Get the parameter ranges for the current fractal type (for UI sliders)
-    func getParameterRanges() -> (minDistance: ClosedRange<Float>, foldingLimit: ClosedRange<Float>, sphereRadius: ClosedRange<Float>) {
-        let ranges = currentRanges()
-        return (ranges.minDistance, ranges.foldingLimit, ranges.sphereRadius)
-    }
-    
     // MARK: - Hand Tracking Updates
     
     /// Update hand data from ARKit hand anchors.
@@ -252,11 +246,10 @@ final class GestureController {
             return simd_clamp(normalized, 0, 1)
         }
         
-        // Index/middle have longer reach (8cm range), ring/pinky have shorter reach (6cm range)
+        // Index/middle have longer reach (8cm range), ring has shorter reach (6cm range)
         data.indexPinch = calculatePinch(fingerTip: data.indexTip, maxDist: 0.08)
         data.middlePinch = calculatePinch(fingerTip: data.middleTip, maxDist: 0.08)
-        data.ringPinch = calculatePinch(fingerTip: data.ringTip, maxDist: 0.06)   // Tighter range for ring
-        data.pinkyPinch = calculatePinch(fingerTip: data.pinkyTip, maxDist: 0.055) // Even tighter for pinky
+        data.ringPinch = calculatePinch(fingerTip: data.ringTip, maxDist: 0.06)
         
         return data
     }
@@ -378,14 +371,10 @@ final class GestureController {
                     let op = ParameterOperation(
                         targetID: node.id,
                         source: .gesture,
-                        value: .absolute(newValue),
-                        frameIndex: self.operationFrameCounter,
-                        smoothing: .init()
+                        value: newValue,
+                        frameIndex: self.operationFrameCounter
                     )
-                    self.operationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: self.operationFrameCounter, operations: [op]),
-                        settings: settings
-                    )
+                    self.operationDispatcher.dispatch([op], settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 if fingerGestureState[digit]!.isActive { activeDigit = digit }
@@ -507,14 +496,10 @@ final class GestureController {
             let op = ParameterOperation(
                 targetID: node.id,
                 source: .gesture,
-                value: .absolute(newValue),
-                frameIndex: operationFrameCounter,
-                smoothing: .init()
+                value: newValue,
+                frameIndex: operationFrameCounter
             )
-            operationDispatcher.dispatch(
-                ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
-                settings: settings
-            )
+            operationDispatcher.dispatch([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
         if fingerGestureState[digit]!.isActive { activeDigit = digit }
@@ -542,14 +527,10 @@ final class GestureController {
             let op = ParameterOperation(
                 targetID: "core.targetFractalScale",
                 source: .gesture,
-                value: .absolute(newValue),
-                frameIndex: operationFrameCounter,
-                smoothing: .init()
+                value: newValue,
+                frameIndex: operationFrameCounter
             )
-            operationDispatcher.dispatch(
-                ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
-                settings: settings
-            )
+            operationDispatcher.dispatch([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
         if fingerGestureState[digit]!.isActive { activeDigit = digit }
@@ -979,14 +960,11 @@ final class GestureController {
                     state.startValues.z = simd_clamp(state.startValues.z + scaledDelta.z, triplet.range.lowerBound, triplet.range.upperBound)
 
                     let ops = [
-                        ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: .absolute(state.startValues.x), frameIndex: operationFrameCounter, smoothing: .init()),
-                        ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(state.startValues.y), frameIndex: operationFrameCounter, smoothing: .init()),
-                        ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: .absolute(state.startValues.z), frameIndex: operationFrameCounter, smoothing: .init()),
+                        ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: state.startValues.x, frameIndex: operationFrameCounter),
+                        ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: state.startValues.y, frameIndex: operationFrameCounter),
+                        ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: state.startValues.z, frameIndex: operationFrameCounter),
                     ]
-                    operationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: operationFrameCounter, operations: ops),
-                        settings: settings
-                    )
+                    operationDispatcher.dispatch(ops, settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 state.prevPos = currentPos
@@ -1020,14 +998,10 @@ final class GestureController {
                 let op = ParameterOperation(
                     targetID: node.id,
                     source: .gesture,
-                    value: .absolute(state.startValue),
-                    frameIndex: operationFrameCounter,
-                    smoothing: .init()
+                    value: state.startValue,
+                    frameIndex: operationFrameCounter
                 )
-                operationDispatcher.dispatch(
-                    ParameterTransaction(frameIndex: operationFrameCounter, operations: [op]),
-                    settings: settings
-                )
+                operationDispatcher.dispatch([op], settings: settings)
                 UsageAnalytics.shared.trackHandGestureUsed()
                 state.prevPos = currentPos
                 activeDigit = digit

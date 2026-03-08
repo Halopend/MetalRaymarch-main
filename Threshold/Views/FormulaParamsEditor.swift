@@ -12,7 +12,7 @@ struct FormulaParamsEditor: View {
     }
 
     var body: some View {
-        if let desc = descriptor, !parameterBatch.nodes.isEmpty {
+        if let desc = descriptor, !parameterBatch.allNodes.isEmpty {
             VStack(spacing: 4) {
                 HStack {
                     Label("\(desc.name) Parameters", systemImage: cache.fractalType.icon)
@@ -32,7 +32,7 @@ struct FormulaParamsEditor: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 4)
 
-                ForEach(Array(parameterBatch.nodes.enumerated()), id: \.element.id) { idx, node in
+                ForEach(Array(parameterBatch.allNodes.enumerated()), id: \.element.id) { idx, node in
                     if idx > 0 { Divider().padding(.leading, 159) }
                     ParameterNodeRow(cache: cache, node: node)
 
@@ -105,9 +105,8 @@ private struct ParameterNodeRow: View {
                             ParameterOperation(
                                 targetID: boolNode.id,
                                 source: .slider,
-                                value: .absolute(value ? 1 : 0),
-                                frameIndex: operationFrameIndex,
-                                smoothing: .init()
+                                value: value ? 1 : 0,
+                                frameIndex: operationFrameIndex
                             )
                         )
                     }
@@ -155,9 +154,8 @@ private struct ParameterNodeRow: View {
                             ParameterOperation(
                                 targetID: floatNode.id,
                                 source: .slider,
-                                value: .absolute(value),
-                                frameIndex: operationFrameIndex,
-                                smoothing: .init()
+                                value: value,
+                                frameIndex: operationFrameIndex
                             )
                         )
                     }
@@ -511,9 +509,8 @@ private struct PowerQuickPicker: View {
             ParameterOperation(
                 targetID: floatNode.id,
                 source: .slider,
-                value: .absolute(value),
-                frameIndex: frameIndex,
-                smoothing: .init()
+                value: value,
+                frameIndex: frameIndex
             )
         )
     }

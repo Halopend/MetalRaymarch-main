@@ -95,7 +95,6 @@ final class UISettingsCache {
         color.gradientState.gradient = gradient
         color.gradientState.gradientPreset = nil  // Mark as custom
         settings?.gradientColorMap = gradient
-        settings?.useGradientColoring = true
     }
     
     var currentRenderQuality: Float = 0.7  // Live stat, not in config struct
@@ -175,10 +174,7 @@ final class UISettingsCache {
     }
 
     func dispatchParameterOperation(_ operation: ParameterOperation) {
-        parameterOperationDispatcher.dispatch(
-            ParameterTransaction(frameIndex: operation.frameIndex, operations: [operation]),
-            cache: self
-        )
+        parameterOperationDispatcher.dispatch([operation], cache: self)
     }
 
     
@@ -227,10 +223,6 @@ final class UISettingsCache {
         color.colorScheme = scheme
     }
     
-    func pushGradientEnabled(_ enabled: Bool) {
-        settings?.useGradientColoring = enabled
-    }
-    
     func pushGradientMap(_ map: GradientColorMap) {
         settings?.gradientColorMap = map
     }
@@ -239,7 +231,6 @@ final class UISettingsCache {
         settings?.applyGradientPreset(preset)
         color.gradientState.gradient = preset.makeGradient()
         color.gradientState.gradientPreset = preset
-        color.gradientState.useGradientColoring = true
         let pp = preset.postProcessing
         color.colorSchemeSaturation = pp.saturation
         color.colorSchemeContrast = pp.contrast
@@ -254,13 +245,10 @@ final class UISettingsCache {
         let op = ParameterOperation(
             targetID: targetID,
             source: .slider,
-            value: .absolute(value),
+            value: value,
             frameIndex: 0
         )
-        parameterOperationDispatcher.dispatch(
-            ParameterTransaction(frameIndex: op.frameIndex, operations: [op]),
-            cache: self
-        )
+        parameterOperationDispatcher.dispatch([op], cache: self)
     }
     
     /// Reset formula params to defaults for the current type and push.

@@ -1,73 +1,32 @@
 import Foundation
 import simd
 
-enum ParameterOperationSource: String, Codable, Sendable {
+enum ParameterOperationSource: String, Sendable {
     case gesture
     case slider
-    case windowSlider
-    case animation
-    case precompute
     case audio
-    case preset
-    case system
 }
 
-enum ParameterOperationValue: Codable, Sendable {
-    case absolute(Float)
-    case delta(Float)
-
-    func resolved(from current: Float) -> Float {
-        switch self {
-        case .absolute(let value): return value
-        case .delta(let delta): return current + delta
-        }
-    }
-}
-
-struct ParameterOperationSmoothing: Codable, Sendable {
-    var smoothingTime: Float?
-
-    init(smoothingTime: Float? = nil) {
-        self.smoothingTime = smoothingTime
-    }
-}
-
-struct ParameterOperation: Codable, Sendable, Identifiable {
-    let id: UUID
+struct ParameterOperation: Sendable {
     let targetID: String
     let source: ParameterOperationSource
-    let value: ParameterOperationValue
+    let value: Float
     let timestamp: TimeInterval
     let frameIndex: UInt64
-    let smoothing: ParameterOperationSmoothing
+    let smoothingTime: Float?
 
     init(targetID: String,
          source: ParameterOperationSource,
-         value: ParameterOperationValue,
+         value: Float,
          timestamp: TimeInterval = CFAbsoluteTimeGetCurrent(),
          frameIndex: UInt64,
-         smoothing: ParameterOperationSmoothing = .init()) {
-        self.id = UUID()
+         smoothingTime: Float? = nil) {
         self.targetID = targetID
         self.source = source
         self.value = value
         self.timestamp = timestamp
         self.frameIndex = frameIndex
-        self.smoothing = smoothing
-    }
-}
-
-struct ParameterTransaction: Sendable {
-    let frameIndex: UInt64
-    let timestamp: TimeInterval
-    let operations: [ParameterOperation]
-
-    init(frameIndex: UInt64,
-         timestamp: TimeInterval = CFAbsoluteTimeGetCurrent(),
-         operations: [ParameterOperation]) {
-        self.frameIndex = frameIndex
-        self.timestamp = timestamp
-        self.operations = operations
+        self.smoothingTime = smoothingTime
     }
 }
 
@@ -75,25 +34,6 @@ struct ParameterTransaction: Sendable {
 // The cache-based dispatch path is @MainActor since it touches MainActor-isolated node closures.
 // The settings-based path only writes through lock-protected RenderSettings.
 final class ParameterOperationDispatcher: @unchecked Sendable {
-    struct SourcePolicy: Sendable {
-        let priority: [ParameterOperationSource: Int]
-
-        static let `default` = SourcePolicy(priority: [
-            .gesture: 10,
-            .windowSlider: 20,
-            .slider: 25,
-            .precompute: 28,
-            .animation: 30,
-            .audio: 35,
-            .preset: 40,
-            .system: 50
-        ])
-
-        func rank(for source: ParameterOperationSource) -> Int {
-            priority[source] ?? 0
-        }
-    }
-
     private var coreStacks: [String: ParameterLayerStack] = [:]
     private var formulaStacks: [String: ParameterLayerStack] = [:]
 
@@ -146,44 +86,48 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         )
     ]
 
-    private let sourcePolicy: SourcePolicy
     var debugTraceEnabled = false
 
-    init(sourcePolicy: SourcePolicy = .default) {
-        self.sourcePolicy = sourcePolicy
+    /// Fixed source priority: audio > slider > gesture.
+    private func rank(for source: ParameterOperationSource) -> Int {
+        switch source {
+        case .gesture: return 10
+        case .slider:  return 25
+        case .audio:   return 35
+        }
     }
 
     @MainActor
-    func dispatch(_ transaction: ParameterTransaction, cache: UISettingsCache) {
-        resolve(transaction).forEach { resolved in
+    func dispatch(_ operations: [ParameterOperation], cache: UISettingsCache) {
+        resolve(operations).forEach { resolved in
             apply(resolved, cache: cache)
         }
     }
 
-    func dispatch(_ transaction: ParameterTransaction, settings: RenderSettings) {
-        resolve(transaction).forEach { resolved in
+    func dispatch(_ operations: [ParameterOperation], settings: RenderSettings) {
+        resolve(operations).forEach { resolved in
             apply(resolved, settings: settings)
         }
     }
 
-    private func resolve(_ transaction: ParameterTransaction) -> [ParameterOperation] {
+    private func resolve(_ operations: [ParameterOperation]) -> [ParameterOperation] {
         var grouped: [String: [ParameterOperation]] = [:]
-        for operation in transaction.operations {
+        for operation in operations {
             grouped[operation.targetID, default: []].append(operation)
         }
 
         var resolved: [ParameterOperation] = []
         for (_, operations) in grouped {
             guard let winner = operations.max(by: { lhs, rhs in
-                let leftRank = sourcePolicy.rank(for: lhs.source)
-                let rightRank = sourcePolicy.rank(for: rhs.source)
+                let leftRank = rank(for: lhs.source)
+                let rightRank = rank(for: rhs.source)
                 if leftRank != rightRank { return leftRank < rightRank }
                 return lhs.timestamp < rhs.timestamp
             }) else { continue }
 
             if debugTraceEnabled, operations.count > 1 {
                 let contenders = operations
-                    .map { "\($0.source.rawValue)(p:\(sourcePolicy.rank(for: $0.source)))" }
+                    .map { "\($0.source.rawValue)(p:\(rank(for: $0.source)))" }
                     .joined(separator: ", ")
                 print("🧮 ParamOp conflict target=\(winner.targetID) [\(contenders)] -> \(winner.source.rawValue)")
             }
@@ -199,9 +143,9 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let timestamp = operation.timestamp
         let layer = layer(for: operation.source)
 
-        // During animation playback, block non-animation writes to
-        // Mandelbox shape params (formula indices 0-2) to prevent flicker.
-        if let settings = cache.renderSettings, settings.isAnimationPlaying && operation.source != .animation {
+        // During animation playback, block writes to Mandelbox shape
+        // params (formula indices 0-2) to prevent flicker.
+        if let settings = cache.renderSettings, settings.isAnimationPlaying {
             let pieces = operation.targetID.split(separator: ".")
             if pieces.count >= 4, pieces[0] == "formula",
                let fractalRaw = Int(pieces[1]),
@@ -215,9 +159,8 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let formulaBatch = ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
         if let node = formulaBatch.floatNodes.first(where: { $0.id == operation.targetID }) {
             node.bootstrapBaseIfNeeded(from: node.readValue(cache), timestamp: timestamp)
-            let current = node.resolvedValue(timestamp: timestamp)
-            let incoming = operation.value.resolved(from: current)
-            let resolved = node.applyLayer(layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
+            _ = node.resolvedValue(timestamp: timestamp)
+            let resolved = node.applyLayer(layer, value: operation.value, smoothingTime: operation.smoothingTime, timestamp: timestamp)
             node.writeValue(cache, resolved)
             if debugTraceEnabled {
                 print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
@@ -226,11 +169,9 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         }
 
         if let boolNode = formulaBatch.boolNodes.first(where: { $0.id == operation.targetID }) {
-            let current = boolNode.readValue(cache) ? 1 as Float : 0 as Float
-            let newValue = operation.value.resolved(from: current)
-            boolNode.writeValue(cache, newValue >= 0.5)
+            boolNode.writeValue(cache, operation.value >= 0.5)
             if debugTraceEnabled {
-                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(newValue >= 0.5)")
+                print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(operation.value >= 0.5)")
             }
             return
         }
@@ -247,14 +188,10 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
            let fractalRaw = Int(pieces[1]),
            let formulaIndex = Int(pieces[2]),
            let fractalType = FractalModelType(rawValue: Int32(fractalRaw)) {
-            // During animation playback, block non-animation writes to Mandelbox
-            // shape params (indices 0-2) that the animation system controls.
-            // These would otherwise overwrite the animation's values via the
-            // Mandelbox bridge, causing frame-to-frame flicker.
-            if settings.isAnimationPlaying && operation.source != .animation {
-                if fractalType == .mandelbox && formulaIndex <= 2 {
-                    return
-                }
+            // During animation playback, block writes to Mandelbox shape
+            // params (indices 0-2) to prevent flicker.
+            if settings.isAnimationPlaying && fractalType == .mandelbox && formulaIndex <= 2 {
+                return
             }
             var params = settings.formulaParams
             let current = FormulaCatalog.getParam(params, index: formulaIndex)
@@ -262,12 +199,12 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
                 .node(for: fractalType, formulaIndex: formulaIndex)?.range ?? -Float.greatestFiniteMagnitude...Float.greatestFiniteMagnitude
             var stack = formulaStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: current, range: nodeRange, timestamp: timestamp)
             stack.setBaseIfNeeded(current, timestamp: timestamp)
-            let incoming = operation.value.resolved(from: stack.resolvedValue(at: timestamp))
+            let incoming = operation.value
             // Mandelbox shape params (indices 0-2) use smoothDamp in
             // interpolateToTargets via the bridge, so bypass the layer stack's
             // own exponential lerp to avoid double-smoothing.
             let useSmoothDampBridge = fractalType == .mandelbox && formulaIndex <= 2
-            let effectiveSmoothTime = useSmoothDampBridge ? Float(0) : operation.smoothing.smoothingTime
+            let effectiveSmoothTime = useSmoothDampBridge ? Float(0) : operation.smoothingTime
             let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: timestamp)
             FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
             settings.formulaParams = params
@@ -298,8 +235,8 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let isSmoothDampBridged = Self.smoothDampBridgedCoreIDs.contains(operation.targetID)
 
         // smoothDamp-bridged params are driven by animation via interpolateToTargets().
-        // Block non-animation writes during playback to prevent tug-of-war flicker.
-        if isSmoothDampBridged && settings.isAnimationPlaying && operation.source != .animation {
+        // Block writes during playback to prevent tug-of-war flicker.
+        if isSmoothDampBridged && settings.isAnimationPlaying {
             return
         }
 
@@ -312,8 +249,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
         stack?.setBaseIfNeeded(descriptor.read(settings), timestamp: operation.timestamp)
 
-        let current = stack?.resolvedValue(at: operation.timestamp) ?? descriptor.read(settings)
-        let incoming = operation.value.resolved(from: current)
+        let incoming = operation.value
 
         if isSmoothDampBridged {
             // smoothDamp in interpolateToTargets() handles smoothing, so bypass the
@@ -324,7 +260,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
                 ?? min(descriptor.range.upperBound, max(descriptor.range.lowerBound, incoming))
             descriptor.write(settings, resolved)
         } else {
-            let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: operation.timestamp) ?? incoming
+            let resolved = stack?.apply(layer: layer, value: incoming, smoothingTime: operation.smoothingTime, timestamp: operation.timestamp) ?? incoming
             descriptor.write(settings, min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved)))
         }
         if let stack { coreStacks[operation.targetID] = stack }
@@ -337,10 +273,8 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     private func layer(for source: ParameterOperationSource) -> ParameterLayer {
         switch source {
         case .gesture: return .gesture
-        case .slider, .windowSlider, .preset: return .ui
-        case .precompute: return .precompute
+        case .slider: return .ui
         case .audio: return .music
-        case .animation, .system: return .system
         }
     }
 

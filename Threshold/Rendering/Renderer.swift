@@ -794,18 +794,15 @@ actor Renderer {
                         ParameterOperation(
                             targetID: targetID,
                             source: .audio,
-                            value: .absolute(offset),
+                            value: offset,
                             frameIndex: parameterOperationFrameIndex,
-                            smoothing: .init(smoothingTime: max(0.02, mapping.smoothingWindow))
+                            smoothingTime: max(0.02, mapping.smoothingWindow)
                         )
                     )
                 }
 
                 if !audioOperations.isEmpty {
-                    parameterOperationDispatcher.dispatch(
-                        ParameterTransaction(frameIndex: parameterOperationFrameIndex, operations: audioOperations),
-                        settings: settings
-                    )
+                    parameterOperationDispatcher.dispatch(audioOperations, settings: settings)
                     parameterOperationFrameIndex &+= 1
                 }
                 
