@@ -1078,6 +1078,17 @@ struct AnimationPlaybackControls: View {
                         Image(systemName: "stop.fill")
                     }
                     .disabled(!animationManager.isPlaying && animationManager.uiPlayhead.state != .paused)
+
+                    Button {
+                        animationManager.disablePlaybackOverrides()
+                    } label: {
+                        Label("Disable Overrides", systemImage: "nosign")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Disable manual playback overrides and restore scene values")
+                    .disabled(animationManager.currentScene == nil)
                     
                     Button {
                         animationManager.togglePlayPause()

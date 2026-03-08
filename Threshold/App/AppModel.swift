@@ -197,6 +197,7 @@ class AppModel {
     /// Save current state for restore on next launch
     func saveLastState() {
         presetManager.saveLastState(from: renderSettings)
+        SettingsPersistence.saveAll(from: renderSettings)
     }
     
     /// Callback to open the menu window (set by App scene)

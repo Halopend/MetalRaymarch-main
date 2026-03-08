@@ -537,7 +537,7 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _fractalAudioReactiveEnabled } }
         set {
             withLock { _fractalAudioReactiveEnabled = newValue }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioReactiveEnabled")
+            persistAudioReactive()
         }
     }
 
@@ -546,7 +546,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(1.0, newValue))
             withLock { _fractalAudioAmount = clamped }
-            UserDefaults.standard.set(clamped, forKey: "fractalAudioAmount")
+            persistAudioReactive()
         }
     }
 
@@ -555,7 +555,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(1.0, newValue))
             withLock { _fractalBeatPunch = clamped }
-            UserDefaults.standard.set(clamped, forKey: "fractalBeatPunch")
+            persistAudioReactive()
         }
     }
 
@@ -578,9 +578,7 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue)
             }
-            if let data = try? JSONEncoder().encode(withLock { _musicReactiveMappings }) {
-                UserDefaults.standard.set(data, forKey: "musicReactiveMappings")
-            }
+            persistAudioReactive()
         }
     }
 
@@ -591,7 +589,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsScale = newValue
                 setMappingEnabledLocked(.fractalScale, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsScale")
+            persistAudioReactive()
         }
     }
 
@@ -602,7 +600,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsFolding = newValue
                 setMappingEnabledLocked(.formulaParam1, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFolding")
+            persistAudioReactive()
         }
     }
 
@@ -613,7 +611,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsRadius = newValue
                 setMappingEnabledLocked(.formulaParam2, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsRadius")
+            persistAudioReactive()
         }
     }
 
@@ -624,7 +622,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsColorMix = newValue
                 setMappingEnabledLocked(.colorMix, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsColorMix")
+            persistAudioReactive()
         }
     }
     
@@ -638,7 +636,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsGlow = newValue
                 setMappingEnabledLocked(.glow, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsGlow")
+            persistAudioReactive()
         }
     }
     
@@ -650,7 +648,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsFog = newValue
                 setMappingEnabledLocked(.fog, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsFog")
+            persistAudioReactive()
         }
     }
     
@@ -662,7 +660,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsBloom = newValue
                 setMappingEnabledLocked(.bloom, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsBloom")
+            persistAudioReactive()
         }
     }
     
@@ -674,7 +672,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsHueSpeed = newValue
                 setMappingEnabledLocked(.hueSpeed, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsHueSpeed")
+            persistAudioReactive()
         }
     }
     
@@ -686,7 +684,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsSaturation = newValue
                 setMappingEnabledLocked(.saturation, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsSaturation")
+            persistAudioReactive()
         }
     }
     
@@ -698,7 +696,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioAffectsIterations = newValue
                 setMappingEnabledLocked(.iterations, enabled: newValue)
             }
-            UserDefaults.standard.set(newValue, forKey: "fractalAudioAffectsIterations")
+            persistAudioReactive()
         }
     }
     
@@ -882,7 +880,7 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _showMusicShortcuts } }
         set {
             withLock { _showMusicShortcuts = newValue }
-            UserDefaults.standard.set(newValue, forKey: "showMusicShortcuts")
+            persistDisplay()
         }
     }
 
@@ -926,7 +924,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(45.0, newValue))
             withLock { _rotationBreakawayDegrees = clamped }
-            UserDefaults.standard.set(clamped, forKey: "rotationBreakawayDegrees")
+            persistGesture()
         }
     }
 
@@ -936,7 +934,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(1.0, min(10.0, newValue))
             withLock { _gestureSensitivity = clamped }
-            UserDefaults.standard.set(clamped, forKey: "gestureSensitivity")
+            persistGesture()
         }
     }
 
@@ -945,7 +943,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(1.0, newValue))
             withLock { _gestureSmoothingFactor = clamped }
-            UserDefaults.standard.set(clamped, forKey: "gestureSmoothingFactor")
+            persistGesture()
         }
     }
 
@@ -954,7 +952,7 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _menuToggleGestureEnabled } }
         set {
             withLock { _menuToggleGestureEnabled = newValue }
-            UserDefaults.standard.set(newValue, forKey: "menuToggleGestureEnabled")
+            persistGesture()
         }
     }
 
@@ -963,16 +961,11 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _menuToggleGestureMode } }
         set {
             withLock { _menuToggleGestureMode = newValue }
-            UserDefaults.standard.set(Int(newValue.rawValue), forKey: "menuToggleGestureMode")
+            persistGesture()
         }
     }
 
     // ── Per-hand gesture binding accessors ──────────────────────────────────
-    private func persistGestureBinding(_ binding: GestureActionBinding, key: String) {
-        if let data = try? JSONEncoder().encode(binding) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
 
     /// Get binding for a specific hand+finger slot.
     func binding(for slot: GestureSlot) -> GestureActionBinding {
@@ -997,19 +990,16 @@ final class RenderSettings: @unchecked Sendable {
                        !(otherBinding == .core(.none)) {
                         let bothKey = GestureSlot(hand: .both, finger: slot.finger).persistenceKey
                         _gestureBindings[bothKey] = .core(.none)
-                        persistGestureBinding(.core(.none), key: bothKey)
                     }
                 } else if slot.hand == .both {
                     let leftKey = GestureSlot(hand: .left, finger: slot.finger).persistenceKey
                     let rightKey = GestureSlot(hand: .right, finger: slot.finger).persistenceKey
                     _gestureBindings[leftKey] = .core(.none)
                     _gestureBindings[rightKey] = .core(.none)
-                    persistGestureBinding(.core(.none), key: leftKey)
-                    persistGestureBinding(.core(.none), key: rightKey)
                 }
             }
         }
-        persistGestureBinding(validated, key: key)
+        persistGesture()
     }
 
     /// Validates that a binding is appropriate for the given hand mode.
@@ -1056,7 +1046,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.05, min(0.6, newValue))
             withLock { _menuToggleHoldDuration = clamped }
-            UserDefaults.standard.set(clamped, forKey: "menuToggleHoldDuration")
+            persistGesture()
         }
     }
 
@@ -1066,7 +1056,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.1, min(2.5, newValue))
             withLock { _menuToggleCooldown = clamped }
-            UserDefaults.standard.set(clamped, forKey: "menuToggleCooldown")
+            persistGesture()
         }
     }
 
@@ -1075,7 +1065,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.2, min(0.95, newValue))
             withLock { _menuToggleActivateThreshold = clamped }
-            UserDefaults.standard.set(clamped, forKey: "menuToggleActivateThreshold")
+            persistGesture()
         }
     }
 
@@ -1084,7 +1074,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.1, min(0.9, newValue))
             withLock { _menuToggleReleaseThreshold = clamped }
-            UserDefaults.standard.set(clamped, forKey: "menuToggleReleaseThreshold")
+            persistGesture()
         }
     }
 
@@ -1093,7 +1083,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.2, min(0.98, newValue))
             withLock { _twoHandPinchActivateThreshold = clamped }
-            UserDefaults.standard.set(clamped, forKey: "twoHandPinchActivateThreshold")
+            persistGesture()
         }
     }
 
@@ -1102,7 +1092,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.1, min(0.95, newValue))
             withLock { _twoHandPinchReleaseThreshold = clamped }
-            UserDefaults.standard.set(clamped, forKey: "twoHandPinchReleaseThreshold")
+            persistGesture()
         }
     }
 
@@ -1111,7 +1101,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.1, min(0.95, newValue))
             withLock { _ringPinchActivateThreshold = clamped }
-            UserDefaults.standard.set(clamped, forKey: "ringPinchActivateThreshold")
+            persistGesture()
         }
     }
 
@@ -1120,7 +1110,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.05, min(0.9, newValue))
             withLock { _ringPinchReleaseThreshold = clamped }
-            UserDefaults.standard.set(clamped, forKey: "ringPinchReleaseThreshold")
+            persistGesture()
         }
     }
 
@@ -1129,7 +1119,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.02, min(0.25, newValue))
             withLock { _gestureMinHandDistance = clamped }
-            UserDefaults.standard.set(clamped, forKey: "gestureMinHandDistance")
+            persistGesture()
         }
     }
 
@@ -1138,7 +1128,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.2, min(1.2, newValue))
             withLock { _gestureMaxHandDistance = max(clamped, _gestureMinHandDistance + 0.05) }
-            UserDefaults.standard.set(withLock { _gestureMaxHandDistance }, forKey: "gestureMaxHandDistance")
+            persistGesture()
         }
     }
 
@@ -1147,7 +1137,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.08, min(1.0, newValue))
             withLock { _gestureMaxStartHandDistance = clamped }
-            UserDefaults.standard.set(clamped, forKey: "gestureMaxStartHandDistance")
+            persistGesture()
         }
     }
 
@@ -1156,7 +1146,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.1, min(1.5, newValue))
             withLock { _gestureMaxActiveHandDistance = max(clamped, _gestureMaxStartHandDistance) }
-            UserDefaults.standard.set(withLock { _gestureMaxActiveHandDistance }, forKey: "gestureMaxActiveHandDistance")
+            persistGesture()
         }
     }
 
@@ -1165,7 +1155,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.2, min(3.0, newValue))
             withLock { _translationSensitivity = clamped }
-            UserDefaults.standard.set(clamped, forKey: "translationSensitivity")
+            persistGesture()
         }
     }
 
@@ -1514,7 +1504,7 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _haltonJitterEnabled } }
         set {
             withLock { _haltonJitterEnabled = newValue }
-            UserDefaults.standard.set(newValue, forKey: "haltonJitterEnabled")
+            SettingsPersistence.save(qualityConfig, domain: .quality)
         }
     }
     
@@ -2225,6 +2215,23 @@ final class RenderSettings: @unchecked Sendable {
             _velocityPosition = .zero
         }
     }
+
+    /// Clear gesture/user offsets that are applied on top of animation base values.
+    /// Used by animation playback reset so scene-driven values fully take over.
+    func clearAnimationManualOffsets() {
+        withLock {
+            _manualOffsetMinDistance = 0.0
+            _manualOffsetFoldingLimit = 0.0
+            _manualOffsetSphereRadius = 0.0
+            _manualOffsetFractalScale = 0.0
+            _manualOffsetPosition = .zero
+            _velocityMinDistance = 0.0
+            _velocityFoldingLimit = 0.0
+            _velocitySphereRadius = 0.0
+            _velocityFractalScale = 0.0
+            _velocityPosition = .zero
+        }
+    }
     
     /// Set all targets at once (for preset loading)
     func setTargets(minDistance: Float, foldingLimit: Float, sphereRadius: Float, position: SIMD3<Float>) {
@@ -2416,6 +2423,357 @@ final class RenderSettings: @unchecked Sendable {
         set { 
             withLock { _earlyTermCount = newValue }
             print("[REFINE] earlyTermCount = \(newValue)")
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Domain-Level Persistence Helpers
+    // Replace 30+ scattered UserDefaults.standard.set(...) calls with
+    // one persist call per domain. Each saves the entire config struct as JSON.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Persist the audio-reactive config (called after any audio toggle/amount change).
+    private func persistAudioReactive() {
+        SettingsPersistence.save(audioReactiveConfig, domain: .audioReactive)
+    }
+
+    /// Persist the gesture config (called after binding/threshold/sensitivity changes).
+    private func persistGesture() {
+        SettingsPersistence.save(gestureConfig, domain: .gesture)
+    }
+
+    /// Persist the display config (called after HUD/music shortcut changes).
+    private func persistDisplay() {
+        SettingsPersistence.save(displayConfig, domain: .display)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Domain Config Struct Accessors
+    // Snapshot current state into focused config structs (get) or apply a
+    // config struct back to the underlying fields (set).
+    // These are the foundation for eliminating UISettingsCache, auto-deriving
+    // preset serialization, and composable SwiftUI views.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var geometryConfig: GeometryConfig {
+        get {
+            withLock {
+                var c = GeometryConfig()
+                c.fractalType = _fractalType
+                c.formulaParams = _formulaParams
+                c.minDistance = _minDistance
+                c.fractalScale = _fractalScale
+                c.foldingLimit = _foldingLimit
+                c.sphereRadius = _sphereRadius
+                c.position = _position
+                c.scale = _scale
+                c.worldRotation = _worldRotation
+                c.detailScale = _detailScale
+                c.doppelgangerEnabled = _doppelgangerEnabled
+                c.doppelgangerPlane = _doppelgangerPlane
+                c.doppelgangerOffset = _doppelgangerOffset
+                return c
+            }
+        }
+        set {
+            withLock {
+                _fractalType = newValue.fractalType
+                _formulaParams = newValue.formulaParams
+                _minDistance = newValue.minDistance
+                _fractalScale = newValue.fractalScale
+                _foldingLimit = newValue.foldingLimit
+                _sphereRadius = newValue.sphereRadius
+                _position = newValue.position
+                _scale = newValue.scale
+                _worldRotation = newValue.worldRotation
+                _detailScale = newValue.detailScale
+                _doppelgangerEnabled = newValue.doppelgangerEnabled
+                _doppelgangerPlane = newValue.doppelgangerPlane
+                _doppelgangerOffset = newValue.doppelgangerOffset
+            }
+        }
+    }
+
+    var qualityConfig: QualityConfig {
+        get {
+            withLock {
+                var c = QualityConfig()
+                c.baseFractalIterations = _baseFractalIterations
+                c.baseMaxRaySteps = _baseMaxRaySteps
+                c.resolutionScale = _resolutionScale
+                c.tileSize = _tileSize
+                c.haltonJitterEnabled = _haltonJitterEnabled
+                c.dynamicRenderQualityEnabled = _dynamicRenderQualityEnabled
+                c.dynamicRenderQualityTarget = _dynamicRenderQualityTarget
+                c.dynamicRenderQualityMin = _dynamicRenderQualityMin
+                c.dynamicRenderQualityMax = _dynamicRenderQualityMax
+                c.relaxFactor = _relaxFactor
+                c.relaxBacktrack = _relaxBacktrack
+                c.sdfScaleCoarse = _sdfScaleCoarse
+                c.sdfScaleSuperCoarse = _sdfScaleSuperCoarse
+                c.earlyTermRatio = _earlyTermRatio
+                c.earlyTermCount = _earlyTermCount
+                c.debugHierarchical = _debugHierarchical
+                return c
+            }
+        }
+        set {
+            withLock {
+                _baseFractalIterations = newValue.baseFractalIterations
+                _fractalIterations = newValue.baseFractalIterations
+                _baseMaxRaySteps = newValue.baseMaxRaySteps
+                _maxRaySteps = newValue.baseMaxRaySteps
+                _resolutionScale = newValue.resolutionScale
+                _tileSize = newValue.tileSize
+                _haltonJitterEnabled = newValue.haltonJitterEnabled
+                _dynamicRenderQualityEnabled = newValue.dynamicRenderQualityEnabled
+                _dynamicRenderQualityTarget = newValue.dynamicRenderQualityTarget
+                _dynamicRenderQualityMin = newValue.dynamicRenderQualityMin
+                _dynamicRenderQualityMax = newValue.dynamicRenderQualityMax
+                _relaxFactor = newValue.relaxFactor
+                _relaxBacktrack = newValue.relaxBacktrack
+                _sdfScaleCoarse = newValue.sdfScaleCoarse
+                _sdfScaleSuperCoarse = newValue.sdfScaleSuperCoarse
+                _earlyTermRatio = newValue.earlyTermRatio
+                _earlyTermCount = newValue.earlyTermCount
+                _debugHierarchical = newValue.debugHierarchical
+            }
+        }
+    }
+
+    var colorConfig: ColorConfig {
+        get {
+            withLock {
+                var c = ColorConfig()
+                c.colorScheme = _targetColorScheme
+                c.gradientState = _gradientState
+                c.colorMix = _colorMix
+                c.colorIterations = _colorIterations
+                c.colorSchemeSaturation = _colorSchemeSaturation
+                c.colorSchemeContrast = _colorSchemeContrast
+                c.colorSchemeGamma = _colorSchemeGamma
+                c.colorSchemeVibrance = _colorSchemeVibrance
+                c.colorSchemeCurve = _colorSchemeCurve
+                c.colorSchemeShadows = _colorSchemeShadows
+                c.colorSchemeHighlights = _colorSchemeHighlights
+                c.lightingSoftness = _lightingSoftness
+                c.colorSchemeAutoTransition = _colorSchemeAutoTransition
+                c.colorSchemeAutoInterval = _colorSchemeAutoInterval
+                c.colorSchemeTransitionDuration = _colorSchemeTransitionDuration
+                return c
+            }
+        }
+        set {
+            withLock {
+                if _targetColorScheme != newValue.colorScheme {
+                    _colorScheme = _targetColorScheme
+                    _targetColorScheme = newValue.colorScheme
+                    _colorSchemeTransitionProgress = 0.0
+                }
+                _gradientState = newValue.gradientState
+                _colorMix = newValue.colorMix
+                _colorIterations = newValue.colorIterations
+                _colorSchemeSaturation = newValue.colorSchemeSaturation
+                _colorSchemeContrast = newValue.colorSchemeContrast
+                _colorSchemeGamma = newValue.colorSchemeGamma
+                _colorSchemeVibrance = newValue.colorSchemeVibrance
+                _colorSchemeCurve = newValue.colorSchemeCurve
+                _colorSchemeShadows = newValue.colorSchemeShadows
+                _colorSchemeHighlights = newValue.colorSchemeHighlights
+                _lightingSoftness = newValue.lightingSoftness
+                _colorSchemeAutoTransition = newValue.colorSchemeAutoTransition
+                _colorSchemeAutoInterval = newValue.colorSchemeAutoInterval
+                _colorSchemeTransitionDuration = newValue.colorSchemeTransitionDuration
+            }
+        }
+    }
+
+    var lightingConfig: LightingConfig {
+        get {
+            withLock {
+                var c = LightingConfig()
+                c.lightingPreset = _lightingPreset
+                c.hueRotationEffect = _hueRotationEffect
+                c.pulseEffect = _pulseEffect
+                c.glowEffect = _glowEffect
+                c.bloomEffect = _bloomEffect
+                c.fogEffect = _fogEffect
+                c.gradientCycleEffect = _gradientCycleEffect
+                c.beatFlashEffect = _beatFlashEffect
+                c.polarRotationEffect = _polarRotationEffect
+                return c
+            }
+        }
+        set {
+            withLock {
+                _lightingPreset = newValue.lightingPreset
+                _hueRotationEffect = newValue.hueRotationEffect
+                _pulseEffect = newValue.pulseEffect
+                _glowEffect = newValue.glowEffect
+                _bloomEffect = newValue.bloomEffect
+                _fogEffect = newValue.fogEffect
+                _gradientCycleEffect = newValue.gradientCycleEffect
+                _beatFlashEffect = newValue.beatFlashEffect
+                _polarRotationEffect = newValue.polarRotationEffect
+            }
+        }
+    }
+
+    var audioReactiveConfig: AudioReactiveConfig {
+        get {
+            withLock {
+                var c = AudioReactiveConfig()
+                c.fractalAudioReactiveEnabled = _fractalAudioReactiveEnabled
+                c.fractalAudioAmount = _fractalAudioAmount
+                c.fractalBeatPunch = _fractalBeatPunch
+                c.bassSensitivity = _bassSensitivity
+                c.midSensitivity = _midSensitivity
+                c.trebleSensitivity = _trebleSensitivity
+                c.beatSensitivity = _beatSensitivity
+                c.visualizerMode = _visualizerMode
+                c.visualizerIntensity = _visualizerIntensity
+                c.musicReactiveMappings = _musicReactiveMappings
+                c.fractalAudioAffectsScale = _fractalAudioAffectsScale
+                c.fractalAudioAffectsFolding = _fractalAudioAffectsFolding
+                c.fractalAudioAffectsRadius = _fractalAudioAffectsRadius
+                c.fractalAudioAffectsColorMix = _fractalAudioAffectsColorMix
+                c.fractalAudioAffectsGlow = _fractalAudioAffectsGlow
+                c.fractalAudioAffectsFog = _fractalAudioAffectsFog
+                c.fractalAudioAffectsBloom = _fractalAudioAffectsBloom
+                c.fractalAudioAffectsHueSpeed = _fractalAudioAffectsHueSpeed
+                c.fractalAudioAffectsSaturation = _fractalAudioAffectsSaturation
+                c.fractalAudioAffectsIterations = _fractalAudioAffectsIterations
+                return c
+            }
+        }
+        set {
+            withLock {
+                _fractalAudioReactiveEnabled = newValue.fractalAudioReactiveEnabled
+                _fractalAudioAmount = newValue.fractalAudioAmount
+                _fractalBeatPunch = newValue.fractalBeatPunch
+                _bassSensitivity = newValue.bassSensitivity
+                _midSensitivity = newValue.midSensitivity
+                _trebleSensitivity = newValue.trebleSensitivity
+                _beatSensitivity = newValue.beatSensitivity
+                _visualizerMode = newValue.visualizerMode
+                _visualizerIntensity = newValue.visualizerIntensity
+                _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue.musicReactiveMappings)
+                _fractalAudioAffectsScale = newValue.fractalAudioAffectsScale
+                _fractalAudioAffectsFolding = newValue.fractalAudioAffectsFolding
+                _fractalAudioAffectsRadius = newValue.fractalAudioAffectsRadius
+                _fractalAudioAffectsColorMix = newValue.fractalAudioAffectsColorMix
+                _fractalAudioAffectsGlow = newValue.fractalAudioAffectsGlow
+                _fractalAudioAffectsFog = newValue.fractalAudioAffectsFog
+                _fractalAudioAffectsBloom = newValue.fractalAudioAffectsBloom
+                _fractalAudioAffectsHueSpeed = newValue.fractalAudioAffectsHueSpeed
+                _fractalAudioAffectsSaturation = newValue.fractalAudioAffectsSaturation
+                _fractalAudioAffectsIterations = newValue.fractalAudioAffectsIterations
+            }
+        }
+    }
+
+    var gestureConfig: GestureConfig {
+        get {
+            withLock {
+                var c = GestureConfig()
+                c.gestureBindings = _gestureBindings
+                c.gestureSensitivity = _gestureSensitivity
+                c.gestureSmoothingFactor = _gestureSmoothingFactor
+                c.useRelativeGestures = _useRelativeGestures
+                c.extendedGestureRange = _extendedGestureRange
+                c.translationSensitivity = _translationSensitivity
+                c.rotationAutoSnap = _rotationAutoSnap
+                c.rotationSnapWindowDegrees = _rotationSnapWindowDegrees
+                c.rotationBreakawayDegrees = _rotationBreakawayDegrees
+                c.menuToggleGestureEnabled = _menuToggleGestureEnabled
+                c.menuToggleGestureMode = _menuToggleGestureMode
+                c.menuToggleHoldDuration = _menuToggleHoldDuration
+                c.menuToggleCooldown = _menuToggleCooldown
+                c.menuToggleActivateThreshold = _menuToggleActivateThreshold
+                c.menuToggleReleaseThreshold = _menuToggleReleaseThreshold
+                c.twoHandPinchActivateThreshold = _twoHandPinchActivateThreshold
+                c.twoHandPinchReleaseThreshold = _twoHandPinchReleaseThreshold
+                c.ringPinchActivateThreshold = _ringPinchActivateThreshold
+                c.ringPinchReleaseThreshold = _ringPinchReleaseThreshold
+                c.gestureMinHandDistance = _gestureMinHandDistance
+                c.gestureMaxHandDistance = _gestureMaxHandDistance
+                c.gestureMaxStartHandDistance = _gestureMaxStartHandDistance
+                c.gestureMaxActiveHandDistance = _gestureMaxActiveHandDistance
+                return c
+            }
+        }
+        set {
+            withLock {
+                _gestureBindings = newValue.gestureBindings
+                _gestureSensitivity = newValue.gestureSensitivity
+                _gestureSmoothingFactor = newValue.gestureSmoothingFactor
+                _useRelativeGestures = newValue.useRelativeGestures
+                _extendedGestureRange = newValue.extendedGestureRange
+                _translationSensitivity = newValue.translationSensitivity
+                _rotationAutoSnap = newValue.rotationAutoSnap
+                _rotationSnapWindowDegrees = newValue.rotationSnapWindowDegrees
+                _rotationBreakawayDegrees = newValue.rotationBreakawayDegrees
+                _menuToggleGestureEnabled = newValue.menuToggleGestureEnabled
+                _menuToggleGestureMode = newValue.menuToggleGestureMode
+                _menuToggleHoldDuration = newValue.menuToggleHoldDuration
+                _menuToggleCooldown = newValue.menuToggleCooldown
+                _menuToggleActivateThreshold = newValue.menuToggleActivateThreshold
+                _menuToggleReleaseThreshold = newValue.menuToggleReleaseThreshold
+                _twoHandPinchActivateThreshold = newValue.twoHandPinchActivateThreshold
+                _twoHandPinchReleaseThreshold = newValue.twoHandPinchReleaseThreshold
+                _ringPinchActivateThreshold = newValue.ringPinchActivateThreshold
+                _ringPinchReleaseThreshold = newValue.ringPinchReleaseThreshold
+                _gestureMinHandDistance = newValue.gestureMinHandDistance
+                _gestureMaxHandDistance = newValue.gestureMaxHandDistance
+                _gestureMaxStartHandDistance = newValue.gestureMaxStartHandDistance
+                _gestureMaxActiveHandDistance = newValue.gestureMaxActiveHandDistance
+            }
+        }
+    }
+
+    var safetyBubbleConfig: SafetyBubbleConfig {
+        get {
+            withLock {
+                var c = SafetyBubbleConfig()
+                c.enabled = _safetyBubbleEnabled
+                c.radius = _safetyBubbleRadius
+                c.shape = _safetyBubbleShape
+                c.fadeEnabled = _safetyBubbleFadeEnabled
+                c.fadeWidth = _safetyBubbleFadeWidth
+                c.strength = _safetyBubbleStrength
+                return c
+            }
+        }
+        set {
+            withLock {
+                _safetyBubbleEnabled = newValue.enabled
+                _safetyBubbleRadius = newValue.radius
+                _safetyBubbleShape = newValue.shape
+                _safetyBubbleFadeEnabled = newValue.fadeEnabled
+                _safetyBubbleFadeWidth = newValue.fadeWidth
+                _safetyBubbleStrength = newValue.strength
+            }
+        }
+    }
+
+    var displayConfig: DisplayConfig {
+        get {
+            withLock {
+                var c = DisplayConfig()
+                c.showHUD = _showHUD
+                c.showMusicShortcuts = _showMusicShortcuts
+                c.lightingPlay = _lightingPlay
+                c.lightingMode = _lightingMode
+                return c
+            }
+        }
+        set {
+            withLock {
+                _showHUD = newValue.showHUD
+                _showMusicShortcuts = newValue.showMusicShortcuts
+                _lightingPlay = newValue.lightingPlay
+                _lightingMode = newValue.lightingMode
+            }
         }
     }
 

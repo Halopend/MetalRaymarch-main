@@ -324,68 +324,73 @@ struct FractalPreset: Codable, Identifiable {
     /// Create a preset from current render settings
     static func fromSettings(_ settings: RenderSettings, name: String, thumbnailData: Data? = nil) -> FractalPreset {
         var preset = FractalPreset(name: name, thumbnailData: thumbnailData)
-        
-        preset.fractalIterations = settings.fractalIterations
-        preset.maxRaySteps = settings.maxRaySteps
-        preset.colorMix = settings.colorMix
-        preset.colorIterations = settings.colorIterations
-        preset.position = settings.position
-        preset.scale = settings.scale
 
-        preset.fractalType = settings.fractalType
-        preset.colorScheme = settings.colorScheme
-        preset.colorSchemeSaturation = settings.colorSchemeSaturation
-        preset.colorSchemeContrast = settings.colorSchemeContrast
-        preset.colorSchemeGamma = settings.colorSchemeGamma
-        preset.colorSchemeVibrance = settings.colorSchemeVibrance
-        preset.colorSchemeCurve = settings.colorSchemeCurve
-        preset.colorSchemeShadows = settings.colorSchemeShadows
-        preset.colorSchemeHighlights = settings.colorSchemeHighlights
-        
-        preset.minDistance = settings.minDistance
-        preset.fractalScale = settings.fractalScale
-        preset.foldingLimit = settings.foldingLimit
-        preset.sphereRadius = settings.sphereRadius
-        
-        // Capture formula params for all types (unified path)
-        let fp = settings.formulaParams
+        // ── Geometry domain (1 lock acquisition) ──
+        let geo = settings.geometryConfig
+        preset.fractalType = geo.fractalType
+        preset.minDistance = geo.minDistance
+        preset.fractalScale = geo.fractalScale
+        preset.foldingLimit = geo.foldingLimit
+        preset.sphereRadius = geo.sphereRadius
+        preset.position = geo.position
+        preset.scale = geo.scale
+        preset.doppelgangerEnabled = geo.doppelgangerEnabled
+        preset.doppelgangerPlane = geo.doppelgangerPlane
+        preset.doppelgangerOffset = geo.doppelgangerOffset
+        // Capture formula params as [Float] for Codable
         var vals = [Float](repeating: 0, count: 16)
-        for i in 0..<16 { vals[i] = FormulaCatalog.getParam(fp, index: i) }
+        for i in 0..<16 { vals[i] = FormulaCatalog.getParam(geo.formulaParams, index: i) }
         preset.formulaParamValues = vals
-        
-        preset.resolutionScale = settings.resolutionScale
-        preset.tileSize = settings.tileSize
-        
-        preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
-        preset.safetyBubbleRadius = settings.safetyBubbleRadius
-        preset.safetyBubbleShape = settings.safetyBubbleShape
-        preset.safetyBubbleBlend = settings.safetyBubbleBlend
-        
-        // v2.0 modular lighting effects
-        preset.lightingMode = settings.lightingMode
-        preset.lightingPreset = settings.lightingPreset
-        preset.hueRotationEffect = settings.hueRotationEffect
-        preset.pulseEffect = settings.pulseEffect
-        preset.glowEffect = settings.glowEffect
-        preset.bloomEffect = settings.bloomEffect
-        preset.fogEffect = settings.fogEffect
-        preset.gradientCycleEffect = settings.gradientCycleEffect
-        
-        // Doppelganger
-        preset.doppelgangerEnabled = settings.doppelgangerEnabled
-        preset.doppelgangerPlane = settings.doppelgangerPlane
-        preset.doppelgangerOffset = settings.doppelgangerOffset
-        
-        // Color scheme auto-transition
-        preset.colorSchemeAutoTransition = settings.colorSchemeAutoTransition
-        preset.colorSchemeAutoInterval = settings.colorSchemeAutoInterval
-        preset.colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
-        
-        // v2.1 gradient coloring system
-        preset.gradientState = settings.gradientState
-        preset.lightingSoftness = settings.lightingSoftness
-        preset.musicReactiveMappings = settings.musicReactiveMappings
-        
+
+        // ── Quality domain (1 lock acquisition) ──
+        let qual = settings.qualityConfig
+        preset.fractalIterations = qual.baseFractalIterations
+        preset.maxRaySteps = qual.baseMaxRaySteps
+        preset.resolutionScale = qual.resolutionScale
+        preset.tileSize = qual.tileSize
+
+        // ── Color domain (1 lock acquisition) ──
+        let col = settings.colorConfig
+        preset.colorScheme = col.colorScheme
+        preset.colorMix = col.colorMix
+        preset.colorIterations = col.colorIterations
+        preset.colorSchemeSaturation = col.colorSchemeSaturation
+        preset.colorSchemeContrast = col.colorSchemeContrast
+        preset.colorSchemeGamma = col.colorSchemeGamma
+        preset.colorSchemeVibrance = col.colorSchemeVibrance
+        preset.colorSchemeCurve = col.colorSchemeCurve
+        preset.colorSchemeShadows = col.colorSchemeShadows
+        preset.colorSchemeHighlights = col.colorSchemeHighlights
+        preset.lightingSoftness = col.lightingSoftness
+        preset.colorSchemeAutoTransition = col.colorSchemeAutoTransition
+        preset.colorSchemeAutoInterval = col.colorSchemeAutoInterval
+        preset.colorSchemeTransitionDuration = col.colorSchemeTransitionDuration
+        preset.gradientState = col.gradientState
+
+        // ── Lighting domain (1 lock acquisition) ──
+        let lit = settings.lightingConfig
+        preset.lightingPreset = lit.lightingPreset
+        preset.hueRotationEffect = lit.hueRotationEffect
+        preset.pulseEffect = lit.pulseEffect
+        preset.glowEffect = lit.glowEffect
+        preset.bloomEffect = lit.bloomEffect
+        preset.fogEffect = lit.fogEffect
+        preset.gradientCycleEffect = lit.gradientCycleEffect
+
+        // ── Display domain (1 lock acquisition) ──
+        let disp = settings.displayConfig
+        preset.lightingMode = disp.lightingMode
+
+        // ── Safety bubble domain (1 lock acquisition) ──
+        let sb = settings.safetyBubbleConfig
+        preset.safetyBubbleEnabled = sb.enabled
+        preset.safetyBubbleRadius = sb.radius
+        preset.safetyBubbleShape = sb.shape
+        preset.safetyBubbleBlend = sb.strength
+
+        // ── Audio reactive domain (1 lock acquisition) ──
+        preset.musicReactiveMappings = settings.audioReactiveConfig.musicReactiveMappings
+
         return preset
     }
     

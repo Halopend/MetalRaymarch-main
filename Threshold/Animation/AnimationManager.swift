@@ -194,6 +194,19 @@ final class AnimationManager {
         sceneWithBubble.safetyBubbleRadius = settings.safetyBubbleRadius
         sceneWithBubble.safetyBubbleShape = settings.safetyBubbleShape
         sceneWithBubble.safetyBubbleBlend = settings.safetyBubbleBlend
+        sceneWithBubble.gradientPreset = settings.gradientPreset
+        sceneWithBubble.colorMappingMode = settings.colorMappingMode
+        sceneWithBubble.gradientRepeat = settings.gradientRepeat
+        sceneWithBubble.gradientOffset = settings.gradientOffset
+        sceneWithBubble.gradientSmoothing = settings.gradientSmoothing
+        sceneWithBubble.colorSchemeSaturation = settings.colorSchemeSaturation
+        sceneWithBubble.colorSchemeContrast = settings.colorSchemeContrast
+        sceneWithBubble.colorSchemeGamma = settings.colorSchemeGamma
+        sceneWithBubble.colorSchemeVibrance = settings.colorSchemeVibrance
+        sceneWithBubble.colorSchemeCurve = settings.colorSchemeCurve
+        sceneWithBubble.colorSchemeShadows = settings.colorSchemeShadows
+        sceneWithBubble.colorSchemeHighlights = settings.colorSchemeHighlights
+        sceneWithBubble.lightingSoftness = settings.lightingSoftness
         userScenes.append(sceneWithBubble)
         saveScenes()
         
@@ -349,6 +362,9 @@ final class AnimationManager {
 
         // Apply scene-level safety bubble / blend window settings
         if let settings = renderSettings, let scene = currentScene {
+            // Clear lingering user/gesture offsets so playback starts from clean scene values.
+            settings.clearAnimationManualOffsets()
+
             if let enabled = scene.safetyBubbleEnabled {
                 settings.safetyBubbleEnabled = enabled
             }
@@ -403,6 +419,12 @@ final class AnimationManager {
             if let soft = scene.lightingSoftness {
                 settings.lightingSoftness = soft
             }
+
+            // Apply the current playhead state immediately so first rendered frame
+            // does not momentarily show stale values from prior interaction.
+            if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
+                applyKeyframe(keyframe)
+            }
         }
 
         // Signal render loop to tick animation updates every frame.
@@ -417,6 +439,20 @@ final class AnimationManager {
         // Auto-play attached song when scene starts
         if let song = currentScene?.attachedSong {
             playSongHandler?(song)
+        }
+    }
+
+    /// Disable user/gesture overrides during playback and re-apply scene-driven
+    /// values at the current playhead position.
+    func disablePlaybackOverrides() {
+        guard let settings = renderSettings,
+              let scene = currentScene,
+              scene.keyframes.count >= 1 else { return }
+
+        settings.clearAnimationManualOffsets()
+
+        if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
+            applyKeyframe(keyframe)
         }
     }
     
@@ -706,6 +742,51 @@ final class AnimationManager {
         settings.targetFractalScale = keyframe.fractalScale + settings.manualOffsetFractalScale
         settings.targetPosition = position
     }
+
+    /// Returns the keyframe state corresponding to the current playhead time.
+    /// Does not mutate playhead time/index.
+    private func interpolatedKeyframeAtCurrentPlayhead(in scene: AnimationScene) -> AnimationKeyframe? {
+        let keyframes = scene.keyframes
+        guard keyframes.count >= 1 else { return nil }
+        guard keyframes.count >= 2 else { return keyframes[0] }
+
+        let keyframeCount = keyframes.count
+        var fromIndex = min(max(playhead.currentKeyframeIndex, 0), keyframeCount - 1)
+        var toIndex = fromIndex + 1
+        if toIndex >= keyframeCount {
+            toIndex = scene.isLooping ? 0 : keyframeCount - 1
+        }
+
+        let segmentDuration = segmentDuration(for: keyframes, toIndex: toIndex)
+        let rawProgress: Float
+        if segmentDuration > 0 {
+            rawProgress = Float(min(max(playhead.elapsedInSegment / segmentDuration, 0.0), 1.0))
+        } else {
+            rawProgress = 1.0
+        }
+
+        let fromKeyframe = keyframes[fromIndex]
+        let toKeyframe = keyframes[toIndex]
+
+        let effectiveEasing = toKeyframe.easingType
+        if effectiveEasing.usesSplineInterpolation || (easingFunction.usesSplineInterpolation && effectiveEasing == .bezier) {
+            return CatmullRomSpline.interpolateKeyframes(
+                keyframes,
+                fromIndex: fromIndex,
+                toIndex: toIndex,
+                t: rawProgress,
+                isLooping: scene.isLooping
+            )
+        }
+
+        if effectiveEasing.usesBezierHandles {
+            let easedProgress = CubicBezier.evaluate(rawProgress, handle: toKeyframe.bezierHandle)
+            return fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
+        }
+
+        let easedProgress = effectiveEasing.apply(rawProgress)
+        return fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // PERSISTENCE
@@ -802,15 +883,15 @@ final class AnimationManager {
         guard let data = json.data(using: .utf8) else { return nil }
         
         do {
-            var scene = try sceneDecoder.decode(AnimationScene.self, from: data)
+            let importedScene = try sceneDecoder.decode(AnimationScene.self, from: data)
             
             // Capture all keyframes and fractal type before re-creating with new ID
-            let originalKeyframes = scene.keyframes
-            let originalFractalType = scene.fractalType
+            let originalKeyframes = importedScene.keyframes
+            let originalFractalType = importedScene.fractalType
             
             // Give it a new ID to avoid conflicts
-            scene = AnimationScene(
-                name: scene.name + " (imported)",
+            var scene = AnimationScene(
+                name: importedScene.name + " (imported)",
                 initialKeyframe: originalKeyframes.first ?? AnimationKeyframe(
                     name: "Default",
                     duration: 0,
@@ -827,6 +908,27 @@ final class AnimationManager {
             if originalKeyframes.count > 1 {
                 scene.keyframes.append(contentsOf: originalKeyframes.dropFirst())
             }
+
+            // Restore scene-level values that are not part of keyframe payload.
+            scene.isLooping = importedScene.isLooping
+            scene.gradientPreset = importedScene.gradientPreset
+            scene.colorMappingMode = importedScene.colorMappingMode
+            scene.gradientRepeat = importedScene.gradientRepeat
+            scene.gradientOffset = importedScene.gradientOffset
+            scene.gradientSmoothing = importedScene.gradientSmoothing
+            scene.colorSchemeSaturation = importedScene.colorSchemeSaturation
+            scene.colorSchemeContrast = importedScene.colorSchemeContrast
+            scene.colorSchemeGamma = importedScene.colorSchemeGamma
+            scene.colorSchemeVibrance = importedScene.colorSchemeVibrance
+            scene.colorSchemeCurve = importedScene.colorSchemeCurve
+            scene.colorSchemeShadows = importedScene.colorSchemeShadows
+            scene.colorSchemeHighlights = importedScene.colorSchemeHighlights
+            scene.lightingSoftness = importedScene.lightingSoftness
+            scene.safetyBubbleEnabled = importedScene.safetyBubbleEnabled
+            scene.safetyBubbleRadius = importedScene.safetyBubbleRadius
+            scene.safetyBubbleShape = importedScene.safetyBubbleShape
+            scene.safetyBubbleBlend = importedScene.safetyBubbleBlend
+            scene.attachedSong = importedScene.attachedSong
             
             userScenes.append(scene)
             saveScenes()

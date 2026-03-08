@@ -58,6 +58,37 @@ private struct ParameterNodeRow: View {
     /// Local copy of this parameter's gesture sensitivity for the slider binding.
     @State private var sensitivityValue: Float = GestureSensitivityStore.defaultSensitivity
 
+    /// Small dead-zone around the midpoint so neutral 1.0x is easy to land on.
+    private let sensitivityNeutralSnapThreshold: Float = 0.02
+
+    /// Slider position in [0,1] where 0.5 is neutral (1.0x).
+    /// Left half maps to reduced sensitivity, right half maps to increased sensitivity.
+    private var sensitivitySliderPosition: Binding<Float> {
+        Binding(
+            get: {
+                let minValue = GestureSensitivityStore.range.lowerBound
+                let maxValue = GestureSensitivityStore.range.upperBound
+                let clamped = min(max(sensitivityValue, minValue), maxValue)
+
+                // Log-space mapping gives symmetric precision below/above 1.0x.
+                // 0.0 -> 0.1x, 0.5 -> 1.0x, 1.0 -> 10.0x.
+                let exponent = log10f(clamped)
+                return min(max((exponent + 1.0) * 0.5, 0.0), 1.0)
+            },
+            set: { position in
+                let defaultValue = GestureSensitivityStore.defaultSensitivity
+                let clampedPosition = min(max(position, 0.0), 1.0)
+
+                if abs(clampedPosition - 0.5) <= sensitivityNeutralSnapThreshold {
+                    sensitivityValue = defaultValue
+                } else {
+                    let exponent = (clampedPosition * 2.0) - 1.0
+                    sensitivityValue = powf(10.0, exponent)
+                }
+            }
+        )
+    }
+
     var body: some View {
         if let boolNode = node as? BoolParameterNode {
             HStack(spacing: 8) {
@@ -221,8 +252,8 @@ private struct ParameterNodeRow: View {
                     .frame(width: 66, alignment: .leading)
                     .lineLimit(1)
 
-                Slider(value: $sensitivityValue,
-                       in: GestureSensitivityStore.range.lowerBound...GestureSensitivityStore.range.upperBound)
+                  Slider(value: sensitivitySliderPosition,
+                      in: 0...1)
                     .tint(.orange)
                     .onChange(of: sensitivityValue) { _, newVal in
                         GestureSensitivityStore.shared.setSensitivity(newVal, for: floatNode.id)

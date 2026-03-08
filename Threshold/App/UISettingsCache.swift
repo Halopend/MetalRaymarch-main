@@ -240,99 +240,123 @@ final class UISettingsCache {
     
     func loadFromSettings() {
         guard let settings else { return }
-        fractalType = settings.fractalType
-        formulaParams = settings.formulaParams
+
+        // ── Geometry domain ──
+        let geo = settings.geometryConfig
+        fractalType = geo.fractalType
+        formulaParams = geo.formulaParams
         fractalScale = settings.targetFractalScale
         targetMinDistance = settings.targetMinDistance
         targetFoldingLimit = settings.targetFoldingLimit
         targetSphereRadius = settings.targetSphereRadius
-        baseFractalIterations = settings.baseFractalIterations
-        baseMaxRaySteps = settings.baseMaxRaySteps
-        colorScheme = settings.colorScheme
-        colorMix = settings.colorMix
-        colorIterations = settings.colorIterations
-        colorSchemeAutoTransition = settings.colorSchemeAutoTransition
-        colorSchemeAutoInterval = settings.colorSchemeAutoInterval
-        colorSchemeTransitionDuration = settings.colorSchemeTransitionDuration
-        colorSchemeSaturation = settings.colorSchemeSaturation
-        colorSchemeContrast = settings.colorSchemeContrast
-        colorSchemeGamma = settings.colorSchemeGamma
-        colorSchemeVibrance = settings.colorSchemeVibrance
-        colorSchemeCurve = settings.colorSchemeCurve
-        colorSchemeShadows = settings.colorSchemeShadows
-        colorSchemeHighlights = settings.colorSchemeHighlights
-        useGradientColoring = settings.useGradientColoring
-        gradientColorMap = settings.gradientColorMap
-        gradientPreset = settings.gradientPreset
-        colorMappingMode = settings.colorMappingMode
-        gradientRepeat = settings.gradientRepeat
-        gradientOffset = settings.gradientOffset
-        gradientSmoothing = settings.gradientSmoothing
-        lightingPreset = settings.lightingPreset
-        hueRotationEffect = settings.hueRotationEffect
-        pulseEffect = settings.pulseEffect
-        glowEffect = settings.glowEffect
-        bloomEffect = settings.bloomEffect
-        fogEffect = settings.fogEffect
-        gradientCycleEffect = settings.gradientCycleEffect
-        polarRotationEffect = settings.polarRotationEffect
-        beatFlashEffect = settings.beatFlashEffect
-        lightingMode = settings.lightingMode
-        lightingSoftness = settings.lightingSoftness
-        bassSensitivity = settings.bassSensitivity
-        midSensitivity = settings.midSensitivity
-        trebleSensitivity = settings.trebleSensitivity
-        beatSensitivity = settings.beatSensitivity
-        fractalAudioReactiveEnabled = settings.fractalAudioReactiveEnabled
-        fractalAudioAmount = settings.fractalAudioAmount
-        fractalBeatPunch = settings.fractalBeatPunch
-        fractalAudioAffectsScale = settings.fractalAudioAffectsScale
-        fractalAudioAffectsFolding = settings.fractalAudioAffectsFolding
-        fractalAudioAffectsRadius = settings.fractalAudioAffectsRadius
-        fractalAudioAffectsColorMix = settings.fractalAudioAffectsColorMix
-        fractalAudioAffectsGlow = settings.fractalAudioAffectsGlow
-        fractalAudioAffectsFog = settings.fractalAudioAffectsFog
-        fractalAudioAffectsBloom = settings.fractalAudioAffectsBloom
-        fractalAudioAffectsHueSpeed = settings.fractalAudioAffectsHueSpeed
-        fractalAudioAffectsSaturation = settings.fractalAudioAffectsSaturation
-        fractalAudioAffectsIterations = settings.fractalAudioAffectsIterations
-        musicReactiveMappings = settings.musicReactiveMappings
-        showHUD = settings.showHUD
-        showMusicShortcuts = settings.showMusicShortcuts
-        safetyBubbleEnabled = settings.safetyBubbleEnabled
-        safetyBubbleRadius = settings.safetyBubbleRadius
-        safetyBubbleShape = settings.safetyBubbleShape
-        safetyBubbleBlend = settings.safetyBubbleBlend
-        useRelativeGestures = settings.useRelativeGestures
-        extendedGestureRange = settings.extendedGestureRange
-        rotationAutoSnap = settings.rotationAutoSnap
-        rotationSnapWindowDegrees = settings.rotationSnapWindowDegrees
-        rotationBreakawayDegrees = settings.rotationBreakawayDegrees
-        gestureSensitivity = settings.gestureSensitivity
-        gestureSmoothingFactor = settings.gestureSmoothingFactor
-        menuToggleGestureEnabled = settings.menuToggleGestureEnabled
-        menuToggleGestureMode = settings.menuToggleGestureMode
-        for slot in GestureSlot.allSlots {
-            gestureBindings[slot.persistenceKey] = settings.binding(for: slot)
-        }
-        menuToggleHoldDuration = settings.menuToggleHoldDuration
-        menuToggleCooldown = settings.menuToggleCooldown
-        menuToggleActivateThreshold = settings.menuToggleActivateThreshold
-        menuToggleReleaseThreshold = settings.menuToggleReleaseThreshold
-        twoHandPinchActivateThreshold = settings.twoHandPinchActivateThreshold
-        twoHandPinchReleaseThreshold = settings.twoHandPinchReleaseThreshold
-        ringPinchActivateThreshold = settings.ringPinchActivateThreshold
-        ringPinchReleaseThreshold = settings.ringPinchReleaseThreshold
-        gestureMinHandDistance = settings.gestureMinHandDistance
-        gestureMaxHandDistance = settings.gestureMaxHandDistance
-        gestureMaxStartHandDistance = settings.gestureMaxStartHandDistance
-        gestureMaxActiveHandDistance = settings.gestureMaxActiveHandDistance
-        translationSensitivity = settings.translationSensitivity
-        haltonJitterEnabled = settings.haltonJitterEnabled
-        dynamicRenderQualityEnabled = settings.dynamicRenderQualityEnabled
-        dynamicRenderQualityMin = settings.dynamicRenderQualityMin
-        dynamicRenderQualityMax = settings.dynamicRenderQualityMax
+
+        // ── Quality domain ──
+        let qual = settings.qualityConfig
+        baseFractalIterations = qual.baseFractalIterations
+        baseMaxRaySteps = qual.baseMaxRaySteps
+        haltonJitterEnabled = qual.haltonJitterEnabled
+        dynamicRenderQualityEnabled = qual.dynamicRenderQualityEnabled
+        dynamicRenderQualityMin = qual.dynamicRenderQualityMin
+        dynamicRenderQualityMax = qual.dynamicRenderQualityMax
         currentRenderQuality = settings.currentRenderQuality
+
+        // ── Color domain ──
+        let col = settings.colorConfig
+        colorScheme = col.colorScheme
+        colorMix = col.colorMix
+        colorIterations = col.colorIterations
+        colorSchemeAutoTransition = col.colorSchemeAutoTransition
+        colorSchemeAutoInterval = col.colorSchemeAutoInterval
+        colorSchemeTransitionDuration = col.colorSchemeTransitionDuration
+        colorSchemeSaturation = col.colorSchemeSaturation
+        colorSchemeContrast = col.colorSchemeContrast
+        colorSchemeGamma = col.colorSchemeGamma
+        colorSchemeVibrance = col.colorSchemeVibrance
+        colorSchemeCurve = col.colorSchemeCurve
+        colorSchemeShadows = col.colorSchemeShadows
+        colorSchemeHighlights = col.colorSchemeHighlights
+        lightingSoftness = col.lightingSoftness
+        // Gradient state
+        let gs = col.gradientState
+        useGradientColoring = gs.useGradientColoring
+        gradientColorMap = gs.gradient
+        gradientPreset = gs.gradientPreset
+        colorMappingMode = gs.gradient.mappingMode
+        gradientRepeat = gs.gradient.repeatCount
+        gradientOffset = gs.gradient.offset
+        gradientSmoothing = gs.gradient.smoothing
+
+        // ── Lighting domain ──
+        let lit = settings.lightingConfig
+        lightingPreset = lit.lightingPreset
+        hueRotationEffect = lit.hueRotationEffect
+        pulseEffect = lit.pulseEffect
+        glowEffect = lit.glowEffect
+        bloomEffect = lit.bloomEffect
+        fogEffect = lit.fogEffect
+        gradientCycleEffect = lit.gradientCycleEffect
+        beatFlashEffect = lit.beatFlashEffect
+        polarRotationEffect = lit.polarRotationEffect
+
+        // ── Display domain ──
+        let disp = settings.displayConfig
+        showHUD = disp.showHUD
+        showMusicShortcuts = disp.showMusicShortcuts
+        lightingMode = disp.lightingMode
+
+        // ── Audio reactive domain ──
+        let audio = settings.audioReactiveConfig
+        bassSensitivity = audio.bassSensitivity
+        midSensitivity = audio.midSensitivity
+        trebleSensitivity = audio.trebleSensitivity
+        beatSensitivity = audio.beatSensitivity
+        fractalAudioReactiveEnabled = audio.fractalAudioReactiveEnabled
+        fractalAudioAmount = audio.fractalAudioAmount
+        fractalBeatPunch = audio.fractalBeatPunch
+        fractalAudioAffectsScale = audio.fractalAudioAffectsScale
+        fractalAudioAffectsFolding = audio.fractalAudioAffectsFolding
+        fractalAudioAffectsRadius = audio.fractalAudioAffectsRadius
+        fractalAudioAffectsColorMix = audio.fractalAudioAffectsColorMix
+        fractalAudioAffectsGlow = audio.fractalAudioAffectsGlow
+        fractalAudioAffectsFog = audio.fractalAudioAffectsFog
+        fractalAudioAffectsBloom = audio.fractalAudioAffectsBloom
+        fractalAudioAffectsHueSpeed = audio.fractalAudioAffectsHueSpeed
+        fractalAudioAffectsSaturation = audio.fractalAudioAffectsSaturation
+        fractalAudioAffectsIterations = audio.fractalAudioAffectsIterations
+        musicReactiveMappings = audio.musicReactiveMappings
+
+        // ── Safety bubble domain ──
+        let sb = settings.safetyBubbleConfig
+        safetyBubbleEnabled = sb.enabled
+        safetyBubbleRadius = sb.radius
+        safetyBubbleShape = sb.shape
+        safetyBubbleBlend = sb.strength
+
+        // ── Gesture domain ──
+        let gest = settings.gestureConfig
+        useRelativeGestures = gest.useRelativeGestures
+        extendedGestureRange = gest.extendedGestureRange
+        rotationAutoSnap = gest.rotationAutoSnap
+        rotationSnapWindowDegrees = gest.rotationSnapWindowDegrees
+        rotationBreakawayDegrees = gest.rotationBreakawayDegrees
+        gestureSensitivity = gest.gestureSensitivity
+        gestureSmoothingFactor = gest.gestureSmoothingFactor
+        menuToggleGestureEnabled = gest.menuToggleGestureEnabled
+        menuToggleGestureMode = gest.menuToggleGestureMode
+        gestureBindings = gest.gestureBindings
+        menuToggleHoldDuration = gest.menuToggleHoldDuration
+        menuToggleCooldown = gest.menuToggleCooldown
+        menuToggleActivateThreshold = gest.menuToggleActivateThreshold
+        menuToggleReleaseThreshold = gest.menuToggleReleaseThreshold
+        twoHandPinchActivateThreshold = gest.twoHandPinchActivateThreshold
+        twoHandPinchReleaseThreshold = gest.twoHandPinchReleaseThreshold
+        ringPinchActivateThreshold = gest.ringPinchActivateThreshold
+        ringPinchReleaseThreshold = gest.ringPinchReleaseThreshold
+        gestureMinHandDistance = gest.gestureMinHandDistance
+        gestureMaxHandDistance = gest.gestureMaxHandDistance
+        gestureMaxStartHandDistance = gest.gestureMaxStartHandDistance
+        gestureMaxActiveHandDistance = gest.gestureMaxActiveHandDistance
+        translationSensitivity = gest.translationSensitivity
     }
     
     @inline(__always)
@@ -449,14 +473,16 @@ final class UISettingsCache {
     
     func reloadLightingEffects() {
         guard let settings = settings else { return }
-        hueRotationEffect = settings.hueRotationEffect
-        pulseEffect = settings.pulseEffect
-        glowEffect = settings.glowEffect
-        bloomEffect = settings.bloomEffect
-        fogEffect = settings.fogEffect
-        gradientCycleEffect = settings.gradientCycleEffect
-        polarRotationEffect = settings.polarRotationEffect
-        beatFlashEffect = settings.beatFlashEffect
+        let lit = settings.lightingConfig
+        lightingPreset = lit.lightingPreset
+        hueRotationEffect = lit.hueRotationEffect
+        pulseEffect = lit.pulseEffect
+        glowEffect = lit.glowEffect
+        bloomEffect = lit.bloomEffect
+        fogEffect = lit.fogEffect
+        gradientCycleEffect = lit.gradientCycleEffect
+        polarRotationEffect = lit.polarRotationEffect
+        beatFlashEffect = lit.beatFlashEffect
     }
 }
 
