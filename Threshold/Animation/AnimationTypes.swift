@@ -218,61 +218,61 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.id = UUID()
         self.name = name
         self.duration = duration
-        
-        // Capture current shape parameters
-        self.minDistance = settings.minDistance
-        self.foldingLimit = settings.foldingLimit
-        self.sphereRadius = settings.sphereRadius
-        self.fractalScale = settings.fractalScale
-        
-        // Capture quality parameters
-        self.baseFractalIterations = settings.baseFractalIterations
-        self.baseMaxRaySteps = settings.baseMaxRaySteps
-        
-        // Capture base scale
-        self.scale = settings.scale
-        
-        // Capture position
-        self.positionX = settings.position.x
-        self.positionY = settings.position.y
-        self.positionZ = settings.position.z
 
-        // Capture detail transform
-        self.detailScale = settings.detailScale
-        self.worldRotationX = settings.worldRotation.imag.x
-        self.worldRotationY = settings.worldRotation.imag.y
-        self.worldRotationZ = settings.worldRotation.imag.z
-        self.worldRotationW = settings.worldRotation.real
-        
-        self.lightingMode = settings.lightingMode
-        self.lightingPreset = settings.lightingPreset
-        self.hueRotationEffect = settings.hueRotationEffect
-        self.pulseEffect = settings.pulseEffect
-        self.glowEffect = settings.glowEffect
-        self.bloomEffect = settings.bloomEffect
-        self.fogEffect = settings.fogEffect
-        self.gradientCycleEffect = settings.gradientCycleEffect
-        
-        // Capture color / gradient settings
-        self.colorMappingMode = settings.colorMappingMode
-        self.gradientRepeat = settings.gradientRepeat
-        self.gradientOffset = settings.gradientOffset
-        self.gradientSmoothing = settings.gradientSmoothing
-        self.colorSchemeSaturation = settings.colorSchemeSaturation
-        self.colorSchemeContrast = settings.colorSchemeContrast
-        self.colorSchemeGamma = settings.colorSchemeGamma
-        self.colorSchemeVibrance = settings.colorSchemeVibrance
-        self.colorSchemeCurve = settings.colorSchemeCurve
-        self.colorSchemeShadows = settings.colorSchemeShadows
-        self.colorSchemeHighlights = settings.colorSchemeHighlights
-        self.lightingSoftness = settings.lightingSoftness
-        self.gradientPreset = settings.gradientPreset
-        
-        // Capture formula params for all types (unified path)
-        let fp = settings.formulaParams
+        // ── Geometry domain (1 lock acquisition) ──
+        let geo = settings.geometryConfig
+        self.minDistance = geo.minDistance
+        self.foldingLimit = geo.foldingLimit
+        self.sphereRadius = geo.sphereRadius
+        self.fractalScale = geo.fractalScale
+        self.scale = geo.scale
+        self.positionX = geo.position.x
+        self.positionY = geo.position.y
+        self.positionZ = geo.position.z
+        self.detailScale = geo.detailScale
+        self.worldRotationX = geo.worldRotation.imag.x
+        self.worldRotationY = geo.worldRotation.imag.y
+        self.worldRotationZ = geo.worldRotation.imag.z
+        self.worldRotationW = geo.worldRotation.real
+        // Capture formula params as [Float]
         var vals = [Float](repeating: 0, count: 16)
-        for i in 0..<16 { vals[i] = FormulaCatalog.getParam(fp, index: i) }
+        for i in 0..<16 { vals[i] = FormulaCatalog.getParam(geo.formulaParams, index: i) }
         self.formulaParamValues = vals
+
+        // ── Quality domain (1 lock acquisition) ──
+        let qual = settings.qualityConfig
+        self.baseFractalIterations = qual.baseFractalIterations
+        self.baseMaxRaySteps = qual.baseMaxRaySteps
+
+        // ── Lighting domain (1 lock acquisition) ──
+        let lit = settings.lightingConfig
+        self.lightingPreset = lit.lightingPreset
+        self.hueRotationEffect = lit.hueRotationEffect
+        self.pulseEffect = lit.pulseEffect
+        self.glowEffect = lit.glowEffect
+        self.bloomEffect = lit.bloomEffect
+        self.fogEffect = lit.fogEffect
+        self.gradientCycleEffect = lit.gradientCycleEffect
+
+        // ── Display domain (1 lock acquisition) ──
+        let disp = settings.displayConfig
+        self.lightingMode = disp.lightingMode
+
+        // ── Color domain (1 lock acquisition) ──
+        let col = settings.colorConfig
+        self.colorSchemeSaturation = col.colorSchemeSaturation
+        self.colorSchemeContrast = col.colorSchemeContrast
+        self.colorSchemeGamma = col.colorSchemeGamma
+        self.colorSchemeVibrance = col.colorSchemeVibrance
+        self.colorSchemeCurve = col.colorSchemeCurve
+        self.colorSchemeShadows = col.colorSchemeShadows
+        self.colorSchemeHighlights = col.colorSchemeHighlights
+        self.lightingSoftness = col.lightingSoftness
+        self.colorMappingMode = col.gradientState.gradient.mappingMode
+        self.gradientRepeat = col.gradientState.gradient.repeatCount
+        self.gradientOffset = col.gradientState.gradient.offset
+        self.gradientSmoothing = col.gradientState.gradient.smoothing
+        self.gradientPreset = col.gradientState.gradientPreset
     }
     
     /// Create with explicit values

@@ -37,11 +37,36 @@ enum SettingsPersistence {
         case display        = "cfg.display"
     }
 
+    // MARK: Throttle
+
+    /// Minimum interval (seconds) between consecutive saves for the same domain.
+    /// Prevents excessive UserDefaults writes from continuous slider drags / gestures.
+    private static let throttleInterval: TimeInterval = 1.0
+
+    /// Timestamp of the last successful save per domain.
+    private static var lastSaveTime: [Domain: TimeInterval] = [:]
+    private static let throttleLock = NSLock()
+
     // MARK: Generic Save / Load
 
     static func save<T: Codable>(_ value: T, domain: Domain) {
         guard let data = try? encoder.encode(value) else { return }
         defaults.set(data, forKey: domain.rawValue)
+    }
+
+    /// Returns true if the domain is eligible for a save (throttle window has elapsed).
+    /// Call this BEFORE constructing the config struct to avoid unnecessary work.
+    static func shouldSave(domain: Domain) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        throttleLock.lock()
+        let last = lastSaveTime[domain] ?? 0
+        if now - last < throttleInterval {
+            throttleLock.unlock()
+            return false
+        }
+        lastSaveTime[domain] = now
+        throttleLock.unlock()
+        return true
     }
 
     static func load<T: Codable>(_ type: T.Type, domain: Domain) -> T? {

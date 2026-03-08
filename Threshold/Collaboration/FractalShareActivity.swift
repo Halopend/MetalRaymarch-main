@@ -57,21 +57,32 @@ struct FractalSyncMessage: Codable, Sendable {
     let timestamp: TimeInterval      // For ordering/interpolation
     let senderID: UUID               // Identifies message source
     
-    /// Initialize from current RenderSettings
+    /// Initialize from current RenderSettings (4 config snapshots vs 13 individual reads)
     init(from settings: RenderSettings, senderID: UUID) {
-        self.position = settings.position
-        self.scale = settings.scale
-        self.fractalType = settings.fractalType.rawValue
-        self.fractalScale = settings.fractalScale
-        self.foldingLimit = settings.foldingLimit
-        self.sphereRadius = settings.sphereRadius
-        self.fractalIterations = settings.fractalIterations
-        self.maxRaySteps = settings.maxRaySteps
-        self.colorMix = settings.colorMix
-        self.minDistance = settings.minDistance
-        self.safetyBubbleEnabled = settings.safetyBubbleEnabled
-        self.safetyBubbleRadius = settings.safetyBubbleRadius
-        self.safetyBubbleShape = settings.safetyBubbleShape
+        // ── Geometry domain (1 lock) ──
+        let geo = settings.geometryConfig
+        self.position = geo.position
+        self.scale = geo.scale
+        self.fractalType = geo.fractalType.rawValue
+        self.fractalScale = geo.fractalScale
+        self.foldingLimit = geo.foldingLimit
+        self.sphereRadius = geo.sphereRadius
+        self.minDistance = geo.minDistance
+
+        // ── Quality domain (1 lock) ──
+        let qual = settings.qualityConfig
+        self.fractalIterations = qual.baseFractalIterations
+        self.maxRaySteps = qual.baseMaxRaySteps
+
+        // ── Color domain (1 lock) ──
+        self.colorMix = settings.colorConfig.colorMix
+
+        // ── Safety bubble domain (1 lock) ──
+        let sb = settings.safetyBubbleConfig
+        self.safetyBubbleEnabled = sb.enabled
+        self.safetyBubbleRadius = sb.radius
+        self.safetyBubbleShape = sb.shape
+
         self.timestamp = Date().timeIntervalSince1970
         self.senderID = senderID
     }

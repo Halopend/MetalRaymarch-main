@@ -189,6 +189,9 @@ class AppModel {
         // Restore last state if available
         presetManager.restoreLastState(to: renderSettings)
         
+        // Restore domain config structs (new persistence format, overlays legacy per-key values)
+        SettingsPersistence.restoreAll(into: renderSettings)
+        
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
 

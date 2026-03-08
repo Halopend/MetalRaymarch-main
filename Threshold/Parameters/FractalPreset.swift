@@ -322,8 +322,8 @@ struct FractalPreset: Codable, Identifiable {
     }
     
     /// Create a preset from current render settings
-    static func fromSettings(_ settings: RenderSettings, name: String, thumbnailData: Data? = nil) -> FractalPreset {
-        var preset = FractalPreset(name: name, thumbnailData: thumbnailData)
+    static func fromSettings(_ settings: RenderSettings, name: String, id: UUID = UUID(), createdAt: Date = Date(), thumbnailData: Data? = nil) -> FractalPreset {
+        var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
 
         // ── Geometry domain (1 lock acquisition) ──
         let geo = settings.geometryConfig

@@ -216,54 +216,10 @@ class PresetManager {
         scheduleSavePresets()
     }
     
-    /// Helper to create preset with specific ID
+    /// Helper to create preset with specific ID.
+    /// Delegates to FractalPreset.fromSettings() (uses config struct accessors).
     private func createPresetWithID(_ id: UUID, name: String, createdAt: Date, settings: RenderSettings, thumbnailData: Data?) -> FractalPreset {
-        var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
-        
-        preset.fractalIterations = settings.fractalIterations
-        preset.maxRaySteps = settings.maxRaySteps
-        preset.colorMix = settings.colorMix
-        preset.colorIterations = settings.colorIterations
-        preset.position = settings.position
-        preset.scale = settings.scale
-        
-        preset.fractalType = settings.fractalType
-        preset.colorSchemeSaturation = settings.colorSchemeSaturation
-        preset.colorSchemeContrast = settings.colorSchemeContrast
-        preset.colorSchemeGamma = settings.colorSchemeGamma
-        preset.colorSchemeVibrance = settings.colorSchemeVibrance
-        preset.colorSchemeCurve = settings.colorSchemeCurve
-        preset.colorSchemeShadows = settings.colorSchemeShadows
-        preset.colorSchemeHighlights = settings.colorSchemeHighlights
-        
-        preset.minDistance = settings.minDistance
-        preset.fractalScale = settings.fractalScale
-        preset.foldingLimit = settings.foldingLimit
-        preset.sphereRadius = settings.sphereRadius
-        
-        preset.resolutionScale = settings.resolutionScale
-        preset.tileSize = settings.tileSize
-        
-        preset.safetyBubbleEnabled = settings.safetyBubbleEnabled
-        preset.safetyBubbleRadius = settings.safetyBubbleRadius
-        preset.safetyBubbleShape = settings.safetyBubbleShape
-        preset.safetyBubbleBlend = settings.safetyBubbleBlend
-        
-        // v2.0 modular lighting effects
-        preset.lightingMode = settings.lightingMode
-        preset.lightingPreset = settings.lightingPreset
-        preset.hueRotationEffect = settings.hueRotationEffect
-        preset.pulseEffect = settings.pulseEffect
-        preset.glowEffect = settings.glowEffect
-        preset.bloomEffect = settings.bloomEffect
-        preset.fogEffect = settings.fogEffect
-        preset.gradientCycleEffect = settings.gradientCycleEffect
-        
-        // v2.1 gradient coloring system
-        preset.gradientState = settings.gradientState
-        preset.lightingSoftness = settings.lightingSoftness
-        
-        return preset
+        FractalPreset.fromSettings(settings, name: name, id: id, createdAt: createdAt, thumbnailData: thumbnailData)
     }
     
     /// Rename a preset

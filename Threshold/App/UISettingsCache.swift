@@ -14,50 +14,171 @@ import SwiftUI
 @Observable
 final class UISettingsCache {
     let parameterOperationDispatcher = ParameterOperationDispatcher()
-    // Fractal parameters
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Domain Config Struct Backing Stores
+    // These 7 structs replace ~84 individual stored properties.
+    // Computed property shims below maintain backward compatibility with views.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var color: ColorConfig = ColorConfig()
+    var lighting: LightingConfig = LightingConfig()
+    var audioReactive: AudioReactiveConfig = AudioReactiveConfig()
+    var gesture: GestureConfig = GestureConfig()
+    var safetyBubble: SafetyBubbleConfig = SafetyBubbleConfig()
+    var quality: QualityConfig = QualityConfig()
+    var display: DisplayConfig = DisplayConfig()
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Geometry (target values, not in any config struct)
+    // ═══════════════════════════════════════════════════════════════════════════
+
     var fractalType: FractalModelType = .mandelbox
     var fractalScale: Float = 2.0
     var targetMinDistance: Float = 0.8
     var targetFoldingLimit: Float = 1.0
     var targetSphereRadius: Float = 0.5
-    var baseFractalIterations: Int = 9
-    var baseMaxRaySteps: Int = 64
     var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
-    
-    // Color & effects
-    var colorScheme: ColorScheme = .nebula
-    var colorMix: Float = 0.5
-    var colorIterations: Float = 8.0
-    var colorSchemeAutoTransition: Bool = false
-    var colorSchemeAutoInterval: Float = 30.0
-    var colorSchemeTransitionDuration: Float = 2.0
-    var colorSchemeSaturation: Float = 2.0
-    var colorSchemeContrast: Float = 1.05
-    var colorSchemeGamma: Float = 0.5
-    var colorSchemeVibrance: Float = 1.0
-    var colorSchemeCurve: Float = 0.0
-    var colorSchemeShadows: Float = 0.0
-    var colorSchemeHighlights: Float = 0.0
-    
-    // === GRADIENT COLORING SYSTEM ===
-    var useGradientColoring: Bool = true
-    var gradientColorMap: GradientColorMap = GradientPreset.nebula.makeGradient()
-    var gradientPreset: GradientPreset? = .nebula
-    var colorMappingMode: ColorMappingMode = .orbitTrap
-    var gradientRepeat: Float = 1.0
-    var gradientOffset: Float = 0.0
-    var gradientSmoothing: Float = 1.0
-    
-    // === MODULAR LIGHTING EFFECTS ===
-    var lightingPreset: LightingPreset = .off
-    var hueRotationEffect: HueRotationEffect = .off
-    var pulseEffect: PulseEffect = .off
-    var glowEffect: GlowEffect = .off
-    var bloomEffect: BloomEffect = .off
-    var fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
-    var gradientCycleEffect: GradientCycleEffect = .off
-    var polarRotationEffect: PolarRotationEffect = .off
-    var beatFlashEffect: BeatFlashEffect = .off
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Quality Shims
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var baseFractalIterations: Int {
+        get { quality.baseFractalIterations }
+        set { quality.baseFractalIterations = newValue }
+    }
+    var baseMaxRaySteps: Int {
+        get { quality.baseMaxRaySteps }
+        set { quality.baseMaxRaySteps = newValue }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Color Shims
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var colorScheme: ColorScheme {
+        get { color.colorScheme }
+        set { color.colorScheme = newValue }
+    }
+    var colorMix: Float {
+        get { color.colorMix }
+        set { color.colorMix = newValue }
+    }
+    var colorIterations: Float {
+        get { color.colorIterations }
+        set { color.colorIterations = newValue }
+    }
+    var colorSchemeAutoTransition: Bool {
+        get { color.colorSchemeAutoTransition }
+        set { color.colorSchemeAutoTransition = newValue }
+    }
+    var colorSchemeAutoInterval: Float {
+        get { color.colorSchemeAutoInterval }
+        set { color.colorSchemeAutoInterval = newValue }
+    }
+    var colorSchemeTransitionDuration: Float {
+        get { color.colorSchemeTransitionDuration }
+        set { color.colorSchemeTransitionDuration = newValue }
+    }
+    var colorSchemeSaturation: Float {
+        get { color.colorSchemeSaturation }
+        set { color.colorSchemeSaturation = newValue }
+    }
+    var colorSchemeContrast: Float {
+        get { color.colorSchemeContrast }
+        set { color.colorSchemeContrast = newValue }
+    }
+    var colorSchemeGamma: Float {
+        get { color.colorSchemeGamma }
+        set { color.colorSchemeGamma = newValue }
+    }
+    var colorSchemeVibrance: Float {
+        get { color.colorSchemeVibrance }
+        set { color.colorSchemeVibrance = newValue }
+    }
+    var colorSchemeCurve: Float {
+        get { color.colorSchemeCurve }
+        set { color.colorSchemeCurve = newValue }
+    }
+    var colorSchemeShadows: Float {
+        get { color.colorSchemeShadows }
+        set { color.colorSchemeShadows = newValue }
+    }
+    var colorSchemeHighlights: Float {
+        get { color.colorSchemeHighlights }
+        set { color.colorSchemeHighlights = newValue }
+    }
+
+    // ── Gradient shims (nested in color.gradientState) ──
+    var useGradientColoring: Bool {
+        get { color.gradientState.useGradientColoring }
+        set { color.gradientState.useGradientColoring = newValue }
+    }
+    var gradientColorMap: GradientColorMap {
+        get { color.gradientState.gradient }
+        set { color.gradientState.gradient = newValue }
+    }
+    var gradientPreset: GradientPreset? {
+        get { color.gradientState.gradientPreset }
+        set { color.gradientState.gradientPreset = newValue }
+    }
+    var colorMappingMode: ColorMappingMode {
+        get { color.gradientState.gradient.mappingMode }
+        set { color.gradientState.gradient.mappingMode = newValue }
+    }
+    var gradientRepeat: Float {
+        get { color.gradientState.gradient.repeatCount }
+        set { color.gradientState.gradient.repeatCount = newValue }
+    }
+    var gradientOffset: Float {
+        get { color.gradientState.gradient.offset }
+        set { color.gradientState.gradient.offset = newValue }
+    }
+    var gradientSmoothing: Float {
+        get { color.gradientState.gradient.smoothing }
+        set { color.gradientState.gradient.smoothing = newValue }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Lighting Shims
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var lightingPreset: LightingPreset {
+        get { lighting.lightingPreset }
+        set { lighting.lightingPreset = newValue }
+    }
+    var hueRotationEffect: HueRotationEffect {
+        get { lighting.hueRotationEffect }
+        set { lighting.hueRotationEffect = newValue }
+    }
+    var pulseEffect: PulseEffect {
+        get { lighting.pulseEffect }
+        set { lighting.pulseEffect = newValue }
+    }
+    var glowEffect: GlowEffect {
+        get { lighting.glowEffect }
+        set { lighting.glowEffect = newValue }
+    }
+    var bloomEffect: BloomEffect {
+        get { lighting.bloomEffect }
+        set { lighting.bloomEffect = newValue }
+    }
+    var fogEffect: FogEffect {
+        get { lighting.fogEffect }
+        set { lighting.fogEffect = newValue }
+    }
+    var gradientCycleEffect: GradientCycleEffect {
+        get { lighting.gradientCycleEffect }
+        set { lighting.gradientCycleEffect = newValue }
+    }
+    var polarRotationEffect: PolarRotationEffect {
+        get { lighting.polarRotationEffect }
+        set { lighting.polarRotationEffect = newValue }
+    }
+    var beatFlashEffect: BeatFlashEffect {
+        get { lighting.beatFlashEffect }
+        set { lighting.beatFlashEffect = newValue }
+    }
     
     // === SAVED CUSTOM GRADIENTS (persisted via UserDefaults) ===
     var savedCustomGradients: [GradientColorMap] = UISettingsCache.loadSavedGradients()
@@ -118,81 +239,247 @@ final class UISettingsCache {
         settings?.useGradientColoring = true
     }
     
-    // Lighting - simplified
-    var lightingMode: LightingMode = .animated
-    var lightingSoftness: Float = 0.0
-    
-    // === MUSIC / AUDIO REACTIVITY ===
-    var bassSensitivity: Float = 1.0
-    var midSensitivity: Float = 1.0
-    var trebleSensitivity: Float = 1.0
-    var beatSensitivity: Float = 1.0
-    var fractalAudioReactiveEnabled: Bool = true
-    var fractalAudioAmount: Float = 0.6
-    var fractalBeatPunch: Float = 0.7
-    var fractalAudioAffectsScale: Bool = true
-    var fractalAudioAffectsFolding: Bool = true
-    var fractalAudioAffectsRadius: Bool = true
-    var fractalAudioAffectsColorMix: Bool = true
-    
-    // === FRACTAL FORGE–INSPIRED EXTENDED AFFECTS ===
-    var fractalAudioAffectsGlow: Bool = true
-    var fractalAudioAffectsFog: Bool = true
-    var fractalAudioAffectsBloom: Bool = true
-    var fractalAudioAffectsHueSpeed: Bool = true
-    var fractalAudioAffectsSaturation: Bool = true
-    var fractalAudioAffectsIterations: Bool = false
-    var musicReactiveMappings: [MusicReactiveMapping] = MusicReactiveMapping.defaultMappings()
-    
-    // Safety & display
-    var showHUD: Bool = false
-    var showMusicShortcuts: Bool = false
-    var safetyBubbleEnabled: Bool = false
-    var safetyBubbleRadius: Float = 1.8
-    var safetyBubbleShape: Float = 0.0
-    var safetyBubbleBlend: Float = 0.5
-    var useRelativeGestures: Bool = true
-    var extendedGestureRange: Bool = true
-    var rotationAutoSnap: Bool = false
-    var rotationSnapWindowDegrees: Float = 6.0
-    var rotationBreakawayDegrees: Float = 12.0
-    var gestureSensitivity: Float = 3.0
-    var gestureSmoothingFactor: Float = 0.5
-    var menuToggleGestureEnabled: Bool = true
-    var menuToggleGestureMode: MenuToggleGestureMode = .middleAndRingToPalm
-    // Per-hand × per-finger gesture binding slots (9 total)
-    var gestureBindings: [String: GestureActionBinding] = {
-        var d: [String: GestureActionBinding] = [:]
-        for slot in GestureSlot.allSlots { d[slot.persistenceKey] = .core(.none) }
-        d["rightIndexBinding"] = .core(.translate)
-        d["bothIndexBinding"]  = .core(.grab)
-        d["bothMiddleBinding"] = .core(.minDistance)
-        d["bothRingBinding"]   = .core(.fractalScale)
-        return d
-    }()
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Display Shims
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    var menuToggleHoldDuration: Float = 0.06
-    var menuToggleCooldown: Float = 0.35
-    var menuToggleActivateThreshold: Float = 0.48
-    var menuToggleReleaseThreshold: Float = 0.30
-    var twoHandPinchActivateThreshold: Float = 0.88
-    var twoHandPinchReleaseThreshold: Float = 0.65
-    var ringPinchActivateThreshold: Float = 0.58
-    var ringPinchReleaseThreshold: Float = 0.38
-    var gestureMinHandDistance: Float = 0.05
-    var gestureMaxHandDistance: Float = 0.60
-    var gestureMaxStartHandDistance: Float = 0.45
-    var gestureMaxActiveHandDistance: Float = 0.90
-    var translationSensitivity: Float = 1.0
+    var lightingMode: LightingMode {
+        get { display.lightingMode }
+        set { display.lightingMode = newValue }
+    }
+    var lightingSoftness: Float {
+        get { color.lightingSoftness }
+        set { color.lightingSoftness = newValue }
+    }
     
-    // Halton jitter temporal AA
-    var haltonJitterEnabled: Bool = true
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Audio Reactive Shims
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var bassSensitivity: Float {
+        get { audioReactive.bassSensitivity }
+        set { audioReactive.bassSensitivity = newValue }
+    }
+    var midSensitivity: Float {
+        get { audioReactive.midSensitivity }
+        set { audioReactive.midSensitivity = newValue }
+    }
+    var trebleSensitivity: Float {
+        get { audioReactive.trebleSensitivity }
+        set { audioReactive.trebleSensitivity = newValue }
+    }
+    var beatSensitivity: Float {
+        get { audioReactive.beatSensitivity }
+        set { audioReactive.beatSensitivity = newValue }
+    }
+    var fractalAudioReactiveEnabled: Bool {
+        get { audioReactive.fractalAudioReactiveEnabled }
+        set { audioReactive.fractalAudioReactiveEnabled = newValue }
+    }
+    var fractalAudioAmount: Float {
+        get { audioReactive.fractalAudioAmount }
+        set { audioReactive.fractalAudioAmount = newValue }
+    }
+    var fractalBeatPunch: Float {
+        get { audioReactive.fractalBeatPunch }
+        set { audioReactive.fractalBeatPunch = newValue }
+    }
+    var fractalAudioAffectsScale: Bool {
+        get { audioReactive.fractalAudioAffectsScale }
+        set { audioReactive.fractalAudioAffectsScale = newValue }
+    }
+    var fractalAudioAffectsFolding: Bool {
+        get { audioReactive.fractalAudioAffectsFolding }
+        set { audioReactive.fractalAudioAffectsFolding = newValue }
+    }
+    var fractalAudioAffectsRadius: Bool {
+        get { audioReactive.fractalAudioAffectsRadius }
+        set { audioReactive.fractalAudioAffectsRadius = newValue }
+    }
+    var fractalAudioAffectsColorMix: Bool {
+        get { audioReactive.fractalAudioAffectsColorMix }
+        set { audioReactive.fractalAudioAffectsColorMix = newValue }
+    }
+    var fractalAudioAffectsGlow: Bool {
+        get { audioReactive.fractalAudioAffectsGlow }
+        set { audioReactive.fractalAudioAffectsGlow = newValue }
+    }
+    var fractalAudioAffectsFog: Bool {
+        get { audioReactive.fractalAudioAffectsFog }
+        set { audioReactive.fractalAudioAffectsFog = newValue }
+    }
+    var fractalAudioAffectsBloom: Bool {
+        get { audioReactive.fractalAudioAffectsBloom }
+        set { audioReactive.fractalAudioAffectsBloom = newValue }
+    }
+    var fractalAudioAffectsHueSpeed: Bool {
+        get { audioReactive.fractalAudioAffectsHueSpeed }
+        set { audioReactive.fractalAudioAffectsHueSpeed = newValue }
+    }
+    var fractalAudioAffectsSaturation: Bool {
+        get { audioReactive.fractalAudioAffectsSaturation }
+        set { audioReactive.fractalAudioAffectsSaturation = newValue }
+    }
+    var fractalAudioAffectsIterations: Bool {
+        get { audioReactive.fractalAudioAffectsIterations }
+        set { audioReactive.fractalAudioAffectsIterations = newValue }
+    }
+    var musicReactiveMappings: [MusicReactiveMapping] {
+        get { audioReactive.musicReactiveMappings }
+        set { audioReactive.musicReactiveMappings = newValue }
+    }
     
-    // Dynamic quality
-    var dynamicRenderQualityEnabled: Bool = true
-    var dynamicRenderQualityMin: Float = 0.5
-    var dynamicRenderQualityMax: Float = 1.0
-    var currentRenderQuality: Float = 0.7
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Display Shims (cont.)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var showHUD: Bool {
+        get { display.showHUD }
+        set { display.showHUD = newValue }
+    }
+    var showMusicShortcuts: Bool {
+        get { display.showMusicShortcuts }
+        set { display.showMusicShortcuts = newValue }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Safety Bubble Shims
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var safetyBubbleEnabled: Bool {
+        get { safetyBubble.enabled }
+        set { safetyBubble.enabled = newValue }
+    }
+    var safetyBubbleRadius: Float {
+        get { safetyBubble.radius }
+        set { safetyBubble.radius = newValue }
+    }
+    var safetyBubbleShape: Float {
+        get { safetyBubble.shape }
+        set { safetyBubble.shape = newValue }
+    }
+    var safetyBubbleBlend: Float {
+        get { safetyBubble.strength }
+        set { safetyBubble.strength = newValue }
+    }
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Gesture Shims
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var useRelativeGestures: Bool {
+        get { gesture.useRelativeGestures }
+        set { gesture.useRelativeGestures = newValue }
+    }
+    var extendedGestureRange: Bool {
+        get { gesture.extendedGestureRange }
+        set { gesture.extendedGestureRange = newValue }
+    }
+    var rotationAutoSnap: Bool {
+        get { gesture.rotationAutoSnap }
+        set { gesture.rotationAutoSnap = newValue }
+    }
+    var rotationSnapWindowDegrees: Float {
+        get { gesture.rotationSnapWindowDegrees }
+        set { gesture.rotationSnapWindowDegrees = newValue }
+    }
+    var rotationBreakawayDegrees: Float {
+        get { gesture.rotationBreakawayDegrees }
+        set { gesture.rotationBreakawayDegrees = newValue }
+    }
+    var gestureSensitivity: Float {
+        get { gesture.gestureSensitivity }
+        set { gesture.gestureSensitivity = newValue }
+    }
+    var gestureSmoothingFactor: Float {
+        get { gesture.gestureSmoothingFactor }
+        set { gesture.gestureSmoothingFactor = newValue }
+    }
+    var menuToggleGestureEnabled: Bool {
+        get { gesture.menuToggleGestureEnabled }
+        set { gesture.menuToggleGestureEnabled = newValue }
+    }
+    var menuToggleGestureMode: MenuToggleGestureMode {
+        get { gesture.menuToggleGestureMode }
+        set { gesture.menuToggleGestureMode = newValue }
+    }
+    var gestureBindings: [String: GestureActionBinding] {
+        get { gesture.gestureBindings }
+        set { gesture.gestureBindings = newValue }
+    }
+    var menuToggleHoldDuration: Float {
+        get { gesture.menuToggleHoldDuration }
+        set { gesture.menuToggleHoldDuration = newValue }
+    }
+    var menuToggleCooldown: Float {
+        get { gesture.menuToggleCooldown }
+        set { gesture.menuToggleCooldown = newValue }
+    }
+    var menuToggleActivateThreshold: Float {
+        get { gesture.menuToggleActivateThreshold }
+        set { gesture.menuToggleActivateThreshold = newValue }
+    }
+    var menuToggleReleaseThreshold: Float {
+        get { gesture.menuToggleReleaseThreshold }
+        set { gesture.menuToggleReleaseThreshold = newValue }
+    }
+    var twoHandPinchActivateThreshold: Float {
+        get { gesture.twoHandPinchActivateThreshold }
+        set { gesture.twoHandPinchActivateThreshold = newValue }
+    }
+    var twoHandPinchReleaseThreshold: Float {
+        get { gesture.twoHandPinchReleaseThreshold }
+        set { gesture.twoHandPinchReleaseThreshold = newValue }
+    }
+    var ringPinchActivateThreshold: Float {
+        get { gesture.ringPinchActivateThreshold }
+        set { gesture.ringPinchActivateThreshold = newValue }
+    }
+    var ringPinchReleaseThreshold: Float {
+        get { gesture.ringPinchReleaseThreshold }
+        set { gesture.ringPinchReleaseThreshold = newValue }
+    }
+    var gestureMinHandDistance: Float {
+        get { gesture.gestureMinHandDistance }
+        set { gesture.gestureMinHandDistance = newValue }
+    }
+    var gestureMaxHandDistance: Float {
+        get { gesture.gestureMaxHandDistance }
+        set { gesture.gestureMaxHandDistance = newValue }
+    }
+    var gestureMaxStartHandDistance: Float {
+        get { gesture.gestureMaxStartHandDistance }
+        set { gesture.gestureMaxStartHandDistance = newValue }
+    }
+    var gestureMaxActiveHandDistance: Float {
+        get { gesture.gestureMaxActiveHandDistance }
+        set { gesture.gestureMaxActiveHandDistance = newValue }
+    }
+    var translationSensitivity: Float {
+        get { gesture.translationSensitivity }
+        set { gesture.translationSensitivity = newValue }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Remaining Quality Shims
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    var haltonJitterEnabled: Bool {
+        get { quality.haltonJitterEnabled }
+        set { quality.haltonJitterEnabled = newValue }
+    }
+    var dynamicRenderQualityEnabled: Bool {
+        get { quality.dynamicRenderQualityEnabled }
+        set { quality.dynamicRenderQualityEnabled = newValue }
+    }
+    var dynamicRenderQualityMin: Float {
+        get { quality.dynamicRenderQualityMin }
+        set { quality.dynamicRenderQualityMin = newValue }
+    }
+    var dynamicRenderQualityMax: Float {
+        get { quality.dynamicRenderQualityMax }
+        set { quality.dynamicRenderQualityMax = newValue }
+    }
+    var currentRenderQuality: Float = 0.7  // Live stat, not in config struct
     
     // === LIVE STATS (synced from render settings periodically) ===
     // These eliminate direct appModel.renderSettings reads from SwiftUI views,
@@ -241,7 +528,16 @@ final class UISettingsCache {
     func loadFromSettings() {
         guard let settings else { return }
 
-        // ── Geometry domain ──
+        // ── Config struct snapshots (7 domain assignments replace ~95 individual lines) ──
+        color = settings.colorConfig
+        lighting = settings.lightingConfig
+        audioReactive = settings.audioReactiveConfig
+        gesture = settings.gestureConfig
+        safetyBubble = settings.safetyBubbleConfig
+        quality = settings.qualityConfig
+        display = settings.displayConfig
+
+        // ── Geometry (target values, not in any config struct) ──
         let geo = settings.geometryConfig
         fractalType = geo.fractalType
         formulaParams = geo.formulaParams
@@ -250,113 +546,8 @@ final class UISettingsCache {
         targetFoldingLimit = settings.targetFoldingLimit
         targetSphereRadius = settings.targetSphereRadius
 
-        // ── Quality domain ──
-        let qual = settings.qualityConfig
-        baseFractalIterations = qual.baseFractalIterations
-        baseMaxRaySteps = qual.baseMaxRaySteps
-        haltonJitterEnabled = qual.haltonJitterEnabled
-        dynamicRenderQualityEnabled = qual.dynamicRenderQualityEnabled
-        dynamicRenderQualityMin = qual.dynamicRenderQualityMin
-        dynamicRenderQualityMax = qual.dynamicRenderQualityMax
+        // ── Live stat ──
         currentRenderQuality = settings.currentRenderQuality
-
-        // ── Color domain ──
-        let col = settings.colorConfig
-        colorScheme = col.colorScheme
-        colorMix = col.colorMix
-        colorIterations = col.colorIterations
-        colorSchemeAutoTransition = col.colorSchemeAutoTransition
-        colorSchemeAutoInterval = col.colorSchemeAutoInterval
-        colorSchemeTransitionDuration = col.colorSchemeTransitionDuration
-        colorSchemeSaturation = col.colorSchemeSaturation
-        colorSchemeContrast = col.colorSchemeContrast
-        colorSchemeGamma = col.colorSchemeGamma
-        colorSchemeVibrance = col.colorSchemeVibrance
-        colorSchemeCurve = col.colorSchemeCurve
-        colorSchemeShadows = col.colorSchemeShadows
-        colorSchemeHighlights = col.colorSchemeHighlights
-        lightingSoftness = col.lightingSoftness
-        // Gradient state
-        let gs = col.gradientState
-        useGradientColoring = gs.useGradientColoring
-        gradientColorMap = gs.gradient
-        gradientPreset = gs.gradientPreset
-        colorMappingMode = gs.gradient.mappingMode
-        gradientRepeat = gs.gradient.repeatCount
-        gradientOffset = gs.gradient.offset
-        gradientSmoothing = gs.gradient.smoothing
-
-        // ── Lighting domain ──
-        let lit = settings.lightingConfig
-        lightingPreset = lit.lightingPreset
-        hueRotationEffect = lit.hueRotationEffect
-        pulseEffect = lit.pulseEffect
-        glowEffect = lit.glowEffect
-        bloomEffect = lit.bloomEffect
-        fogEffect = lit.fogEffect
-        gradientCycleEffect = lit.gradientCycleEffect
-        beatFlashEffect = lit.beatFlashEffect
-        polarRotationEffect = lit.polarRotationEffect
-
-        // ── Display domain ──
-        let disp = settings.displayConfig
-        showHUD = disp.showHUD
-        showMusicShortcuts = disp.showMusicShortcuts
-        lightingMode = disp.lightingMode
-
-        // ── Audio reactive domain ──
-        let audio = settings.audioReactiveConfig
-        bassSensitivity = audio.bassSensitivity
-        midSensitivity = audio.midSensitivity
-        trebleSensitivity = audio.trebleSensitivity
-        beatSensitivity = audio.beatSensitivity
-        fractalAudioReactiveEnabled = audio.fractalAudioReactiveEnabled
-        fractalAudioAmount = audio.fractalAudioAmount
-        fractalBeatPunch = audio.fractalBeatPunch
-        fractalAudioAffectsScale = audio.fractalAudioAffectsScale
-        fractalAudioAffectsFolding = audio.fractalAudioAffectsFolding
-        fractalAudioAffectsRadius = audio.fractalAudioAffectsRadius
-        fractalAudioAffectsColorMix = audio.fractalAudioAffectsColorMix
-        fractalAudioAffectsGlow = audio.fractalAudioAffectsGlow
-        fractalAudioAffectsFog = audio.fractalAudioAffectsFog
-        fractalAudioAffectsBloom = audio.fractalAudioAffectsBloom
-        fractalAudioAffectsHueSpeed = audio.fractalAudioAffectsHueSpeed
-        fractalAudioAffectsSaturation = audio.fractalAudioAffectsSaturation
-        fractalAudioAffectsIterations = audio.fractalAudioAffectsIterations
-        musicReactiveMappings = audio.musicReactiveMappings
-
-        // ── Safety bubble domain ──
-        let sb = settings.safetyBubbleConfig
-        safetyBubbleEnabled = sb.enabled
-        safetyBubbleRadius = sb.radius
-        safetyBubbleShape = sb.shape
-        safetyBubbleBlend = sb.strength
-
-        // ── Gesture domain ──
-        let gest = settings.gestureConfig
-        useRelativeGestures = gest.useRelativeGestures
-        extendedGestureRange = gest.extendedGestureRange
-        rotationAutoSnap = gest.rotationAutoSnap
-        rotationSnapWindowDegrees = gest.rotationSnapWindowDegrees
-        rotationBreakawayDegrees = gest.rotationBreakawayDegrees
-        gestureSensitivity = gest.gestureSensitivity
-        gestureSmoothingFactor = gest.gestureSmoothingFactor
-        menuToggleGestureEnabled = gest.menuToggleGestureEnabled
-        menuToggleGestureMode = gest.menuToggleGestureMode
-        gestureBindings = gest.gestureBindings
-        menuToggleHoldDuration = gest.menuToggleHoldDuration
-        menuToggleCooldown = gest.menuToggleCooldown
-        menuToggleActivateThreshold = gest.menuToggleActivateThreshold
-        menuToggleReleaseThreshold = gest.menuToggleReleaseThreshold
-        twoHandPinchActivateThreshold = gest.twoHandPinchActivateThreshold
-        twoHandPinchReleaseThreshold = gest.twoHandPinchReleaseThreshold
-        ringPinchActivateThreshold = gest.ringPinchActivateThreshold
-        ringPinchReleaseThreshold = gest.ringPinchReleaseThreshold
-        gestureMinHandDistance = gest.gestureMinHandDistance
-        gestureMaxHandDistance = gest.gestureMaxHandDistance
-        gestureMaxStartHandDistance = gest.gestureMaxStartHandDistance
-        gestureMaxActiveHandDistance = gest.gestureMaxActiveHandDistance
-        translationSensitivity = gest.translationSensitivity
     }
     
     @inline(__always)
@@ -473,16 +664,7 @@ final class UISettingsCache {
     
     func reloadLightingEffects() {
         guard let settings = settings else { return }
-        let lit = settings.lightingConfig
-        lightingPreset = lit.lightingPreset
-        hueRotationEffect = lit.hueRotationEffect
-        pulseEffect = lit.pulseEffect
-        glowEffect = lit.glowEffect
-        bloomEffect = lit.bloomEffect
-        fogEffect = lit.fogEffect
-        gradientCycleEffect = lit.gradientCycleEffect
-        polarRotationEffect = lit.polarRotationEffect
-        beatFlashEffect = lit.beatFlashEffect
+        lighting = settings.lightingConfig
     }
 }
 

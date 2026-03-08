@@ -295,40 +295,46 @@ class UsageAnalytics: ObservableObject {
         // Accumulate quality time
         qualityTimeAccum[currentQuality, default: 0] += dt
         
+        // ── Snapshot domains (4 lock acquisitions vs ~15) ──
+        let geo = settings.geometryConfig
+        let col = settings.colorConfig
+        let lit = settings.lightingConfig
+        let sb  = settings.safetyBubbleConfig
+
         // Accumulate gradient preset time
-        let presetName = settings.gradientPreset?.rawValue ?? "custom"
+        let presetName = col.gradientState.gradientPreset?.rawValue ?? "custom"
         gradientPresetUsageAccum[presetName, default: 0] += dt
         
         // Accumulate parameter values (for averaging)
         let dtf = Float(dt)
-        fractalScaleAccum += settings.fractalScale * dtf
-        foldingLimitAccum += settings.foldingLimit * dtf
-        sphereRadiusAccum += settings.sphereRadius * dtf
-        minDistanceAccum += settings.minDistance * dtf
-        colorMixAccum += settings.colorMix * dtf
-        glowIntensityAccum += settings.glowEffect.intensity * dtf
-        safetyBubbleRadiusAccum += settings.safetyBubbleRadius * dtf
-        bloomStrengthAccum += settings.bloomEffect.strength * dtf
-        fogIntensityAccum += settings.fogEffect.intensity * dtf
+        fractalScaleAccum += geo.fractalScale * dtf
+        foldingLimitAccum += geo.foldingLimit * dtf
+        sphereRadiusAccum += geo.sphereRadius * dtf
+        minDistanceAccum += geo.minDistance * dtf
+        colorMixAccum += col.colorMix * dtf
+        glowIntensityAccum += lit.glowEffect.intensity * dtf
+        safetyBubbleRadiusAccum += sb.radius * dtf
+        bloomStrengthAccum += lit.bloomEffect.strength * dtf
+        fogIntensityAccum += lit.fogEffect.intensity * dtf
         fpsAccum += Float(fps) * dtf
         renderQualityAccum += settings.currentRenderQuality * dtf
         sampleCount += 1
         
         // Accumulate fractal type distribution
-        fractalTypeTimeAccum[settings.fractalType.displayName, default: 0] += dt
+        fractalTypeTimeAccum[geo.fractalType.displayName, default: 0] += dt
         
         // Accumulate gradient preset distribution
-        if settings.useGradientColoring {
+        if col.gradientState.useGradientColoring {
             usedGradientColoring = true
-            let gradName = settings.gradientPreset?.rawValue ?? "Custom"
+            let gradName = col.gradientState.gradientPreset?.rawValue ?? "Custom"
             gradientPresetTimeAccum[gradName, default: 0] += dt
         }
         
         // Accumulate lighting preset distribution
-        lightingPresetTimeAccum[settings.lightingPreset.displayName, default: 0] += dt
+        lightingPresetTimeAccum[lit.lightingPreset.displayName, default: 0] += dt
         
         // Track feature usage
-        if settings.lightingMode == .audioReactive {
+        if settings.displayConfig.lightingMode == .audioReactive {
             usedAudioReactive = true
         }
         // Check if we should upload

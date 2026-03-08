@@ -465,7 +465,10 @@ final class RenderSettings: @unchecked Sendable {
     
     var colorMix: Float {
         get { withLock { _colorMix } }
-        set { withLock { _colorMix = newValue } }
+        set {
+            withLock { _colorMix = newValue }
+            persistColor()
+        }
     }
 
     var lightingPlay: Bool {
@@ -757,7 +760,10 @@ final class RenderSettings: @unchecked Sendable {
     
     var colorIterations: Float {
         get { withLock { _colorIterations } }
-        set { withLock { _colorIterations = newValue } }
+        set {
+            withLock { _colorIterations = newValue }
+            persistColor()
+        }
     }
     
     var resolutionScale: Float {
@@ -1162,27 +1168,39 @@ final class RenderSettings: @unchecked Sendable {
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry
     var safetyBubbleEnabled: Bool {
         get { withLock { _safetyBubbleEnabled } }
-        set { withLock { _safetyBubbleEnabled = newValue } }
+        set {
+            withLock { _safetyBubbleEnabled = newValue }
+            persistSafetyBubble()
+        }
     }
 
     /// Radius of the safety bubble in meters (0.05 - 2.5)
     var safetyBubbleRadius: Float {
         get { withLock { _safetyBubbleRadius } }
-        set { withLock { _safetyBubbleRadius = max(0.05, min(2.5, newValue)) } }
+        set {
+            withLock { _safetyBubbleRadius = max(0.05, min(2.5, newValue)) }
+            persistSafetyBubble()
+        }
     }
     
     /// Shape of the safety bubble (0 = sphere, 1 = cube, intermediate = morph)
     /// Cube does not rotate with view, only translates with position
     var safetyBubbleShape: Float {
         get { withLock { _safetyBubbleShape } }
-        set { withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) } }
+        set {
+            withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) }
+            persistSafetyBubble()
+        }
     }
 
     /// Compatibility alias for the legacy safety-bubble blend slider.
     /// Maps onto the shader's temporal bubble-strength control.
     var safetyBubbleBlend: Float {
         get { withLock { _safetyBubbleStrength } }
-        set { withLock { _safetyBubbleStrength = max(0.0, min(1.0, newValue)) } }
+        set {
+            withLock { _safetyBubbleStrength = max(0.0, min(1.0, newValue)) }
+            persistSafetyBubble()
+        }
     }
 
     var safetyBubbleFadeEnabled: Bool {
@@ -1249,49 +1267,73 @@ final class RenderSettings: @unchecked Sendable {
     /// Saturation override (independent of scheme default)
     var colorSchemeSaturation: Float {
         get { withLock { _colorSchemeSaturation } }
-        set { withLock { _colorSchemeSaturation = max(0.0, min(3.0, newValue)) } }
+        set {
+            withLock { _colorSchemeSaturation = max(0.0, min(3.0, newValue)) }
+            persistColor()
+        }
     }
     
     /// Contrast override
     var colorSchemeContrast: Float {
         get { withLock { _colorSchemeContrast } }
-        set { withLock { _colorSchemeContrast = max(0.95, min(1.15, newValue)) } }
+        set {
+            withLock { _colorSchemeContrast = max(0.95, min(1.15, newValue)) }
+            persistColor()
+        }
     }
     
     /// Gamma override
     var colorSchemeGamma: Float {
         get { withLock { _colorSchemeGamma } }
-        set { withLock { _colorSchemeGamma = max(0.2, min(1.0, newValue)) } }
+        set {
+            withLock { _colorSchemeGamma = max(0.2, min(1.0, newValue)) }
+            persistColor()
+        }
     }
     
     /// Vibrance boost (0-1)
     var colorSchemeVibrance: Float {
         get { withLock { _colorSchemeVibrance } }
-        set { withLock { _colorSchemeVibrance = max(0.0, min(1.0, newValue)) } }
+        set {
+            withLock { _colorSchemeVibrance = max(0.0, min(1.0, newValue)) }
+            persistColor()
+        }
     }
     
     /// Lighting softness (0 = sharp vibrance-driven, 1 = classic soft)
     var lightingSoftness: Float {
         get { withLock { _lightingSoftness } }
-        set { withLock { _lightingSoftness = max(0.0, min(1.0, newValue)) } }
+        set {
+            withLock { _lightingSoftness = max(0.0, min(1.0, newValue)) }
+            persistColor()
+        }
     }
     
     /// Midtone curve adjustment (-1 to 1)
     var colorSchemeCurve: Float {
         get { withLock { _colorSchemeCurve } }
-        set { withLock { _colorSchemeCurve = max(-1.0, min(1.0, newValue)) } }
+        set {
+            withLock { _colorSchemeCurve = max(-1.0, min(1.0, newValue)) }
+            persistColor()
+        }
     }
     
     /// Shadow lift/crush (-0.05 to 0.05)
     var colorSchemeShadows: Float {
         get { withLock { _colorSchemeShadows } }
-        set { withLock { _colorSchemeShadows = max(-0.05, min(0.05, newValue)) } }
+        set {
+            withLock { _colorSchemeShadows = max(-0.05, min(0.05, newValue)) }
+            persistColor()
+        }
     }
     
     /// Highlight boost/reduction (-0.5 to 1.0)
     var colorSchemeHighlights: Float {
         get { withLock { _colorSchemeHighlights } }
-        set { withLock { _colorSchemeHighlights = max(-0.5, min(1.0, newValue)) } }
+        set {
+            withLock { _colorSchemeHighlights = max(-0.5, min(1.0, newValue)) }
+            persistColor()
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1301,13 +1343,19 @@ final class RenderSettings: @unchecked Sendable {
     /// Whether gradient coloring is enabled (vs legacy 3-color palette)
     var useGradientColoring: Bool {
         get { withLock { _gradientState.useGradientColoring } }
-        set { withLock { _gradientState.useGradientColoring = newValue } }
+        set {
+            withLock { _gradientState.useGradientColoring = newValue }
+            persistColor()
+        }
     }
     
     /// Current gradient color map
     var gradientColorMap: GradientColorMap {
         get { withLock { _gradientState.gradient } }
-        set { withLock { _gradientState.gradient = newValue; _gradientState.markAsCustom() } }
+        set {
+            withLock { _gradientState.gradient = newValue; _gradientState.markAsCustom() }
+            persistColor()
+        }
     }
     
     /// Current gradient preset (nil if custom)
@@ -1318,25 +1366,37 @@ final class RenderSettings: @unchecked Sendable {
     /// Color mapping mode for gradient sampling
     var colorMappingMode: ColorMappingMode {
         get { withLock { _gradientState.gradient.mappingMode } }
-        set { withLock { _gradientState.gradient.mappingMode = newValue } }
+        set {
+            withLock { _gradientState.gradient.mappingMode = newValue }
+            persistColor()
+        }
     }
     
     /// Gradient repeat count
     var gradientRepeat: Float {
         get { withLock { _gradientState.gradient.repeatCount } }
-        set { withLock { _gradientState.gradient.repeatCount = max(0.1, min(10.0, newValue)) } }
+        set {
+            withLock { _gradientState.gradient.repeatCount = max(0.1, min(10.0, newValue)) }
+            persistColor()
+        }
     }
     
     /// Gradient offset
     var gradientOffset: Float {
         get { withLock { _gradientState.gradient.offset } }
-        set { withLock { _gradientState.gradient.offset = newValue } }
+        set {
+            withLock { _gradientState.gradient.offset = newValue }
+            persistColor()
+        }
     }
     
     /// Gradient smoothing
     var gradientSmoothing: Float {
         get { withLock { _gradientState.gradient.smoothing } }
-        set { withLock { _gradientState.gradient.smoothing = max(0.0, min(1.0, newValue)) } }
+        set {
+            withLock { _gradientState.gradient.smoothing = max(0.0, min(1.0, newValue)) }
+            persistColor()
+        }
     }
     
     /// Apply a gradient preset (replaces current gradient and enables gradient mode)
@@ -1356,12 +1416,16 @@ final class RenderSettings: @unchecked Sendable {
                 // Neon presets keep neon active through the gradient system
             }
         }
+        persistColor()
     }
     
     /// Full gradient state (for serialization)
     var gradientState: GradientState {
         get { withLock { _gradientState } }
-        set { withLock { _gradientState = newValue } }
+        set {
+            withLock { _gradientState = newValue }
+            persistColor()
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1385,6 +1449,7 @@ final class RenderSettings: @unchecked Sendable {
                     _gradientCycleEffect = effects.gradientCycle
                 }
             }
+            persistLighting()
         }
     }
     
@@ -1396,6 +1461,7 @@ final class RenderSettings: @unchecked Sendable {
                 _hueRotationEffect = newValue
                 _lightingPreset = .custom  // Switch to custom when manually adjusted
             }
+            persistLighting()
         }
     }
     
@@ -1407,6 +1473,7 @@ final class RenderSettings: @unchecked Sendable {
                 _pulseEffect = newValue
                 _lightingPreset = .custom
             }
+            persistLighting()
         }
     }
     
@@ -1418,6 +1485,7 @@ final class RenderSettings: @unchecked Sendable {
                 _glowEffect = newValue
                 _lightingPreset = .custom
             }
+            persistLighting()
         }
     }
     
@@ -1429,6 +1497,7 @@ final class RenderSettings: @unchecked Sendable {
                 _bloomEffect = newValue
                 _lightingPreset = .custom
             }
+            persistLighting()
         }
     }
     
@@ -1440,6 +1509,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fogEffect = newValue
                 _lightingPreset = .custom
             }
+            persistLighting()
         }
     }
     
@@ -1451,6 +1521,7 @@ final class RenderSettings: @unchecked Sendable {
                 _gradientCycleEffect = newValue
                 _lightingPreset = .custom
             }
+            persistLighting()
         }
     }
 
@@ -1462,6 +1533,7 @@ final class RenderSettings: @unchecked Sendable {
                 _beatFlashEffect = newValue
                 _lightingPreset = .custom
             }
+            persistLighting()
         }
     }
 
@@ -1473,6 +1545,7 @@ final class RenderSettings: @unchecked Sendable {
                 _polarRotationEffect = newValue
                 _lightingPreset = .custom
             }
+            persistLighting()
         }
     }
     
@@ -2445,6 +2518,24 @@ final class RenderSettings: @unchecked Sendable {
     /// Persist the display config (called after HUD/music shortcut changes).
     private func persistDisplay() {
         SettingsPersistence.save(displayConfig, domain: .display)
+    }
+
+    /// Persist the color config (throttled — sliders/gradients may fire at 90fps).
+    private func persistColor() {
+        guard SettingsPersistence.shouldSave(domain: .color) else { return }
+        SettingsPersistence.save(colorConfig, domain: .color)
+    }
+
+    /// Persist the lighting config (throttled — effect intensity sliders may fire rapidly).
+    private func persistLighting() {
+        guard SettingsPersistence.shouldSave(domain: .lighting) else { return }
+        SettingsPersistence.save(lightingConfig, domain: .lighting)
+    }
+
+    /// Persist the safety bubble config (throttled — radius/shape sliders).
+    private func persistSafetyBubble() {
+        guard SettingsPersistence.shouldSave(domain: .safetyBubble) else { return }
+        SettingsPersistence.save(safetyBubbleConfig, domain: .safetyBubble)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
