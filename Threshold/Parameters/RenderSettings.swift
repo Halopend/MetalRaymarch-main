@@ -357,14 +357,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _velocityFractalScale: Float = 0.0
     private var _velocityPosition: SIMD3<Float> = .zero
     
-    // === REFINING PARAMETERS (Polychronakis 2024 / Keinert 2014) ===
-    // These control the sphere tracing optimization thresholds
-    private var _relaxFactor: Float = 1.6            // Over-relaxation multiplier (1.0-2.0)
-    private var _relaxBacktrack: Float = 0.7         // Backtrack factor when overshooting (0.5-1.0)
-    private var _sdfScaleCoarse: Float = 1.3         // SDF scaling for coarse pass (1.0-2.0)
-    private var _sdfScaleSuperCoarse: Float = 1.5    // SDF scaling for super-coarse pass (1.0-2.5)
-    private var _earlyTermRatio: Float = 0.3         // Early termination convergence ratio (0.1-0.5)
-    private var _earlyTermCount: Int = 3             // Steps before early termination (1-5)
 
     var minDistance: Float {
         get { withLock { _minDistance } }
@@ -2282,60 +2274,6 @@ final class RenderSettings: @unchecked Sendable {
         ).normalized
     }
 
-    // === REFINING PARAMETERS ===
-    // Over-relaxation multiplier (Keinert 2014)
-    var relaxFactor: Float {
-        get { withLock { _relaxFactor } }
-        set { 
-            withLock { _relaxFactor = newValue }
-            print("[REFINE] relaxFactor = \(newValue)")
-        }
-    }
-    
-    // Backtrack factor when overshooting
-    var relaxBacktrack: Float {
-        get { withLock { _relaxBacktrack } }
-        set { 
-            withLock { _relaxBacktrack = newValue }
-            print("[REFINE] relaxBacktrack = \(newValue)")
-        }
-    }
-    
-    // SDF scaling for coarse pass (Polychronakis 2024)
-    var sdfScaleCoarse: Float {
-        get { withLock { _sdfScaleCoarse } }
-        set { 
-            withLock { _sdfScaleCoarse = newValue }
-            print("[REFINE] sdfScaleCoarse = \(newValue)")
-        }
-    }
-    
-    // SDF scaling for super-coarse pass
-    var sdfScaleSuperCoarse: Float {
-        get { withLock { _sdfScaleSuperCoarse } }
-        set { 
-            withLock { _sdfScaleSuperCoarse = newValue }
-            print("[REFINE] sdfScaleSuperCoarse = \(newValue)")
-        }
-    }
-    
-    // Early termination convergence ratio
-    var earlyTermRatio: Float {
-        get { withLock { _earlyTermRatio } }
-        set { 
-            withLock { _earlyTermRatio = newValue }
-            print("[REFINE] earlyTermRatio = \(newValue)")
-        }
-    }
-    
-    // Steps before early termination
-    var earlyTermCount: Int {
-        get { withLock { _earlyTermCount } }
-        set { 
-            withLock { _earlyTermCount = newValue }
-            print("[REFINE] earlyTermCount = \(newValue)")
-        }
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Domain-Level Persistence Helpers
@@ -2429,12 +2367,6 @@ final class RenderSettings: @unchecked Sendable {
                 c.dynamicRenderQualityTarget = _dynamicRenderQualityTarget
                 c.dynamicRenderQualityMin = _dynamicRenderQualityMin
                 c.dynamicRenderQualityMax = _dynamicRenderQualityMax
-                c.relaxFactor = _relaxFactor
-                c.relaxBacktrack = _relaxBacktrack
-                c.sdfScaleCoarse = _sdfScaleCoarse
-                c.sdfScaleSuperCoarse = _sdfScaleSuperCoarse
-                c.earlyTermRatio = _earlyTermRatio
-                c.earlyTermCount = _earlyTermCount
                 c.debugHierarchical = _debugHierarchical
                 return c
             }
@@ -2451,12 +2383,6 @@ final class RenderSettings: @unchecked Sendable {
                 _dynamicRenderQualityTarget = newValue.dynamicRenderQualityTarget
                 _dynamicRenderQualityMin = newValue.dynamicRenderQualityMin
                 _dynamicRenderQualityMax = newValue.dynamicRenderQualityMax
-                _relaxFactor = newValue.relaxFactor
-                _relaxBacktrack = newValue.relaxBacktrack
-                _sdfScaleCoarse = newValue.sdfScaleCoarse
-                _sdfScaleSuperCoarse = newValue.sdfScaleSuperCoarse
-                _earlyTermRatio = newValue.earlyTermRatio
-                _earlyTermCount = newValue.earlyTermCount
                 _debugHierarchical = newValue.debugHierarchical
             }
         }

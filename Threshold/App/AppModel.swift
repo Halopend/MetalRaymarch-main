@@ -89,7 +89,6 @@ class AppModel {
     var showParameterDebugPanel: Bool = false {
         didSet {
             UserDefaults.standard.set(showParameterDebugPanel, forKey: "showParameterDebugPanel")
-            ParameterDebugLogGate.isEnabled = showParameterDebugPanel
         }
     }
 

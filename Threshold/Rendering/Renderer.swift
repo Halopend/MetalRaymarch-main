@@ -630,14 +630,13 @@ actor Renderer {
         let fractalType = settings.fractalType
         
         // === PARAMETER UPDATE COORDINATION ===
-        // Use ParameterUpdateCoordinator to batch animation/audio/smoothing updates
+        // Use ParameterUpdateCoordinator to batch animation/audio updates
         // Prevents per-frame MainActor blocking that causes UI lag during heavy rendering
         parameterUpdateCoordinator?.scheduleParameterUpdates(
             shouldUpdateAnimation: shouldUpdateAnimation,
             shouldUpdateAudio: isAudioMode && hasActiveAudioSources,
             deltaTime: animDelta,
-            currentTime: time,
-            fractalType: fractalType
+            currentTime: time
         )
         
         if isAudioMode {

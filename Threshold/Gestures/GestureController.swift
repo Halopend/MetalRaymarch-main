@@ -95,7 +95,6 @@ final class GestureController {
     /// Minimum frames left hand must be continuously tracked before two-hand gestures activate (~0.33s at 90Hz)
     private static let leftHandStabilityThreshold: Int = 30
     
-    // === GMT-FRACTALS: Asymmetric Smoothed Gesture Speed ===
     // === MENU TOGGLE GESTURE STATE (Right hand, configurable mode) ===
     private var menuToggleActive: Bool = false
     private var menuToggleHoldTimer: Float = 0
@@ -142,7 +141,6 @@ final class GestureController {
         menuToggleActive = false
         menuToggleHoldTimer = 0
         menuToggleCooldown = 0
-        
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -153,7 +151,6 @@ final class GestureController {
         
         // Reset gesture states
         syncWithSettings()
-        
     }
     
     /// Get the parameter ranges for the current fractal type (for UI sliders)
@@ -302,9 +299,7 @@ final class GestureController {
         }
 
         guard rightHand.isTracked else {
-            if menuToggleActive {
-                menuToggleActive = false
-            }
+            menuToggleActive = false
             menuToggleHoldTimer = 0
             return
         }
@@ -328,9 +323,7 @@ final class GestureController {
                 }
             }
         } else {
-            if menuToggleActive {
-                menuToggleActive = false
-            }
+            menuToggleActive = false
             menuToggleHoldTimer = 0
         }
     }
@@ -431,20 +424,14 @@ final class GestureController {
             }
         }
         
-        // ── 2. LEFT-HAND SINGLE-HAND GESTURES ──────────────────────────
-        for digit in 1...3 {
-            guard let finger = FingerDigit(rawValue: digit) else { continue }
-            let slot = GestureSlot(hand: .left, finger: finger)
-            let binding = settings.binding(for: slot)
-            processSingleHandDrag(slot: slot, hand: leftHand, binding: binding, settings: settings, activeDigit: &activeDigit)
-        }
-
-        // ── 3. RIGHT-HAND SINGLE-HAND GESTURES ─────────────────────────
-        for digit in 1...3 {
-            guard let finger = FingerDigit(rawValue: digit) else { continue }
-            let slot = GestureSlot(hand: .right, finger: finger)
-            let binding = settings.binding(for: slot)
-            processSingleHandDrag(slot: slot, hand: rightHand, binding: binding, settings: settings, activeDigit: &activeDigit)
+        // ── 2. SINGLE-HAND GESTURES (left + right, independent) ─────────
+        for (handMode, handData) in [(GestureHandMode.left, leftHand), (.right, rightHand)] {
+            for digit in 1...3 {
+                guard let finger = FingerDigit(rawValue: digit) else { continue }
+                let slot = GestureSlot(hand: handMode, finger: finger)
+                let binding = settings.binding(for: slot)
+                processSingleHandDrag(slot: slot, hand: handData, binding: binding, settings: settings, activeDigit: &activeDigit)
+            }
         }
 
         // Update active gesture for HUD
@@ -460,11 +447,35 @@ final class GestureController {
     // MARK: - Shape & Scale Gesture Dispatch
     
     /// Maps a FingerGestureAction (.minDistance / .foldingLimit / .sphereRadius)
-    /// to the corresponding Mandelbox formula-param index.
+    /// to its formula-param index, current target, range, and animation-offset writer.
     private static let shapeActionToFormulaIndex: [FingerGestureAction: Int] = [
         .minDistance:   0,
         .foldingLimit:  1,
         .sphereRadius:  2
+    ]
+
+    private typealias ShapeInfo = (
+        target: (RenderSettings) -> Float,
+        range: (GestureParamRanges) -> ClosedRange<Float>,
+        writeOffset: (RenderSettings, Float) -> Void
+    )
+
+    private static let shapeActionInfo: [FingerGestureAction: ShapeInfo] = [
+        .minDistance: (
+            target: { $0.effectiveTargetMinDistance },
+            range:  { $0.minDistance },
+            writeOffset: { $0.manualOffsetMinDistance = $1 - $0.animationBaseMinDistance }
+        ),
+        .foldingLimit: (
+            target: { $0.effectiveTargetFoldingLimit },
+            range:  { $0.foldingLimit },
+            writeOffset: { $0.manualOffsetFoldingLimit = $1 - $0.animationBaseFoldingLimit }
+        ),
+        .sphereRadius: (
+            target: { $0.effectiveTargetSphereRadius },
+            range:  { $0.sphereRadius },
+            writeOffset: { $0.manualOffsetSphereRadius = $1 - $0.animationBaseSphereRadius }
+        ),
     ]
 
     /// Dispatches a two-hand gesture for Mandelbox shape params through the unified
@@ -477,25 +488,8 @@ final class GestureController {
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
-        guard let formulaIndex = Self.shapeActionToFormulaIndex[action] else { return }
-        
-        let currentTarget: Float = {
-            switch action {
-            case .minDistance:   return settings.effectiveTargetMinDistance
-            case .foldingLimit:  return settings.effectiveTargetFoldingLimit
-            case .sphereRadius:  return settings.effectiveTargetSphereRadius
-            default: return 0
-            }
-        }()
-
-        let range: ClosedRange<Float> = {
-            switch action {
-            case .minDistance:  return ranges.minDistance
-            case .foldingLimit: return ranges.foldingLimit
-            case .sphereRadius: return ranges.sphereRadius
-            default: return 0...1
-            }
-        }()
+        guard let formulaIndex = Self.shapeActionToFormulaIndex[action],
+              let info = Self.shapeActionInfo[action] else { return }
 
         let batch = ParameterNodeRegistry.shared.formulaBatch(for: .mandelbox)
         guard let node = batch.floatNodeByFormulaIndex[formulaIndex] else { return }
@@ -503,32 +497,17 @@ final class GestureController {
         processTwoHandGesture(
             digit: digit,
             state: &fingerGestureState[digit]!,
-            currentTarget: currentTarget,
-            range: range,
+            currentTarget: info.target(settings),
+            range: info.range(ranges),
             parameterID: node.id
         ) { newValue in
-            let targetValue: Float
             if settings.isAnimationPlaying {
-                switch action {
-                case .minDistance:
-                    targetValue = newValue
-                    settings.manualOffsetMinDistance = newValue - settings.animationBaseMinDistance
-                case .foldingLimit:
-                    targetValue = newValue
-                    settings.manualOffsetFoldingLimit = newValue - settings.animationBaseFoldingLimit
-                case .sphereRadius:
-                    targetValue = newValue
-                    settings.manualOffsetSphereRadius = newValue - settings.animationBaseSphereRadius
-                default:
-                    targetValue = newValue
-                }
-            } else {
-                targetValue = newValue
+                info.writeOffset(settings, newValue)
             }
             let op = ParameterOperation(
                 targetID: node.id,
                 source: .gesture,
-                value: .absolute(targetValue),
+                value: .absolute(newValue),
                 frameIndex: operationFrameCounter,
                 smoothing: .init()
             )
@@ -557,17 +536,13 @@ final class GestureController {
             range: ranges.fractalScale,
             parameterID: "core.targetFractalScale"
         ) { newValue in
-            let targetValue: Float
             if settings.isAnimationPlaying {
-                targetValue = newValue
                 settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
-            } else {
-                targetValue = newValue
             }
             let op = ParameterOperation(
                 targetID: "core.targetFractalScale",
                 source: .gesture,
-                value: .absolute(targetValue),
+                value: .absolute(newValue),
                 frameIndex: operationFrameCounter,
                 smoothing: .init()
             )
@@ -647,7 +622,6 @@ final class GestureController {
             )
             grabOriginalAxis = grabMapping!.startAxis
             rotationBrokenAway = !settings.rotationAutoSnap  // If snap disabled, act as if already broken away
-            
         }
         
         // === GESTURE ACTIVE ===
@@ -724,7 +698,6 @@ final class GestureController {
 
             // Apply rotation auto-snap on release
             settings.applyRotationSnap()
-
         }
     }
     
@@ -796,7 +769,6 @@ final class GestureController {
             state.startParameterValue = currentTarget  // Capture current target when gesture starts
             // Track starting height (average Y of both hands) for vertical sensitivity scaling
             state.startHeight = (leftPos.y + rightPos.y) * 0.5
-            
         }
         
         // Gesture active - set TARGET directly (Renderer smooths to this value)
@@ -895,19 +867,43 @@ final class GestureController {
             return
         }
 
-        // Check if the OTHER hand is attempting any pinch (likely a two-hand gesture)
+        // Check if the OTHER hand is attempting a pinch on a digit that has a
+        // both-hand binding.  Only those pinches indicate a possible two-hand
+        // gesture; pinches on digits with only single-hand bindings are the
+        // other hand doing its own independent gesture and should not block.
+        // Also skip digits where the other hand already owns an active single-
+        // hand drag — that hand is doing its own gesture, not a two-hand attempt.
         let otherHand = (slot.hand == .right) ? leftHand : rightHand
-        let otherAttemptingPinch = otherHand.isTracked && (
-            otherHand.indexPinch >= 0.55 ||
-            otherHand.middlePinch >= 0.55 ||
-            otherHand.ringPinch >= 0.45
-        )
+        var otherAttemptingPinch = false
+        if otherHand.isTracked {
+            let otherHandMode: GestureHandMode = (slot.hand == .right) ? .left : .right
+            for d in 1...3 {
+                let bothBinding = settings.binding(forHand: .both, digit: d)
+                if case .core(.none) = bothBinding { continue }
+                // If the other hand already has an active single-hand drag for
+                // this digit, the two-hand gesture won't fire (guarded in step 1),
+                // so don't treat this pinch as a two-hand attempt.
+                if let finger = FingerDigit(rawValue: d) {
+                    let otherKey = GestureSlot(hand: otherHandMode, finger: finger).persistenceKey
+                    if singleHandDragState[otherKey]?.isActive == true { continue }
+                }
+                let threshold: Float = (d == 3) ? 0.45 : 0.55
+                if otherHand.pinchStrength(digit: d) >= threshold {
+                    otherAttemptingPinch = true
+                    break
+                }
+            }
+        }
 
         let pinch = hand.pinchStrength(digit: digit)
         var state = singleHandDragState[key] ?? SingleHandDragState()
         let active: Bool
         if state.isActive {
-            active = hand.isTracked && pinch >= releaseThresh && !otherAttemptingPinch
+            // Once active, only deactivate when the hand releases the pinch.
+            // Don't let the other hand's pinch kill an established gesture —
+            // the two-hand guard (step 1) already prevents two-hand from
+            // activating while any single-hand drag is active for the same digit.
+            active = hand.isTracked && pinch >= releaseThresh
         } else {
             active = hand.isTracked && pinch >= activateThresh && !otherAttemptingPinch
         }

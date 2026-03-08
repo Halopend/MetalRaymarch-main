@@ -24,9 +24,6 @@ struct FormulaParamDescriptor: Codable, Identifiable {
     var bundle: ParameterBundle?
     
     var id: String { "\(index)-\(name)" }
-
-    /// Resolved bundle, defaulting to `.custom` when the catalog entry omits the field.
-    var resolvedBundle: ParameterBundle { bundle ?? .custom }
 }
 
 /// Full description of a fractal formula loaded from the catalog.

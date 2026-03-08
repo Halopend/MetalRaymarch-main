@@ -1,30 +1,6 @@
 import Foundation
 
-enum ParameterDebugLogGate {
-    static var isEnabled: Bool = false
-
-    static func log(_ message: @autoclosure () -> String) {
-        guard isEnabled else { return }
-        print("🧭 \(message())")
-    }
-}
-
 // MARK: - Shared Parameter Taxonomy
-
-enum ParameterSection: String, CaseIterable, Codable, Sendable {
-    case fractal
-    case core       // Mandelbox geometry (minDistance, foldingLimit, sphereRadius, fractalScale)
-    case gestures
-    case effects
-    case animation
-}
-
-/// Scope distinguishes built-in engine parameters from formula-specific ones.
-enum ParameterScope: String, Codable, Sendable {
-    case core       // engine-level (minDistance, scale, colorMix, position…)
-    case formula    // fractal formula params (power, bailout, Julia seeds…)
-    case effect     // lighting/color effects (glow, fog, bloom, hue, saturation…)
-}
 
 // High-level bundles describe which conceptual group a parameter belongs to. This allows
 // UI, gesture, and modulation layers to address related parameters consistently.
@@ -51,31 +27,9 @@ enum ParameterLayer: String, Codable, Sendable {
     case system
 }
 
-struct ParameterMetadata: Sendable {
-    let bundle: ParameterBundle
-    let range: ClosedRange<Float>
-    let step: Float
-    let smoothingTime: Float
-
-    init(bundle: ParameterBundle = .custom,
-         range: ClosedRange<Float>,
-         step: Float,
-         smoothingTime: Float = 0) {
-        self.bundle = bundle
-        self.range = range
-        self.step = step
-        self.smoothingTime = max(0, smoothingTime)
-    }
-}
-
 struct ParameterGroup: Hashable, Codable, Sendable {
     let id: String
     let title: String
-}
-
-enum ParameterNodeSource: String, Codable, Sendable {
-    case core
-    case formula
 }
 
 // MARK: - Core Node Protocol
@@ -86,13 +40,7 @@ protocol ParameterNode: AnyObject, Identifiable {
     var id: String { get }
     var name: String { get }
     var descriptionText: String { get }
-    var section: ParameterSection { get }
     var group: ParameterGroup? { get }
-    var source: ParameterNodeSource { get }
-
-    var isDirty: Bool { get }
-    func markDirty()
-    func markClean()
 
     var isGestureMappable: Bool { get }
     var currentValue: Value { get set }
@@ -103,73 +51,46 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     let id: String
     let name: String
     let descriptionText: String
-    let section: ParameterSection
     let group: ParameterGroup?
-    let source: ParameterNodeSource
-    let scope: ParameterScope
     let icon: String
     let isGestureMappable: Bool
-    let metadata: ParameterMetadata?
-
-    fileprivate(set) var isDirty: Bool = false
 
     init(id: String,
          name: String,
          descriptionText: String,
-         section: ParameterSection,
          group: ParameterGroup?,
-         source: ParameterNodeSource,
-         scope: ParameterScope = .formula,
          icon: String,
-         isGestureMappable: Bool,
-         metadata: ParameterMetadata?) {
+         isGestureMappable: Bool) {
         self.id = id
         self.name = name
         self.descriptionText = descriptionText
-        self.section = section
         self.group = group
-        self.source = source
-        self.scope = scope
         self.icon = icon
         self.isGestureMappable = isGestureMappable
-        self.metadata = metadata
     }
-
-    func markDirty() { isDirty = true }
-    func markClean() { isDirty = false }
 }
 
 class BaseParameterNode<Value>: AnyParameterNodeBase, @unchecked Sendable, ParameterNode {
-    var currentValue: Value {
-        didSet { markDirty() }
-    }
+    var currentValue: Value
 
     let defaultValue: Value
 
     init(id: String,
          name: String,
          descriptionText: String,
-         section: ParameterSection,
          group: ParameterGroup?,
-         source: ParameterNodeSource,
-         scope: ParameterScope = .formula,
          icon: String,
          isGestureMappable: Bool,
-         defaultValue: Value,
-         metadata: ParameterMetadata? = nil) {
+         defaultValue: Value) {
         self.defaultValue = defaultValue
         self.currentValue = defaultValue
         super.init(
             id: id,
             name: name,
             descriptionText: descriptionText,
-            section: section,
             group: group,
-            source: source,
-            scope: scope,
             icon: icon,
-            isGestureMappable: isGestureMappable,
-            metadata: metadata
+            isGestureMappable: isGestureMappable
         )
     }
 }
@@ -184,11 +105,7 @@ class FloatParameterNode: BaseParameterNode<Float>, @unchecked Sendable {
     init(id: String,
          name: String,
          descriptionText: String,
-         section: ParameterSection,
          group: ParameterGroup?,
-         source: ParameterNodeSource,
-         scope: ParameterScope = .formula,
-         bundle: ParameterBundle = .custom,
          icon: String,
          defaultValue: Float,
          range: ClosedRange<Float>,
@@ -204,14 +121,10 @@ class FloatParameterNode: BaseParameterNode<Float>, @unchecked Sendable {
         super.init(id: id,
                    name: name,
                    descriptionText: descriptionText,
-                   section: section,
                    group: group,
-                   source: source,
-                   scope: scope,
                    icon: icon,
                    isGestureMappable: isGestureMappable,
-                   defaultValue: defaultValue,
-                   metadata: ParameterMetadata(bundle: bundle, range: range, step: step))
+                   defaultValue: defaultValue)
     }
 
     @discardableResult
@@ -253,10 +166,7 @@ final class BoolParameterNode: BaseParameterNode<Bool>, @unchecked Sendable {
     init(id: String,
          name: String,
          descriptionText: String,
-         section: ParameterSection,
          group: ParameterGroup?,
-         source: ParameterNodeSource,
-         scope: ParameterScope = .formula,
          icon: String,
          defaultValue: Bool,
          isGestureMappable: Bool,
@@ -267,10 +177,7 @@ final class BoolParameterNode: BaseParameterNode<Bool>, @unchecked Sendable {
         super.init(id: id,
                    name: name,
                    descriptionText: descriptionText,
-                   section: section,
                    group: group,
-                   source: source,
-                   scope: scope,
                    icon: icon,
                    isGestureMappable: isGestureMappable,
                    defaultValue: defaultValue)
@@ -515,11 +422,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             id: "core.fractalScale",
             name: "Fractal Scale",
             descriptionText: "Global fractal scale multiplier",
-            section: .core,
             group: coreGroup,
-            source: .core,
-            scope: .core,
-            bundle: .scale,
             icon: "arrow.up.left.and.arrow.down.right",
             defaultValue: 2.0,
             range: -5.0...8.0,
@@ -533,11 +436,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             id: "core.colorMix",
             name: "Color Mix",
             descriptionText: "Iteration-based color mix factor",
-            section: .core,
             group: coreGroup,
-            source: .core,
-            scope: .core,
-            bundle: .color,
             icon: "paintpalette",
             defaultValue: 0.5,
             range: 0.0...1.0,
@@ -552,11 +451,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             id: "effect.glow",
             name: "Glow",
             descriptionText: "Glow effect intensity",
-            section: .core,
             group: effectGroup,
-            source: .core,
-            scope: .effect,
-            bundle: .lighting,
             icon: "sun.max",
             defaultValue: 0.0,
             range: 0.0...2.0,
@@ -570,11 +465,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             id: "effect.fog",
             name: "Fog",
             descriptionText: "Fog effect intensity",
-            section: .core,
             group: effectGroup,
-            source: .core,
-            scope: .effect,
-            bundle: .lighting,
             icon: "cloud.fog",
             defaultValue: 0.32,
             range: 0.0...1.0,
@@ -588,11 +479,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             id: "effect.bloom",
             name: "Bloom",
             descriptionText: "Bloom strength",
-            section: .core,
             group: effectGroup,
-            source: .core,
-            scope: .effect,
-            bundle: .lighting,
             icon: "sparkle",
             defaultValue: 0.0,
             range: 0.0...2.0,
@@ -606,11 +493,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             id: "effect.hueSpeed",
             name: "Hue Speed",
             descriptionText: "Hue rotation speed",
-            section: .core,
             group: effectGroup,
-            source: .core,
-            scope: .effect,
-            bundle: .color,
             icon: "arrow.trianglehead.2.clockwise.rotate.90",
             defaultValue: 0.0,
             range: 0.0...0.5,
@@ -624,11 +507,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             id: "effect.saturation",
             name: "Saturation",
             descriptionText: "Color scheme saturation",
-            section: .core,
             group: effectGroup,
-            source: .core,
-            scope: .effect,
-            bundle: .color,
             icon: "drop.halffull",
             defaultValue: 2.0,
             range: 0.0...3.0,
@@ -731,12 +610,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         formulaBatch(for: binding.fractalType).floatNodes.first { $0.id == binding.parameterNodeID }
     }
 
-    // MARK: - Per-Frame Smoothing Tick
-
-    /// Retained for call-site compatibility; no per-node smoothing is active.
-    @MainActor
-    func updateSmoothing(deltaTime: Float, for type: FractalModelType) { }
-
     private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         guard let descriptor = FormulaCatalog.shared.descriptor(for: type) else {
             return ParameterNodeBatch(fractalType: type, nodes: [])
@@ -762,9 +635,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                     id: id,
                     name: label,
                     descriptionText: description,
-                    section: .fractal,
                     group: group,
-                    source: .formula,
                     icon: icon,
                     defaultValue: param.default > 0.5,
                     isGestureMappable: false,
@@ -780,10 +651,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 id: id,
                 name: label,
                 descriptionText: description,
-                section: .fractal,
                 group: group,
-                source: .formula,
-                bundle: param.resolvedBundle,
                 icon: icon,
                 defaultValue: param.default,
                 range: param.min...param.max,
