@@ -175,10 +175,10 @@ final class UISettingsCache {
     var menuToggleCooldown: Float = 0.35
     var menuToggleActivateThreshold: Float = 0.48
     var menuToggleReleaseThreshold: Float = 0.30
-    var twoHandPinchActivateThreshold: Float = 0.78
-    var twoHandPinchReleaseThreshold: Float = 0.56
-    var ringPinchActivateThreshold: Float = 0.46
-    var ringPinchReleaseThreshold: Float = 0.28
+    var twoHandPinchActivateThreshold: Float = 0.88
+    var twoHandPinchReleaseThreshold: Float = 0.65
+    var ringPinchActivateThreshold: Float = 0.58
+    var ringPinchReleaseThreshold: Float = 0.38
     var gestureMinHandDistance: Float = 0.05
     var gestureMaxHandDistance: Float = 0.60
     var gestureMaxStartHandDistance: Float = 0.45

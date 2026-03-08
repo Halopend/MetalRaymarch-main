@@ -391,8 +391,8 @@ struct FractalPreset: Codable, Identifiable {
     
     /// Apply this preset to render settings
     func apply(to settings: RenderSettings, includePerformance: Bool = false) {
-        settings.fractalIterations = fractalIterations
-        settings.maxRaySteps = maxRaySteps
+        settings.baseFractalIterations = fractalIterations
+        settings.baseMaxRaySteps = maxRaySteps
         settings.colorMix = colorMix
         settings.colorIterations = colorIterations
         settings.position = position

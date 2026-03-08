@@ -1334,9 +1334,9 @@ final class GestureController {
         // Check if the OTHER hand is attempting any pinch (likely a two-hand gesture)
         let otherHand = (slot.hand == .right) ? leftHand : rightHand
         let otherAttemptingPinch = otherHand.isTracked && (
-            otherHand.indexPinch >= 0.4 ||
-            otherHand.middlePinch >= 0.4 ||
-            otherHand.ringPinch >= 0.3
+            otherHand.indexPinch >= 0.55 ||
+            otherHand.middlePinch >= 0.55 ||
+            otherHand.ringPinch >= 0.45
         )
 
         let pinch = hand.pinchStrength(digit: digit)
