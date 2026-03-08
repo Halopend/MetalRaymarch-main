@@ -1,5 +1,18 @@
 import SwiftUI
 
+// MARK: - Scroll Proxy Environment
+
+struct ScrollProxyKey: EnvironmentKey {
+    static let defaultValue: ScrollViewProxy? = nil
+}
+
+extension EnvironmentValues {
+    var scrollProxy: ScrollViewProxy? {
+        get { self[ScrollProxyKey.self] }
+        set { self[ScrollProxyKey.self] = newValue }
+    }
+}
+
 struct FormulaParamsEditor: View {
     @Bindable var cache: UISettingsCache
 
@@ -9,6 +22,10 @@ struct FormulaParamsEditor: View {
 
     private var parameterBatch: ParameterNodeBatch {
         ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
+    }
+
+    private var triplets: [GestureBindableTriplet] {
+        ParameterNodeRegistry.shared.gestureBindableTriplets(for: cache.fractalType)
     }
 
     var body: some View {
@@ -35,11 +52,18 @@ struct FormulaParamsEditor: View {
                 ForEach(Array(parameterBatch.allNodes.enumerated()), id: \.element.id) { idx, node in
                     if idx > 0 { Divider().padding(.leading, 159) }
                     ParameterNodeRow(cache: cache, node: node)
+                        .id(node.id)
 
                     // Quick-pick segmented control for Mandelbulb Power
                     if node.id == "formula.1.0.Power" {
                         PowerQuickPicker(cache: cache, node: node)
                     }
+                }
+
+                // Multi-axis gesture controls (XYZ triplets)
+                if !triplets.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    TripletAssignmentSection(cache: cache, triplets: triplets)
                 }
             }
             .padding(10)
@@ -54,6 +78,7 @@ private struct ParameterNodeRow: View {
     let node: AnyParameterNodeBase
 
     /// When true, shows the sensitivity slider instead of the parameter slider.
+    @Environment(\.scrollProxy) private var scrollProxy
     @State private var isFlipped: Bool = false
     /// Local copy of this parameter's gesture sensitivity for the slider binding.
     @State private var sensitivityValue: Float = GestureSensitivityStore.defaultSensitivity
@@ -135,6 +160,15 @@ private struct ParameterNodeRow: View {
             .animation(.easeInOut(duration: 0.25), value: isFlipped)
             .onAppear {
                 sensitivityValue = GestureSensitivityStore.shared.sensitivity(for: floatNode.id)
+            }
+            .onChange(of: isFlipped) { _, flipped in
+                if flipped {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            scrollProxy?.scrollTo(node.id, anchor: .center)
+                        }
+                    }
+                }
             }
         }
     }
@@ -513,5 +547,101 @@ private struct PowerQuickPicker: View {
                 frameIndex: frameIndex
             )
         )
+    }
+}
+
+// MARK: - Multi-Axis Gesture Assignment
+
+private struct TripletAssignmentSection: View {
+    @Bindable var cache: UISettingsCache
+    let triplets: [GestureBindableTriplet]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Multi-Axis Controls", systemImage: "move.3d")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 2)
+
+            ForEach(triplets, id: \.groupName) { triplet in
+                TripletRow(cache: cache, triplet: triplet)
+            }
+
+            Text("Assign XYZ parameter groups to single-hand drag gestures.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+private struct TripletRow: View {
+    @Bindable var cache: UISettingsCache
+    let triplet: GestureBindableTriplet
+
+    private var binding: GestureActionBinding { .parameterTriplet(triplet) }
+
+    private var currentSlot: GestureSlot? {
+        cache.gestureSlot(for: binding)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "move.3d")
+                .font(.caption)
+                .foregroundStyle(.purple)
+                .frame(width: 16)
+
+            Text(triplet.display.title)
+                .font(.subheadline)
+                .lineLimit(1)
+
+            Spacer()
+
+            Menu {
+                ForEach([GestureHandMode.left, .right], id: \.self) { hand in
+                    Menu(hand.displayName) {
+                        ForEach(FingerDigit.allCases, id: \.self) { finger in
+                            let slot = GestureSlot(hand: hand, finger: finger)
+                            let isCurrent = currentSlot == slot
+                            Button {
+                                cache.setGestureBinding(binding, for: slot)
+                            } label: {
+                                HStack {
+                                    Label(finger.displayName, systemImage: finger.icon)
+                                    if isCurrent { Image(systemName: "checkmark") }
+                                }
+                            }
+                        }
+                    }
+                }
+                if currentSlot != nil {
+                    Divider()
+                    Button("Clear") {
+                        if let slot = currentSlot {
+                            cache.setGestureBinding(.core(.none), for: slot)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if let slot = currentSlot {
+                        Image(systemName: slot.hand.icon)
+                        Text("\(slot.hand.displayName) \(slot.finger.displayName)")
+                    } else {
+                        Text("Not Assigned")
+                    }
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                }
+                .font(.caption)
+                .foregroundStyle(currentSlot != nil ? .green : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(currentSlot != nil ? Color.green.opacity(0.1) : Color.secondary.opacity(0.08))
+                )
+            }
+        }
     }
 }

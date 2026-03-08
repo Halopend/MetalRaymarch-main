@@ -272,14 +272,17 @@ struct ContentView: View {
             .padding(.horizontal, 16).padding(.vertical, 8)
             
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 12) {
-                    switch fractalSubTab {
-                    case .shape:   fractalShapeContent
-                    case .space:   fractalSpaceContent
-                    case .quality: fractalQualityContent
+                ScrollViewReader { scrollProxy in
+                    VStack(spacing: 12) {
+                        switch fractalSubTab {
+                        case .shape:   fractalShapeContent
+                        case .space:   fractalSpaceContent
+                        case .quality: fractalQualityContent
+                        }
                     }
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .environment(\.scrollProxy, scrollProxy)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 8)
             }
         }
     }
