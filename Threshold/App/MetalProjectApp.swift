@@ -50,6 +50,7 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
 @main
 struct MetalProjectTestApp: App {
     @State private var appModel = AppModel()
+    @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -67,10 +68,22 @@ struct MetalProjectTestApp: App {
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
                     }
+
+                    if !hasCompletedIntroOnboarding {
+                        openWindow(id: AppModel.onboardingWindowID)
+                        dismissWindow(id: appModel.menuWindowID)
+                    }
                 }
         }
         .defaultSize(width: 1050, height: 600)
         .windowStyle(.plain)
+        .windowResizability(.contentSize)
+
+        Window("Welcome", id: AppModel.onboardingWindowID) {
+            FirstLaunchWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 640, height: 540)
         .windowResizability(.contentSize)
 
         // Music Library pop-out window

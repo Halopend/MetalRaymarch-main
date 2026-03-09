@@ -13,6 +13,12 @@ extension EnvironmentValues {
     }
 }
 
+struct ParameterNodeGroup: Identifiable {
+    let id: String
+    let triplet: GestureBindableTriplet?
+    let nodes: [AnyParameterNodeBase]
+}
+
 struct FormulaParamsEditor: View {
     @Bindable var cache: UISettingsCache
 
@@ -26,6 +32,32 @@ struct FormulaParamsEditor: View {
 
     private var triplets: [GestureBindableTriplet] {
         ParameterNodeRegistry.shared.gestureBindableTriplets(for: cache.fractalType)
+    }
+
+    private var nodeGroups: [ParameterNodeGroup] {
+        var groups: [ParameterNodeGroup] = []
+        var processedIDs: Set<String> = []
+        let currentTriplets = triplets
+        
+        for node in parameterBatch.allNodes {
+            if processedIDs.contains(node.id) { continue }
+            
+            if let triplet = currentTriplets.first(where: { 
+                $0.xNodeID == node.id || $0.yNodeID == node.id || $0.zNodeID == node.id 
+            }) {
+                let tripletNodes = parameterBatch.allNodes.filter { 
+                    $0.id == triplet.xNodeID || $0.id == triplet.yNodeID || $0.id == triplet.zNodeID 
+                }
+                groups.append(ParameterNodeGroup(id: triplet.groupName, triplet: triplet, nodes: tripletNodes))
+                for tNode in tripletNodes {
+                    processedIDs.insert(tNode.id)
+                }
+            } else {
+                groups.append(ParameterNodeGroup(id: node.id, triplet: nil, nodes: [node]))
+                processedIDs.insert(node.id)
+            }
+        }
+        return groups
     }
 
     var body: some View {
@@ -49,21 +81,36 @@ struct FormulaParamsEditor: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 4)
 
-                ForEach(Array(parameterBatch.allNodes.enumerated()), id: \.element.id) { idx, node in
+                ForEach(Array(nodeGroups.enumerated()), id: \.element.id) { idx, group in
                     if idx > 0 { Divider().padding(.leading, 159) }
-                    ParameterNodeRow(cache: cache, node: node)
-                        .id(node.id)
-
-                    // Quick-pick segmented control for Mandelbulb Power
-                    if node.id == "formula.1.0.Power" {
-                        PowerQuickPicker(cache: cache, node: node)
+                    
+                    if let triplet = group.triplet {
+                        DisclosureGroup {
+                            VStack(spacing: 0) {
+                                ForEach(Array(group.nodes.enumerated()), id: \.element.id) { subIdx, node in
+                                    if subIdx > 0 { Divider().padding(.leading, 159) }
+                                    ParameterNodeRow(cache: cache, node: node)
+                                        .id(node.id)
+                                    if node.id == "formula.1.0.Power" {
+                                        PowerQuickPicker(cache: cache, node: node)
+                                    }
+                                }
+                            }
+                            .padding(.leading, 16)
+                            .padding(.top, 4)
+                        } label: {
+                            TripletRow(cache: cache, triplet: triplet)
+                        }
+                    } else {
+                        ForEach(group.nodes) { node in
+                            ParameterNodeRow(cache: cache, node: node)
+                                .id(node.id)
+                            
+                            if node.id == "formula.1.0.Power" {
+                                PowerQuickPicker(cache: cache, node: node)
+                            }
+                        }
                     }
-                }
-
-                // Multi-axis gesture controls (XYZ triplets)
-                if !triplets.isEmpty {
-                    Divider().padding(.vertical, 4)
-                    TripletAssignmentSection(cache: cache, triplets: triplets)
                 }
             }
             .padding(10)
@@ -551,28 +598,6 @@ private struct PowerQuickPicker: View {
 }
 
 // MARK: - Multi-Axis Gesture Assignment
-
-private struct TripletAssignmentSection: View {
-    @Bindable var cache: UISettingsCache
-    let triplets: [GestureBindableTriplet]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Multi-Axis Controls", systemImage: "move.3d")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.bottom, 2)
-
-            ForEach(triplets, id: \.groupName) { triplet in
-                TripletRow(cache: cache, triplet: triplet)
-            }
-
-            Text("Assign XYZ parameter groups to single-hand drag gestures.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-    }
-}
 
 private struct TripletRow: View {
     @Bindable var cache: UISettingsCache

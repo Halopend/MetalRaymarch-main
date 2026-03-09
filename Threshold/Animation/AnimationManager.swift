@@ -495,6 +495,59 @@ final class AnimationManager {
         applyKeyframe(scene.keyframes[index])
     }
     
+    /// Jump to a specific time across the entire scene's duration
+    func jumpToTime(_ time: TimeInterval) {
+        guard let scene = currentScene, !scene.keyframes.isEmpty else { return }
+        let keyframes = scene.keyframes
+        
+        if keyframes.count == 1 {
+            jumpToKeyframe(0)
+            return
+        }
+        
+        let total = scene.totalDuration
+        let targetTime = max(0, min(time, total)) // clamp
+        
+        var accumulated: TimeInterval = 0
+        var foundIndex = 0
+        var segmentElapsed: TimeInterval = 0
+        
+        for i in 0..<(keyframes.count - 1) {
+            let segDuration = segmentDuration(for: keyframes, toIndex: i + 1)
+            let remaining = targetTime - accumulated
+            if remaining <= segDuration { // found the segment
+                foundIndex = i
+                segmentElapsed = remaining
+                break
+            }
+            accumulated += segDuration
+            if i == keyframes.count - 2 { // edge case: last segment
+                foundIndex = i
+                segmentElapsed = segDuration // max out the last segment
+            }
+        }
+        
+        playhead.currentKeyframeIndex = foundIndex
+        playhead.elapsedInSegment = segmentElapsed
+        uiPlayhead = playhead
+        
+        // Disable scene overrides and re-apply directly at current location
+        disablePlaybackOverrides()
+    }
+    
+    /// Calculate current total time of the playhead
+    var currentTime: TimeInterval {
+        guard let scene = currentScene else { return 0 }
+        let keyframes = scene.keyframes
+        guard playhead.currentKeyframeIndex < keyframes.count else { return 0 }
+        
+        var accumulated: TimeInterval = 0
+        for i in 0..<playhead.currentKeyframeIndex {
+            accumulated += segmentDuration(for: keyframes, toIndex: i + 1)
+        }
+        return accumulated + playhead.elapsedInSegment
+    }
+    
     /// Precompile shader pipelines for all keyframes in the current scene.
     /// This ensures smooth playback by compiling all needed pipelines ahead of time.
     private func precompilePipelinesForCurrentScene() {

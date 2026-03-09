@@ -14,6 +14,7 @@ import CoreGraphics
 class AppModel {
     let immersiveSpaceID = "ImmersiveSpace"
     let menuWindowID = "MenuWindow"
+    static let onboardingWindowID = "OnboardingWindow"
     static let fractalBrowserWindowID = "FractalBrowserWindow"
     static let fractalSettingsDidChangeNotification = Notification.Name("AppModel.fractalSettingsDidChange")
     

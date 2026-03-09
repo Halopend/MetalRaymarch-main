@@ -700,7 +700,7 @@ actor Renderer {
                     musicAnchorByTarget[.saturation] = settings.colorSchemeSaturation
                     musicAnchorByTarget[.iterations] = Float(settings.fractalIterations)
                     let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
-                    for target in [MusicReactiveTarget.formulaParam0, .formulaParam1, .formulaParam2] {
+                    for target in [MusicReactiveTarget.formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3] {
                         if let slot = target.formulaParamSlot, slot < floatParams.count {
                             musicAnchorByTarget[target] = FormulaCatalog.getParam(anchorFP, index: floatParams[slot].index)
                         }

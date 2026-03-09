@@ -24,6 +24,7 @@ struct StoredFractalDefaults: Codable {
     var position: [Float]
     var worldRotation: [Float]
     var safetyBubbleEnabled: Bool?
+    var colorMappingModeRaw: Int?
 }
 
 // MARK: - FractalDefaultsStore
@@ -82,7 +83,8 @@ enum FractalDefaultsStore {
             detailScale: viewState.detailScale,
             position: [viewState.position.x, viewState.position.y, viewState.position.z],
             worldRotation: [viewState.rotation.vector.x, viewState.rotation.vector.y, viewState.rotation.vector.z, viewState.rotation.vector.w],
-            safetyBubbleEnabled: viewState.safetyBubbleEnabled
+            safetyBubbleEnabled: viewState.safetyBubbleEnabled,
+            colorMappingModeRaw: fractalType == .kleinian ? ColorMappingMode.iterations.rawValue : nil
         )
     }
 
@@ -125,6 +127,11 @@ enum FractalDefaultsStore {
         if let safetyBubbleEnabled = stored.safetyBubbleEnabled {
             settings.safetyBubbleEnabled = safetyBubbleEnabled
         }
+
+        if let modeRaw = stored.colorMappingModeRaw,
+           let mode = ColorMappingMode(rawValue: modeRaw) {
+            settings.colorMappingMode = mode
+        }
     }
 
     /// Capture the current state of settings as stored defaults for the active fractal type.
@@ -143,7 +150,8 @@ enum FractalDefaultsStore {
                             settings.worldRotation.vector.y,
                             settings.worldRotation.vector.z,
                             settings.worldRotation.vector.w],
-            safetyBubbleEnabled: settings.safetyBubbleEnabled
+            safetyBubbleEnabled: settings.safetyBubbleEnabled,
+            colorMappingModeRaw: settings.colorMappingMode.rawValue
         )
 
         var defaultsMap = loadStoredDefaultsMap()
@@ -158,5 +166,11 @@ enum FractalDefaultsStore {
         let stored = defaultsMap[String(fractalType.rawValue)]
             ?? makeFactoryDefaults(for: fractalType)
         applyStoredDefaults(stored, to: settings)
+
+        // Backward compatibility: legacy stored defaults may not include coloring mode.
+        // Keep Kleinian's default coloring on iterations unless the user has saved a mode.
+        if fractalType == .kleinian, stored.colorMappingModeRaw == nil {
+            settings.colorMappingMode = .iterations
+        }
     }
 }

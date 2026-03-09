@@ -1066,6 +1066,9 @@ struct AnimationPlaybackControls: View {
                     },
                     onJumpToKeyframe: { index in
                         animationManager.jumpToKeyframe(index)
+                    },
+                    onJumpToTime: { time in
+                        animationManager.jumpToTime(time)
                     }
                 )
                 .frame(height: 44)
@@ -1198,6 +1201,7 @@ struct KeyframeTimelineView: View {
     let playhead: AnimationPlayhead
     let onEditKeyframe: (AnimationKeyframe) -> Void
     let onJumpToKeyframe: (Int) -> Void
+    var onJumpToTime: ((TimeInterval) -> Void)? = nil
     
     @State private var longPressKeyframeID: UUID?
     
@@ -1236,11 +1240,26 @@ struct KeyframeTimelineView: View {
             let trackHeight: CGFloat = 4
             
             ZStack(alignment: .topLeading) {
+                // ── Interactive scrubbing area ──
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))
+                    .frame(height: trackHeight + 30)
+                    .offset(y: trackY - (trackHeight + 30) / 2)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard totalDuration > 0 else { return }
+                                let fraction = max(0, min(value.location.x / w, 1.0))
+                                onJumpToTime?(totalDuration * Double(fraction))
+                            }
+                    )
+                
                 // ── Track background ──
                 Capsule()
                     .fill(Color.secondary.opacity(0.2))
                     .frame(height: trackHeight)
                     .offset(y: trackY - trackHeight / 2)
+                    .allowsHitTesting(false)
                 
                 // ── Played portion ──
                 Capsule()
