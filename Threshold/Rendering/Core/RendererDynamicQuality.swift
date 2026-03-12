@@ -5,9 +5,9 @@ extension Renderer {
     // hintSceneComplexity() unconditionally nudges quality down by 0.05 and bypasses the
     // update cooldown — calling it every frame drains quality at 4.5/s (0.05 * 90fps),
     // which overwhelms the 0.08/s increase rate and prevents recovery.
-    private static var _lastHintedIterations: Int = -1
-    private static var _lastHintedRaySteps: Int = -1
-    private static var _lastHintedTileSize: Int = -1
+    nonisolated(unsafe) private static var _lastHintedIterations: Int = -1
+    nonisolated(unsafe) private static var _lastHintedRaySteps: Int = -1
+    nonisolated(unsafe) private static var _lastHintedTileSize: Int = -1
 
     /// Update dynamic render quality based on FPS performance (visionOS 26+)
     /// This implements Apple's WWDC25 Session 294 dynamic render quality API

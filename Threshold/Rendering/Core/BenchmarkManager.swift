@@ -2,7 +2,7 @@ import Foundation
 
 #if DEBUG
 class BenchmarkManager {
-    static let shared = BenchmarkManager()
+    nonisolated(unsafe) static let shared = BenchmarkManager()
     
     var isBenchmarking = false
     

@@ -120,7 +120,9 @@ final class UISettingsCache {
         self._appModel = appModel
         loadFromSettings()
         syncTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.syncLiveStats()
+            Task { @MainActor in
+                self?.syncLiveStats()
+            }
         }
     }
     

@@ -35,39 +35,38 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     
     /// User-created scenes (persisted to disk)
-    private(set) var userScenes: [AnimationScene] = []
+    private(set) var userScenes: [AnimationScene] = [] {
+        didSet { rebuildScenes() }
+    }
     
     /// Default scene IDs the user has hidden (persisted via UserDefaults)
     private(set) var hiddenDefaultSceneIDs: Set<UUID> = [] {
-        didSet { saveHiddenDefaults() }
+        didSet { saveHiddenDefaults(); rebuildScenes() }
     }
     
     /// User-edited copies of default scenes (persisted alongside user scenes).
     /// Key = default scene ID → Value = the user's edited version.
     /// When present, this overlay replaces the built-in original in the list.
     private(set) var editedDefaultOverrides: [UUID: AnimationScene] = [:] {
-        didSet { saveOverrides() }
+        didSet { saveOverrides(); rebuildScenes() }
     }
     
     /// The merged list exposed to the UI: visible defaults (possibly overridden) + user scenes.
-    var scenes: [AnimationScene] {
+    /// Cached — rebuilt automatically when underlying data changes.
+    private(set) var scenes: [AnimationScene] = []
+    
+    private func rebuildScenes() {
         var result: [AnimationScene] = []
-        
-        // 1. Built-in defaults (in order), unless hidden
         for defaultScene in DefaultScenes.all() {
             guard !hiddenDefaultSceneIDs.contains(defaultScene.id) else { continue }
-            // Show the user's edited overlay if it exists, otherwise the original
             if let override = editedDefaultOverrides[defaultScene.id] {
                 result.append(override)
             } else {
                 result.append(defaultScene)
             }
         }
-        
-        // 2. User-created scenes
         result.append(contentsOf: userScenes)
-        
-        return result
+        scenes = result
     }
     
     /// Check whether a scene is a built-in default (original or edited overlay)
@@ -165,6 +164,7 @@ final class AnimationManager {
     init(renderSettings: RenderSettings? = nil) {
         self.renderSettings = renderSettings
         loadScenes()
+        rebuildScenes()
     }
     
     func setRenderSettings(_ settings: RenderSettings) {
@@ -804,7 +804,7 @@ final class AnimationManager {
         guard keyframes.count >= 2 else { return keyframes[0] }
 
         let keyframeCount = keyframes.count
-        var fromIndex = min(max(playhead.currentKeyframeIndex, 0), keyframeCount - 1)
+        let fromIndex = min(max(playhead.currentKeyframeIndex, 0), keyframeCount - 1)
         var toIndex = fromIndex + 1
         if toIndex >= keyframeCount {
             toIndex = scene.isLooping ? 0 : keyframeCount - 1

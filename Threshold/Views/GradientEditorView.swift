@@ -275,30 +275,42 @@ struct GradientStopRow: View {
 
 struct GradientPreviewBar: View {
     let gradient: GradientColorMap
-    
+    @State private var renderedImage: CGImage?
+    private static let renderWidth = 256
+
     var body: some View {
         GeometryReader { geo in
-            Canvas { context, size in
-                let width = Int(size.width)
-                guard width > 0 else { return }
-                
-                for x in 0..<width {
-                    let t = Float(x) / Float(width - 1)
-                    let color = gradient.evaluate(at: t)
-                    
-                    let rect = CGRect(x: CGFloat(x), y: 0, width: 1, height: size.height)
-                    context.fill(
-                        Path(rect),
-                        with: .color(Color(
-                            red: Double(color.x),
-                            green: Double(color.y),
-                            blue: Double(color.z)
-                        ))
-                    )
-                }
+            if let image = renderedImage {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .frame(width: geo.size.width, height: geo.size.height)
             }
         }
+        .onAppear { renderedImage = Self.renderGradient(gradient) }
+        .onChange(of: gradient) { _, newGradient in renderedImage = Self.renderGradient(newGradient) }
         .accessibilityLabel("Gradient preview: \(gradient.name)")
         .accessibilityAddTraits(.isImage)
+    }
+
+    private static func renderGradient(_ gradient: GradientColorMap) -> CGImage? {
+        let w = renderWidth
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: w, height: 1,
+            bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        guard let buffer = ctx.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        for x in 0..<w {
+            let t = Float(x) / Float(w - 1)
+            let c = gradient.evaluate(at: t)
+            buffer[x * 4 + 0] = UInt8(clamping: Int(c.x * 255))
+            buffer[x * 4 + 1] = UInt8(clamping: Int(c.y * 255))
+            buffer[x * 4 + 2] = UInt8(clamping: Int(c.z * 255))
+            buffer[x * 4 + 3] = 255
+        }
+        return ctx.makeImage()
     }
 }

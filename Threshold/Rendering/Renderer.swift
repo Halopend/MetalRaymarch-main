@@ -633,7 +633,6 @@ actor Renderer {
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
         let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
         let shouldUpdateAnimation = settings.isAnimationPlaying
-        let fractalType = settings.fractalType
         
         // === PARAMETER UPDATE COORDINATION ===
         // Use ParameterUpdateCoordinator to batch animation/audio updates

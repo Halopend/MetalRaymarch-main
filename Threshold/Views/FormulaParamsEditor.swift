@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Scroll Proxy Environment
 
 struct ScrollProxyKey: EnvironmentKey {
-    static let defaultValue: ScrollViewProxy? = nil
+    nonisolated(unsafe) static let defaultValue: ScrollViewProxy? = nil
 }
 
 extension EnvironmentValues {
@@ -21,6 +21,7 @@ struct ParameterNodeGroup: Identifiable {
 
 struct FormulaParamsEditor: View {
     @Bindable var cache: UISettingsCache
+    @State private var cachedGroups: [ParameterNodeGroup] = []
 
     private var descriptor: FormulaDescriptor? {
         FormulaCatalog.shared.descriptor(for: cache.fractalType)
@@ -30,22 +31,19 @@ struct FormulaParamsEditor: View {
         ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
     }
 
-    private var triplets: [GestureBindableTriplet] {
-        ParameterNodeRegistry.shared.gestureBindableTriplets(for: cache.fractalType)
-    }
-
-    private var nodeGroups: [ParameterNodeGroup] {
+    private static func buildNodeGroups(for fractalType: FractalModelType) -> [ParameterNodeGroup] {
+        let batch = ParameterNodeRegistry.shared.formulaBatch(for: fractalType)
+        let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: fractalType)
         var groups: [ParameterNodeGroup] = []
         var processedIDs: Set<String> = []
-        let currentTriplets = triplets
         
-        for node in parameterBatch.allNodes {
+        for node in batch.allNodes {
             if processedIDs.contains(node.id) { continue }
             
-            if let triplet = currentTriplets.first(where: { 
+            if let triplet = triplets.first(where: { 
                 $0.xNodeID == node.id || $0.yNodeID == node.id || $0.zNodeID == node.id 
             }) {
-                let tripletNodes = parameterBatch.allNodes.filter { 
+                let tripletNodes = batch.allNodes.filter { 
                     $0.id == triplet.xNodeID || $0.id == triplet.yNodeID || $0.id == triplet.zNodeID 
                 }
                 groups.append(ParameterNodeGroup(id: triplet.groupName, triplet: triplet, nodes: tripletNodes))
@@ -81,14 +79,14 @@ struct FormulaParamsEditor: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 4)
 
-                ForEach(Array(nodeGroups.enumerated()), id: \.element.id) { idx, group in
-                    if idx > 0 { Divider().padding(.leading, 159) }
+                ForEach(cachedGroups) { group in
+                    if group.id != cachedGroups.first?.id { Divider().padding(.leading, 159) }
                     
                     if let triplet = group.triplet {
                         DisclosureGroup {
                             VStack(spacing: 0) {
-                                ForEach(Array(group.nodes.enumerated()), id: \.element.id) { subIdx, node in
-                                    if subIdx > 0 { Divider().padding(.leading, 159) }
+                                ForEach(group.nodes) { node in
+                                    if node.id != group.nodes.first?.id { Divider().padding(.leading, 159) }
                                     ParameterNodeRow(cache: cache, node: node)
                                         .id(node.id)
                                     if node.id == "formula.1.0.Power" {
@@ -115,6 +113,8 @@ struct FormulaParamsEditor: View {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+            .onAppear { cachedGroups = Self.buildNodeGroups(for: cache.fractalType) }
+            .onChange(of: cache.fractalType) { _, newType in cachedGroups = Self.buildNodeGroups(for: newType) }
         }
     }
 }

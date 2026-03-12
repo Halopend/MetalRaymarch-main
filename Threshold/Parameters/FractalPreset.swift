@@ -511,7 +511,7 @@ struct FractalPreset: Codable, Identifiable {
     
     /// Get the thumbnail as a UIImage (visionOS/iOS) or NSImage (macOS)
     #if os(visionOS) || os(iOS)
-    private static let thumbnailCache = NSCache<NSString, UIImage>()
+    nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, UIImage>()
 
     static func clearThumbnailCache(for id: UUID) {
         thumbnailCache.removeObject(forKey: id.uuidString as NSString)
@@ -537,7 +537,7 @@ struct FractalPreset: Codable, Identifiable {
         return decoded
     }
     #elseif os(macOS)
-    private static let thumbnailCache = NSCache<NSString, NSImage>()
+    nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, NSImage>()
 
     static func clearThumbnailCache(for id: UUID) {
         thumbnailCache.removeObject(forKey: id.uuidString as NSString)

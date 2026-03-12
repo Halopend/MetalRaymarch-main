@@ -303,19 +303,10 @@ final class MusicService {
         let originService = attachment.trackID.serviceID
 
         // Search each connected provider that isn't the origin
-        await withTaskGroup(of: UnifiedTrackID?.self) { group in
-            for provider in self.connectedProviders where provider.serviceID != originService {
-                let providerRef = provider
-                group.addTask { @MainActor in
-                    guard let match = await providerRef.searchTrack(title: title, artist: artist) else {
-                        return nil
-                    }
-                    return match.trackID
-                }
-            }
-
-            for await maybeID in group {
-                if let id = maybeID, !ids.contains(id) {
+        for provider in self.connectedProviders where provider.serviceID != originService {
+            if let match = await provider.searchTrack(title: title, artist: artist) {
+                let id = match.trackID
+                if !ids.contains(id) {
                     ids.append(id)
                 }
             }

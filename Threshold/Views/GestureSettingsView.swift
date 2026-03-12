@@ -23,31 +23,8 @@ struct GestureSettingsView: View {
                 Spacer()
             }
 
-            // ── Diagnostic status ────────────────────────────────────────
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(gestureStatusColor)
-                    .frame(width: 8, height: 8)
-                Text(appModel.gestureStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if appModel.leftHandTracked || appModel.rightHandTracked {
-                    HStack(spacing: 4) {
-                        if appModel.leftHandTracked {
-                            Image(systemName: "hand.raised.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.green)
-                        }
-                        if appModel.rightHandTracked {
-                            Image(systemName: "hand.raised.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.green)
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, 2)
+            HandTrackingStatusView()
+                .padding(.vertical, 2)
 
             Toggle("Enable Hand Gesture Controls", isOn: Binding(
                 get: { appModel.handTrackingEnabled },
@@ -285,15 +262,4 @@ struct GestureSettingsView: View {
         }
     }
 
-    private var gestureStatusColor: Color {
-        let status = appModel.gestureStatus
-        if status.hasPrefix("Active:") { return .green }
-        if status.hasPrefix("Ready") { return .cyan }
-        if status.contains("Suppressed") { return .yellow }
-        if status.contains("disabled") || status.contains("not authorized") || status.contains("not running") || status.contains("stopped") || status.contains("failed") {
-            return .red
-        }
-        if status.contains("No hands") { return .orange }
-        return .gray
-    }
 }

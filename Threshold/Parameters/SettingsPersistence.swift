@@ -17,7 +17,7 @@ import Synchronization
 
 enum SettingsPersistence {
 
-    private static let defaults = UserDefaults.standard
+    nonisolated(unsafe) private static let defaults = UserDefaults.standard
     private static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = .sortedKeys

@@ -59,8 +59,8 @@ final class GestureSensitivityStore: Sendable {
 
     /// Reset a single parameter back to default sensitivity.
     func resetSensitivity(for parameterID: String) {
-        _sensitivities.withLock { sensitivities in
-            sensitivities.removeValue(forKey: parameterID)
+        _ = _sensitivities.withLock {
+            $0.removeValue(forKey: parameterID)
         }
         save()
     }

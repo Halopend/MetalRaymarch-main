@@ -1,6 +1,6 @@
 import Foundation
 
-class AppClock {
+class AppClock: @unchecked Sendable {
     private var accumulatedTime: TimeInterval = 0
     private var startTime: Date?
     

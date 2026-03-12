@@ -67,13 +67,7 @@ struct ContentView: View {
     @State private var isBenchmarking = false
 #endif
     
-    private var fpsIndicatorColor: Color {
-        let fps = appModel.fps
-        if fps >= 85 { return .green }
-        else if fps >= 60 { return .yellow }
-        else if fps >= 45 { return .orange }
-        else { return .red }
-    }
+
     
     var body: some View {
         @Bindable var appModel = appModel
@@ -222,18 +216,7 @@ struct ContentView: View {
             
             Divider().frame(height: 20)
             
-            // Performance indicator
-            HStack(spacing: 6) {
-                Image(systemName: appModel.isUsingSpecializedPipeline ? "bolt.fill" : "bolt.slash")
-                    .font(.caption2)
-                    .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
-                Circle().fill(fpsIndicatorColor).frame(width: 8, height: 8)
-                Text("\(appModel.fps, specifier: "%.0f") FPS")
-                    .font(.caption.bold()).monospacedDigit()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(.ultraThinMaterial))
+            FPSIndicatorView()
             
             Spacer()
             
@@ -1191,31 +1174,8 @@ struct ContentView: View {
                     Spacer()
                 }
 
-                // Gesture diagnostic status
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(gestureStatusColor)
-                        .frame(width: 8, height: 8)
-                    Text(appModel.gestureStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if appModel.leftHandTracked || appModel.rightHandTracked {
-                        HStack(spacing: 4) {
-                            if appModel.leftHandTracked {
-                                Image(systemName: "hand.raised.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.green)
-                            }
-                            if appModel.rightHandTracked {
-                                Image(systemName: "hand.raised.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.green)
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 2)
+                HandTrackingStatusView()
+                    .padding(.vertical, 2)
 
                 Toggle("Enable Hand Gesture Controls", isOn: Binding(
                     get: { appModel.handTrackingEnabled },
@@ -1447,18 +1407,7 @@ struct ContentView: View {
         }
     }
 
-    /// Color for the gesture status indicator dot
-    private var gestureStatusColor: Color {
-        let status = appModel.gestureStatus
-        if status.hasPrefix("Active:") { return .green }
-        if status.hasPrefix("Ready") { return .cyan }
-        if status.contains("Suppressed") { return .yellow }
-        if status.contains("disabled") || status.contains("not authorized") || status.contains("not running") || status.contains("stopped") || status.contains("failed") {
-            return .red
-        }
-        if status.contains("No hands") { return .orange }
-        return .gray
-    }
+
     
     private var fpsColor: Color {
         // Use cache.liveFPS for the settings panel to avoid @Observable invalidation from appModel.fps
@@ -1829,6 +1778,36 @@ private struct HoldToSaveResetButton: View {
             isPressing = false
             holdCompleted = false
         }
+    }
+}
+
+// MARK: - FPS Indicator (isolated to prevent 90Hz invalidation of ContentView)
+
+/// Standalone view that reads `appModel.fps` so the ~90Hz render-loop updates
+/// only invalidate this small capsule, not the entire ContentView tree.
+private struct FPSIndicatorView: View {
+    @Environment(AppModel.self) private var appModel
+
+    private var indicatorColor: Color {
+        let fps = appModel.fps
+        if fps >= 85 { return .green }
+        else if fps >= 60 { return .yellow }
+        else if fps >= 45 { return .orange }
+        else { return .red }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: appModel.isUsingSpecializedPipeline ? "bolt.fill" : "bolt.slash")
+                .font(.caption2)
+                .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
+            Circle().fill(indicatorColor).frame(width: 8, height: 8)
+            Text("\(appModel.fps, specifier: "%.0f") FPS")
+                .font(.caption.bold()).monospacedDigit()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(.ultraThinMaterial))
     }
 }
 

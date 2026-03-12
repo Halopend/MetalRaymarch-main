@@ -75,5 +75,5 @@ final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
         return UnownedTaskExecutor(ordinary: self)
     }
 
-    static var shared: RendererTaskExecutor = RendererTaskExecutor()
+    nonisolated(unsafe) static var shared: RendererTaskExecutor = RendererTaskExecutor()
 }

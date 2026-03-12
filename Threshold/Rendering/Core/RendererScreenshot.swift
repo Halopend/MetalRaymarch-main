@@ -1,5 +1,5 @@
 import Foundation
-import Metal
+@preconcurrency import Metal
 import MetalKit
 
 extension Renderer {
@@ -139,7 +139,7 @@ extension Renderer {
     }
 
     /// Convert a Metal texture to PNG image data
-    private func textureToImageData(_ texture: MTLTexture) -> Data? {
+    private nonisolated func textureToImageData(_ texture: MTLTexture) -> Data? {
         let width = texture.width
         let height = texture.height
         let bytesPerPixel = 4

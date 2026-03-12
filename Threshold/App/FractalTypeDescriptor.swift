@@ -107,13 +107,13 @@ extension FractalTypeDescriptor {
 // MARK: - Registry
 
 enum FractalTypeRegistry {
-    private static var descriptors: [Int32: FractalTypeDescriptor] = {
+    nonisolated(unsafe) private static var descriptors: [Int32: FractalTypeDescriptor] = {
         var d: [Int32: FractalTypeDescriptor] = [:]
         for desc in allDescriptors { d[desc.rawValue] = desc }
         return d
     }()
 
-    private static let allDescriptors: [FractalTypeDescriptor] = [
+    nonisolated(unsafe) private static let allDescriptors: [any FractalTypeDescriptor] = [
         MandelboxDescriptor(),
         MandelbulbDescriptor(),
         MengerDescriptor(),
