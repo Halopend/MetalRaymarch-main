@@ -8,9 +8,33 @@
       "category": "Box Folds",
       "description": "Classic Mandelbox — box fold + sphere fold geometry.",
       "params": [
-        { "index": 0, "name": "Min Distance", "default": 0.8,  "min": -5.0,  "max": 15.0, "step": 0.01, "bundle": "fractalCore" },
-        { "index": 1, "name": "Folding Limit", "default": 1.0,  "min": -10.0, "max": 30.0, "step": 0.01, "bundle": "fractalCore" },
-        { "index": 2, "name": "Sphere Radius", "default": 0.5,  "min": -5.0,  "max": 8.0,  "step": 0.01, "bundle": "fractalCore" }
+        {
+          "index": 0,
+          "name": "Min Distance",
+          "default": 0.8,
+          "min": -5.0,
+          "max": 15.0,
+          "step": 0.01,
+          "bundle": "fractalCore"
+        },
+        {
+          "index": 1,
+          "name": "Folding Limit",
+          "default": 1.0,
+          "min": -10.0,
+          "max": 30.0,
+          "step": 0.01,
+          "bundle": "fractalCore"
+        },
+        {
+          "index": 2,
+          "name": "Sphere Radius",
+          "default": 0.5,
+          "min": -5.0,
+          "max": 8.0,
+          "step": 0.01,
+          "bundle": "fractalCore"
+        }
       ]
     },
     {
@@ -20,16 +44,88 @@
       "category": "Power / Quaternion",
       "description": "Power-based 3D Mandelbrot. Higher powers produce more lobes.",
       "params": [
-        { "index": 0, "name": "Power",         "default": 8.0,   "min": 2.0,   "max": 32.0,  "step": 0.5  },
-        { "index": 1, "name": "Bailout",        "default": 4.0,   "min": 1.0,   "max": 64.0,  "step": 1.0  },
-        { "index": 2, "name": "DerivBias",      "default": 1.0,   "min": 0.01,  "max": 4.0,   "step": 0.1  },
-        { "index": 3, "name": "AlternateVer",   "default": 0,     "min": 0,     "max": 1,     "step": 1,   "isBool": true },
-        { "index": 4, "name": "PolarRotation",  "default": 0,     "min": -3.14, "max": 3.14,  "step": 0.01 },
-        { "index": 5, "name": "PolarRotation2", "default": 0,     "min": -3.14, "max": 3.14,  "step": 0.01 },
-        { "index": 8, "name": "Julia",          "default": 0,     "min": 0,     "max": 1,     "step": 1,   "isBool": true },
-        { "index": 9, "name": "JuliaC.x",       "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 },
-        { "index": 10, "name": "JuliaC.y",      "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 },
-        { "index": 11, "name": "JuliaC.z",      "default": 0,     "min": -2.0,  "max": 2.0,   "step": 0.01 }
+        {
+          "index": 0,
+          "name": "Power",
+          "default": 8.0,
+          "min": 2.0,
+          "max": 32.0,
+          "step": 0.5
+        },
+        {
+          "index": 1,
+          "name": "Bailout",
+          "default": 4.0,
+          "min": 1.0,
+          "max": 64.0,
+          "step": 1.0
+        },
+        {
+          "index": 2,
+          "name": "DerivBias",
+          "default": 1.0,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.1
+        },
+        {
+          "index": 3,
+          "name": "AlternateVer",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "isBool": true
+        },
+        {
+          "index": 4,
+          "name": "PolarRotation",
+          "default": 0,
+          "min": -3.14,
+          "max": 3.14,
+          "step": 0.01
+        },
+        {
+          "index": 5,
+          "name": "PolarRotation2",
+          "default": 0,
+          "min": -3.14,
+          "max": 3.14,
+          "step": 0.01
+        },
+        {
+          "index": 8,
+          "name": "Julia",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "isBool": true
+        },
+        {
+          "index": 9,
+          "name": "JuliaC.x",
+          "default": 0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 10,
+          "name": "JuliaC.y",
+          "default": 0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 11,
+          "name": "JuliaC.z",
+          "default": 0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        }
       ]
     },
     {
@@ -39,10 +135,38 @@
       "category": "Kaleidoscopic IFS",
       "description": "Classic Menger sponge — recursive box with cross-shaped holes.",
       "params": [
-        { "index": 0, "name": "Scale",    "default": 3.0, "min": 1.0, "max": 6.0,  "step": 0.1 },
-        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
-        { "index": 2, "name": "Offset.y", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
-        { "index": 3, "name": "Offset.z", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 }
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 3.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        }
       ]
     },
     {
@@ -52,10 +176,38 @@
       "category": "Kaleidoscopic IFS",
       "description": "Sierpinski tetrahedron — iterated fold-and-scale.",
       "params": [
-        { "index": 0, "name": "Scale",    "default": 2.0, "min": 1.0, "max": 6.0,  "step": 0.1 },
-        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
-        { "index": 2, "name": "Offset.y", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
-        { "index": 3, "name": "Offset.z", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 }
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 2.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        }
       ]
     },
     {
@@ -65,9 +217,30 @@
       "category": "Kaleidoscopic IFS",
       "description": "Dodecahedron IFS — golden-ratio symmetry folds.",
       "params": [
-        { "index": 0, "name": "Scale",         "default": 2.0,   "min": 1.0,  "max": 6.0,  "step": 0.1 },
-        { "index": 1, "name": "Phi",           "default": 1.618, "min": 0.5,  "max": 3.0,  "step": 0.01 },
-        { "index": 2, "name": "Log10Bailout",  "default": 2.0,   "min": 0.5,  "max": 6.0,  "step": 0.5 }
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 2.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Phi",
+          "default": 1.618,
+          "min": 0.5,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "Log10Bailout",
+          "default": 2.0,
+          "min": 0.5,
+          "max": 6.0,
+          "step": 0.5
+        }
       ]
     },
     {
@@ -77,11 +250,46 @@
       "category": "Power / Quaternion",
       "description": "4D quaternion Julia set sliced in 3D.",
       "params": [
-        { "index": 0, "name": "C.x",       "default": -0.2, "min": -2.0, "max": 2.0,  "step": 0.01 },
-        { "index": 1, "name": "C.y",       "default": 0.8,  "min": -2.0, "max": 2.0,  "step": 0.01 },
-        { "index": 2, "name": "C.z",       "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.01 },
-        { "index": 3, "name": "C.w",       "default": 0,    "min": -2.0, "max": 2.0,  "step": 0.01 },
-        { "index": 4, "name": "Threshold", "default": 10.0, "min": 1.0,  "max": 100.0, "step": 1.0 }
+        {
+          "index": 0,
+          "name": "C.x",
+          "default": -0.2,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "C.y",
+          "default": 0.8,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "C.z",
+          "default": 0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "C.w",
+          "default": 0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "Threshold",
+          "default": 10.0,
+          "min": 1.0,
+          "max": 100.0,
+          "step": 1.0
+        }
       ]
     },
     {
@@ -91,8 +299,22 @@
       "category": "Julia Box",
       "description": "Sphere Sponge — recursive sphere inversions.",
       "params": [
-        { "index": 0, "name": "Scale",      "default": 2.0, "min": 1.0, "max": 6.0, "step": 0.1 },
-        { "index": 1, "name": "BubbleSize", "default": 3.0, "min": 0.5, "max": 10.0, "step": 0.1 }
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 2.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "BubbleSize",
+          "default": 3.0,
+          "min": 0.5,
+          "max": 10.0,
+          "step": 0.1
+        }
       ]
     },
     {
@@ -102,10 +324,38 @@
       "category": "Kaleidoscopic IFS",
       "description": "Octahedron IFS — abs folds with scale + offset.",
       "params": [
-        { "index": 0, "name": "Scale",    "default": 2.0, "min": 1.0, "max": 6.0,  "step": 0.1  },
-        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
-        { "index": 2, "name": "Offset.y", "default": 0,   "min": 0.0, "max": 4.0,  "step": 0.05 },
-        { "index": 3, "name": "Offset.z", "default": 0,   "min": 0.0, "max": 4.0,  "step": 0.05 }
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 2.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        }
       ]
     },
     {
@@ -115,11 +365,47 @@
       "category": "Kaleidoscopic IFS",
       "description": "Menger Sphere — menger folds with optional spherification.",
       "params": [
-        { "index": 0, "name": "Scale",    "default": 3.0, "min": 1.0, "max": 6.0, "step": 0.1  },
-        { "index": 1, "name": "Offset.x", "default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05 },
-        { "index": 2, "name": "Offset.y", "default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05 },
-        { "index": 3, "name": "Offset.z", "default": 1.0, "min": 0.0, "max": 4.0, "step": 0.05 },
-        { "index": 4, "name": "Spherify", "default": 0,   "min": 0,   "max": 1,   "step": 1,   "isBool": true }
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 3.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 4,
+          "name": "Spherify",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "isBool": true
+        }
       ]
     },
     {
@@ -129,22 +415,134 @@
       "category": "Julia Box",
       "description": "Scale-1 Julia-box fold combined with a Menger-style base shape.",
       "params": [
-        { "index": 0,  "name": "Size",         "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.01 },
-        { "index": 1,  "name": "CSize.x",      "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.01 },
-        { "index": 2,  "name": "CSize.y",      "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.01 },
-        { "index": 3,  "name": "CSize.z",      "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.01 },
-        { "index": 4,  "name": "C.x",          "default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05 },
-        { "index": 5,  "name": "C.y",          "default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05 },
-        { "index": 6,  "name": "C.z",          "default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05 },
-        { "index": 7,  "name": "DEoffset",     "default": 0.0, "min": 0.0, "max": 0.1,  "step": 0.001 },
-        { "index": 8,  "name": "Offset.x",     "default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05 },
-        { "index": 9,  "name": "Offset.y",     "default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05 },
-        { "index": 10, "name": "Offset.z",     "default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05 },
-        { "index": 11, "name": "MnIterations", "default": 2.0, "min": 0.0, "max": 20.0, "step": 1.0 },
-        { "index": 12, "name": "MnScale",      "default": 3.0, "min": 0.0, "max": 4.0,  "step": 0.05 },
-        { "index": 13, "name": "MnOffset.x",   "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.05 },
-        { "index": 14, "name": "MnOffset.y",   "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.05 },
-        { "index": 15, "name": "MnOffset.z",   "default": 1.0, "min": 0.0, "max": 2.0,  "step": 0.05 }
+        {
+          "index": 0,
+          "name": "Size",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "CSize.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "CSize.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "CSize.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "C.x",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 5,
+          "name": "C.y",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 6,
+          "name": "C.z",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 7,
+          "name": "DEoffset",
+          "default": 0.0,
+          "min": 0.0,
+          "max": 0.1,
+          "step": 0.001
+        },
+        {
+          "index": 8,
+          "name": "Offset.x",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 9,
+          "name": "Offset.y",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 10,
+          "name": "Offset.z",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 11,
+          "name": "MnIterations",
+          "default": 2.0,
+          "min": 0.0,
+          "max": 20.0,
+          "step": 1.0
+        },
+        {
+          "index": 12,
+          "name": "MnScale",
+          "default": 3.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 13,
+          "name": "MnOffset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 14,
+          "name": "MnOffset.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 15,
+          "name": "MnOffset.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05
+        }
       ]
     },
     {
@@ -154,16 +552,360 @@
       "category": "Julia Box",
       "description": "Knighty's Pseudo Kleinian — box fold + sphere inversion with cylindrical cross-section.",
       "params": [
-        { "index": 0,  "name": "Mins.x",      "default": -0.3252, "min": -2.0, "max": 2.0, "step": 0.01 },
-        { "index": 1,  "name": "Mins.y",      "default": -0.7862, "min": -2.0, "max": 2.0, "step": 0.01 },
-        { "index": 2,  "name": "Mins.z",      "default": -0.0948, "min": -2.0, "max": 2.0, "step": 0.01 },
-        { "index": 3,  "name": "SphFold",     "default": 0.69,    "min": 0.01, "max": 3.0, "step": 0.01 },
-        { "index": 4,  "name": "Maxs.x",      "default": 0.35,    "min": -2.0, "max": 2.0, "step": 0.01 },
-        { "index": 5,  "name": "Maxs.y",      "default": 1.0,     "min": -2.0, "max": 2.0, "step": 0.01 },
-        { "index": 6,  "name": "Maxs.z",      "default": 1.22,    "min": -2.0, "max": 2.0, "step": 0.01 },
-        { "index": 7,  "name": "CrossR",      "default": 0.84,    "min": 0.01, "max": 4.0, "step": 0.01 },
-        { "index": 8,  "name": "ColorOfs",    "default": 0.25,    "min": -2.0, "max": 2.0, "step": 0.01 },
-        { "index": 9,  "name": "ColorScale",  "default": 1.0,     "min": 0.0,  "max": 4.0, "step": 0.01 }
+        {
+          "index": 0,
+          "name": "Mins.x",
+          "default": -0.3252,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "Mins.y",
+          "default": -0.7862,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "Mins.z",
+          "default": -0.0948,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "SphFold",
+          "default": 0.69,
+          "min": 0.01,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "Maxs.x",
+          "default": 0.35,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 5,
+          "name": "Maxs.y",
+          "default": 1.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 6,
+          "name": "Maxs.z",
+          "default": 1.22,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 7,
+          "name": "CrossR",
+          "default": 0.84,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 8,
+          "name": "ColorOfs",
+          "default": 0.25,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 9,
+          "name": "ColorScale",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "pseudoKleinian",
+      "name": "Pseudo Kleinian (MB3D)",
+      "fractalType": 18,
+      "category": "Julia Box",
+      "description": "Pseudo Kleinian distance estimator from MB3D.",
+      "params": [
+        {
+          "index": 0,
+          "name": "Max R²",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 10.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 0.0,
+          "min": -5.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 0.0,
+          "min": -5.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 0.0,
+          "min": -5.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "Gap.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 5,
+          "name": "Gap.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 6,
+          "name": "Gap.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 7,
+          "name": "Scale",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 8,
+          "name": "Fold.x",
+          "default": 0.0,
+          "min": -5.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 9,
+          "name": "Fold.y",
+          "default": 0.0,
+          "min": -5.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 10,
+          "name": "Fold.z",
+          "default": 0.0,
+          "min": -5.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 11,
+          "name": "BoxLimit",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 12,
+          "name": "BoxValue",
+          "default": 2.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 13,
+          "name": "CSize.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 14,
+          "name": "CSize.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 15,
+          "name": "CSize.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "pseudoKleinianMenger",
+      "name": "PK Menger Hybrid",
+      "fractalType": 19,
+      "category": "Julia Box",
+      "description": "Pseudo Kleinian with rotated Menger inner fold.",
+      "params": [
+        {
+          "index": 0,
+          "name": "Size",
+          "default": 1.46218,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "CSize.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "CSize.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "CSize.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "C.x",
+          "default": -0.11024,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 5,
+          "name": "C.y",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 6,
+          "name": "C.z",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 7,
+          "name": "Offset.x",
+          "default": 1.26088,
+          "min": -3.0,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 8,
+          "name": "Offset.y",
+          "default": 1.52172,
+          "min": -3.0,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 9,
+          "name": "Offset.z",
+          "default": -0.69564,
+          "min": -3.0,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 10,
+          "name": "iScale",
+          "default": 4.0,
+          "min": 0.5,
+          "max": 8.0,
+          "step": 0.01
+        },
+        {
+          "index": 11,
+          "name": "v1",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 10.0,
+          "step": 0.01
+        },
+        {
+          "index": 12,
+          "name": "v3",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 13,
+          "name": "w1.x",
+          "default": 0.85484,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 14,
+          "name": "w1.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 15,
+          "name": "w1.z",
+          "default": 0.80646,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        }
       ]
     }
   ]

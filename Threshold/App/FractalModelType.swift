@@ -20,6 +20,8 @@ enum FractalModelType: Int32, CaseIterable {
     case mengerSphere      = 14
     case theliPseudoKleinian = 15
     case kleinian              = 17
+    case pseudoKleinian        = 18
+    case pseudoKleinianMenger  = 19
     
     /// Descriptor from the registry — all metadata is defined there.
     var descriptor: FractalTypeDescriptor { FractalTypeRegistry.descriptor(for: self) }
@@ -53,7 +55,6 @@ extension FractalModelType: Codable {
     private static let legacyStringMap: [String: FractalModelType] = [
         "apollonianGasket": .theliPseudoKleinian,
         "apollonianLight": .theliPseudoKleinian,
-        "pseudoKleinian": .theliPseudoKleinian,
         "amazingSurface": .mandelbox,
         "pseudoKnightyan": .mandelbox,
         "mandalayBox": .mandelbox,
@@ -70,7 +71,6 @@ extension FractalModelType: Codable {
         12: .dodecahedron,         // icosahedron
         13: .mengerSphere,         // surfaceKIFS
         16: .theliPseudoKleinian,  // old apollonian
-        18: .kleinian,             // future alias
     ]
 
     private static let stringMap: [String: FractalModelType] = {

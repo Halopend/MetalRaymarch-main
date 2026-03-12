@@ -763,9 +763,10 @@ actor Renderer {
                         rawTargetValue = minValue + rangeSpan * normalized + lfoOffset
 
                     case .relative:
-                        // Music adds a deviation around the current anchor.
-                        // Intensity alone controls how far it can push — no min/max needed.
-                        // Max deviation = 15% of the parameter's full allowed range × intensity.
+                        // Music adds a deviation around the CURRENT base value
+                        // (set by sliders, gestures, animations). The layer stack
+                        // adds the music offset on top of the live UI/gesture value,
+                        // so we only need to produce the pure delta here.
                         let allowed = mapping.target.allowedRange(for: activeFractalType)
                         let allowedSpan = allowed.upperBound - allowed.lowerBound
                         let maxDeviation = allowedSpan * 0.15 * absAmount * globalAmount
@@ -779,17 +780,25 @@ actor Renderer {
                             lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
                         }
 
-                        let anchor = musicAnchorByTarget[mapping.target]
-                            ?? ((allowed.lowerBound + allowed.upperBound) * 0.5)
                         let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
                         let delta = sourceValue * maxDeviation * sign
-                        rawTargetValue = anchor + delta + lfoOffset
+                        rawTargetValue = delta + lfoOffset
                     }
 
                     // ── 5. Dispatch to parameter system (LayerStack handles smoothing) ──
                     guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
-                    let anchor = musicAnchorByTarget[mapping.target] ?? rawTargetValue
-                    let offset = rawTargetValue - anchor
+                    // In absolute mode, convert the raw target to an offset from the
+                    // captured anchor so the layer stack's additive music layer
+                    // produces the correct final value.
+                    // In relative mode, rawTargetValue is already a pure delta that
+                    // the layer stack adds on top of the live UI/gesture base value.
+                    let offset: Float
+                    if mapping.mode == .absolute {
+                        let anchor = musicAnchorByTarget[mapping.target] ?? rawTargetValue
+                        offset = rawTargetValue - anchor
+                    } else {
+                        offset = rawTargetValue
+                    }
                     audioOperations.append(
                         ParameterOperation(
                             targetID: targetID,

@@ -247,7 +247,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return 0.0...2.0
         case .hueSpeed: return 0.0...0.5
         case .saturation: return 0.0...3.0
-        case .formulaParam0, .formulaParam1, .formulaParam2: return -10.0...64.0
+        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3: return -10.0...64.0
         case .foldingLimit: return -10.0...30.0
         case .sphereRadius: return -5.0...8.0
         }

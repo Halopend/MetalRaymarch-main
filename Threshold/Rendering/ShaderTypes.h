@@ -76,6 +76,8 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMengerSphere        = 14,
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
+    FractalTypePseudoKleinian        = 18,
+    FractalTypePseudoKleinianMenger  = 19,
 };
 
 // === FORMULA PARAMETERS ===
