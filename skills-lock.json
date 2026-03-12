@@ -206,6 +206,11 @@
       "sourceType": "github",
       "computedHash": "74c3da2596b80f786269d35ac8c50b77a8d1899c47b42564c2a548180e6242ff"
     },
+    "swift-concurrency-expert": {
+      "source": "Dimillian/Skills",
+      "sourceType": "github",
+      "computedHash": "4a230bf6acd49e9f77d88a6b39b5fd877a66bef119feaa8a4fa0ebe92a3a0713"
+    },
     "swift-language": {
       "source": "dpearson2699/swift-ios-skills",
       "sourceType": "github",
@@ -256,6 +261,11 @@
       "sourceType": "github",
       "computedHash": "424bd658ad0fefd629d5759a0f3ce885533e4f3250b7c82068be3a28e5f91ad1"
     },
+    "swiftui-performance-audit": {
+      "source": "Dimillian/Skills",
+      "sourceType": "github",
+      "computedHash": "0c4029813d8085be2337ddef76cfa8b932b9c33a95f1a592e5e1926054ffc319"
+    },
     "swiftui-pro": {
       "source": "twostraws/swiftui-agent-skill",
       "sourceType": "github",
@@ -265,6 +275,11 @@
       "source": "dpearson2699/swift-ios-skills",
       "sourceType": "github",
       "computedHash": "a44fa2f893097ac9d3174cbb0862deea6fae3663d2fee9ce6c397cb8e453539e"
+    },
+    "swiftui-view-refactor": {
+      "source": "Dimillian/Skills",
+      "sourceType": "github",
+      "computedHash": "8934a53708a788434dc1a0f81d52e2b22b2dade869993abae43051ee3c7d4914"
     },
     "tipkit": {
       "source": "dpearson2699/swift-ios-skills",

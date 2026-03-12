@@ -190,8 +190,8 @@ class FractalShareSession {
         self.messenger = messenger
         
         // Subscribe to session state changes
+        // No .receive(on:) needed — FractalShareSession is @MainActor
         session.$state
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] sessionState in
                 self?.handleSessionStateChange(sessionState)
             }
@@ -199,7 +199,6 @@ class FractalShareSession {
         
         // Subscribe to participant changes
         session.$activeParticipants
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] participants in
                 self?.participantCount = participants.count
                 if participants.count > 0 {

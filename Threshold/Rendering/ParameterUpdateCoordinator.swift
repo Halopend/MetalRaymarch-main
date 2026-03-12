@@ -8,27 +8,34 @@
 
 import Foundation
 import Observation
+import Synchronization
 
-/// Coordinates parameter updates without blocking MainActor
-/// Batches animation and audio operations into coordinated MainActor dispatch
-final class ParameterUpdateCoordinator: @unchecked Sendable {
-    private struct PendingParameterWork {
+/// Coordinates parameter updates without blocking MainActor.
+/// Uses Mutex-protected rate-limiting state and batched MainActor dispatch
+/// to prevent per-frame contention.
+final class ParameterUpdateCoordinator: Sendable {
+    private struct State {
+        var lastAnimationUpdate: TimeInterval = 0
+        var lastAudioUpdate: TimeInterval = 0
+        var pendingAnimationUpdate = false
+        var pendingAudioUpdate = false
+        var pendingDeltaTime: TimeInterval = 1.0 / 90.0
+        var isMainActorDispatchScheduled = false
+    }
+
+    private struct PendingParameterWork: Sendable {
         let shouldUpdateAnimation: Bool
         let shouldUpdateAudio: Bool
         let deltaTime: TimeInterval
     }
 
-    private let updateQueue = DispatchQueue(label: "parameter.update.coordinator", qos: .userInitiated)
-    private weak var appModel: AppModel?
+    private let _state = Mutex(State())
+
+    // Weak reference to avoid retain cycles (nonisolated(unsafe) because AppModel is @MainActor;
+    // only dereferenced inside @MainActor applyParameterUpdates)
+    nonisolated(unsafe) private weak var appModel: AppModel?
     
     // Rate limiting for different update types
-    private var lastAnimationUpdate: TimeInterval = 0
-    private var lastAudioUpdate: TimeInterval = 0
-    private var pendingAnimationUpdate = false
-    private var pendingAudioUpdate = false
-    private var pendingDeltaTime: TimeInterval = 1.0 / 90.0
-    private var isMainActorDispatchScheduled = false
-    
     private let animationUpdateInterval: TimeInterval = 1.0 / 90.0  // 90Hz
     private let audioUpdateInterval: TimeInterval = 1.0 / 60.0      // 60Hz
     
@@ -36,70 +43,59 @@ final class ParameterUpdateCoordinator: @unchecked Sendable {
         self.appModel = appModel
     }
     
-    /// Schedule parameter updates from render thread without blocking
-    /// Batches animation and audio into coordinated MainActor dispatch
+    /// Schedule parameter updates from render thread without blocking.
+    /// Batches animation and audio into coordinated MainActor dispatch.
     nonisolated func scheduleParameterUpdates(
         shouldUpdateAnimation: Bool,
         shouldUpdateAudio: Bool,
         deltaTime: TimeInterval,
         currentTime: TimeInterval
     ) {
-        updateQueue.async { [weak self] in
-            self?.processPendingParameterUpdates(
-                shouldUpdateAnimation: shouldUpdateAnimation,
-                shouldUpdateAudio: shouldUpdateAudio,
-                deltaTime: deltaTime,
-                currentTime: currentTime
-            )
+        let shouldDispatch = _state.withLock { state -> Bool in
+            let needsAnimationUpdate = shouldUpdateAnimation &&
+                (currentTime - state.lastAnimationUpdate >= animationUpdateInterval)
+            let needsAudioUpdate = shouldUpdateAudio &&
+                (currentTime - state.lastAudioUpdate >= audioUpdateInterval)
+            
+            guard needsAnimationUpdate || needsAudioUpdate else { return false }
+            
+            if needsAnimationUpdate {
+                state.lastAnimationUpdate = currentTime
+            }
+            if needsAudioUpdate {
+                state.lastAudioUpdate = currentTime
+            }
+            
+            state.pendingAnimationUpdate = state.pendingAnimationUpdate || needsAnimationUpdate
+            state.pendingAudioUpdate = state.pendingAudioUpdate || needsAudioUpdate
+            state.pendingDeltaTime = deltaTime
+            
+            guard !state.isMainActorDispatchScheduled else { return false }
+            
+            state.isMainActorDispatchScheduled = true
+            return true
         }
-    }
-    
-    private func processPendingParameterUpdates(
-        shouldUpdateAnimation: Bool,
-        shouldUpdateAudio: Bool,
-        deltaTime: TimeInterval,
-        currentTime: TimeInterval
-    ) {
-        let needsAnimationUpdate = shouldUpdateAnimation && (currentTime - lastAnimationUpdate >= animationUpdateInterval)
-        let needsAudioUpdate = shouldUpdateAudio && (currentTime - lastAudioUpdate >= audioUpdateInterval)
         
-        // Only dispatch to MainActor if there's actual work to do
-        guard needsAnimationUpdate || needsAudioUpdate else { return }
-        
-        if needsAnimationUpdate {
-            lastAnimationUpdate = currentTime
-        }
-        if needsAudioUpdate {
-            lastAudioUpdate = currentTime
-        }
-
-        pendingAnimationUpdate = pendingAnimationUpdate || needsAnimationUpdate
-        pendingAudioUpdate = pendingAudioUpdate || needsAudioUpdate
-        pendingDeltaTime = deltaTime
-        
-        guard !isMainActorDispatchScheduled else { return }
-
-        isMainActorDispatchScheduled = true
-
-        // Single batched MainActor dispatch.
-        Task { @MainActor [weak self] in
-            self?.applyParameterUpdates()
+        if shouldDispatch {
+            Task { @MainActor [weak self] in
+                self?.applyParameterUpdates()
+            }
         }
     }
     
     @MainActor
     private func applyParameterUpdates() {
-        let pendingWork = updateQueue.sync { () -> PendingParameterWork in
+        let pendingWork = _state.withLock { state -> PendingParameterWork in
             defer {
-                pendingAnimationUpdate = false
-                pendingAudioUpdate = false
-                isMainActorDispatchScheduled = false
+                state.pendingAnimationUpdate = false
+                state.pendingAudioUpdate = false
+                state.isMainActorDispatchScheduled = false
             }
 
             return PendingParameterWork(
-                shouldUpdateAnimation: pendingAnimationUpdate,
-                shouldUpdateAudio: pendingAudioUpdate,
-                deltaTime: pendingDeltaTime
+                shouldUpdateAnimation: state.pendingAnimationUpdate,
+                shouldUpdateAudio: state.pendingAudioUpdate,
+                deltaTime: state.pendingDeltaTime
             )
         }
 

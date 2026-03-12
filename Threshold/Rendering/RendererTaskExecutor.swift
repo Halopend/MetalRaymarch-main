@@ -6,34 +6,58 @@
 //
 
 import Foundation
+import Synchronization
 
 /// Dedicated render thread using a persistent Thread object with high priority.
 /// This avoids thread hopping and preemption that causes micro-stutters with DispatchQueue.
+///
+/// @unchecked Sendable justification: mutable job queue is protected by Mutex;
+/// DispatchSemaphore is used for blocking thread wake-up (not in async context);
+/// isRunning is only written during init and never changes.
 final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
-    // pendingJobs is protected by lock - safe for Sendable
-    private var pendingJobs: [UnownedJob] = []
-    private var pendingJobsHead: Int = 0
-    private let lock = NSLock()
+    private struct JobQueue {
+        var jobs: [UnownedJob] = []
+        var head: Int = 0
+        let compactionThreshold = 64
+
+        mutating func enqueue(_ job: UnownedJob) {
+            jobs.append(job)
+        }
+
+        mutating func dequeue() -> UnownedJob? {
+            guard head < jobs.count else {
+                jobs.removeAll(keepingCapacity: true)
+                head = 0
+                return nil
+            }
+            let job = jobs[head]
+            head += 1
+            if head >= compactionThreshold && head >= jobs.count / 2 {
+                jobs.removeFirst(head)
+                head = 0
+            }
+            return job
+        }
+    }
+
+    private let _queue = Mutex(JobQueue())
+    // DispatchSemaphore is intentionally used here for blocking thread wake-up.
+    // This is a raw Thread (not async context), so semaphore is the correct primitive.
     private let semaphore = DispatchSemaphore(value: 0)
-    private var isRunning = true
+    private let isRunning = true
     private var renderThread: Thread?
-    private let pendingJobsCompactionThreshold = 64
     
     init() {
-        // Create a persistent high-priority thread for rendering
         let executor = self
         renderThread = Thread { [weak executor] in
-            // Set thread priority to maximum for real-time rendering
             Thread.current.qualityOfService = .userInteractive
             Thread.current.threadPriority = 1.0
             Thread.current.name = "RenderThread"
             
             while executor?.isRunning ?? false {
-                // Wait for work
                 executor?.semaphore.wait()
                 
-                // Process all pending jobs
-                while let job = executor?.dequeueJob() {
+                while let job = executor?._queue.withLock({ $0.dequeue() }) {
                     job.runSynchronously(on: executor!.asUnownedSerialExecutor())
                 }
             }
@@ -41,29 +65,9 @@ final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
         renderThread?.qualityOfService = .userInteractive
         renderThread?.start()
     }
-    
-    private func dequeueJob() -> UnownedJob? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard pendingJobsHead < pendingJobs.count else {
-            pendingJobs.removeAll(keepingCapacity: true)
-            pendingJobsHead = 0
-            return nil
-        }
-
-        let job = pendingJobs[pendingJobsHead]
-        pendingJobsHead += 1
-        if pendingJobsHead >= pendingJobsCompactionThreshold && pendingJobsHead >= pendingJobs.count / 2 {
-            pendingJobs.removeFirst(pendingJobsHead)
-            pendingJobsHead = 0
-        }
-        return job
-    }
 
     func enqueue(_ job: UnownedJob) {
-        lock.lock()
-        pendingJobs.append(job)
-        lock.unlock()
+        _queue.withLock { $0.enqueue(job) }
         semaphore.signal()
     }
 

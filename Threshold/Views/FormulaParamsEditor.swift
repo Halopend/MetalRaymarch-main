@@ -210,7 +210,8 @@ private struct ParameterNodeRow: View {
             }
             .onChange(of: isFlipped) { _, flipped in
                 if flipped {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(150))
                         withAnimation(.easeInOut(duration: 0.3)) {
                             scrollProxy?.scrollTo(node.id, anchor: .center)
                         }

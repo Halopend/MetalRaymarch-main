@@ -556,7 +556,13 @@ actor Renderer {
         // Wait for a buffer to become available. With maxBuffersInFlight=2,
         // this allows CPU/GPU pipelining while preventing frame accumulation.
         // The 2-buffer setup prevents the 45fps vsync lock that occurred with 1 buffer.
-        _ = inFlightSemaphore.wait(timeout: DispatchTime.distantFuture)
+        // Timeout at 100ms (~10 FPS floor) to detect GPU stalls instead of hanging forever.
+        let waitResult = inFlightSemaphore.wait(timeout: .now() + .milliseconds(100))
+        if waitResult == .timedOut {
+            // GPU is severely behind — skip this frame to avoid accumulating latency
+            if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
+            return
+        }
 
         frame.startSubmission()
 

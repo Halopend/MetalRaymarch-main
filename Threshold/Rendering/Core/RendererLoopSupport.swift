@@ -21,16 +21,9 @@ extension Renderer {
 
                 if shouldCaptureScreenshot {
                     shouldCaptureScreenshot = false
-                    let screenshotData = renderScreenshot()
-                    if RENDERER_DEBUG {
-                        if screenshotData != nil {
-                            print("📷 Screenshot captured (\(screenshotData!.count) bytes)")
-                        } else {
-                            print("⚠️ Screenshot capture FAILED")
-                        }
-                    }
-                    pendingScreenshotContinuation?.resume(returning: screenshotData)
-                    pendingScreenshotContinuation = nil
+                    // renderScreenshot() is non-blocking: it uses addCompletedHandler
+                    // to resume the pending continuation after GPU finishes
+                    renderScreenshot()
                 }
 
                 if shouldRunProfiler {

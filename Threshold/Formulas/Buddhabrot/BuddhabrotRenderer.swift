@@ -18,12 +18,23 @@
 import Metal
 import simd
 import CompositorServices
+import os
 
 // MARK: - Buddhabrot Settings
 
 /// User-adjustable parameters for the Buddhabrot volume renderer.
 /// Thread-safe for cross-thread access (render loop reads, UI writes).
+/// Protected by os_unfair_lock — all property access is synchronized.
 final class BuddhabrotSettings: @unchecked Sendable {
+    private var _lock = os_unfair_lock()
+
+    @inline(__always)
+    func withLock<T>(_ body: () -> T) -> T {
+        os_unfair_lock_lock(&_lock)
+        defer { os_unfair_lock_unlock(&_lock) }
+        return body()
+    }
+
     // Volume resolution (per axis). 128^3 = 8 MB density buffer.
     var resolution: Int = 128
 
@@ -68,6 +79,58 @@ final class BuddhabrotSettings: @unchecked Sendable {
     // State
     var totalSamplesAccumulated: UInt64 = 0
     var needsClear: Bool = false
+
+    /// Takes a consistent snapshot of all settings under the lock.
+    /// Call once per frame from the render thread to avoid per-property locking.
+    func snapshot() -> BuddhabrotSettingsSnapshot {
+        withLock {
+            BuddhabrotSettingsSnapshot(
+                resolution: resolution, power: power, maxIterations: maxIterations,
+                bailoutRadius: bailoutRadius, useRGBMode: useRGBMode,
+                shortEscapeMax: shortEscapeMax, mediumEscapeMax: mediumEscapeMax,
+                batchSize: batchSize, batchesPerFrame: batchesPerFrame,
+                normalizationInterval: normalizationInterval,
+                densityScale: densityScale, gamma: gamma, alphaScale: alphaScale,
+                colorLow: colorLow, colorMid: colorMid, colorHigh: colorHigh,
+                maxRaySteps: maxRaySteps, earlyExitAlpha: earlyExitAlpha,
+                volumeDistance: volumeDistance, volumeScale: volumeScale,
+                autoRotate: autoRotate, rotationSpeed: rotationSpeed,
+                worldExtent: worldExtent,
+                totalSamplesAccumulated: totalSamplesAccumulated,
+                needsClear: needsClear
+            )
+        }
+    }
+}
+
+/// Immutable copy of BuddhabrotSettings for use on the render thread.
+/// Eliminates per-property locking — one lock acquisition per frame.
+struct BuddhabrotSettingsSnapshot {
+    let resolution: Int
+    let power: Float
+    let maxIterations: Int
+    let bailoutRadius: Float
+    let useRGBMode: Bool
+    let shortEscapeMax: Int
+    let mediumEscapeMax: Int
+    let batchSize: Int
+    let batchesPerFrame: Int
+    let normalizationInterval: Int
+    let densityScale: Float
+    let gamma: Float
+    let alphaScale: Float
+    let colorLow: SIMD3<Float>
+    let colorMid: SIMD3<Float>
+    let colorHigh: SIMD3<Float>
+    let maxRaySteps: Int
+    let earlyExitAlpha: Float
+    let volumeDistance: Float
+    let volumeScale: Float
+    let autoRotate: Bool
+    let rotationSpeed: Float
+    let worldExtent: Float
+    let totalSamplesAccumulated: UInt64
+    let needsClear: Bool
 }
 
 // MARK: - BuddhabrotRenderer

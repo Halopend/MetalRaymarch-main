@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import Synchronization
 
 // MARK: - SettingsPersistence
 
@@ -44,8 +45,7 @@ enum SettingsPersistence {
     private static let throttleInterval: TimeInterval = 1.0
 
     /// Timestamp of the last successful save per domain.
-    private static var lastSaveTime: [Domain: TimeInterval] = [:]
-    private static let throttleLock = NSLock()
+    private static let _lastSaveTime = Mutex<[Domain: TimeInterval]>([:])
 
     // MARK: Generic Save / Load
 
@@ -58,15 +58,14 @@ enum SettingsPersistence {
     /// Call this BEFORE constructing the config struct to avoid unnecessary work.
     static func shouldSave(domain: Domain) -> Bool {
         let now = ProcessInfo.processInfo.systemUptime
-        throttleLock.lock()
-        let last = lastSaveTime[domain] ?? 0
-        if now - last < throttleInterval {
-            throttleLock.unlock()
-            return false
+        return _lastSaveTime.withLock { lastSaveTime in
+            let last = lastSaveTime[domain] ?? 0
+            if now - last < throttleInterval {
+                return false
+            }
+            lastSaveTime[domain] = now
+            return true
         }
-        lastSaveTime[domain] = now
-        throttleLock.unlock()
-        return true
     }
 
     static func load<T: Codable>(_ type: T.Type, domain: Domain) -> T? {

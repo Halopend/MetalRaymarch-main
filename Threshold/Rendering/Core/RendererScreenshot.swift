@@ -59,13 +59,16 @@ extension Renderer {
         }
     }
 
-    /// Render and capture a screenshot to PNG data
-    func renderScreenshot() -> Data? {
+    /// Render and capture a screenshot to PNG data.
+    /// Uses addCompletedHandler instead of waitUntilCompleted to avoid blocking the render thread.
+    func renderScreenshot() {
         guard let screenshotTexture = screenshotTexture,
               let screenshotPipeline = screenshotPipeline,
               let screenshotDepthTexture = screenshotDepthTexture,
               let commandBuffer = commandQueue.makeCommandBuffer() else {
-            return nil
+            pendingScreenshotContinuation?.resume(returning: nil)
+            pendingScreenshotContinuation = nil
+            return
         }
 
         let renderPassDescriptor = MTLRenderPassDescriptor()
@@ -80,7 +83,9 @@ extension Renderer {
         renderPassDescriptor.depthAttachment.clearDepth = 1.0
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-            return nil
+            pendingScreenshotContinuation?.resume(returning: nil)
+            pendingScreenshotContinuation = nil
+            return
         }
 
         renderEncoder.label = "Screenshot Render Encoder"
@@ -121,10 +126,16 @@ extension Renderer {
         }
         #endif
 
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
+        // Capture continuation and texture ref before the closure to avoid actor re-entry
+        let continuation = pendingScreenshotContinuation
+        pendingScreenshotContinuation = nil
+        let capturedTexture = screenshotTexture
 
-        return textureToImageData(screenshotTexture)
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            let imageData = self?.textureToImageData(capturedTexture)
+            continuation?.resume(returning: imageData)
+        }
+        commandBuffer.commit()
     }
 
     /// Convert a Metal texture to PNG image data

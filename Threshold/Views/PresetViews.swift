@@ -542,7 +542,9 @@ struct ShareSheet: NSViewControllerRepresentable {
     func makeNSViewController(context: Context) -> NSViewController {
         let controller = NSViewController()
         let picker = NSSharingServicePicker(items: activityItems)
-        DispatchQueue.main.async {
+        // Delay presentation to next run loop iteration so the view is laid out.
+        // Already on MainActor via NSViewControllerRepresentable.
+        Task { @MainActor in
             picker.show(relativeTo: .zero, of: controller.view, preferredEdge: .minY)
         }
         return controller
