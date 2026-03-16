@@ -132,8 +132,8 @@ struct GradientStopsPopover: View {
         cache.pushGradientMap(map)
         
         // Save to custom list
-        cache.savedCustomGradients.append(map)
-        cache.saveSavedGradients()
+        cache.gradientLibrary.savedCustomGradients.append(map)
+        cache.gradientLibrary.persist()
         
         showSavedConfirmation = true
         Task {

@@ -171,6 +171,8 @@ actor Renderer {
 
     private var parameterOperationFrameIndex: UInt64 = 0
     private let parameterOperationDispatcher = ParameterOperationDispatcher()
+    // Lifetime is bounded to init/deinit; the task body still hops back onto the actor.
+    nonisolated(unsafe) private var setupTask: Task<Void, Never>?
 
     var smoothedScale: Float = 1.0
     
@@ -370,22 +372,31 @@ actor Renderer {
         
         // Defer actor-isolated setup to after init completes
         // These methods access actor-isolated properties and must run on this actor
-        Task {
+        setupTask = Task { [weak self] in
+            guard let self else { return }
+
             // Setup screenshot capture pipeline
             await self.setupScreenshotCapture()
-            
+            guard !Task.isCancelled else { return }
+
             // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
             // Initialize dynamic quality manager if available on this OS version
             await self.setupDynamicRenderQuality()
-            
+            guard !Task.isCancelled else { return }
+
             // === RESIDENCY SET ===
             // Pre-validate resource residency for reduced per-frame overhead
             await self.setupResidencySet()
-            
+            guard !Task.isCancelled else { return }
+
             // === PRESET PIPELINE PRECOMPILATION ===
             // Build specialized pipelines for saved presets to avoid hitches when loading
             await self.precompilePresetPipelines()
         }
+    }
+
+    deinit {
+        setupTask?.cancel()
     }
     
     @MainActor
@@ -564,7 +575,17 @@ actor Renderer {
             return
         }
 
+        var shouldSignalInFlightSemaphore = true
+        defer {
+            if shouldSignalInFlightSemaphore {
+                inFlightSemaphore.signal()
+            }
+        }
+
         frame.startSubmission()
+        defer {
+            frame.endSubmission()
+        }
 
         let presentationTime = drawable.frameTiming.presentationTime
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
@@ -866,8 +887,8 @@ actor Renderer {
                 
                 if rendered {
                     drawable.encodePresent(commandBuffer: commandBuffer)
+                    shouldSignalInFlightSemaphore = false
                     commandBuffer.commit()
-                    frame.endSubmission()
                     return
                 }
             }
@@ -888,8 +909,8 @@ actor Renderer {
             
             if computeRendered {
                 drawable.encodePresent(commandBuffer: commandBuffer)
+                shouldSignalInFlightSemaphore = false
                 commandBuffer.commit()
-                frame.endSubmission()
                 return  // Skip fragment-based rendering
             }
         } else {
@@ -903,8 +924,8 @@ actor Renderer {
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
             drawable.encodePresent(commandBuffer: commandBuffer)
+            shouldSignalInFlightSemaphore = false
             commandBuffer.commit()
-            frame.endSubmission()
             return
         }
 
@@ -961,9 +982,7 @@ actor Renderer {
         }
 
         for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
-            guard let layout = element as? MDLVertexBufferLayout else {
-                return
-            }
+            guard let layout = element as? MDLVertexBufferLayout else { continue }
 
             if layout.stride != 0 {
                 let buffer = mesh.vertexBuffers[index]
@@ -1009,9 +1028,8 @@ actor Renderer {
 
         drawable.encodePresent(commandBuffer: commandBuffer)
 
+        shouldSignalInFlightSemaphore = false
         commandBuffer.commit()
-
-        frame.endSubmission()
     }
     
     // MARK: - Adaptive 8x8 Hierarchical Compute Rendering
@@ -1029,10 +1047,11 @@ actor Renderer {
         prevDepthTexture: MTLTexture,
         curDepthTexture: MTLTexture,
         prevColorTexture: MTLTexture,
-        curColorTexture: MTLTexture
+        curColorTexture: MTLTexture,
+        uniformBuffer: MTLBuffer,
+        bufferContents: UnsafeMutableRawPointer
     ) {
-        guard let pipeline = pipeline ?? adaptiveHierarchicalPipeline8x8,
-              let uniformBuffer = tileUniformBuffer else {
+        guard let pipeline = pipeline ?? adaptiveHierarchicalPipeline8x8 else {
             if RENDERER_DEBUG { print("⚠️ Adaptive compute pipeline not available") }
             return
         }
@@ -1116,9 +1135,9 @@ actor Renderer {
             colorScheme: colorSchemeParams
         )
         
-        // Copy uniforms to buffer
+        // Copy uniforms to buffer (pointer cached by caller across both eyes)
         let uniformOffset = MemoryLayout<TileUniforms>.stride * viewIndex
-        memcpy(uniformBuffer.contents().advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
+        memcpy(bufferContents.advanced(by: uniformOffset), &tileUniforms, MemoryLayout<TileUniforms>.size)
         
         // Create compute encoder
         guard let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
@@ -1126,7 +1145,7 @@ actor Renderer {
             return
         }
         
-        computeEncoder.label = "Adaptive 8x8 Hierarchical Raymarch - Eye \(viewIndex)"
+        computeEncoder.label = viewIndex == 0 ? "Adaptive Compute - Eye 0" : "Adaptive Compute - Eye 1"
         computeEncoder.setComputePipelineState(pipeline)
         computeEncoder.setBuffer(uniformBuffer, offset: uniformOffset, index: 0)
         computeEncoder.setTexture(outputTexture, index: 0)
@@ -1186,8 +1205,7 @@ actor Renderer {
         computeOutputTexture = texture
         computeOutputSize = SIMD2(width, height)
         
-        // Add to residency set for GPU memory pre-validation
-        updateResidencySetForComputeTexture(texture)
+        // Residency update deferred to renderWithAdaptiveCompute() for batching
         
         if RENDERER_DEBUG { print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers") }
         return texture
@@ -1234,9 +1252,7 @@ actor Renderer {
         temporalDepthSize = SIMD2(width, height)
         temporalFrameCount = 0  // Reset — first frame has no valid previous data
         
-        // Add to residency set
-        updateResidencySetForComputeTexture(tex0)
-        updateResidencySetForComputeTexture(tex1)
+        // Residency update deferred to renderWithAdaptiveCompute() for batching
         
         if RENDERER_DEBUG { print("📐 Created temporal depth textures: \(width)×\(height) × \(viewCount) layers") }
         return (read: tex0, write: tex0)  // First frame: read=write (will be marked invalid)
@@ -1280,8 +1296,7 @@ actor Renderer {
         temporalColorTextures = [tex0, tex1]
         temporalColorSize = SIMD2(width, height)
 
-        updateResidencySetForComputeTexture(tex0)
-        updateResidencySetForComputeTexture(tex1)
+        // Residency update deferred to renderWithAdaptiveCompute() for batching
 
         if RENDERER_DEBUG { print("📐 Created temporal color textures: \(width)×\(height) × \(viewCount) layers") }
         return (read: tex0, write: tex0)  // First frame: no valid previous history
@@ -1296,7 +1311,8 @@ actor Renderer {
         guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else { return }
         blitEncoder.label = "Copy Compute Output to Drawable"
         
-        for eye in 0..<drawable.views.count {
+        let viewCount = drawable.views.count
+        for eye in 0..<viewCount {
             let destinationTexture: MTLTexture
             let destinationSlice: Int
             
@@ -1339,6 +1355,13 @@ actor Renderer {
         let computePipeline = selectComputePipeline(fractalIterations: fi, maxRaySteps: rs)
         
         guard computePipeline != nil else { return false }
+        guard let uniformBuffer = tileUniformBuffer else { return false }
+        let bufferContents = uniformBuffer.contents()
+        
+        // Track textures created this frame for batched residency update
+        let prevComputeOutput = computeOutputTexture
+        let prevDepth0 = temporalDepthTextures[0]
+        let prevColor0 = temporalColorTextures[0]
         
         guard let outputTexture = ensureComputeOutputTexture(for: drawable) else {
             return false
@@ -1350,6 +1373,17 @@ actor Renderer {
                         if RENDERER_DEBUG { print("⚠️ Temporal textures unavailable; falling back to fragment rendering") }
                         return false
                 }
+        
+        // Batch residency set updates for any newly created textures (single commit)
+        var newTextures: [MTLTexture] = []
+        if computeOutputTexture !== prevComputeOutput { newTextures.append(outputTexture) }
+        if temporalDepthTextures[0] !== prevDepth0 {
+            newTextures.append(contentsOf: temporalDepthTextures.compactMap { $0 })
+        }
+        if temporalColorTextures[0] !== prevColor0 {
+            newTextures.append(contentsOf: temporalColorTextures.compactMap { $0 })
+        }
+        if !newTextures.isEmpty { updateResidencySetForComputeTextures(newTextures) }
         
         // Render each eye
         for viewIndex in 0..<drawable.views.count {
@@ -1363,7 +1397,9 @@ actor Renderer {
                 prevDepthTexture: depthPair.read,
                 curDepthTexture: depthPair.write,
                 prevColorTexture: colorPair.read,
-                curColorTexture: colorPair.write
+                curColorTexture: colorPair.write,
+                uniformBuffer: uniformBuffer,
+                bufferContents: bufferContents
             )
         }
         
@@ -1406,9 +1442,12 @@ actor Renderer {
         shouldRunProfiler = true
     }
     
-    /// Profile each component of your rendering pipeline
+    /// Profile each component of your rendering pipeline.
+    /// Runs GPU work on a background queue to avoid blocking the render thread.
     func profilePipelineComponents() {
         let settingsSnapshot = appModel.renderSettings.snapshot()
+        let device = self.device
+        let commandQueue = self.commandQueue
         
         guard let library = device.makeDefaultLibrary(),
               let diagnosticFunc = library.makeFunction(name: "diagnosticKernel"),
@@ -1441,65 +1480,69 @@ actor Renderer {
         let currentSphere = settingsSnapshot.sphereRadius
         let currentMinDist = settingsSnapshot.minDistance
         
-        print("\n╔═══════════════════════════════════════════════════════════════╗")
-        print("║        PIPELINE COMPONENT PROFILER                            ║")
-        print("╠═══════════════════════════════════════════════════════════════╣")
-        print("║  Iterations: \(currentIters), Steps: \(currentSteps), Scale: \(String(format: "%.2f", currentScale)), Fold: \(String(format: "%.2f", currentFold))  ║")
-        print("╠═══════════════════════════════════════════════════════════════╣")
-        
-        let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
-        let threadgroups = MTLSize(
-            width: (testSize + 15) / 16,
-            height: (testSize + 15) / 16,
-            depth: 1
-        )
-        
-        let modes: [(String, Int32)] = [
-            ("Single Map() call (baseline)", 5),
-            ("SDF raymarch only (no shading)", 0),
-            ("SDF + 6-point normal", 1),
-            ("Full shade (SDF + normal + light)", 2),
-            ("100x Map() at fixed pos (iter cost)", 3),
-            ("50x normal calc (normal cost)", 4),
-        ]
-        
-        for (name, mode) in modes {
-            var uniforms = DiagnosticUniformsLayout(
-                projectionMatrix: matrix_identity_float4x4,
-                viewMatrix: matrix_identity_float4x4,
-                inverseViewMatrix: matrix_identity_float4x4,
-                inverseProjectionMatrix: matrix_identity_float4x4,
-                resolution: SIMD2<Float>(Float(testSize), Float(testSize)),
-                time: 0,
-                minDistance: currentMinDist,
-                fractalScale: currentScale,
-                foldingLimit: currentFold,
-                sphereRadius: currentSphere,
-                fractalIterations: Int32(currentIters),
-                maxRaySteps: Int32(currentSteps),
-                diagnosticMode: mode,
-                forceIterations: 0,
-                forceRaySteps: 0
+        // Run GPU profiler work on a background queue to avoid blocking the render thread.
+        // All captured values are Sendable (value types, MTL objects).
+        Task.detached(priority: .utility) {
+            print("\n╔═══════════════════════════════════════════════════════════════╗")
+            print("║        PIPELINE COMPONENT PROFILER                            ║")
+            print("╠═══════════════════════════════════════════════════════════════╣")
+            print("║  Iterations: \(currentIters), Steps: \(currentSteps), Scale: \(String(format: "%.2f", currentScale)), Fold: \(String(format: "%.2f", currentFold))  ║")
+            print("╠═══════════════════════════════════════════════════════════════╣")
+            
+            let threadsPerGroup = MTLSize(width: 16, height: 16, depth: 1)
+            let threadgroups = MTLSize(
+                width: (testSize + 15) / 16,
+                height: (testSize + 15) / 16,
+                depth: 1
             )
-            memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<DiagnosticUniformsLayout>.size)
             
-            guard let cmdBuffer = commandQueue.makeCommandBuffer(),
-                  let encoder = cmdBuffer.makeComputeCommandEncoder() else { continue }
+            let modes: [(String, Int32)] = [
+                ("Single Map() call (baseline)", 5),
+                ("SDF raymarch only (no shading)", 0),
+                ("SDF + 6-point normal", 1),
+                ("Full shade (SDF + normal + light)", 2),
+                ("100x Map() at fixed pos (iter cost)", 3),
+                ("50x normal calc (normal cost)", 4),
+            ]
             
-            encoder.setComputePipelineState(diagnosticPipeline)
-            encoder.setTexture(testTexture, index: 0)
-            encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
-            encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
-            encoder.endEncoding()
+            for (name, mode) in modes {
+                var uniforms = DiagnosticUniformsLayout(
+                    projectionMatrix: matrix_identity_float4x4,
+                    viewMatrix: matrix_identity_float4x4,
+                    inverseViewMatrix: matrix_identity_float4x4,
+                    inverseProjectionMatrix: matrix_identity_float4x4,
+                    resolution: SIMD2<Float>(Float(testSize), Float(testSize)),
+                    time: 0,
+                    minDistance: currentMinDist,
+                    fractalScale: currentScale,
+                    foldingLimit: currentFold,
+                    sphereRadius: currentSphere,
+                    fractalIterations: Int32(currentIters),
+                    maxRaySteps: Int32(currentSteps),
+                    diagnosticMode: mode,
+                    forceIterations: 0,
+                    forceRaySteps: 0
+                )
+                memcpy(uniformBuffer.contents(), &uniforms, MemoryLayout<DiagnosticUniformsLayout>.size)
+                
+                guard let cmdBuffer = commandQueue.makeCommandBuffer(),
+                      let encoder = cmdBuffer.makeComputeCommandEncoder() else { continue }
+                
+                encoder.setComputePipelineState(diagnosticPipeline)
+                encoder.setTexture(testTexture, index: 0)
+                encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
+                encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threadsPerGroup)
+                encoder.endEncoding()
+                
+                let startTime = CACurrentMediaTime()
+                cmdBuffer.commit()
+                cmdBuffer.waitUntilCompleted()
+                let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
+                
+                print("║  \(name.padding(toLength: 40, withPad: " ", startingAt: 0)) \(String(format: "%6.2f", elapsed))ms ║")
+            }
             
-            let startTime = CACurrentMediaTime()
-            cmdBuffer.commit()
-            cmdBuffer.waitUntilCompleted()
-            let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
-            
-            print("║  \(name.padding(toLength: 40, withPad: " ", startingAt: 0)) \(String(format: "%6.2f", elapsed))ms ║")
+            print("╚═══════════════════════════════════════════════════════════════╝\n")
         }
-        
-        print("╚═══════════════════════════════════════════════════════════════╝\n")
     }
 }

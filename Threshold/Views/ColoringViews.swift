@@ -45,15 +45,15 @@ struct GradientBrowserView: View {
             }
 
             // ── Saved Custom Gradients ──
-            if !cache.savedCustomGradients.isEmpty {
+            if !cache.gradientLibrary.savedCustomGradients.isEmpty {
                 HStack {
                     Text("Saved").font(.subheadline).foregroundColor(.secondary)
                     Spacer()
-                    Text("\(cache.savedCustomGradients.count)").font(.caption2).foregroundStyle(.tertiary)
+                    Text("\(cache.gradientLibrary.savedCustomGradients.count)").font(.caption2).foregroundStyle(.tertiary)
                 }
                 .padding(.top, 4)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                    ForEach(Array(cache.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
+                    ForEach(Array(cache.gradientLibrary.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
                         let isActive = cache.color.gradientState.gradientPreset == nil && cache.color.gradientState.gradient.id == saved.id
                         Button {
                             cache.applySavedGradient(saved)

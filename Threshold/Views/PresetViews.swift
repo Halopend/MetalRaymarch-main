@@ -249,17 +249,17 @@ struct PresetsListView: View {
     @State private var presetToRename: FractalPreset?
     @State private var newName: String = ""
     @State private var shareItem: ShareItem?
+    @State private var cachedFilteredPresets: [FractalPreset] = []
     
-    var filteredPresets: [FractalPreset] {
+    private static func buildFilteredPresets(from presets: [FractalPreset], searchText: String) -> [FractalPreset] {
         let base: [FractalPreset]
         if searchText.isEmpty {
-            base = presetManager.presets
+            base = presets
         } else {
-            base = presetManager.presets.filter {
+            base = presets.filter {
                 $0.name.localizedCaseInsensitiveContains(searchText)
             }
         }
-        // Favorites (higher rating) float to top, then newest
         return base.sorted { lhs, rhs in
             if lhs.rating != rhs.rating {
                 return lhs.rating > rhs.rating
@@ -336,12 +336,22 @@ struct PresetsListView: View {
                 Button("Rename") {
                     if let preset = presetToRename {
                         presetManager.renamePreset(preset, to: newName)
+                        refreshPresets()
                     }
                     presetToRename = nil
                 }
             } message: {
                 Text("Enter a new name for the preset")
             }
+        }
+        .onAppear {
+            refreshPresets()
+        }
+        .onChange(of: searchText) { _, _ in
+            refreshPresets()
+        }
+        .onChange(of: presetManager.presets.count) { _, _ in
+            refreshPresets()
         }
     }
     
@@ -414,9 +424,13 @@ struct PresetsListView: View {
         .padding()
     }
     
+    private func refreshPresets() {
+        cachedFilteredPresets = Self.buildFilteredPresets(from: presetManager.presets, searchText: searchText)
+    }
+    
     private var presetsList: some View {
         List {
-            ForEach(filteredPresets) { preset in
+            ForEach(cachedFilteredPresets) { preset in
                 PresetRowView(
                     preset: preset,
                     onLoad: {
@@ -425,9 +439,11 @@ struct PresetsListView: View {
                     },
                     onDelete: {
                         presetManager.deletePreset(preset)
+                        refreshPresets()
                     },
                     onRate: { rating in
                         presetManager.updateRating(preset, rating: rating)
+                        refreshPresets()
                     },
                     onExport: {
                         if let url = presetManager.exportPreset(preset) {

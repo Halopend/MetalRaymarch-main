@@ -8,6 +8,26 @@
 
 import SwiftUI
 
+// MARK: - Gradient Library
+// Isolated @Observable so gradient mutations don't invalidate UISettingsCache observers
+@MainActor
+@Observable
+final class GradientLibrary {
+    var savedCustomGradients: [GradientColorMap] = GradientLibrary.load()
+
+    static func load() -> [GradientColorMap] {
+        guard let data = UserDefaults.standard.data(forKey: "savedCustomGradients"),
+              let gradients = try? JSONDecoder().decode([GradientColorMap].self, from: data) else { return [] }
+        return gradients
+    }
+
+    func persist() {
+        if let data = try? JSONEncoder().encode(savedCustomGradients) {
+            UserDefaults.standard.set(data, forKey: "savedCustomGradients")
+        }
+    }
+}
+
 // MARK: - Cached UI Settings
 // Local state that syncs with RenderSettings periodically to avoid lock contention
 @MainActor
@@ -39,56 +59,43 @@ final class UISettingsCache {
     var targetSphereRadius: Float = 0.5
     var formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()
 
-    // === SAVED CUSTOM GRADIENTS (persisted via UserDefaults) ===
-    var savedCustomGradients: [GradientColorMap] = UISettingsCache.loadSavedGradients()
-    
-    static func loadSavedGradients() -> [GradientColorMap] {
-        guard let data = UserDefaults.standard.data(forKey: "savedCustomGradients"),
-              let gradients = try? JSONDecoder().decode([GradientColorMap].self, from: data) else { return [] }
-        return gradients
-    }
-    
-    func saveSavedGradients() {
-        if let data = try? JSONEncoder().encode(savedCustomGradients) {
-            UserDefaults.standard.set(data, forKey: "savedCustomGradients")
-        }
-    }
+    // === SAVED CUSTOM GRADIENTS (isolated in GradientLibrary to avoid observation cross-talk) ===
+    let gradientLibrary = GradientLibrary()
     
     func saveCurrentGradientAsCustom() {
         var copy = color.gradientState.gradient
-        // Give it a unique name
-        let existingCount = savedCustomGradients.count
+        let existingCount = gradientLibrary.savedCustomGradients.count
         copy = GradientColorMap(name: "Custom \(existingCount + 1)", stops: copy.stops,
                                  mappingMode: copy.mappingMode, repeatCount: copy.repeatCount,
                                  offset: copy.offset, smoothing: copy.smoothing)
-        savedCustomGradients.append(copy)
-        saveSavedGradients()
+        gradientLibrary.savedCustomGradients.append(copy)
+        gradientLibrary.persist()
     }
     
     func deleteSavedGradient(at index: Int) {
-        guard index >= 0 && index < savedCustomGradients.count else { return }
-        savedCustomGradients.remove(at: index)
-        saveSavedGradients()
+        guard index >= 0 && index < gradientLibrary.savedCustomGradients.count else { return }
+        gradientLibrary.savedCustomGradients.remove(at: index)
+        gradientLibrary.persist()
     }
     
     func renameSavedGradient(at index: Int, to newName: String) {
-        guard index >= 0 && index < savedCustomGradients.count else { return }
-        savedCustomGradients[index].name = newName
-        saveSavedGradients()
+        guard index >= 0 && index < gradientLibrary.savedCustomGradients.count else { return }
+        gradientLibrary.savedCustomGradients[index].name = newName
+        gradientLibrary.persist()
     }
     
     /// Overwrite a saved gradient's stops/settings with the current editor state
     func updateSavedGradient(at index: Int) {
-        guard index >= 0 && index < savedCustomGradients.count else { return }
-        let name = savedCustomGradients[index].name
-        savedCustomGradients[index] = GradientColorMap(
+        guard index >= 0 && index < gradientLibrary.savedCustomGradients.count else { return }
+        let name = gradientLibrary.savedCustomGradients[index].name
+        gradientLibrary.savedCustomGradients[index] = GradientColorMap(
             name: name, stops: color.gradientState.gradient.stops,
             mappingMode: color.gradientState.gradient.mappingMode,
             repeatCount: color.gradientState.gradient.repeatCount,
             offset: color.gradientState.gradient.offset,
             smoothing: color.gradientState.gradient.smoothing
         )
-        saveSavedGradients()
+        gradientLibrary.persist()
     }
     
     func applySavedGradient(_ gradient: GradientColorMap) {
@@ -133,6 +140,8 @@ final class UISettingsCache {
     
     private func syncLiveStats() {
         guard let settings else { return }
+        // Skip syncing when app is backgrounded — no UI visible to update
+        guard _appModel?.isAppActive ?? false else { return }
         currentRenderQuality = settings.currentRenderQuality
         liveFractalIterations = settings.fractalIterations
         liveMaxRaySteps = settings.maxRaySteps
@@ -148,23 +157,35 @@ final class UISettingsCache {
     func loadFromSettings() {
         guard let settings else { return }
 
-        // ── Config struct snapshots (7 domain assignments replace ~95 individual lines) ──
-        color = settings.colorConfig
-        lighting = settings.lightingConfig
-        audioReactive = settings.audioReactiveConfig
-        gesture = settings.gestureConfig
-        safetyBubble = settings.safetyBubbleConfig
-        quality = settings.qualityConfig
-        display = settings.displayConfig
+        // ── Config struct snapshots ──
+        // Only assign when changed (Equatable check) to suppress no-op @Observable invalidation.
+        let newColor = settings.colorConfig
+        if color != newColor { color = newColor }
+        let newLighting = settings.lightingConfig
+        if lighting != newLighting { lighting = newLighting }
+        let newAudioReactive = settings.audioReactiveConfig
+        if audioReactive != newAudioReactive { audioReactive = newAudioReactive }
+        let newGesture = settings.gestureConfig
+        if gesture != newGesture { gesture = newGesture }
+        let newSafetyBubble = settings.safetyBubbleConfig
+        if safetyBubble != newSafetyBubble { safetyBubble = newSafetyBubble }
+        let newQuality = settings.qualityConfig
+        if quality != newQuality { quality = newQuality }
+        let newDisplay = settings.displayConfig
+        if display != newDisplay { display = newDisplay }
 
         // ── Geometry (target values, not in any config struct) ──
         let geo = settings.geometryConfig
-        fractalType = geo.fractalType
+        if fractalType != geo.fractalType { fractalType = geo.fractalType }
         formulaParams = geo.formulaParams
-        fractalScale = settings.targetFractalScale
-        targetMinDistance = settings.targetMinDistance
-        targetFoldingLimit = settings.targetFoldingLimit
-        targetSphereRadius = settings.targetSphereRadius
+        let newScale = settings.targetFractalScale
+        if fractalScale != newScale { fractalScale = newScale }
+        let newMinDist = settings.targetMinDistance
+        if targetMinDistance != newMinDist { targetMinDistance = newMinDist }
+        let newFold = settings.targetFoldingLimit
+        if targetFoldingLimit != newFold { targetFoldingLimit = newFold }
+        let newSphere = settings.targetSphereRadius
+        if targetSphereRadius != newSphere { targetSphereRadius = newSphere }
 
         // ── Live stat ──
         currentRenderQuality = settings.currentRenderQuality

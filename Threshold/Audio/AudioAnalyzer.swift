@@ -35,6 +35,13 @@ class AudioAnalyzer {
     /// Whether audio capture is active
     @ObservationIgnored nonisolated(unsafe) private(set) var isCapturing: Bool = false
     
+    // Pending MainActor dispatch batching — avoids creating ~86 Tasks/sec
+    @ObservationIgnored nonisolated(unsafe) private var pendingLevelDispatch = false
+    @ObservationIgnored nonisolated(unsafe) private var pendingOverall: Float = 0
+    @ObservationIgnored nonisolated(unsafe) private var pendingBass: Float = 0
+    @ObservationIgnored nonisolated(unsafe) private var pendingMid: Float = 0
+    @ObservationIgnored nonisolated(unsafe) private var pendingTreble: Float = 0
+    
     /// Error message if capture fails
     private(set) var errorMessage: String?
     
@@ -53,6 +60,14 @@ class AudioAnalyzer {
     private var imagBuffer: [Float] = []
     private var magnitudeBuffer: [Float] = []
     private var windowBuffer: [Float] = []
+    
+    // Precomputed band boundary indices (set once in setupFFT, reused per frame)
+    private var bassStartBin: Int = 0
+    private var bassEndBin: Int = 0
+    private var midStartBin: Int = 0
+    private var midEndBin: Int = 0
+    private var trebleStartBin: Int = 0
+    private var trebleEndBin: Int = 0
     
     // Frame-rate independent smoothing speeds
     private let attackSpeed: Float = 40.0      // Fast attack for responsiveness
@@ -128,6 +143,22 @@ class AudioAnalyzer {
         // Create Hann window for better frequency resolution
         windowBuffer = [Float](repeating: 0, count: fftSize)
         vDSP_hann_window(&windowBuffer, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+        
+        // Precompute frequency band bin indices (avoids per-frame recalculation)
+        computeBandIndices()
+    }
+    
+    /// Recompute band boundary indices from current sampleRate and fftSize.
+    /// Called once at setup and again if sampleRate changes.
+    private func computeBandIndices() {
+        let halfSize = fftSize / 2
+        let binWidth = sampleRate / Float(fftSize)
+        bassStartBin = max(1, Int(20.0 / binWidth))
+        bassEndBin = min(halfSize - 1, Int(250.0 / binWidth))
+        midStartBin = bassEndBin + 1
+        midEndBin = min(halfSize - 1, Int(2000.0 / binWidth))
+        trebleStartBin = midEndBin + 1
+        trebleEndBin = min(halfSize - 1, Int(8000.0 / binWidth))
     }
     
     private func checkMicrophonePermission() async -> Bool {
@@ -157,6 +188,9 @@ class AudioAnalyzer {
         }
         
         sampleRate = Float(format.sampleRate)
+        
+        // Recompute band indices for the actual hardware sample rate
+        computeBandIndices()
         
         // Use larger buffer for FFT analysis
         input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(fftSize), format: format) { [weak self] buffer, _ in
@@ -222,21 +256,13 @@ class AudioAnalyzer {
             var scale: Float = 2.0 / Float(fftSize)
             vDSP_vsmul(magnitudeBuffer, 1, &scale, &magnitudeBuffer, 1, vDSP_Length(halfSize))
             
-            // Calculate frequency bands
-            // Bin frequency = (bin index * sample rate) / FFT size
-            let binWidth = sampleRate / Float(fftSize)
-            
-            // Bass: 20-250 Hz
-            let bassStart = max(1, Int(20.0 / binWidth))
-            let bassEnd = min(halfSize - 1, Int(250.0 / binWidth))
-            
-            // Mids: 250-2000 Hz  
-            let midStart = bassEnd + 1
-            let midEnd = min(halfSize - 1, Int(2000.0 / binWidth))
-            
-            // Treble: 2000-8000 Hz (limiting upper range for better response)
-            let trebleStart = midEnd + 1
-            let trebleEnd = min(halfSize - 1, Int(8000.0 / binWidth))
+            // Use precomputed band boundary indices
+            let bassStart = bassStartBin
+            let bassEnd = bassEndBin
+            let midStart = midStartBin
+            let midEnd = midEndBin
+            let trebleStart = trebleStartBin
+            let trebleEnd = trebleEndBin
             
             // Sum magnitudes in each band
             if bassEnd > bassStart {
@@ -263,9 +289,16 @@ class AudioAnalyzer {
             treble = min(1.0, compressLevel(treble * inputGain))
         }
         
-        // Update levels on main thread with smoothing
-        Task { @MainActor in
-            self.updateLevels(overall: normalizedLevel, bass: bass, mid: mid, treble: treble)
+        // Batch level updates: store latest values, dispatch to MainActor only if no dispatch is pending
+        pendingOverall = normalizedLevel
+        pendingBass = bass
+        pendingMid = mid
+        pendingTreble = treble
+        if !pendingLevelDispatch {
+            pendingLevelDispatch = true
+            Task { @MainActor in
+                self.drainPendingLevels()
+            }
         }
     }
     
@@ -274,6 +307,11 @@ class AudioAnalyzer {
         // Soft knee compression: x / (1 + x) with gain
         // Maps 0-inf to 0-1 range, with most interesting range in 0-0.8
         return x / (0.5 + x)
+    }
+    
+    private func drainPendingLevels() {
+        pendingLevelDispatch = false
+        updateLevels(overall: pendingOverall, bass: pendingBass, mid: pendingMid, treble: pendingTreble)
     }
     
     private func updateLevels(overall: Float, bass: Float, mid: Float, treble: Float) {

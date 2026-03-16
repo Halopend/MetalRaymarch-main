@@ -342,20 +342,25 @@ final class BuddhabrotRenderer {
     /// Returns the command buffer so the caller can track completion.
     @discardableResult
     func dispatchAccumulation() -> MTLCommandBuffer? {
+        let needsResourceReset = settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear
+
         // Check if resolution changed
-        if settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear {
+        if needsResourceReset {
             reallocateResources(resolution: settings.resolution)
-            clearDensityBuffers()
-            settings.needsClear = false
         }
         
-          guard let pipeline = settings.useRGBMode ? accumulateRGBPipeline : accumulatePipeline,
+        guard let pipeline = settings.useRGBMode ? accumulateRGBPipeline : accumulatePipeline,
               let uniformBuffer = accumulationUniformBuffer else {
             return nil
         }
         
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
         commandBuffer.label = "Buddhabrot Accumulation"
+
+        if needsResourceReset {
+            guard encodeDensityClear(commandBuffer: commandBuffer) else { return nil }
+            settings.needsClear = false
+        }
         
         // Fill uniforms
         let uniforms = uniformBuffer.contents().bindMemory(to: BuddhabrotAccumulationUniforms.self, capacity: 1)
@@ -404,9 +409,14 @@ final class BuddhabrotRenderer {
     /// In-order accumulation encoded onto the frame command buffer.
     /// This guarantees normalization sees fresh density data in the same frame.
     func encodeAccumulation(commandBuffer: MTLCommandBuffer) {
-        if settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear {
+        let needsResourceReset = settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear
+
+        if needsResourceReset {
             reallocateResources(resolution: settings.resolution)
-            clearDensityBuffers()
+        }
+
+        if needsResourceReset {
+            guard encodeDensityClear(commandBuffer: commandBuffer) else { return }
             settings.needsClear = false
         }
 
@@ -723,10 +733,12 @@ final class BuddhabrotRenderer {
     
     // MARK: - Density Buffer Utilities
     
-    /// Clears the density buffer(s) to zero.
-    func clearDensityBuffers() {
-        guard let clearPipeline = clearDensityPipeline,
-              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+    /// Encodes a density-buffer clear into the given command buffer.
+    /// Keeping the clear on the same command buffer as subsequent accumulation
+    /// preserves GPU ordering without a CPU-side wait.
+    @discardableResult
+    private func encodeDensityClear(commandBuffer: MTLCommandBuffer) -> Bool {
+        guard let clearPipeline = clearDensityPipeline else { return false }
         
         let voxelCount = currentResolution * currentResolution * currentResolution
         let buffers: [MTLBuffer?] = settings.useRGBMode
@@ -747,14 +759,13 @@ final class BuddhabrotRenderer {
             encoder.dispatchThreads(threads, threadsPerThreadgroup: tgSize)
             encoder.endEncoding()
         }
-        
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        
+
         seedOffset = 0
         maxDensityValue = 0
         settings.totalSamplesAccumulated = 0
         print("✓ Buddhabrot: Density buffers cleared")
+
+        return true
     }
     
     /// Scans the density buffer to find the current maximum value.

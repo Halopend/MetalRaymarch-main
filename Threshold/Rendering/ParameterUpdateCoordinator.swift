@@ -30,17 +30,24 @@ final class ParameterUpdateCoordinator: Sendable {
     }
 
     private let _state = Mutex(State())
-
-    // Weak reference to avoid retain cycles (nonisolated(unsafe) because AppModel is @MainActor;
-    // only dereferenced inside @MainActor applyParameterUpdates)
-    nonisolated(unsafe) private weak var appModel: AppModel?
+    private let applyPendingWorkHandler: @Sendable @MainActor (PendingParameterWork) -> Void
     
     // Rate limiting for different update types
     private let animationUpdateInterval: TimeInterval = 1.0 / 90.0  // 90Hz
     private let audioUpdateInterval: TimeInterval = 1.0 / 60.0      // 60Hz
     
     nonisolated init(appModel: AppModel) {
-        self.appModel = appModel
+        self.applyPendingWorkHandler = { [weak appModel] pendingWork in
+            guard let appModel else { return }
+
+            if pendingWork.shouldUpdateAnimation {
+                appModel.animationManager?.update(deltaTime: pendingWork.deltaTime)
+            }
+
+            if pendingWork.shouldUpdateAudio {
+                appModel.appleMusicManager.updateFrame()
+            }
+        }
     }
     
     /// Schedule parameter updates from render thread without blocking.
@@ -99,14 +106,6 @@ final class ParameterUpdateCoordinator: Sendable {
             )
         }
 
-        guard let appModel = appModel else { return }
-        
-        if pendingWork.shouldUpdateAnimation {
-            appModel.animationManager?.update(deltaTime: pendingWork.deltaTime)
-        }
-        
-        if pendingWork.shouldUpdateAudio {
-            appModel.appleMusicManager.updateFrame()
-        }
+        applyPendingWorkHandler(pendingWork)
     }
 }

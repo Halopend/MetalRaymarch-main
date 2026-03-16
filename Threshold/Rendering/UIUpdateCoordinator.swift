@@ -30,17 +30,34 @@ final class UIUpdateCoordinator: Sendable {
     }
 
     private let _state = Mutex(State())
+    private let applyPendingWorkHandler: @Sendable @MainActor (PendingUIWork) -> Void
     
     // Rate limiting constants
     private let fpsUpdateInterval: TimeInterval = 0.5  // 2Hz FPS display
     private let analyticsInterval: TimeInterval = 0.25 // 4Hz analytics
     
-    // Weak reference to avoid retain cycles (nonisolated(unsafe) because AppModel is @MainActor;
-    // only dereferenced inside @MainActor applyPendingUpdates)
-    nonisolated(unsafe) private weak var appModel: AppModel?
-    
     nonisolated init(appModel: AppModel) {
-        self.appModel = appModel
+        self.applyPendingWorkHandler = { [weak appModel] pendingWork in
+            guard let appModel else { return }
+
+            if let fps = pendingWork.fps {
+                appModel.fps = fps
+            }
+
+            if pendingWork.shouldUpdateAnalytics {
+                let settings = appModel.renderSettings
+                let qualityPreset = QualityPreset.detect(
+                    fractalIterations: settings.fractalIterations,
+                    raySteps: settings.maxRaySteps
+                )?.rawValue ?? "custom"
+
+                UsageAnalytics.shared.sample(
+                    settings: settings,
+                    fps: pendingWork.analyticsFPS ?? pendingWork.fps ?? appModel.fps,
+                    currentQuality: qualityPreset
+                )
+            }
+        }
     }
     
     /// Called from render thread - schedules UI updates without blocking
@@ -93,31 +110,6 @@ final class UIUpdateCoordinator: Sendable {
             )
         }
 
-        guard let appModel = appModel else { return }
-        
-        // Apply FPS update if pending
-        if let fps = pendingWork.fps {
-            appModel.fps = fps
-        }
-        
-        // Update analytics at separate rate
-        if pendingWork.shouldUpdateAnalytics {
-            updateAnalytics(appModel: appModel, fps: pendingWork.analyticsFPS ?? pendingWork.fps ?? appModel.fps)
-        }
-    }
-    
-    @MainActor
-    private func updateAnalytics(appModel: AppModel, fps: Double) {
-        let settings = appModel.renderSettings
-        let qualityPreset = QualityPreset.detect(
-            fractalIterations: settings.fractalIterations,
-            raySteps: settings.maxRaySteps
-        )?.rawValue ?? "custom"
-        
-        UsageAnalytics.shared.sample(
-            settings: settings,
-            fps: fps,
-            currentQuality: qualityPreset
-        )
+        applyPendingWorkHandler(pendingWork)
     }
 }

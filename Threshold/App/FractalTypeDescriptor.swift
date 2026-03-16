@@ -55,7 +55,7 @@ struct FractalShapeDefaults {
 
 // MARK: - Protocol
 
-protocol FractalTypeDescriptor {
+protocol FractalTypeDescriptor: Sendable {
     var rawValue: Int32 { get }
     var displayName: String { get }
     var icon: String { get }
@@ -107,13 +107,7 @@ extension FractalTypeDescriptor {
 // MARK: - Registry
 
 enum FractalTypeRegistry {
-    nonisolated(unsafe) private static var descriptors: [Int32: FractalTypeDescriptor] = {
-        var d: [Int32: FractalTypeDescriptor] = [:]
-        for desc in allDescriptors { d[desc.rawValue] = desc }
-        return d
-    }()
-
-    nonisolated(unsafe) private static let allDescriptors: [any FractalTypeDescriptor] = [
+    private static let allDescriptors: [any FractalTypeDescriptor] = [
         MandelboxDescriptor(),
         MandelbulbDescriptor(),
         MengerDescriptor(),
@@ -128,6 +122,12 @@ enum FractalTypeRegistry {
         PseudoKleinianDescriptor(),
         PseudoKleinianMengerDescriptor(),
     ]
+
+    private static let descriptors: [Int32: any FractalTypeDescriptor] = {
+        var d: [Int32: any FractalTypeDescriptor] = [:]
+        for desc in allDescriptors { d[desc.rawValue] = desc }
+        return d
+    }()
 
     static func descriptor(for type: FractalModelType) -> FractalTypeDescriptor {
         descriptors[type.rawValue]!

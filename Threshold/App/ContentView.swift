@@ -605,13 +605,12 @@ struct ContentView: View {
         HStack {
             Text("Current Quality:").font(.caption); Spacer()
             Text("\(Int(cache.currentRenderQuality * 100))%").font(.caption.monospacedDigit()).foregroundStyle(qualityColor(cache.currentRenderQuality))
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.3))
-                    RoundedRectangle(cornerRadius: 2).fill(qualityColor(cache.currentRenderQuality))
-                        .frame(width: geo.size.width * CGFloat(cache.currentRenderQuality))
-                }
-            }.frame(width: 60, height: 8)
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.3))
+                    .frame(width: 60, height: 8)
+                RoundedRectangle(cornerRadius: 2).fill(qualityColor(cache.currentRenderQuality))
+                    .frame(width: 60 * CGFloat(cache.currentRenderQuality), height: 8)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Render quality")
@@ -765,15 +764,15 @@ struct ContentView: View {
             }
             
             // ── Saved Custom Gradients ──
-            if !cache.savedCustomGradients.isEmpty {
+            if !cache.gradientLibrary.savedCustomGradients.isEmpty {
                 HStack {
                     Text("Saved").font(.subheadline).foregroundColor(.secondary)
                     Spacer()
-                    Text("\(cache.savedCustomGradients.count)").font(.caption2).foregroundStyle(.tertiary)
+                    Text("\(cache.gradientLibrary.savedCustomGradients.count)").font(.caption2).foregroundStyle(.tertiary)
                 }
                 .padding(.top, 4)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                    ForEach(Array(cache.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
+                    ForEach(Array(cache.gradientLibrary.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
                         let isActive = cache.color.gradientState.gradientPreset == nil && cache.color.gradientState.gradient.id == saved.id
                         Button {
                             cache.applySavedGradient(saved)

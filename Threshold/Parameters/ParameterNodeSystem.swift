@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 // MARK: - Shared Parameter Taxonomy
 
@@ -15,6 +16,7 @@ struct ParameterGroup: Hashable, Codable, Sendable {
 
 // MARK: - Core Node Protocol
 
+/// @unchecked Sendable justification: immutable metadata only.
 class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     let id: String
     let name: String
@@ -35,12 +37,14 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     }
 }
 
+/// @unchecked Sendable justification: mutable layer state is protected by Mutex;
+/// read/write closures are MainActor-isolated and only invoked from the UI path.
 class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let range: ClosedRange<Float>
     let step: Float
     let readValue: @MainActor (UISettingsCache) -> Float
     let writeValue: @MainActor (UISettingsCache, Float) -> Void
-    private var layerStack: ParameterLayerStack
+    private let _layerStack: Mutex<ParameterLayerStack>
 
     init(id: String,
          name: String,
@@ -56,7 +60,7 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
         self.step = step
         self.readValue = readValue
         self.writeValue = writeValue
-        self.layerStack = ParameterLayerStack(defaultValue: defaultValue, range: range)
+        self._layerStack = Mutex(ParameterLayerStack(defaultValue: defaultValue, range: range))
         super.init(id: id,
                    name: name,
                    group: group,
@@ -69,18 +73,25 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
                     value: Float,
                     smoothingTime: Float? = nil,
                     timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
-        layerStack.apply(layer: layer, value: value, smoothingTime: smoothingTime, timestamp: timestamp)
+        _layerStack.withLock { layerStack in
+            layerStack.apply(layer: layer, value: value, smoothingTime: smoothingTime, timestamp: timestamp)
+        }
     }
 
     func resolvedValue(timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Float {
-        layerStack.resolvedValue(at: timestamp)
+        _layerStack.withLock { layerStack in
+            layerStack.resolvedValue(at: timestamp)
+        }
     }
 
     func bootstrapBaseIfNeeded(from value: Float, timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) {
-        layerStack.setBaseIfNeeded(value, timestamp: timestamp)
+        _layerStack.withLock { layerStack in
+            layerStack.setBaseIfNeeded(value, timestamp: timestamp)
+        }
     }
 }
 
+/// @unchecked Sendable justification: stores immutable metadata plus MainActor-only closures.
 final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let readValue: @MainActor (UISettingsCache) -> Bool
     let writeValue: @MainActor (UISettingsCache, Bool) -> Void
@@ -105,7 +116,7 @@ final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
 
 // MARK: - Layered Value Stack
 
-private struct ParameterLayerEntry {
+private struct ParameterLayerEntry: Sendable {
     var rawValue: Float
     var smoothingTime: Float?
     private(set) var lastResolved: Float
@@ -137,7 +148,7 @@ private struct ParameterLayerEntry {
     }
 }
 
-struct ParameterLayerStack {
+struct ParameterLayerStack: Sendable {
     /// Default smoothing time (seconds) applied to all non-music parameter changes.
     /// Provides frame-rate-independent exponential lerp that eliminates jitter/stagger
     /// from gesture input noise and discrete slider steps.
@@ -250,7 +261,7 @@ struct ParameterLayerStack {
 
 // MARK: - Batching + Registration
 
-struct ParameterNodeBatch {
+struct ParameterNodeBatch: Sendable {
     let fractalType: FractalModelType
     let floatNodes: [FloatParameterNode]
     let boolNodes: [BoolParameterNode]
@@ -272,28 +283,38 @@ struct ParameterNodeBatch {
     }
 }
 
-final class ParameterNodeRegistry: @unchecked Sendable {
+/// Startup-built, immutable registry of parameter nodes shared across UI and rendering.
+final class ParameterNodeRegistry: Sendable {
     static let shared = ParameterNodeRegistry()
 
-    private var formulaBatches: [FractalModelType: ParameterNodeBatch] = [:]
+    private let formulaBatches: [FractalModelType: ParameterNodeBatch]
     /// Core parameter nodes (fractalScale, colorMix).
     /// Keyed by their targetID string (e.g. "core.fractalScale").
-    private(set) var coreNodes: [String: FloatParameterNode] = [:]
+    let coreNodes: [String: FloatParameterNode]
     /// Effect parameter nodes (glow, fog, bloom, hueSpeed, saturation).
-    private(set) var effectNodes: [String: FloatParameterNode] = [:]
+    let effectNodes: [String: FloatParameterNode]
 
     private init() {
-        buildCoreAndEffectNodes()
-        rebuildFormulaBatches()
+        let coreAndEffectNodes = Self.buildCoreAndEffectNodes()
+        self.coreNodes = coreAndEffectNodes.core
+        self.effectNodes = coreAndEffectNodes.effect
+
+        var batches: [FractalModelType: ParameterNodeBatch] = [:]
+        for type in FractalModelType.allCases {
+            batches[type] = Self.buildFormulaBatch(for: type)
+        }
+        self.formulaBatches = batches
     }
 
     /// One-time build of engine-level parameter nodes for core geometry and effects.
     /// IDs and ranges mirror the descriptors in ParameterOperationDispatcher.
     /// NOTE: minDistance / foldingLimit / sphereRadius are now catalog-driven formula
     /// params (built per-type in buildFormulaBatch) rather than hard-coded core nodes.
-    private func buildCoreAndEffectNodes() {
+    private static func buildCoreAndEffectNodes() -> (core: [String: FloatParameterNode], effect: [String: FloatParameterNode]) {
         let coreGroup = ParameterGroup(id: "core.geometry", title: "Fractal Geometry")
         let effectGroup = ParameterGroup(id: "effect.postprocess", title: "Post-Processing")
+        var coreNodes: [String: FloatParameterNode] = [:]
+        var effectNodes: [String: FloatParameterNode] = [:]
 
         // --- Core geometry nodes ---
 
@@ -388,21 +409,12 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             readValue: { $0.color.colorSchemeSaturation },
             writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.push(\.colorSchemeSaturation, value: v) }
         )
-    }
 
-    private func rebuildFormulaBatches() {
-        var newBatches: [FractalModelType: ParameterNodeBatch] = [:]
-        for type in FractalModelType.allCases {
-            newBatches[type] = buildFormulaBatch(for: type)
-        }
-        formulaBatches = newBatches
+        return (coreNodes, effectNodes)
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
-        if let cached = formulaBatches[type] { return cached }
-        let built = buildFormulaBatch(for: type)
-        formulaBatches[type] = built
-        return built
+        formulaBatches[type] ?? ParameterNodeBatch(fractalType: type)
     }
 
     func node(for type: FractalModelType, formulaIndex: Int) -> FloatParameterNode? {
@@ -481,7 +493,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         formulaBatch(for: binding.fractalType).floatNodes.first { $0.id == binding.parameterNodeID }
     }
 
-    private func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
+    private static func buildFormulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
         guard let descriptor = FormulaCatalog.shared.descriptor(for: type) else {
             return ParameterNodeBatch(fractalType: type)
         }
@@ -498,8 +510,8 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 "Duplicate formula parameter index \(param.index) for fractal type \(type.rawValue)"
             )
 
-            let label = displayLabel(for: param.name)
-            let icon = icon(for: param.name)
+            let label = Self.displayLabel(for: param.name)
+            let icon = Self.icon(for: param.name)
             let id = "formula.\(type.rawValue).\(param.index).\(param.name)"
 
             if param.isBool == true {
@@ -547,7 +559,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         )
     }
 
-    private func displayLabel(for rawName: String) -> String {
+    private static func displayLabel(for rawName: String) -> String {
         let raw = rawName.replacingOccurrences(of: ".", with: " ")
         var result = ""
         for (index, char) in raw.enumerated() {
@@ -559,7 +571,7 @@ final class ParameterNodeRegistry: @unchecked Sendable {
         return result
     }
 
-    private func icon(for rawName: String) -> String {
+    private static func icon(for rawName: String) -> String {
         let name = rawName.lowercased()
         if name.contains("scale") { return "arrow.up.left.and.arrow.down.right" }
         if name.contains("power") { return "bolt" }

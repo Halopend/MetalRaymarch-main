@@ -54,8 +54,12 @@ final class FormulaCatalog: @unchecked Sendable {
     private var byType: [Int32: FormulaDescriptor] = [:]
     
     /// Lookup by string id (e.g. "mandelbulb").
-    private var byId: [String: FormulaDescriptor] = [:]
+    private var byId: [String: FormulaDescriptor] = [:]    
+    /// Lookup by category (prebuilt index for O(1) access).
+    private var byCategory: [String: [FormulaDescriptor]] = []
     
+    /// Ordered unique category names.
+    private(set) var categories: [String] = []    
     private init() {
         load()
     }
@@ -72,10 +76,15 @@ final class FormulaCatalog: @unchecked Sendable {
             let data = try Data(contentsOf: url)
             let root = try JSONDecoder().decode(CatalogRoot.self, from: data)
             self.formulas = root.formulas
+            var catOrder: [String] = []
+            var catSeen = Set<String>()
             for f in root.formulas {
                 byType[f.fractalType] = f
                 byId[f.id] = f
+                byCategory[f.category, default: []].append(f)
+                if catSeen.insert(f.category).inserted { catOrder.append(f.category) }
             }
+            self.categories = catOrder
         } catch {
             print("[FormulaCatalog] Failed to decode catalog.json: \(error)")
         }
@@ -93,19 +102,12 @@ final class FormulaCatalog: @unchecked Sendable {
         byId[id]
     }
     
-    /// All formulas in a given category.
+    /// All formulas in a given category (O(1) lookup).
     func formulas(inCategory category: String) -> [FormulaDescriptor] {
-        formulas.filter { $0.category == category }
+        byCategory[category] ?? []
     }
     
-    /// Unique category names in declaration order.
-    var categories: [String] {
-        var seen = Set<String>()
-        return formulas.compactMap { f in
-            if seen.insert(f.category).inserted { return f.category }
-            return nil
-        }
-    }
+    /// Unique category names in declaration order (prebuilt at load time).
     
     // MARK: - FormulaParams Builder
     

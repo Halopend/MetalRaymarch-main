@@ -84,7 +84,8 @@ class AppModel {
     var gestureStatus: String = "Waiting for immersive space…"
     
     /// Whether the hand tracking ARKit provider is actively running.
-    var handTrackingRunning: Bool = false
+    /// Only written by the render loop, never read by SwiftUI views — skip observation.
+    @ObservationIgnored var handTrackingRunning: Bool = false
 
     
     // Gesture controller for mapping hand gestures to parameters

@@ -40,6 +40,18 @@ extension Renderer {
         }
     }
 
+    /// Batch-add multiple textures to the residency set with a single commit + requestResidency.
+    func updateResidencySetForComputeTextures(_ textures: [MTLTexture]) {
+        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
+            guard let set = residencySet, !textures.isEmpty else { return }
+            for texture in textures {
+                set.addAllocation(texture)
+            }
+            set.commit()
+            set.requestResidency()
+        }
+    }
+
     /// Setup dynamic render quality management (visionOS 26+)
     func setupDynamicRenderQuality() {
         if #available(visionOS 26.0, *) {
