@@ -1536,7 +1536,7 @@ actor Renderer {
                 
                 let startTime = CACurrentMediaTime()
                 cmdBuffer.commit()
-                cmdBuffer.waitUntilCompleted()
+                await cmdBuffer.completed()
                 let elapsed = (CACurrentMediaTime() - startTime) * 1000.0
                 
                 print("║  \(name.padding(toLength: 40, withPad: " ", startingAt: 0)) \(String(format: "%6.2f", elapsed))ms ║")

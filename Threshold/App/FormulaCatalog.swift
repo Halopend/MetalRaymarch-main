@@ -56,7 +56,7 @@ final class FormulaCatalog: @unchecked Sendable {
     /// Lookup by string id (e.g. "mandelbulb").
     private var byId: [String: FormulaDescriptor] = [:]    
     /// Lookup by category (prebuilt index for O(1) access).
-    private var byCategory: [String: [FormulaDescriptor]] = []
+    private var byCategory: [String: [FormulaDescriptor]] = [:]
     
     /// Ordered unique category names.
     private(set) var categories: [String] = []    
