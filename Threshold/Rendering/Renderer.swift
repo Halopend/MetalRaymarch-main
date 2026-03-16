@@ -537,6 +537,13 @@ actor Renderer {
 
         frame.endUpdate()
 
+        // Begin submission immediately after update so every early-return path
+        // still calls endSubmission(), preventing leaked frames in CompositorServices.
+        frame.startSubmission()
+        defer {
+            frame.endSubmission()
+        }
+
         guard let timing = frame.predictTiming() else { return }
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
 
@@ -580,11 +587,6 @@ actor Renderer {
             if shouldSignalInFlightSemaphore {
                 inFlightSemaphore.signal()
             }
-        }
-
-        frame.startSubmission()
-        defer {
-            frame.endSubmission()
         }
 
         let presentationTime = drawable.frameTiming.presentationTime
