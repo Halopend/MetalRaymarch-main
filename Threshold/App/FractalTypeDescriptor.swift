@@ -121,6 +121,7 @@ enum FractalTypeRegistry {
         KleinianDescriptor(),
         PseudoKleinianDescriptor(),
         PseudoKleinianMengerDescriptor(),
+        BoxSphereFolderDescriptor(),
     ]
 
     private static let descriptors: [Int32: any FractalTypeDescriptor] = {
@@ -405,6 +406,32 @@ private struct PseudoKleinianMengerDescriptor: FractalTypeDescriptor {
         fp.params.13 = 0.85484 // w1.x
         fp.params.14 = 1.0     // w1.y
         fp.params.15 = 0.80646 // w1.z
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+}
+
+private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
+    let rawValue: Int32 = 20
+    let displayName = "Box Sphere Folder"
+    let icon = "cube.transparent"
+    let category = "Julia Box"
+    let codableString = "boxSphereFolder"
+    let isSelectableInUI = true
+    let supportedCoreGestureActions = standardCoreGestureActions
+    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
+    func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        fp.params.0 = 1.0   // Offset.x
+        fp.params.1 = 1.0   // Offset.y
+        fp.params.2 = 1.0   // Offset.z
+        fp.params.3 = 1.0   // BoxFold
+        fp.params.4 = 0.25  // MinR2
+        fp.params.5 = 1.0   // MaxR2
+        fp.params.6 = 1.15  // Scale
+        fp.params.7 = 1.2   // ShapeR
+        fp.params.8 = 0.25  // ColorOfs
+        fp.params.9 = 1.0   // ColorScale
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }

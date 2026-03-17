@@ -41,6 +41,7 @@
 #include "Kleinian/Kleinian.h"
 #include "PseudoKleinian/PseudoKleinian.h"
 #include "PseudoKleinianMenger/PseudoKleinianMenger.h"
+#include "BoxSphereFolder/BoxSphereFolder.h"
 
 // ============================================================================
 // DISPATCH — distance only
@@ -71,6 +72,8 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_PseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypePseudoKleinianMenger:
             return DE_PseudoKleinianMenger_Dist(pos, fp, fp.rotMatrix1, iterations);
+        case FractalTypeBoxSphereFolder:
+            return DE_BoxSphereFolder_Dist(pos, fp, fp.rotMatrix1, iterations);
         default:
             return 1e10f; // Unknown type — far away
     }
@@ -107,6 +110,8 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_PseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypePseudoKleinianMenger:
             return DE_PseudoKleinianMenger(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
+        case FractalTypeBoxSphereFolder:
+            return DE_BoxSphereFolder(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         default:
             orbit.trap = 1e20f;
             orbit.trapIteration = 0;

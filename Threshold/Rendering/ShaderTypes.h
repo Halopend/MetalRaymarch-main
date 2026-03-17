@@ -78,6 +78,7 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeKleinian              = 17,
     FractalTypePseudoKleinian        = 18,
     FractalTypePseudoKleinianMenger  = 19,
+    FractalTypeBoxSphereFolder         = 20,
 };
 
 // === FORMULA PARAMETERS ===

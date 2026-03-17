@@ -1115,9 +1115,10 @@ enum DefaultScenes {
     static let sceneOneID = UUID(uuidString: "00000000-0001-0000-0000-000000000001")!
     static let ambientBlurID = UUID(uuidString: "00000000-0002-0000-0000-000000000002")!
     static let blackLightPartyID = UUID(uuidString: "00000000-0003-0000-0000-000000000003")!
+    static let boxSphereFolderID = UUID(uuidString: "00000000-0004-0000-0000-000000000004")!
     
     /// All default scene IDs for easy lookup
-    static let allIDs: Set<UUID> = [ambientBlurID, blackLightPartyID]
+    static let allIDs: Set<UUID> = [ambientBlurID, blackLightPartyID, boxSphereFolderID]
     
     /// Check whether a scene ID belongs to a built-in default
     static func isDefault(_ id: UUID) -> Bool {
