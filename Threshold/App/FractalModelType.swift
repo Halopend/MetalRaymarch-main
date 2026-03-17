@@ -20,8 +20,6 @@ enum FractalModelType: Int32, CaseIterable {
     case mengerSphere      = 14
     case theliPseudoKleinian = 15
     case kleinian              = 17
-    case pseudoKleinian        = 18
-    case pseudoKleinianMenger  = 19
     case boxSphereFolder         = 20
     
     /// Descriptor from the registry — all metadata is defined there.

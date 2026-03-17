@@ -119,8 +119,6 @@ enum FractalTypeRegistry {
         MengerSphereDescriptor(),
         TheliPseudoKleinianDescriptor(),
         KleinianDescriptor(),
-        PseudoKleinianDescriptor(),
-        PseudoKleinianMengerDescriptor(),
         BoxSphereFolderDescriptor(),
     ]
 
@@ -342,70 +340,6 @@ private struct KleinianDescriptor: FractalTypeDescriptor {
         fp.params.4 = 0.35; fp.params.5 = 1.0; fp.params.6 = 1.22
         fp.params.7 = 0.84
         fp.params.8 = 0.25; fp.params.9 = 1.0
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-}
-
-private struct PseudoKleinianDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 18
-    let displayName = "Pseudo Kleinian (MB3D)"
-    let icon = "cube.fill"
-    let category = "Julia Box"
-    let codableString = "pseudoKleinian"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 1.0     // MaxR2
-        fp.params.1 = 0.0     // Offset.x
-        fp.params.2 = 0.0     // Offset.y
-        fp.params.3 = 0.0     // Offset.z
-        fp.params.4 = 1.0     // Gap.x
-        fp.params.5 = 1.0     // Gap.y
-        fp.params.6 = 1.0     // Gap.z
-        fp.params.7 = 1.0     // Scale
-        fp.params.8 = 0.0     // Fold.x
-        fp.params.9 = 0.0     // Fold.y
-        fp.params.10 = 0.0    // Fold.z
-        fp.params.11 = 1.0    // BoxLimit
-        fp.params.12 = 2.0    // BoxValue
-        fp.params.13 = 1.0    // CSize.x
-        fp.params.14 = 1.0    // CSize.y
-        fp.params.15 = 1.0    // CSize.z
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-}
-
-private struct PseudoKleinianMengerDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 19
-    let displayName = "PK Menger Hybrid"
-    let icon = "cube.transparent.fill"
-    let category = "Julia Box"
-    let codableString = "pseudoKleinianMenger"
-    let isSelectableInUI = true
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 1.46218  // Size
-        fp.params.1 = 1.0      // CSize.x
-        fp.params.2 = 1.0      // CSize.y
-        fp.params.3 = 1.0      // CSize.z
-        fp.params.4 = -0.11024 // C.x
-        fp.params.5 = 0.0      // C.y
-        fp.params.6 = 0.0      // C.z
-        fp.params.7 = 1.26088  // Offset.x
-        fp.params.8 = 1.52172  // Offset.y
-        fp.params.9 = -0.69564 // Offset.z
-        fp.params.10 = 4.0     // iScale
-        fp.params.11 = 1.0     // v1
-        fp.params.12 = 1.0     // v3
-        fp.params.13 = 0.85484 // w1.x
-        fp.params.14 = 1.0     // w1.y
-        fp.params.15 = 0.80646 // w1.z
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }

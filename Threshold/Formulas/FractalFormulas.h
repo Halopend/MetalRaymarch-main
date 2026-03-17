@@ -39,8 +39,6 @@
 #include "MengerSphere/MengerSphere.h"
 #include "TheliPseudoKleinian/TheliPseudoKleinian.h"
 #include "Kleinian/Kleinian.h"
-#include "PseudoKleinian/PseudoKleinian.h"
-#include "PseudoKleinianMenger/PseudoKleinianMenger.h"
 #include "BoxSphereFolder/BoxSphereFolder.h"
 
 // ============================================================================
@@ -68,10 +66,6 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_TheliPseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeKleinian:
             return DE_Kleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypePseudoKleinian:
-            return DE_PseudoKleinian_Dist(pos, fp, fp.rotMatrix1, iterations);
-        case FractalTypePseudoKleinianMenger:
-            return DE_PseudoKleinianMenger_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeBoxSphereFolder:
             return DE_BoxSphereFolder_Dist(pos, fp, fp.rotMatrix1, iterations);
         default:
@@ -106,10 +100,6 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_TheliPseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeKleinian:
             return DE_Kleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypePseudoKleinian:
-            return DE_PseudoKleinian(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
-        case FractalTypePseudoKleinianMenger:
-            return DE_PseudoKleinianMenger(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeBoxSphereFolder:
             return DE_BoxSphereFolder(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         default:
