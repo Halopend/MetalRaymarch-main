@@ -40,9 +40,7 @@ enum FractalModelType: Int32, CaseIterable {
 
 extension FractalModelType {
     /// Types shown in the UI picker (descriptor.isSelectableInUI == true).
-    static var selectableCases: [FractalModelType] {
-        allCases.filter { $0.descriptor.isSelectableInUI }
-    }
+    static let selectableCases: [FractalModelType] = allCases.filter { $0.descriptor.isSelectableInUI }
 }
 
 // MARK: - Human-Readable Codable

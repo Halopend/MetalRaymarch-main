@@ -132,6 +132,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioAmount: Float              = loadFloat("fractalAudioAmount", default: 0.6)
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
+    private var _tripletMusicGains: [String: Float] = [:]
     
     private var _foldingLimit: Float = 1.0
     private var _sphereRadius: Float = 0.5
@@ -145,7 +146,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
-    private var _showHUD: Bool = false               // HUD disabled
     private var _showMusicShortcuts: Bool = loadBool("showMusicShortcuts", default: false)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
@@ -268,6 +268,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes
     private var _colorSchemeAutoInterval: Float = 30.0      // Seconds between auto-transitions
     private var _colorSchemeAutoTimer: Float = 0.0          // Timer for auto-transitions
+    private var _colorSchemeCycleIndex: Int = 0             // Tracked index for O(1) cycle advance
+    static let colorSchemeCycle: [ColorScheme] = ColorScheme.allCases
     private var _colorSchemeSaturation: Float = 1.5         // Color saturation override
     private var _colorSchemeContrast: Float = 1.02          // Contrast override (subtle)
     private var _colorSchemeGamma: Float = 0.75             // Gamma override (lower = brighter, 1.0 = linear)
@@ -529,6 +531,14 @@ final class RenderSettings: @unchecked Sendable {
             persistAudioReactive()
         }
     }
+
+    var tripletMusicGains: [String: Float] {
+        get { withLock { _tripletMusicGains } }
+        set {
+            withLock { _tripletMusicGains = newValue }
+            persistAudioReactive()
+        }
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // AUDIO MODULATION SETTERS (bypass lighting preset tracking)
@@ -704,11 +714,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    var showHUD: Bool {
-        get { false }
-        set { /* HUD disabled */ }
-    }
-
     var showMusicShortcuts: Bool {
         get { withLock { _showMusicShortcuts } }
         set {
@@ -1427,10 +1432,11 @@ final class RenderSettings: @unchecked Sendable {
                 _colorSchemeAutoTimer += deltaTime
                 if _colorSchemeAutoTimer >= _colorSchemeAutoInterval {
                     _colorSchemeAutoTimer = 0.0
-                    // Transition to next scheme using rawValue arithmetic (faster than allCases lookup)
-                    let allSchemes = ColorScheme.allCases
-                    if let currentIndex = allSchemes.firstIndex(of: _targetColorScheme), !allSchemes.isEmpty {
-                        let nextScheme = allSchemes[(currentIndex + 1) % allSchemes.count]
+                    // Advance to next scheme using cached array + tracked index (avoids firstIndex search)
+                    let allSchemes = Self.colorSchemeCycle
+                    if !allSchemes.isEmpty {
+                        _colorSchemeCycleIndex = (_colorSchemeCycleIndex + 1) % allSchemes.count
+                        let nextScheme = allSchemes[_colorSchemeCycleIndex]
                         _colorScheme = _targetColorScheme
                         _targetColorScheme = nextScheme
                         _colorSchemeTransitionProgress = 0.0
@@ -1564,7 +1570,6 @@ final class RenderSettings: @unchecked Sendable {
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 limitFlash: _limitFlash,
-                showHUD: _showHUD,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
                 safetyBubbleRadius: _safetyBubbleRadius,
@@ -1813,7 +1818,10 @@ final class RenderSettings: @unchecked Sendable {
     /// Uses critically-damped spring physics for smooth acceleration/deceleration.
     /// - Parameter deltaTime: Time since last frame in seconds
     func interpolateToTargets(deltaTime: Float) {
-        withLock {
+        withLock { _interpolateToTargets_locked(deltaTime: deltaTime) }
+    }
+
+    private func _interpolateToTargets_locked(deltaTime: Float) {
             // Guard against bad deltaTime values that could cause instability
             let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
             
@@ -1997,8 +2005,11 @@ final class RenderSettings: @unchecked Sendable {
             // Smooth interpolation for world rotation (slerp) and grab scale (exp lerp)
             let rotLerpT = 1.0 - exp(-12.0 * clampedDT)  // Same speed as main smoothing
             _worldRotation = simd_slerp(_worldRotation, _targetWorldRotation, rotLerpT)
-            // Re-normalize to prevent drift
-            _worldRotation = _worldRotation.normalized
+            // Re-normalize only when drift exceeds threshold (saves sqrt per frame)
+            let rotLenSq = simd_length_squared(_worldRotation)
+            if abs(rotLenSq - 1.0) > 1e-4 {
+                _worldRotation = _worldRotation.normalized
+            }
             
             let scaleRatio = _targetDetailScale / max(_detailScale, 1e-6)
             let logRatio = log(max(scaleRatio, 1e-6))
@@ -2082,7 +2093,6 @@ final class RenderSettings: @unchecked Sendable {
             _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
             
             } // end convergence lock else
-        }
     }
     
     /// When animation stops/pauses, bake manual offsets into targets and clear offsets.
@@ -2140,7 +2150,10 @@ final class RenderSettings: @unchecked Sendable {
     /// hand-tracking jitter. Uses an adaptive rate: slower for tiny movements
     /// (dead-zone on noise), faster for clear intentional motion.
     func applyDetailState(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float, responsiveness: Float = 0.75) {
-        withLock {
+        withLock { _applyDetailState_locked(position: position, worldRotation: worldRotation, detailScale: detailScale, responsiveness: responsiveness) }
+    }
+
+    private func _applyDetailState_locked(position: SIMD3<Float>, worldRotation: simd_quatf, detailScale: Float, responsiveness: Float) {
             // Adaptive lerp: base 0.30 (smoother), ramp up to 0.55 for large motions.
             // This damps hand-tracking micro-jitter while keeping big gestures snappy.
             let positionDelta = simd_length(position - _position)
@@ -2162,7 +2175,10 @@ final class RenderSettings: @unchecked Sendable {
             
             // Rotation: slerp current toward new value
             _worldRotation = simd_slerp(_worldRotation, worldRotation, t)
-            _worldRotation = _worldRotation.normalized
+            let keyRotLenSq = simd_length_squared(_worldRotation)
+            if abs(keyRotLenSq - 1.0) > 1e-4 {
+                _worldRotation = _worldRotation.normalized
+            }
             _targetWorldRotation = _worldRotation
             
             // Scale: exponential lerp (so doubling and halving feel symmetric)
@@ -2170,7 +2186,6 @@ final class RenderSettings: @unchecked Sendable {
             let logTarget = log(max(detailScale, 1e-6))
             _detailScale = exp(logCurrent + (logTarget - logCurrent) * t)
             _targetDetailScale = _detailScale
-        }
     }
     
     /// Reset detail transform to identity (worldRotation = identity, detailScale = 1)
@@ -2467,6 +2482,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.trebleSensitivity = _trebleSensitivity
                 c.beatSensitivity = _beatSensitivity
                 c.musicReactiveMappings = _musicReactiveMappings
+                c.tripletMusicGains = _tripletMusicGains
                 return c
             }
         }
@@ -2480,6 +2496,7 @@ final class RenderSettings: @unchecked Sendable {
                 _trebleSensitivity = newValue.trebleSensitivity
                 _beatSensitivity = newValue.beatSensitivity
                 _musicReactiveMappings = Self.sanitizeMusicReactiveMappings(newValue.musicReactiveMappings)
+                _tripletMusicGains = newValue.tripletMusicGains
             }
         }
     }
@@ -2570,7 +2587,6 @@ final class RenderSettings: @unchecked Sendable {
         get {
             withLock {
                 var c = DisplayConfig()
-                c.showHUD = _showHUD
                 c.showMusicShortcuts = _showMusicShortcuts
                 c.lightingPlay = _lightingPlay
                 c.lightingMode = _lightingMode
@@ -2579,7 +2595,6 @@ final class RenderSettings: @unchecked Sendable {
         }
         set {
             withLock {
-                _showHUD = newValue.showHUD
                 _showMusicShortcuts = newValue.showMusicShortcuts
                 _lightingPlay = newValue.lightingPlay
                 _lightingMode = newValue.lightingMode

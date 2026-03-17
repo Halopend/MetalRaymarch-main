@@ -135,6 +135,12 @@ class PresetManager {
         }
     }
 
+    /// Replace all presets with the given array and persist.
+    func replaceAll(with newPresets: [FractalPreset]) {
+        presets = newPresets
+        savePresets()
+    }
+
     /// Coalesce frequent save calls into one disk write.
     private func scheduleSavePresets() {
         pendingSaveTask?.cancel()

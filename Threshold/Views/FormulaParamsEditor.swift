@@ -610,63 +610,120 @@ private struct TripletRow: View {
         cache.gestureSlot(for: binding)
     }
 
+    private var hasTripletMusicMapping: Bool {
+        let floatParams = MusicReactiveTarget.floatFormulaParams(for: cache.fractalType)
+        let indices = [triplet.xFormulaIndex, triplet.yFormulaIndex, triplet.zFormulaIndex]
+        for formulaIndex in indices {
+            guard let slotIndex = floatParams.firstIndex(where: { $0.index == formulaIndex }) else { continue }
+            let target: MusicReactiveTarget?
+            switch slotIndex {
+            case 0: target = .formulaParam0
+            case 1: target = .formulaParam1
+            case 2: target = .formulaParam2
+            case 3: target = .formulaParam3
+            default: target = nil
+            }
+            if let t = target, cache.audioReactive.musicReactiveMappings.contains(where: { $0.target == t && $0.isEnabled }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private var tripletGain: Float {
+        cache.audioReactive.tripletMusicGains[triplet.groupName] ?? 1.0
+    }
+
+    private func setTripletGain(_ value: Float) {
+        cache.audioReactive.tripletMusicGains[triplet.groupName] = value
+        cache.push(\.tripletMusicGains, value: cache.audioReactive.tripletMusicGains)
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "move.3d")
-                .font(.caption)
-                .foregroundStyle(.purple)
-                .frame(width: 16)
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "move.3d")
+                    .font(.caption)
+                    .foregroundStyle(.purple)
+                    .frame(width: 16)
 
-            Text(triplet.display.title)
-                .font(.subheadline)
-                .lineLimit(1)
+                Text(triplet.display.title)
+                    .font(.subheadline)
+                    .lineLimit(1)
 
-            Spacer()
+                Spacer()
 
-            Menu {
-                ForEach([GestureHandMode.left, .right], id: \.self) { hand in
-                    Menu(hand.displayName) {
-                        ForEach(FingerDigit.allCases, id: \.self) { finger in
-                            let slot = GestureSlot(hand: hand, finger: finger)
-                            let isCurrent = currentSlot == slot
-                            Button {
-                                cache.setGestureBinding(binding, for: slot)
-                            } label: {
-                                HStack {
-                                    Label(finger.displayName, systemImage: finger.icon)
-                                    if isCurrent { Image(systemName: "checkmark") }
+                Menu {
+                    ForEach([GestureHandMode.left, .right], id: \.self) { hand in
+                        Menu(hand.displayName) {
+                            ForEach(FingerDigit.allCases, id: \.self) { finger in
+                                let slot = GestureSlot(hand: hand, finger: finger)
+                                let isCurrent = currentSlot == slot
+                                Button {
+                                    cache.setGestureBinding(binding, for: slot)
+                                } label: {
+                                    HStack {
+                                        Label(finger.displayName, systemImage: finger.icon)
+                                        if isCurrent { Image(systemName: "checkmark") }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                if currentSlot != nil {
-                    Divider()
-                    Button("Clear") {
-                        if let slot = currentSlot {
-                            cache.setGestureBinding(.core(.none), for: slot)
+                    if currentSlot != nil {
+                        Divider()
+                        Button("Clear") {
+                            if let slot = currentSlot {
+                                cache.setGestureBinding(.core(.none), for: slot)
+                            }
                         }
                     }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    if let slot = currentSlot {
-                        Image(systemName: slot.hand.icon)
-                        Text("\(slot.hand.displayName) \(slot.finger.displayName)")
-                    } else {
-                        Text("Not Assigned")
+                } label: {
+                    HStack(spacing: 4) {
+                        if let slot = currentSlot {
+                            Image(systemName: slot.hand.icon)
+                            Text("\(slot.hand.displayName) \(slot.finger.displayName)")
+                        } else {
+                            Text("Not Assigned")
+                        }
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
                     }
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
+                    .font(.caption)
+                    .foregroundStyle(currentSlot != nil ? .green : .secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(currentSlot != nil ? Color.green.opacity(0.1) : Color.secondary.opacity(0.08))
+                    )
                 }
-                .font(.caption)
-                .foregroundStyle(currentSlot != nil ? .green : .secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(currentSlot != nil ? Color.green.opacity(0.1) : Color.secondary.opacity(0.08))
-                )
+            }
+
+            if hasTripletMusicMapping {
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.pink)
+                        .frame(width: 16)
+                    Text("Gain")
+                        .font(.caption2)
+                        .foregroundStyle(.pink)
+                        .frame(width: 32, alignment: .leading)
+                    Slider(
+                        value: Binding(
+                            get: { tripletGain },
+                            set: { setTripletGain($0) }
+                        ),
+                        in: 0...2
+                    )
+                    .tint(.pink)
+                    Text(String(format: "%.2f", tripletGain))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32)
+                }
+                .padding(.leading, 16)
             }
         }
     }

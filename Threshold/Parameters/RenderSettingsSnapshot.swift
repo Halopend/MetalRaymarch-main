@@ -28,7 +28,6 @@ struct RenderSettingsSnapshot {
     let tileSize: Int
     let debugHierarchical: Bool
     let limitFlash: Float
-    let showHUD: Bool
     let activeGestureIndex: Int
     let safetyBubbleEnabled: Bool
     let safetyBubbleRadius: Float

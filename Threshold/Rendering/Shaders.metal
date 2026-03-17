@@ -75,8 +75,6 @@ constant int FC_SHADOW_ITERATIONS [[function_constant(1)]];
 // Feature toggles - allows compiler to eliminate entire code paths
 constant bool FC_SAFETY_BUBBLE_ENABLED [[function_constant(2)]];
 
-constant bool FC_SHOW_HUD [[function_constant(3)]];
-
 // Quality mode - enables aggressive optimizations for lower quality settings
 constant int FC_QUALITY_MODE [[function_constant(4)]]; // 0=high, 1=medium, 2=low
 
@@ -1427,84 +1425,6 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
 }
 
 // =============================================================================
-// HUD RENDERING - Simple bar display for parameters
-// =============================================================================
-
-// Draw a horizontal bar showing parameter value within range
-// OPTIMIZATION: Use step() instead of branches for GPU-friendly code
-float hudBar(float2 uv, float2 pos, float2 size, float fillAmount) {
-    float2 localUV = (uv - pos) / size;
-    
-    // Early exit check using step (branchless)
-    float inBounds = step(0.0f, localUV.x) * step(localUV.x, 1.0f) * 
-                     step(0.0f, localUV.y) * step(localUV.y, 1.0f);
-    if (inBounds < 0.5f) return 0.0f;
-    
-    // Border (2% edge) - use branchless comparisons
-    float borderL = step(localUV.x, 0.02f);
-    float borderR = step(0.98f, localUV.x);
-    float borderB = step(localUV.y, 0.08f);
-    float borderT = step(0.92f, localUV.y);
-    float border = max(max(borderL, borderR), max(borderB, borderT)) * 0.6f;
-    
-    // Fill bar - branchless
-    float fillX = step(0.02f, localUV.x) * step(localUV.x, fma(fillAmount, 0.96f, 0.02f));
-    float fillY = step(0.08f, localUV.y) * step(localUV.y, 0.92f);
-    float fill = fillX * fillY;
-    
-    return max(border, fill);
-}
-
-// Render HUD overlay showing current parameter values (Mandelbox only)
-half3 renderHUD(half3 baseColor, float2 uv, int activeGesture,
-                float minDist, float foldLimit, float sphereRad) {
-    // HUD in bottom-left corner
-    float2 hudPos = float2(0.02, 0.02);
-    float hudWidth = 0.2;
-    float hudHeight = 0.15;
-    
-    float2 hudUV = (uv - hudPos) / float2(hudWidth, hudHeight);
-    
-    // Only render in HUD area
-    if (hudUV.x < 0.0 || hudUV.x > 1.0 || hudUV.y < 0.0 || hudUV.y > 1.0) {
-        return baseColor;
-    }
-    
-    half3 hudColor = half3(0.0h);
-    float alpha = 0.0;
-    
-    // Semi-transparent background
-    float bg = 0.25;
-    
-    // Mandelbox: minDistance (0.001-5), foldingLimit (0.1-10), sphereRadius (0.01-2)
-    float fill1 = clamp(minDist / 5.0, 0.0, 1.0);
-    float fill2 = clamp(foldLimit / 10.0, 0.0, 1.0);
-    float fill3 = clamp(sphereRad / 2.0, 0.0, 1.0);
-    
-    float bar1 = hudBar(hudUV, float2(0.05, 0.68), float2(0.9, 0.22), fill1);
-    float bar2 = hudBar(hudUV, float2(0.05, 0.39), float2(0.9, 0.22), fill2);
-    float bar3 = hudBar(hudUV, float2(0.05, 0.10), float2(0.9, 0.22), fill3);
-    
-    // Colors: index=cyan, middle=yellow, ring=magenta
-    // Highlight active gesture
-    float h1 = (activeGesture == 1) ? 1.5 : 1.0;
-    float h2 = (activeGesture == 2) ? 1.5 : 1.0;
-    float h3 = (activeGesture == 3) ? 1.5 : 1.0;
-    
-    hudColor += half3(0.0h, 1.0h, 1.0h) * half(bar1 * h1);   // Cyan - minDistance
-    hudColor += half3(1.0h, 1.0h, 0.0h) * half(bar2 * h2);   // Yellow - foldingLimit
-    hudColor += half3(1.0h, 0.0h, 1.0h) * half(bar3 * h3);   // Magenta - sphereRadius
-    
-    alpha = max(max(bar1, bar2), bar3);
-    
-    // Blend: background + bars
-    alpha = max(alpha, bg);
-    return mix(baseColor, hudColor + half3(0.05h), half(alpha * 0.85));
-}
-
-
-
-// =============================================================================
 
 // Soft shadow with over-relaxation
 // OPTIMIZATION: Combined exit conditions to reduce branches
@@ -2205,15 +2125,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
     } else {
         col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
-    }
-
-    // Render HUD overlay if enabled
-    // Use function constant when defined to eliminate this code path entirely
-    const bool showHUD = is_function_constant_defined(FC_SHOW_HUD) ? FC_SHOW_HUD : (uniforms.showHUD != 0);
-    if (showHUD) {
-        col = renderHUD(col, float2(in.texCoord), uniforms.activeGesture,
-                        uniforms.minDistance, uniforms.foldingLimit, uniforms.sphereRadius);
-
     }
 
     output.color = float4(float3(col), 1.0);

@@ -112,7 +112,6 @@ extension Renderer {
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
             safetyBubbleEnabled: nil,  // Runtime: respects user toggle
-            showHUD: true,
             qualityMode: qualityMode,
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
@@ -258,7 +257,6 @@ extension Renderer {
                 fractalIterations: Int32(iterations),
                 shadowIterations: Int32(max(iterations - 2, 2)),
                 safetyBubbleEnabled: nil,
-                showHUD: true,
                 qualityMode: Int32(qualityMode),
                 debugHierarchical: false,
                 maxRaySteps: Int32(raySteps),
@@ -372,7 +370,6 @@ extension Renderer {
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
             safetyBubbleEnabled: nil,  // Runtime: respects user toggle
-            showHUD: false,
             qualityMode: Int32(qualityMode),
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
@@ -420,7 +417,6 @@ extension Renderer {
         var si = shadowIterations
         var rs = maxRaySteps
         var debug: Bool = false
-        var hud: Bool = false
         var neon: Bool = false
 
         if var type = fractalType {
@@ -433,7 +429,6 @@ extension Renderer {
         constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
         constants.setConstantValue(&rs, type: .int, index: FunctionConstantIndex.maxRaySteps.rawValue)
         constants.setConstantValue(&debug, type: .bool, index: FunctionConstantIndex.debugHierarchical.rawValue)
-        constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
         constants.setConstantValue(&neon, type: .bool, index: FunctionConstantIndex.neonModeEnabled.rawValue)
 
         guard let function = try? library.makeFunction(name: kernelName, constantValues: constants) else {

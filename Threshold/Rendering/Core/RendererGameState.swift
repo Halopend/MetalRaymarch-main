@@ -88,6 +88,12 @@ extension Renderer {
             let projection = drawable.computeProjection(viewIndex: viewIndex)
 
             let modelView = viewMatrix * modelMatrix
+            let inverseModelView = modelView.inverse
+
+            // Cache per-eye matrices for reuse in encodeAdaptiveCompute()
+            cachedPerEyeModelView[viewIndex] = modelView
+            cachedPerEyeInverseModelView[viewIndex] = inverseModelView
+            cachedPerEyeProjection[viewIndex] = projection
 
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
 
@@ -99,7 +105,7 @@ extension Renderer {
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
-                            inverseModelViewMatrix: modelView.inverse,
+                            inverseModelViewMatrix: inverseModelView,
                             time: frameTime,
                             minDistance: settingsSnapshot.minDistance,
                             fractalScale: settingsSnapshot.fractalScale,
@@ -121,7 +127,6 @@ extension Renderer {
                             safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
                             colorIterations: settingsSnapshot.colorIterations,
                             limitFlash: settingsSnapshot.limitFlash,
-                            showHUD: settingsSnapshot.showHUD ? 1 : 0,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
                             fractalType: settingsSnapshot.fractalType.rawValue,
                             lightingSoftness: settingsSnapshot.lightingSoftness,

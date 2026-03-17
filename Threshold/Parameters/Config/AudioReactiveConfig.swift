@@ -23,6 +23,9 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
     // Per-target music-reactive mappings
     var musicReactiveMappings: [MusicReactiveMapping] = []
 
+    // Per-triplet gain multiplier (keyed by triplet groupName, default 1.0)
+    var tripletMusicGains: [String: Float] = [:]
+
     // MARK: - Validation
 
     mutating func clamp() {

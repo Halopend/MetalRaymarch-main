@@ -516,7 +516,7 @@ final class BuddhabrotRenderer {
         encoder.setTexture(volumeTex, index: 0)
         
         let res = currentResolution
-        let threadgroupSize = MTLSize(width: 4, height: 4, depth: 4)
+        let threadgroupSize = MTLSize(width: 8, height: 4, depth: 4)  // 128 threads — better Apple Silicon occupancy
         let gridSize = MTLSize(width: res, height: res, depth: res)
         encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadgroupSize)
         

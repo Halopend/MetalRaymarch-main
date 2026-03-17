@@ -76,6 +76,22 @@ class AudioAnalyzer {
     private let bandAttackSpeed: Float = 35.0  // Band-specific attack
     private let bandDecaySpeed: Float = 10.0   // Band-specific decay
     
+    // Cached smoothing factors — avoids 4 exp() calls per frame when dt is stable
+    private var cachedDT: Float = 0
+    private var cachedAttackFactor: Float = 0
+    private var cachedDecayFactor: Float = 0
+    private var cachedBandAttackFactor: Float = 0
+    private var cachedBandDecayFactor: Float = 0
+    
+    private func refreshSmoothingFactors(_ dt: Float) {
+        if abs(dt - cachedDT) < 0.001 { return }
+        cachedDT = dt
+        cachedAttackFactor = 1.0 - exp(-attackSpeed * dt)
+        cachedDecayFactor = 1.0 - exp(-decaySpeed * dt)
+        cachedBandAttackFactor = 1.0 - exp(-bandAttackSpeed * dt)
+        cachedBandDecayFactor = 1.0 - exp(-bandDecaySpeed * dt)
+    }
+    
     // Gain and sensitivity
     private let inputGain: Float = 25.0        // Amplify quiet input
     private let bassBoost: Float = 1.5         // Bass needs more boost
@@ -320,14 +336,13 @@ class AudioAnalyzer {
         lastUpdateTime = currentTime
         
         let clampedDT = max(0.001, min(0.1, deltaTime))
+        refreshSmoothingFactors(clampedDT)
         
         // Smooth overall level (fast attack, slow decay)
         if overall > level {
-            let attackFactor = 1.0 - exp(-attackSpeed * clampedDT)
-            level = level + (overall - level) * attackFactor
+            level = level + (overall - level) * cachedAttackFactor
         } else {
-            let decayFactor = 1.0 - exp(-decaySpeed * clampedDT)
-            level = level + (overall - level) * decayFactor
+            level = level + (overall - level) * cachedDecayFactor
         }
         
         // Update peak with slow decay
@@ -345,11 +360,9 @@ class AudioAnalyzer {
     
     private func smoothBand(_ current: inout Float, target: Float, dt: Float) {
         if target > current {
-            let attackFactor = 1.0 - exp(-bandAttackSpeed * dt)
-            current = current + (target - current) * attackFactor
+            current = current + (target - current) * cachedBandAttackFactor
         } else {
-            let decayFactor = 1.0 - exp(-bandDecaySpeed * dt)
-            current = current + (target - current) * decayFactor
+            current = current + (target - current) * cachedBandDecayFactor
         }
     }
 }

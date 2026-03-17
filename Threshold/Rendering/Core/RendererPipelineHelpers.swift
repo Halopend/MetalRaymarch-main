@@ -47,7 +47,6 @@ extension Renderer {
         var fractalIterations: Int32?      // FC index 0
         var shadowIterations: Int32?       // FC index 1
         var safetyBubbleEnabled: Bool?     // FC index 2
-        var showHUD: Bool?                 // FC index 3
         var qualityMode: Int32?            // FC index 4 (0=high, 1=medium, 2=low)
         var debugHierarchical: Bool?       // FC index 5
         var maxRaySteps: Int32?            // FC index 6 - max ray marching steps
@@ -81,9 +80,6 @@ extension Renderer {
             }
             if var bubble = safetyBubbleEnabled {
                 constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
-            }
-            if var hud = showHUD {
-                constants.setConstantValue(&hud, type: .bool, index: FunctionConstantIndex.showHUD.rawValue)
             }
             if var quality = qualityMode {
                 constants.setConstantValue(&quality, type: .int, index: FunctionConstantIndex.qualityMode.rawValue)
@@ -120,7 +116,6 @@ extension Renderer {
                 fractalIterations: 6,
                 shadowIterations: 4,
                 safetyBubbleEnabled: false,
-                showHUD: false,
                 qualityMode: 2,  // Low quality
                 debugHierarchical: false,
                 maxRaySteps: 32,
@@ -140,7 +135,6 @@ extension Renderer {
                 fractalIterations: 12,
                 shadowIterations: 10,
                 safetyBubbleEnabled: nil,  // Runtime: respects user toggle
-                showHUD: true,
                 qualityMode: 0,  // High quality
                 debugHierarchical: false,
                 maxRaySteps: 100,
@@ -165,7 +159,6 @@ extension Renderer {
                 fractalIterations: Int32(preset.fractalIterations),
                 shadowIterations: Int32(max(preset.fractalIterations - 2, 2)),
                 safetyBubbleEnabled: nil,    // Runtime: respects user toggle
-                showHUD: false,              // Compile out HUD for these fast pipelines
                 qualityMode: qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: Int32(preset.raySteps),
@@ -190,7 +183,6 @@ extension Renderer {
                 fractalIterations: fc.fractalIterations,
                 shadowIterations: fc.shadowIterations,
                 safetyBubbleEnabled: nil,  // Runtime: respects live safety bubble toggle/radius changes
-                showHUD: true,
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,

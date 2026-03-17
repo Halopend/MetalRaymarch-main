@@ -9,7 +9,6 @@
 import Foundation
 
 struct DisplayConfig: Codable, Equatable, Sendable {
-    var showHUD: Bool = false
     var showMusicShortcuts: Bool = false
     var lightingPlay: Bool = false
     var lightingMode: LightingMode = .animated

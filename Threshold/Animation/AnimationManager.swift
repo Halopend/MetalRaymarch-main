@@ -34,6 +34,11 @@ final class AnimationManager {
     // SCENE STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
     
+    // Coalesced persistence — avoids redundant UserDefaults writes during rapid edits
+    @ObservationIgnored private var pendingSaveHidden = false
+    @ObservationIgnored private var pendingSaveOverrides = false
+    @ObservationIgnored private var saveCoalesceTask: Task<Void, Never>?
+    
     /// User-created scenes (persisted to disk)
     private(set) var userScenes: [AnimationScene] = [] {
         didSet { rebuildScenes() }
@@ -41,14 +46,14 @@ final class AnimationManager {
     
     /// Default scene IDs the user has hidden (persisted via UserDefaults)
     private(set) var hiddenDefaultSceneIDs: Set<UUID> = [] {
-        didSet { saveHiddenDefaults(); rebuildScenes() }
+        didSet { pendingSaveHidden = true; scheduleSaveFlush(); rebuildScenes() }
     }
     
     /// User-edited copies of default scenes (persisted alongside user scenes).
     /// Key = default scene ID → Value = the user's edited version.
     /// When present, this overlay replaces the built-in original in the list.
     private(set) var editedDefaultOverrides: [UUID: AnimationScene] = [:] {
-        didSet { saveOverrides(); rebuildScenes() }
+        didSet { pendingSaveOverrides = true; scheduleSaveFlush(); rebuildScenes() }
     }
     
     /// The merged list exposed to the UI: visible defaults (possibly overridden) + user scenes.
@@ -696,7 +701,6 @@ final class AnimationManager {
         settings.fractalScale = keyframe.fractalScale
         settings.baseFractalIterations = keyframe.baseFractalIterations
         settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
-        settings.scale = keyframe.scale
         settings.position = keyframe.position
         settings.detailScale = keyframe.detailScale
         settings.targetDetailScale = keyframe.detailScale
@@ -886,6 +890,12 @@ final class AnimationManager {
             print("❌ Failed to save scenes: \(error)")
         }
     }
+
+    /// Replace all user scenes with the given array and persist.
+    func replaceUserScenes(with scenes: [AnimationScene]) {
+        userScenes = scenes
+        saveScenes()
+    }
     
     private func saveHiddenDefaults() {
         let ids = hiddenDefaultSceneIDs.map { $0.uuidString }
@@ -899,6 +909,23 @@ final class AnimationManager {
             UserDefaults.standard.set(data, forKey: "editedDefaultOverrides")
         } catch {
             print("❌ Failed to save default overrides: \(error)")
+        }
+    }
+    
+    /// Debounced flush — coalesces rapid didSet writes into a single save
+    private func scheduleSaveFlush() {
+        saveCoalesceTask?.cancel()
+        saveCoalesceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled, let self else { return }
+            if self.pendingSaveHidden {
+                self.pendingSaveHidden = false
+                self.saveHiddenDefaults()
+            }
+            if self.pendingSaveOverrides {
+                self.pendingSaveOverrides = false
+                self.saveOverrides()
+            }
         }
     }
     

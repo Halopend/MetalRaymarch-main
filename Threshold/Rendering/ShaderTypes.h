@@ -50,7 +50,6 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexFractalIterations   = 0,  // int: Fractal iteration count (enables Map() loop auto-unrolling)
     FCIndexShadowIterations    = 1,  // int: Shadow iteration count
     FCIndexSafetyBubbleEnabled = 2,  // bool: Safety bubble feature toggle
-    FCIndexShowHUD             = 3,  // bool: HUD overlay toggle
     FCIndexQualityMode         = 4,  // int: 0=high, 1=medium, 2=low - controls feature degradation
     FCIndexDebugHierarchical   = 5,  // bool: Debug visualization toggle
     FCIndexMaxRaySteps         = 6,  // int: Max raymarch steps (enables loop optimization)
@@ -223,7 +222,6 @@ typedef struct
     float safetyBubbleStrength;   // Temporal fade strength (0=off, 1=fully active)
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
-    int showHUD;             // Show in-world HUD overlay (0/1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting

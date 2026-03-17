@@ -15,7 +15,6 @@ enum FunctionConstantIndex: Int {
     case fractalIterations = 0
     case shadowIterations = 1
     case safetyBubbleEnabled = 2
-    case showHUD = 3
     case qualityMode = 4
     case debugHierarchical = 5
     case maxRaySteps = 6  // Base max ray steps (actual count scaled by quality at runtime)

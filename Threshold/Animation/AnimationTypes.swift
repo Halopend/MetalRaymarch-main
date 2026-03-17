@@ -225,7 +225,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.foldingLimit = geo.foldingLimit
         self.sphereRadius = geo.sphereRadius
         self.fractalScale = geo.fractalScale
-        self.scale = geo.scale
         self.positionX = geo.position.x
         self.positionY = geo.position.y
         self.positionZ = geo.position.z
@@ -399,7 +398,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             fractalScale: lerp(self.fractalScale, other.fractalScale),
             baseFractalIterations: clampedT < 0.5 ? self.baseFractalIterations : other.baseFractalIterations,
             baseMaxRaySteps: clampedT < 0.5 ? self.baseMaxRaySteps : other.baseMaxRaySteps,
-            scale: lerp(self.scale, other.scale),
             position: lerp3(self.position, other.position),
             detailScale: lerp(self.detailScale, other.detailScale),
             worldRotation: simd_slerp(self.worldRotation, other.worldRotation, clampedT).normalized,
@@ -518,7 +516,6 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         try c.encode(fractalScale, forKey: .fractalScale)
         try c.encode(baseFractalIterations, forKey: .baseFractalIterations)
         try c.encode(baseMaxRaySteps, forKey: .baseMaxRaySteps)
-        try c.encode(scale, forKey: .scale)
         try c.encode(positionX, forKey: .positionX)
         try c.encode(positionY, forKey: .positionY)
         try c.encode(positionZ, forKey: .positionZ)
@@ -974,7 +971,6 @@ struct CatmullRomSpline {
             fractalScale: interpolate(p0.fractalScale, p1.fractalScale, p2.fractalScale, p3.fractalScale, t: t),
             baseFractalIterations: t < 0.5 ? p1.baseFractalIterations : p2.baseFractalIterations,
             baseMaxRaySteps: t < 0.5 ? p1.baseMaxRaySteps : p2.baseMaxRaySteps,
-            scale: interpolate(p0.scale, p1.scale, p2.scale, p3.scale, t: t),
             position: interpolate(p0.position, p1.position, p2.position, p3.position, t: t),
             detailScale: interpolate(p0.detailScale, p1.detailScale, p2.detailScale, p3.detailScale, t: t),
             worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized,
@@ -1072,7 +1068,6 @@ struct CatmullRomSpline {
             fractalScale: 2 * anchor.fractalScale - away.fractalScale,
             baseFractalIterations: anchor.baseFractalIterations,
             baseMaxRaySteps: anchor.baseMaxRaySteps,
-            scale: 2 * anchor.scale - away.scale,
             position: 2 * anchor.position - away.position,
             detailScale: 2 * anchor.detailScale - away.detailScale,
             worldRotation: anchor.worldRotation,

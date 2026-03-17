@@ -75,6 +75,11 @@ actor Renderer {
     var cachedMaxViewDistance: Float = RenderSettings.maxViewDistance
     var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     
+    // Per-eye matrices — computed once in updateGameState(), reused in encodeAdaptiveCompute()
+    var cachedPerEyeModelView: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    var cachedPerEyeInverseModelView: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    var cachedPerEyeProjection: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
+    
     // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
     var tileUniformBuffer: MTLBuffer?
@@ -96,6 +101,10 @@ actor Renderer {
     private var temporalDepthSize: SIMD2<Int> = .zero
     private var temporalColorTextures: [MTLTexture?] = [nil, nil]   // ping-pong color history
     private var temporalColorSize: SIMD2<Int> = .zero
+    
+    // Cached view amplification mappings — avoids per-frame array allocation
+    private var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []
+    private var cachedViewMappingsCount: Int = 0
     
     // Screenshot capture
     var screenshotTexture: MTLTexture?
@@ -180,6 +189,14 @@ actor Renderer {
 
 
     var mesh: MTKMesh
+    
+    // Cached mesh vertex layout — avoids per-frame enumeration + type-casting of MDLVertexBufferLayout
+    struct CachedMeshBinding {
+        let bufferIndex: Int
+        let buffer: MTLBuffer
+        let offset: Int
+    }
+    var cachedMeshBindings: [CachedMeshBinding] = []
 
     let arSession: ARKitSession
     let worldTracking: WorldTrackingProvider
@@ -312,6 +329,13 @@ actor Renderer {
         } catch {
             if RENDERER_DEBUG { print("❌ Unable to build MetalKit Mesh: \(error)") }
             return nil
+        }
+
+        // Pre-compute mesh vertex layout bindings (avoids per-frame enumeration + type-cast)
+        for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
+            guard let layout = element as? MDLVertexBufferLayout, layout.stride != 0 else { continue }
+            let buf = mesh.vertexBuffers[index]
+            cachedMeshBindings.append(CachedMeshBinding(bufferIndex: index, buffer: buf.buffer, offset: buf.offset))
         }
 
         // Build tile-based compute pipelines with function constants for maximum optimization
@@ -756,6 +780,23 @@ actor Renderer {
 
                 let activeFractalType = settings.fractalType
                 let mappings = settings.musicReactiveMappings
+
+                // Build triplet gain lookup: formulaParamSlot → gain multiplier
+                let tripletGains = settings.tripletMusicGains
+                var slotGainLookup: [Int: Float] = [:]
+                if !tripletGains.isEmpty {
+                    let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: activeFractalType)
+                    let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
+                    for triplet in triplets {
+                        guard let gain = tripletGains[triplet.groupName], gain != 1.0 else { continue }
+                        for formulaIndex in [triplet.xFormulaIndex, triplet.yFormulaIndex, triplet.zFormulaIndex] {
+                            if let slot = floatParams.firstIndex(where: { $0.index == formulaIndex }) {
+                                slotGainLookup[slot] = gain
+                            }
+                        }
+                    }
+                }
+
                 for mapping in mappings where mapping.isEnabled {
                     // ── 1. Select audio source level (0-1) ──
                     let sourceValue: Float
@@ -830,11 +871,20 @@ actor Renderer {
                     } else {
                         offset = rawTargetValue
                     }
+
+                    // Apply triplet gain for formula param targets
+                    let finalOffset: Float
+                    if let slot = mapping.target.formulaParamSlot, let gain = slotGainLookup[slot] {
+                        finalOffset = offset * gain
+                    } else {
+                        finalOffset = offset
+                    }
+
                     audioOperations.append(
                         ParameterOperation(
                             targetID: targetID,
                             source: .audio,
-                            value: offset,
+                            value: finalOffset,
                             frameIndex: parameterOperationFrameIndex,
                             smoothingTime: max(0.02, mapping.smoothingWindow)
                         )
@@ -979,20 +1029,18 @@ actor Renderer {
         renderEncoder.setViewports(viewports)
 
         if drawable.views.count > 1 {
-            var viewMappings = (0..<drawable.views.count).map {
-                MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
-                                                  renderTargetArrayIndexOffset: UInt32($0))
+            if drawable.views.count != cachedViewMappingsCount {
+                cachedViewMappings = (0..<drawable.views.count).map {
+                    MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
+                                                      renderTargetArrayIndexOffset: UInt32($0))
+                }
+                cachedViewMappingsCount = drawable.views.count
             }
-            renderEncoder.setVertexAmplificationCount(viewports.count, viewMappings: &viewMappings)
+            renderEncoder.setVertexAmplificationCount(viewports.count, viewMappings: &cachedViewMappings)
         }
 
-        for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
-            guard let layout = element as? MDLVertexBufferLayout else { continue }
-
-            if layout.stride != 0 {
-                let buffer = mesh.vertexBuffers[index]
-                renderEncoder.setVertexBuffer(buffer.buffer, offset:buffer.offset, index: index)
-            }
+        for binding in cachedMeshBindings {
+            renderEncoder.setVertexBuffer(binding.buffer, offset: binding.offset, index: binding.bufferIndex)
         }
 
         for submesh in mesh.submeshes {
@@ -1060,19 +1108,10 @@ actor Renderer {
             if RENDERER_DEBUG { print("⚠️ Adaptive compute pipeline not available") }
             return
         }
-        let view = drawable.views[viewIndex]
-        
-        // Build model matrix — reuse cached value from updateGameState() instead of recomputing
-        let modelMatrix = cachedModelMatrix
-        
-        // Build view matrix (same as fragment shader)
-        let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
-        let viewMatrix = (deviceTransform * view.transform).inverse
-        let projection = drawable.computeProjection(viewIndex: viewIndex)
-        
-        // Model-view matrix and its inverse (THIS WAS MISSING!)
-        let modelView = viewMatrix * modelMatrix
-        let inverseModelView = modelView.inverse
+        // Reuse per-eye matrices cached by updateGameState() — eliminates 2 matrix inversions per eye
+        let modelView = cachedPerEyeModelView[viewIndex]
+        let inverseModelView = cachedPerEyeInverseModelView[viewIndex]
+        let projection = cachedPerEyeProjection[viewIndex]
         
         // Current frame's full model-view-projection (for temporal reprojection)
         let currentViewProj = projection * modelView
