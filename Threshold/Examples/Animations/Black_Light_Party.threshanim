@@ -1,0 +1,619 @@
+{
+  "createdAt" : "2026-03-17T00:11:01Z",
+  "fractalType" : "kleinian",
+  "id" : "00000000-0003-0000-0000-000000000003",
+  "isLooping" : true,
+  "keyframes" : [
+    {
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 32,
+      "bezierHandle" : {
+        "cp1x" : 0.42,
+        "cp1y" : 0,
+        "cp2x" : 0.58,
+        "cp2y" : 1
+      },
+      "bloomEffect" : {
+        "enabled" : true,
+        "strength" : 0.1
+      },
+      "colorMappingMode" : 5,
+      "colorSchemeContrast" : 1.15,
+      "colorSchemeCurve" : 0,
+      "colorSchemeGamma" : 0.75,
+      "colorSchemeHighlights" : 1,
+      "colorSchemeSaturation" : 0.8,
+      "colorSchemeShadows" : 0,
+      "colorSchemeVibrance" : 1,
+      "detailScale" : 1,
+      "duration" : 0,
+      "easingType" : "bezier",
+      "fogEffect" : {
+        "enabled" : true,
+        "intensity" : 0.050000012
+      },
+      "foldingLimit" : 1,
+      "formulaParamValues" : [
+        -0.7129297,
+        -0.8780583,
+        0.07105777,
+        2.9999967,
+        0.87897384,
+        1.0217812,
+        0.52353466,
+        1.0244274,
+        1.9928894,
+        2.9945393,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "fractalScale" : 0.99946576,
+      "glowEffect" : {
+        "enabled" : true,
+        "intensity" : 0.40530083
+      },
+      "gradientCycleEffect" : {
+        "enabled" : false,
+        "mirrorLoop" : true,
+        "speed" : 0.09695886
+      },
+      "gradientOffset" : 0.09882506,
+      "gradientPreset" : "rainbow",
+      "gradientRepeat" : 5,
+      "gradientSmoothing" : 1,
+      "hueRotationEffect" : {
+        "enabled" : true,
+        "intensity" : 0.3,
+        "speed" : 0.02
+      },
+      "id" : "457CF599-42A0-48AB-BA96-01967E53AED9",
+      "lightingMode" : "audioReactive",
+      "lightingPreset" : "Custom",
+      "lightingSoftness" : 0,
+      "minDistance" : 0.8,
+      "name" : "Start",
+      "positionX" : 0.36781877,
+      "positionY" : 1.0601807,
+      "positionZ" : 1.6699973,
+      "pulseEffect" : {
+        "amount" : 0.1637325,
+        "enabled" : false,
+        "speed" : 0.46227682
+      },
+      "scale" : 1,
+      "sphereRadius" : 0.5,
+      "worldRotationW" : 1,
+      "worldRotationX" : 0,
+      "worldRotationY" : 0,
+      "worldRotationZ" : 0
+    },
+    {
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 32,
+      "bezierHandle" : {
+        "cp1x" : 0.42,
+        "cp1y" : 0,
+        "cp2x" : 0.58,
+        "cp2y" : 1
+      },
+      "bloomEffect" : {
+        "enabled" : true,
+        "strength" : 0.1
+      },
+      "colorMappingMode" : 1,
+      "colorSchemeContrast" : 1.15,
+      "colorSchemeCurve" : 0,
+      "colorSchemeGamma" : 0.75,
+      "colorSchemeHighlights" : 1,
+      "colorSchemeSaturation" : 0.8,
+      "colorSchemeShadows" : 0,
+      "colorSchemeVibrance" : 1,
+      "detailScale" : 1,
+      "duration" : 10,
+      "easingType" : "bezier",
+      "fogEffect" : {
+        "enabled" : true,
+        "intensity" : 0.050000012
+      },
+      "foldingLimit" : 1,
+      "formulaParamValues" : [
+        -0.7129297,
+        -0.8780583,
+        0.07105777,
+        2.9999967,
+        0.87897384,
+        1.0217812,
+        0.52353466,
+        1.0244274,
+        1.9928894,
+        2.9945393,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "fractalScale" : 0.99946576,
+      "glowEffect" : {
+        "enabled" : true,
+        "intensity" : 0.40530083
+      },
+      "gradientCycleEffect" : {
+        "enabled" : false,
+        "mirrorLoop" : true,
+        "speed" : 0.09695886
+      },
+      "gradientOffset" : 0.09882506,
+      "gradientPreset" : "rainbow",
+      "gradientRepeat" : 5,
+      "gradientSmoothing" : 1,
+      "hueRotationEffect" : {
+        "enabled" : true,
+        "intensity" : 0.3,
+        "speed" : 0.02
+      },
+      "id" : "FE8E7756-FF51-4F44-97AC-67F72DC3AC97",
+      "lightingMode" : "audioReactive",
+      "lightingPreset" : "Custom",
+      "lightingSoftness" : 0,
+      "minDistance" : 0.8,
+      "name" : "Keyframe 2",
+      "positionX" : 0.46126872,
+      "positionY" : 2.7955682,
+      "positionZ" : -4.414038,
+      "pulseEffect" : {
+        "amount" : 0.1637325,
+        "enabled" : false,
+        "speed" : 0.46227682
+      },
+      "scale" : 1,
+      "sphereRadius" : 0.5,
+      "worldRotationW" : 1,
+      "worldRotationX" : 0,
+      "worldRotationY" : 0,
+      "worldRotationZ" : 0
+    },
+    {
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 32,
+      "bezierHandle" : {
+        "cp1x" : 0.42,
+        "cp1y" : 0,
+        "cp2x" : 0.58,
+        "cp2y" : 1
+      },
+      "bloomEffect" : {
+        "enabled" : true,
+        "strength" : 0.1
+      },
+      "colorMappingMode" : 1,
+      "colorSchemeContrast" : 1.15,
+      "colorSchemeCurve" : 0,
+      "colorSchemeGamma" : 0.75,
+      "colorSchemeHighlights" : 1,
+      "colorSchemeSaturation" : 0.8,
+      "colorSchemeShadows" : 0,
+      "colorSchemeVibrance" : 1,
+      "detailScale" : 1.8840756,
+      "duration" : 3,
+      "easingType" : "bezier",
+      "fogEffect" : {
+        "enabled" : true,
+        "intensity" : 0.050000012
+      },
+      "foldingLimit" : 1,
+      "formulaParamValues" : [
+        -0.7129297,
+        -0.8780583,
+        0.07105777,
+        2.9999967,
+        -0.93872815,
+        0.29751745,
+        1.6141167,
+        1.0244274,
+        1.9928894,
+        2.9945393,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "fractalScale" : 0.99946576,
+      "glowEffect" : {
+        "enabled" : true,
+        "intensity" : 0.40530083
+      },
+      "gradientCycleEffect" : {
+        "enabled" : false,
+        "mirrorLoop" : true,
+        "speed" : 0.09695886
+      },
+      "gradientOffset" : 0.09882506,
+      "gradientPreset" : "rainbow",
+      "gradientRepeat" : 5,
+      "gradientSmoothing" : 1,
+      "hueRotationEffect" : {
+        "enabled" : true,
+        "intensity" : 0.3,
+        "speed" : 0.02
+      },
+      "id" : "ADB3670D-579F-42F0-AAA3-C9A47914C124",
+      "lightingMode" : "audioReactive",
+      "lightingPreset" : "Custom",
+      "lightingSoftness" : 0,
+      "minDistance" : 0.8,
+      "name" : "Keyframe 3",
+      "positionX" : -0.10877061,
+      "positionY" : 4.324732,
+      "positionZ" : -3.605622,
+      "pulseEffect" : {
+        "amount" : 0.1637325,
+        "enabled" : false,
+        "speed" : 0.46227682
+      },
+      "scale" : 1,
+      "sphereRadius" : 0.5,
+      "worldRotationW" : 0.99958783,
+      "worldRotationX" : 0.0044394573,
+      "worldRotationY" : 0.026312018,
+      "worldRotationZ" : 0.01058747
+    },
+    {
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 32,
+      "bezierHandle" : {
+        "cp1x" : 0.42,
+        "cp1y" : 0,
+        "cp2x" : 0.58,
+        "cp2y" : 1
+      },
+      "bloomEffect" : {
+        "enabled" : true,
+        "strength" : 0.1
+      },
+      "colorMappingMode" : 1,
+      "colorSchemeContrast" : 1.15,
+      "colorSchemeCurve" : 0,
+      "colorSchemeGamma" : 0.75,
+      "colorSchemeHighlights" : 1,
+      "colorSchemeSaturation" : 0.8,
+      "colorSchemeShadows" : 0,
+      "colorSchemeVibrance" : 1,
+      "detailScale" : 1.4173728,
+      "duration" : 9.5,
+      "easingType" : "bezier",
+      "fogEffect" : {
+        "enabled" : true,
+        "intensity" : 0.050000012
+      },
+      "foldingLimit" : 1,
+      "formulaParamValues" : [
+        -0.7129297,
+        -0.8780583,
+        0.07105777,
+        2.9999967,
+        0.8783962,
+        1.0673993,
+        0.92526495,
+        1.0244274,
+        1.9928894,
+        2.9945393,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "fractalScale" : 0.99946576,
+      "glowEffect" : {
+        "enabled" : true,
+        "intensity" : 0.40530083
+      },
+      "gradientCycleEffect" : {
+        "enabled" : false,
+        "mirrorLoop" : true,
+        "speed" : 0.09695886
+      },
+      "gradientOffset" : 0.09882506,
+      "gradientPreset" : "rainbow",
+      "gradientRepeat" : 5,
+      "gradientSmoothing" : 1,
+      "hueRotationEffect" : {
+        "enabled" : true,
+        "intensity" : 0.3,
+        "speed" : 0.02
+      },
+      "id" : "F0B79460-7A81-4FB2-81D9-AE76B9AED763",
+      "lightingMode" : "audioReactive",
+      "lightingPreset" : "Custom",
+      "lightingSoftness" : 0,
+      "minDistance" : 0.8,
+      "name" : "Keyframe 4",
+      "positionX" : 0.36918172,
+      "positionY" : 1.0335227,
+      "positionZ" : 6.924728,
+      "pulseEffect" : {
+        "amount" : 0.1637325,
+        "enabled" : false,
+        "speed" : 0.46227682
+      },
+      "scale" : 1,
+      "sphereRadius" : 0.5,
+      "worldRotationW" : 0.9997451,
+      "worldRotationX" : 0.0028420733,
+      "worldRotationY" : 0.021442425,
+      "worldRotationZ" : 0.0064708465
+    },
+    {
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 32,
+      "bezierHandle" : {
+        "cp1x" : 0.42,
+        "cp1y" : 0,
+        "cp2x" : 0.58,
+        "cp2y" : 1
+      },
+      "bloomEffect" : {
+        "enabled" : true,
+        "strength" : 0.1
+      },
+      "colorMappingMode" : 1,
+      "colorSchemeContrast" : 1.15,
+      "colorSchemeCurve" : 0,
+      "colorSchemeGamma" : 0.75,
+      "colorSchemeHighlights" : 1,
+      "colorSchemeSaturation" : 0.8,
+      "colorSchemeShadows" : 0,
+      "colorSchemeVibrance" : 1,
+      "detailScale" : 11.7769375,
+      "duration" : 9.5,
+      "easingType" : "bezier",
+      "fogEffect" : {
+        "enabled" : true,
+        "intensity" : 0.050000012
+      },
+      "foldingLimit" : 1,
+      "formulaParamValues" : [
+        -0.7129297,
+        -0.8780583,
+        0.07105777,
+        2.9999967,
+        0.8783962,
+        1.0673993,
+        0.92526495,
+        1.0244274,
+        1.9928894,
+        2.9945393,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "fractalScale" : 0.99946576,
+      "glowEffect" : {
+        "enabled" : true,
+        "intensity" : 0.40530083
+      },
+      "gradientCycleEffect" : {
+        "enabled" : false,
+        "mirrorLoop" : true,
+        "speed" : 0.09695886
+      },
+      "gradientOffset" : 0.09882506,
+      "gradientPreset" : "rainbow",
+      "gradientRepeat" : 5,
+      "gradientSmoothing" : 1,
+      "hueRotationEffect" : {
+        "enabled" : true,
+        "intensity" : 0.3,
+        "speed" : 0.02
+      },
+      "id" : "EDCF250B-3E51-47ED-A2EB-454E31121A8D",
+      "lightingMode" : "audioReactive",
+      "lightingPreset" : "Custom",
+      "lightingSoftness" : 0,
+      "minDistance" : 0.8,
+      "name" : "Keyframe 5",
+      "positionX" : 0.78930837,
+      "positionY" : 17.805145,
+      "positionZ" : -2.427865,
+      "pulseEffect" : {
+        "amount" : 0.1637325,
+        "enabled" : false,
+        "speed" : 0.46227682
+      },
+      "scale" : 1,
+      "sphereRadius" : 0.5,
+      "worldRotationW" : 0.9999775,
+      "worldRotationX" : 0.004342879,
+      "worldRotationY" : 0.0050712656,
+      "worldRotationZ" : -0.0007393395
+    },
+    {
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 32,
+      "bezierHandle" : {
+        "cp1x" : 0.42,
+        "cp1y" : 0,
+        "cp2x" : 0.58,
+        "cp2y" : 1
+      },
+      "bloomEffect" : {
+        "enabled" : true,
+        "strength" : 0.1
+      },
+      "colorMappingMode" : 1,
+      "colorSchemeContrast" : 1.15,
+      "colorSchemeCurve" : 0,
+      "colorSchemeGamma" : 0.75,
+      "colorSchemeHighlights" : 1,
+      "colorSchemeSaturation" : 0.8,
+      "colorSchemeShadows" : 0,
+      "colorSchemeVibrance" : 1,
+      "detailScale" : 11.7769375,
+      "duration" : 5.5,
+      "easingType" : "bezier",
+      "fogEffect" : {
+        "enabled" : true,
+        "intensity" : 0.050000012
+      },
+      "foldingLimit" : 1,
+      "formulaParamValues" : [
+        -0.7129297,
+        -0.8780583,
+        0.07105777,
+        2.9999967,
+        -0.4619508,
+        1.6027817,
+        1.3720701,
+        1.0244274,
+        1.9928894,
+        2.9945393,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "fractalScale" : 0.99946576,
+      "glowEffect" : {
+        "enabled" : true,
+        "intensity" : 0.40530083
+      },
+      "gradientCycleEffect" : {
+        "enabled" : false,
+        "mirrorLoop" : true,
+        "speed" : 0.09695886
+      },
+      "gradientOffset" : 0.09882506,
+      "gradientPreset" : "rainbow",
+      "gradientRepeat" : 5,
+      "gradientSmoothing" : 1,
+      "hueRotationEffect" : {
+        "enabled" : true,
+        "intensity" : 0.3,
+        "speed" : 0.02
+      },
+      "id" : "48B7ABC0-8CD9-45A4-9F89-1ECE2E52CFE8",
+      "lightingMode" : "audioReactive",
+      "lightingPreset" : "Custom",
+      "lightingSoftness" : 0,
+      "minDistance" : 0.8,
+      "name" : "Keyframe 6",
+      "positionX" : 0.8438573,
+      "positionY" : 17.601604,
+      "positionZ" : -0.73332375,
+      "pulseEffect" : {
+        "amount" : 0.1637325,
+        "enabled" : false,
+        "speed" : 0.46227682
+      },
+      "scale" : 1,
+      "sphereRadius" : 0.5,
+      "worldRotationW" : 0.9999775,
+      "worldRotationX" : 0.004342879,
+      "worldRotationY" : 0.0050712656,
+      "worldRotationZ" : -0.0007393395
+    },
+    {
+      "baseFractalIterations" : 6,
+      "baseMaxRaySteps" : 32,
+      "bezierHandle" : {
+        "cp1x" : 0.42,
+        "cp1y" : 0,
+        "cp2x" : 0.58,
+        "cp2y" : 1
+      },
+      "bloomEffect" : {
+        "enabled" : true,
+        "strength" : 0.1
+      },
+      "colorMappingMode" : 1,
+      "colorSchemeContrast" : 1.15,
+      "colorSchemeCurve" : 0,
+      "colorSchemeGamma" : 0.75,
+      "colorSchemeHighlights" : 1,
+      "colorSchemeSaturation" : 0.8,
+      "colorSchemeShadows" : 0,
+      "colorSchemeVibrance" : 1,
+      "detailScale" : 8.044674,
+      "duration" : 5.5,
+      "easingType" : "bezier",
+      "fogEffect" : {
+        "enabled" : true,
+        "intensity" : 0.050000012
+      },
+      "foldingLimit" : 1,
+      "formulaParamValues" : [
+        -0.759473,
+        -0.88121974,
+        0.101999015,
+        2.9999967,
+        -1.4696453,
+        1.5029442,
+        0.8764496,
+        1.0244274,
+        1.9928894,
+        2.9945393,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "fractalScale" : 0.99946576,
+      "glowEffect" : {
+        "enabled" : true,
+        "intensity" : 0.40530083
+      },
+      "gradientCycleEffect" : {
+        "enabled" : false,
+        "mirrorLoop" : true,
+        "speed" : 0.09695886
+      },
+      "gradientOffset" : 0.09882506,
+      "gradientPreset" : "rainbow",
+      "gradientRepeat" : 5,
+      "gradientSmoothing" : 1,
+      "hueRotationEffect" : {
+        "enabled" : true,
+        "intensity" : 0.3,
+        "speed" : 0.02
+      },
+      "id" : "480E2438-2B07-4D8E-8645-B730C0F6E9BF",
+      "lightingMode" : "audioReactive",
+      "lightingPreset" : "Custom",
+      "lightingSoftness" : 0,
+      "minDistance" : 0.8,
+      "name" : "Keyframe 7",
+      "positionX" : 1.4063047,
+      "positionY" : 11.744276,
+      "positionZ" : 9.928887,
+      "pulseEffect" : {
+        "amount" : 0.1637325,
+        "enabled" : false,
+        "speed" : 0.46227682
+      },
+      "scale" : 1,
+      "sphereRadius" : 0.5,
+      "worldRotationW" : 0.999135,
+      "worldRotationX" : 0.009014492,
+      "worldRotationY" : 0.040074937,
+      "worldRotationZ" : 0.0064876704
+    }
+  ],
+  "modifiedAt" : "2026-03-17T00:26:06Z",
+  "name" : "Black Light Party"
+}

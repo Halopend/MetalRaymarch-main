@@ -537,13 +537,6 @@ actor Renderer {
 
         frame.endUpdate()
 
-        // Begin submission immediately after update so every early-return path
-        // still calls endSubmission(), preventing leaked frames in CompositorServices.
-        frame.startSubmission()
-        defer {
-            frame.endSubmission()
-        }
-
         guard let timing = frame.predictTiming() else { return }
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
 
@@ -571,14 +564,24 @@ actor Renderer {
             drawable = legacyDrawable
         }
 
+        // Begin submission once we have a drawable — every path from here MUST
+        // call drawable.encodePresent() before endSubmission() fires.
+        frame.startSubmission()
+        defer {
+            frame.endSubmission()
+        }
+
         // Wait for a buffer to become available. With maxBuffersInFlight=2,
         // this allows CPU/GPU pipelining while preventing frame accumulation.
         // The 2-buffer setup prevents the 45fps vsync lock that occurred with 1 buffer.
         // Timeout at 100ms (~10 FPS floor) to detect GPU stalls instead of hanging forever.
         let waitResult = inFlightSemaphore.wait(timeout: .now() + .milliseconds(100))
         if waitResult == .timedOut {
-            // GPU is severely behind — skip this frame to avoid accumulating latency
+            // GPU is severely behind — present an empty frame to satisfy CompositorServices,
+            // then skip rendering to avoid accumulating latency.
             if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
+            drawable.encodePresent(commandBuffer: commandBuffer)
+            commandBuffer.commit()
             return
         }
 

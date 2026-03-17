@@ -963,8 +963,8 @@ struct CatmullRomSpline {
             p3 = extrapolateKeyframe(p2, away: p1)
         }
         
-        // Perform Catmull-Rom interpolation for each parameter
-        return AnimationKeyframe(
+        // Perform Catmull-Rom interpolation for geometry parameters
+        var result = AnimationKeyframe(
             id: p1.id,
             name: p1.name,
             duration: p1.duration,
@@ -977,14 +977,92 @@ struct CatmullRomSpline {
             scale: interpolate(p0.scale, p1.scale, p2.scale, p3.scale, t: t),
             position: interpolate(p0.position, p1.position, p2.position, p3.position, t: t),
             detailScale: interpolate(p0.detailScale, p1.detailScale, p2.detailScale, p3.detailScale, t: t),
-            worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized
+            worldRotation: simd_slerp(p1.worldRotation, p2.worldRotation, simd_clamp(t, 0, 1)).normalized,
+            lightingMode: t < 0.5 ? p1.lightingMode : p2.lightingMode,
+            lightingPreset: t < 0.5 ? p1.lightingPreset : p2.lightingPreset,
+            hueRotationEffect: lerpHue(p1.hueRotationEffect, p2.hueRotationEffect, t: t),
+            pulseEffect: lerpPulse(p1.pulseEffect, p2.pulseEffect, t: t),
+            glowEffect: lerpGlow(p1.glowEffect, p2.glowEffect, t: t),
+            bloomEffect: lerpBloom(p1.bloomEffect, p2.bloomEffect, t: t),
+            fogEffect: lerpFog(p1.fogEffect, p2.fogEffect, t: t),
+            gradientCycleEffect: lerpGradientCycle(p1.gradientCycleEffect, p2.gradientCycleEffect, t: t)
         )
+        
+        // Formula parameters: linear interpolation between p1 and p2
+        result.formulaParamValues = lerpFormulaParams(p1.formulaParamValues, p2.formulaParamValues, t: t)
+        
+        // Per-keyframe color overrides: linear interpolation for continuous, discrete for enums
+        result.colorMappingMode = t < 0.5 ? p1.colorMappingMode : p2.colorMappingMode
+        result.gradientRepeat = lerpOpt(p1.gradientRepeat, p2.gradientRepeat, t: t)
+        result.gradientOffset = lerpOpt(p1.gradientOffset, p2.gradientOffset, t: t)
+        result.gradientSmoothing = lerpOpt(p1.gradientSmoothing, p2.gradientSmoothing, t: t)
+        result.colorSchemeSaturation = lerpOpt(p1.colorSchemeSaturation, p2.colorSchemeSaturation, t: t)
+        result.colorSchemeContrast = lerpOpt(p1.colorSchemeContrast, p2.colorSchemeContrast, t: t)
+        result.colorSchemeGamma = lerpOpt(p1.colorSchemeGamma, p2.colorSchemeGamma, t: t)
+        result.colorSchemeVibrance = lerpOpt(p1.colorSchemeVibrance, p2.colorSchemeVibrance, t: t)
+        result.colorSchemeCurve = lerpOpt(p1.colorSchemeCurve, p2.colorSchemeCurve, t: t)
+        result.colorSchemeShadows = lerpOpt(p1.colorSchemeShadows, p2.colorSchemeShadows, t: t)
+        result.colorSchemeHighlights = lerpOpt(p1.colorSchemeHighlights, p2.colorSchemeHighlights, t: t)
+        result.lightingSoftness = lerpOpt(p1.lightingSoftness, p2.lightingSoftness, t: t)
+        result.gradientPreset = t < 0.5 ? p1.gradientPreset : p2.gradientPreset
+        return result
+    }
+    
+    // MARK: - Helpers for optional property interpolation
+    
+    private static func lerpOpt(_ a: Float?, _ b: Float?, t: Float) -> Float? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return a + (b - a) * t
+    }
+    
+    private static func lerpFormulaParams(_ a: [Float]?, _ b: [Float]?, t: Float) -> [Float]? {
+        guard let a, let b, a.count == b.count else { return t < 0.5 ? a : b }
+        return zip(a, b).map { $0 + ($1 - $0) * t }
+    }
+    
+    private static func lerpHue(_ a: HueRotationEffect?, _ b: HueRotationEffect?, t: Float) -> HueRotationEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return HueRotationEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                                 speed: a.speed + (b.speed - a.speed) * t,
+                                 intensity: a.intensity + (b.intensity - a.intensity) * t)
+    }
+    
+    private static func lerpPulse(_ a: PulseEffect?, _ b: PulseEffect?, t: Float) -> PulseEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return PulseEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                           speed: a.speed + (b.speed - a.speed) * t,
+                           amount: a.amount + (b.amount - a.amount) * t)
+    }
+    
+    private static func lerpGlow(_ a: GlowEffect?, _ b: GlowEffect?, t: Float) -> GlowEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return GlowEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                          intensity: a.intensity + (b.intensity - a.intensity) * t)
+    }
+    
+    private static func lerpBloom(_ a: BloomEffect?, _ b: BloomEffect?, t: Float) -> BloomEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return BloomEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                           strength: a.strength + (b.strength - a.strength) * t)
+    }
+    
+    private static func lerpFog(_ a: FogEffect?, _ b: FogEffect?, t: Float) -> FogEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return FogEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                         intensity: a.intensity + (b.intensity - a.intensity) * t)
+    }
+    
+    private static func lerpGradientCycle(_ a: GradientCycleEffect?, _ b: GradientCycleEffect?, t: Float) -> GradientCycleEffect? {
+        guard let a, let b else { return t < 0.5 ? a : b }
+        return GradientCycleEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
+                                   speed: a.speed + (b.speed - a.speed) * t,
+                                   mirrorLoop: t < 0.5 ? a.mirrorLoop : b.mirrorLoop)
     }
     
     /// Create an extrapolated keyframe for smooth endpoints
     /// Reflects `away` keyframe around `anchor` to create a phantom point
     private static func extrapolateKeyframe(_ anchor: AnimationKeyframe, away: AnimationKeyframe) -> AnimationKeyframe {
-        return AnimationKeyframe(
+        var result = AnimationKeyframe(
             id: UUID(),
             name: "phantom",
             duration: anchor.duration,
@@ -997,8 +1075,32 @@ struct CatmullRomSpline {
             scale: 2 * anchor.scale - away.scale,
             position: 2 * anchor.position - away.position,
             detailScale: 2 * anchor.detailScale - away.detailScale,
-            worldRotation: anchor.worldRotation
+            worldRotation: anchor.worldRotation,
+            lightingMode: anchor.lightingMode,
+            lightingPreset: anchor.lightingPreset,
+            hueRotationEffect: anchor.hueRotationEffect,
+            pulseEffect: anchor.pulseEffect,
+            glowEffect: anchor.glowEffect,
+            bloomEffect: anchor.bloomEffect,
+            fogEffect: anchor.fogEffect,
+            gradientCycleEffect: anchor.gradientCycleEffect
         )
+        // Carry forward optional properties from the anchor point
+        result.formulaParamValues = anchor.formulaParamValues
+        result.colorMappingMode = anchor.colorMappingMode
+        result.gradientRepeat = anchor.gradientRepeat
+        result.gradientOffset = anchor.gradientOffset
+        result.gradientSmoothing = anchor.gradientSmoothing
+        result.colorSchemeSaturation = anchor.colorSchemeSaturation
+        result.colorSchemeContrast = anchor.colorSchemeContrast
+        result.colorSchemeGamma = anchor.colorSchemeGamma
+        result.colorSchemeVibrance = anchor.colorSchemeVibrance
+        result.colorSchemeCurve = anchor.colorSchemeCurve
+        result.colorSchemeShadows = anchor.colorSchemeShadows
+        result.colorSchemeHighlights = anchor.colorSchemeHighlights
+        result.lightingSoftness = anchor.lightingSoftness
+        result.gradientPreset = anchor.gradientPreset
+        return result
     }
 }
 
@@ -1012,9 +1114,10 @@ enum DefaultScenes {
     /// Stable UUID so we can always identify the built-in scene across launches.
     static let sceneOneID = UUID(uuidString: "00000000-0001-0000-0000-000000000001")!
     static let ambientBlurID = UUID(uuidString: "00000000-0002-0000-0000-000000000002")!
+    static let blackLightPartyID = UUID(uuidString: "00000000-0003-0000-0000-000000000003")!
     
     /// All default scene IDs for easy lookup
-    static let allIDs: Set<UUID> = [ambientBlurID]
+    static let allIDs: Set<UUID> = [ambientBlurID, blackLightPartyID]
     
     /// Check whether a scene ID belongs to a built-in default
     static func isDefault(_ id: UUID) -> Bool {
