@@ -846,7 +846,7 @@ final class BuddhabrotRenderer {
         guard let pipeline = splatEmitPipeline,
               let splatBuf = splatBuffer,
               let counterBuf = atomicCounterBuffer,
-              let uniformBuf = splatEmitUniformBuffer else { return }
+              let _ = splatEmitUniformBuffer else { return }
         
         let batchSize = max(1, settings.batchSize)
         let batchesPerFrame = max(1, settings.batchesPerFrame)
@@ -884,8 +884,8 @@ final class BuddhabrotRenderer {
         settings.totalSamplesAccumulated += UInt64(batchSize * batchesPerFrame)
 
         commandBuffer.addCompletedHandler { [weak self] _ in
-            guard let self,
-                  let counterBuf = self.atomicCounterBuffer else { return }
+            guard let self else { return }
+            guard let counterBuf = self.atomicCounterBuffer else { return }
             let counterValue = counterBuf.contents().bindMemory(to: UInt32.self, capacity: 1).pointee
             let clampedCount = min(Int(counterValue), self.currentMaxSplatCount)
             self.withCompletedSplatCountLock {

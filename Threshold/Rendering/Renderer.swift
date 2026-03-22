@@ -884,9 +884,11 @@ actor Renderer {
                         ParameterOperation(
                             targetID: targetID,
                             source: .audio,
-                            value: finalOffset,
+                            value: .delta(finalOffset),
                             frameIndex: parameterOperationFrameIndex,
-                            smoothingTime: max(0.02, mapping.smoothingWindow)
+                            smoothing: ParameterOperationSmoothing(
+                                smoothingTime: max(0.02, mapping.smoothingWindow)
+                            )
                         )
                     )
                 }

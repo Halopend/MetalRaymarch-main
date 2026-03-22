@@ -177,7 +177,7 @@ private struct ParameterNodeRow: View {
                             ParameterOperation(
                                 targetID: boolNode.id,
                                 source: .slider,
-                                value: value ? 1 : 0,
+                                value: .absolute(value ? 1.0 : 0.0),
                                 frameIndex: operationFrameIndex
                             )
                         )
@@ -236,7 +236,7 @@ private struct ParameterNodeRow: View {
                             ParameterOperation(
                                 targetID: floatNode.id,
                                 source: .slider,
-                                value: value,
+                                value: .absolute(value),
                                 frameIndex: operationFrameIndex
                             )
                         )
@@ -591,7 +591,7 @@ private struct PowerQuickPicker: View {
             ParameterOperation(
                 targetID: floatNode.id,
                 source: .slider,
-                value: value,
+                value: .absolute(value),
                 frameIndex: frameIndex
             )
         )

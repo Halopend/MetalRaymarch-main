@@ -391,7 +391,7 @@ final class GestureController {
                     let op = ParameterOperation(
                         targetID: node.id,
                         source: .gesture,
-                        value: newValue,
+                        value: .absolute(newValue),
                         frameIndex: self.operationFrameCounter
                     )
                     self.operationDispatcher.dispatch([op], settings: settings)
@@ -516,7 +516,7 @@ final class GestureController {
             let op = ParameterOperation(
                 targetID: node.id,
                 source: .gesture,
-                value: newValue,
+                value: .absolute(newValue),
                 frameIndex: operationFrameCounter
             )
             operationDispatcher.dispatch([op], settings: settings)
@@ -547,7 +547,7 @@ final class GestureController {
             let op = ParameterOperation(
                 targetID: "core.targetFractalScale",
                 source: .gesture,
-                value: newValue,
+                value: .absolute(newValue),
                 frameIndex: operationFrameCounter
             )
             operationDispatcher.dispatch([op], settings: settings)
@@ -980,9 +980,9 @@ final class GestureController {
                     state.startValues.z = simd_clamp(state.startValues.z + scaledDelta.z, triplet.range.lowerBound, triplet.range.upperBound)
 
                     let ops = [
-                        ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: state.startValues.x, frameIndex: operationFrameCounter),
-                        ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: state.startValues.y, frameIndex: operationFrameCounter),
-                        ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: state.startValues.z, frameIndex: operationFrameCounter),
+                        ParameterOperation(targetID: triplet.xNodeID, source: .gesture, value: .absolute(state.startValues.x), frameIndex: operationFrameCounter),
+                        ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(state.startValues.y), frameIndex: operationFrameCounter),
+                        ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: .absolute(state.startValues.z), frameIndex: operationFrameCounter),
                     ]
                     operationDispatcher.dispatch(ops, settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
@@ -1018,7 +1018,7 @@ final class GestureController {
                 let op = ParameterOperation(
                     targetID: node.id,
                     source: .gesture,
-                    value: state.startValue,
+                    value: .absolute(state.startValue),
                     frameIndex: operationFrameCounter
                 )
                 operationDispatcher.dispatch([op], settings: settings)

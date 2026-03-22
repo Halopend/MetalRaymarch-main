@@ -24,11 +24,11 @@ final class ICloudBackupManager {
     // MARK: - Constants
 
     /// Folder name inside the ubiquity container's Documents directory.
-    private nonisolated(unsafe) static let folderName = "threshold"
-    private nonisolated(unsafe) static let settingsFile = "settings.json"
-    private nonisolated(unsafe) static let presetsFile  = "presets.json"
-    private nonisolated(unsafe) static let scenesFile   = "scenes.json"
-    private nonisolated(unsafe) static let metadataFile = "backup_metadata.json"
+    private nonisolated static let folderName = "threshold"
+    private nonisolated static let settingsFile = "settings.json"
+    private nonisolated static let presetsFile  = "presets.json"
+    private nonisolated static let scenesFile   = "scenes.json"
+    private nonisolated static let metadataFile = "backup_metadata.json"
 
     // MARK: - Private
 

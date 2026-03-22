@@ -7,6 +7,8 @@ enum ParameterLayer: String, Codable, Sendable {
     case ui
     case gesture
     case music
+    case precompute
+    case system
 }
 
 struct ParameterGroup: Hashable, Codable, Sendable {
@@ -240,6 +242,7 @@ struct ParameterLayerStack: Sendable {
         case .ui: return ui
         case .gesture: return gesture
         case .music: return music
+        case .precompute, .system: return nil
         }
     }
 
@@ -255,6 +258,7 @@ struct ParameterLayerStack: Sendable {
         case .ui: ui = entry
         case .gesture: gesture = entry
         case .music: music = entry
+        case .precompute, .system: break
         }
     }
 }

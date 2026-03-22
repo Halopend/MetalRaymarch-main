@@ -268,7 +268,7 @@ final class UISettingsCache {
         let op = ParameterOperation(
             targetID: targetID,
             source: .slider,
-            value: value,
+            value: .absolute(value),
             frameIndex: 0
         )
         parameterOperationDispatcher.dispatch([op], cache: self)
