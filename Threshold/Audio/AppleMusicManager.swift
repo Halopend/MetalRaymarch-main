@@ -1,5 +1,6 @@
 import Foundation
 import MediaPlayer
+import os
 import QuartzCore
 
 @MainActor
@@ -415,24 +416,24 @@ final class AppleMusicManager {
                     }
                     return
                 }
-                playlist.addItem(withProductID: "", completionHandler: nil) // no-op warmup not needed
 
                 // Add items one at a time via persistent IDs
                 let group = DispatchGroup()
-                var anyFailed = false
+                let failCount = OSAllocatedUnfairLock(initialState: 0)
                 for item in items {
                     group.enter()
                     playlist.addItem(
                         withProductID: String(item.persistentID),
                         completionHandler: { error in
-                            if error != nil { anyFailed = true }
+                            if error != nil { failCount.withLock { $0 += 1 } }
                             group.leave()
                         }
                     )
                 }
                 group.notify(queue: .main) {
+                    let failed = failCount.withLock { $0 > 0 }
                     Task { @MainActor in
-                        continuation.resume(returning: anyFailed ? nil : name)
+                        continuation.resume(returning: failed ? nil : name)
                     }
                 }
             }

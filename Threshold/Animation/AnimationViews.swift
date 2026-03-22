@@ -626,6 +626,7 @@ struct SceneEditorView: View {
                 }
             }
         }
+    }
     
     // Standalone: NavigationStack with toolbar – for sheet presentation
     private var standaloneContent: some View {

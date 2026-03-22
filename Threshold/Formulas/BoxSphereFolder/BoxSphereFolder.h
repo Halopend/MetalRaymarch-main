@@ -31,8 +31,8 @@ FORCE_INLINE float DE_BoxSphereFolder(float3 pos, FormulaParams fp, float3x3 rot
                                       thread OrbitData& orbit) {
     float3 offset = float3(fp.params[0], fp.params[1], fp.params[2]);
     float boxFold = fp.params[3];
-    float minR2   = fp.params[4];
-    float maxR2   = fp.params[5];
+    float minR2   = max(fp.params[4], 1e-6f);  // Guard: clamp lower bound must be > 0
+    float maxR2   = max(fp.params[5], minR2);   // Ensure maxR2 >= minR2
     float scale   = fp.params[6];
     float shapeR  = fp.params[7];
     bool hasRotation = hasRot1Precomputed(fp);
@@ -91,8 +91,8 @@ FORCE_INLINE float DE_BoxSphereFolder(float3 pos, FormulaParams fp, float3x3 rot
 FORCE_INLINE float DE_BoxSphereFolder_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
     float3 offset = float3(fp.params[0], fp.params[1], fp.params[2]);
     float boxFold = fp.params[3];
-    float minR2   = fp.params[4];
-    float maxR2   = fp.params[5];
+    float minR2   = max(fp.params[4], 1e-6f);  // Guard: clamp lower bound must be > 0
+    float maxR2   = max(fp.params[5], minR2);   // Ensure maxR2 >= minR2
     float scale   = fp.params[6];
     float shapeR  = fp.params[7];
     bool hasRotation = hasRot1Precomputed(fp);

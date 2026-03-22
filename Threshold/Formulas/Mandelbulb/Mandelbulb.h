@@ -107,7 +107,8 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     // dBias acts as a DE multiplier: <1 = finer surface detail, >1 = coarser/faster.
     // The additive bias in the loop is fixed at 1.0 for numerical stability;
     // dBias scales the final result for user-controllable resolution.
-    return dBias * 0.5f * r * fast::log2(max(r, 1e-30f)) / max(dr, kEpsLen) * kLn2;
+    float safeR = max(r, 1e-6f);  // Prevent log2(~0) → -∞
+    return dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
 }
 
 // Lean distance-only: no orbit tracking, no struct writes.
@@ -163,7 +164,8 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
     }
 
     // dBias as final DE multiplier for resolution control
-    return dBias * 0.5f * r * fast::log2(max(r, 1e-30f)) / max(dr, kEpsLen) * kLn2;
+    float safeR = max(r, 1e-6f);  // Prevent log2(~0) → -∞
+    return dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
 }
 
 #endif /* DE_Mandelbulb_h */

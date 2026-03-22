@@ -29,10 +29,12 @@ FORCE_INLINE float DE_KaleidoIFS(float3 pos, FormulaParams fp, float3x3 rot,
     float nw      = fp.params[2];  // default 0.5
     bool hasRotation = hasRot1Precomputed(fp);
 
-    // Three reflection normals that cycle each iteration (normalized)
-    float3 b0 = normalize(float3(nw, nw, 0.0f));   // (nw, nw, 0)
-    float3 b1 = normalize(float3(0.0f, nw, nw));   // (0, nw, nw)
-    float3 b2 = normalize(float3(nw, 0.0f, nw));   // (nw, 0, nw)
+    // Three reflection normals that cycle each iteration (normalized).
+    // Guard: when nw==0 the vectors are zero-length; normalize(0) → NaN.
+    // Fall back to axis-aligned normals so folds still operate correctly.
+    float3 b0 = (nw > 1e-7f) ? normalize(float3(nw, nw, 0.0f)) : float3(0.70710678f, 0.70710678f, 0.0f);
+    float3 b1 = (nw > 1e-7f) ? normalize(float3(0.0f, nw, nw)) : float3(0.0f, 0.70710678f, 0.70710678f);
+    float3 b2 = (nw > 1e-7f) ? normalize(float3(nw, 0.0f, nw)) : float3(0.70710678f, 0.0f, 0.70710678f);
 
     float3 p = pos;
     float dr = 1.0f;  // accumulated scale for DE
@@ -76,9 +78,10 @@ FORCE_INLINE float DE_KaleidoIFS_Dist(float3 pos, FormulaParams fp, float3x3 rot
     float nw      = fp.params[2];
     bool hasRotation = hasRot1Precomputed(fp);
 
-    float3 b0 = normalize(float3(nw, nw, 0.0f));
-    float3 b1 = normalize(float3(0.0f, nw, nw));
-    float3 b2 = normalize(float3(nw, 0.0f, nw));
+    // Guard: when nw==0 the vectors are zero-length; normalize(0) → NaN.
+    float3 b0 = (nw > 1e-7f) ? normalize(float3(nw, nw, 0.0f)) : float3(0.70710678f, 0.70710678f, 0.0f);
+    float3 b1 = (nw > 1e-7f) ? normalize(float3(0.0f, nw, nw)) : float3(0.0f, 0.70710678f, 0.70710678f);
+    float3 b2 = (nw > 1e-7f) ? normalize(float3(nw, 0.0f, nw)) : float3(0.70710678f, 0.0f, 0.70710678f);
 
     float3 p = pos;
     float dr = 1.0f;

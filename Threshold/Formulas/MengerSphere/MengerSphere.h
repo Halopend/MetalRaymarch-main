@@ -35,12 +35,13 @@ FORCE_INLINE float DE_MengerSphere(float3 pos, FormulaParams fp, float3x3 rot,
         if (z.z < -0.5f * offset.z * (scale - 1.0f))
             z.z += offset.z * (scale - 1.0f);
 
-        // Optional sphere mapping
+        // Optional sphere mapping (guard near-zero r²)
         if (spherify) {
             float r2 = dot(z, z);
-            if (r2 < 1.0f) {
-                z /= r2;
-                dr /= r2;
+            if (r2 > 1e-6f && r2 < 1.0f) {
+                float invR2 = 1.0f / r2;
+                z *= invR2;
+                dr *= invR2;
             }
         }
 
@@ -84,9 +85,10 @@ FORCE_INLINE float DE_MengerSphere_Dist(float3 pos, FormulaParams fp, float3x3 r
 
         if (spherify) {
             float r2 = dot(z, z);
-            if (r2 < 1.0f) {
-                z /= r2;
-                dr /= r2;
+            if (r2 > 1e-6f && r2 < 1.0f) {
+                float invR2 = 1.0f / r2;
+                z *= invR2;
+                dr *= invR2;
             }
         }
 

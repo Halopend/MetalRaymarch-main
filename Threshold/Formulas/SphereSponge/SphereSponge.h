@@ -37,11 +37,12 @@ FORCE_INLINE float DE_SphereSponge(float3 pos, FormulaParams fp, float3x3 rot,
         // Translate
         z -= float3(bubble, bubble, bubble) * (scale - 1.0f);
 
-        // Sphere inversion
+        // Sphere inversion (guard near-zero r² to prevent explosion)
         float r2 = dot(z, z);
-        if (r2 < 1.0f) {
-            z /= r2;
-            dr /= r2;
+        if (r2 > 1e-6f && r2 < 1.0f) {
+            float invR2 = 1.0f / r2;
+            z *= invR2;
+            dr *= invR2;
         }
 
         z = rot * z;
@@ -78,9 +79,10 @@ FORCE_INLINE float DE_SphereSponge_Dist(float3 pos, FormulaParams fp, float3x3 r
         dr = dr * scale;
 
         float r2 = dot(z, z);
-        if (r2 < 1.0f) {
-            z /= r2;
-            dr /= r2;
+        if (r2 > 1e-6f && r2 < 1.0f) {
+            float invR2 = 1.0f / r2;
+            z *= invR2;
+            dr *= invR2;
         }
 
         z = rot * z;

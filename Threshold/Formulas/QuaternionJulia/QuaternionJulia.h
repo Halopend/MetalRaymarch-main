@@ -56,7 +56,8 @@ FORCE_INLINE float DE_QuaternionJulia(float3 pos, FormulaParams fp, float3x3 rot
 
     float r = fast::length(q);
     float dr = fast::length(dq);
-    return 0.5f * r * fast::log(max(r, 1e-30f)) / max(dr, kEpsLen);
+    float safeR = max(r, 1e-6f);  // Prevent log(~0) → -∞
+    return 0.5f * safeR * fast::log(safeR) / max(dr, kEpsLen);
 }
 
 // Lean distance-only: no orbit tracking, no struct writes.
@@ -86,7 +87,8 @@ FORCE_INLINE float DE_QuaternionJulia_Dist(float3 pos, FormulaParams fp, float3x
     }
 
     float r = fast::length(q);
-    return 0.5f * r * fast::log(max(r, 1e-30f)) / max(fast::length(dq), kEpsLen);
+    float safeR = max(r, 1e-6f);  // Prevent log(~0) → -∞
+    return 0.5f * safeR * fast::log(safeR) / max(fast::length(dq), kEpsLen);
 }
 
 #endif /* DE_QuaternionJulia_h */
