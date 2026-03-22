@@ -120,6 +120,96 @@ typedef struct {
 } BuddhabrotRayMarchUniformsArray;
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// MARK: - 3D Gaussian Splat Types
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Maximum splat buffer capacity. 512K is balanced for visionOS thermals.
+// Must be power-of-2 for radix sort.
+#define BBROT_DEFAULT_MAX_SPLATS 524288
+
+// Radix sort constants
+#define RADIX_SORT_BITS_PER_PASS 8
+#define RADIX_SORT_BIN_COUNT 256
+#define RADIX_SORT_THREADS_PER_GROUP 256
+
+/// A single Gaussian splat: position + packed color + orbit tangent. 32 bytes total.
+/// Written by the emit compute kernel, read by the splat render vertex shader.
+/// Note: vector_float3 is 16-byte aligned (16 bytes including padding), so the tangent
+/// fields occupy the alignment padding that was previously wasted — zero extra memory.
+typedef struct {
+    vector_float3 position;       // World-space orbit point (16 bytes with alignment)
+    uint32_t      packedColor;    // R8G8B8A8 — color from transfer function + opacity (4 bytes)
+    float         tangentX;       // Orbit tangent direction x (4 bytes)
+    float         tangentY;       // Orbit tangent direction y (4 bytes)
+    float         tangentZ;       // Orbit tangent direction z (4 bytes)
+} BuddhabrotSplat;
+
+/// Parameters for the splat emission compute kernel.
+/// Same orbit computation as accumulation, but appends orbit points to a splat buffer
+/// instead of depositing into a density grid.
+typedef struct {
+    uint32_t maxIterations;       // Maximum fractal iterations
+    uint32_t batchSize;           // Number of random seeds per dispatch
+    uint32_t seedOffset;          // Offset into global seed sequence
+    float    escapeRadius;        // Bailout radius squared
+    float    worldExtent;         // Half-size of the bounding cube
+    float    power;               // Mandelbulb power
+    float    bailoutRadius;       // Bailout radius (not squared)
+    uint32_t maxSplatCount;       // Ring-buffer capacity
+
+    // Transfer function colors (applied at emit time on GPU)
+    vector_float3 colorLow;
+    float         pad0;
+    vector_float3 colorMid;
+    float         pad1;
+    vector_float3 colorHigh;
+    float         pad2;
+} BuddhabrotEmitUniforms;
+
+/// A sort key entry: view-space depth key + original splat index. 8 bytes.
+typedef struct {
+    uint32_t key;                  // Depth encoded as sortable uint32 (larger = farther)
+    uint32_t value;                // Index into splat buffer
+} RadixSortEntry;
+
+/// Uniforms for the depth-key computation kernel.
+typedef struct {
+    matrix_float4x4 viewMatrix;            // World → view (left eye)
+    matrix_float4x4 volumeWorldMatrix;     // Volume model → world
+    uint32_t activeSplatCount;
+    float    pad[3];
+} DepthKeyUniforms;
+
+/// Uniforms for each radix sort pass.
+typedef struct {
+    uint32_t activeSplatCount;     // Number of elements to sort
+    uint32_t bitOffset;            // Which 8-bit digit (0, 8, 16, 24)
+    uint32_t numThreadgroups;      // Total threadgroups dispatched for histogram/scatter
+    uint32_t pad;
+} RadixSortUniforms;
+
+/// Per-eye uniforms for 3D Gaussian splat rendering.
+typedef struct {
+    matrix_float4x4 viewMatrix;
+    matrix_float4x4 projectionMatrix;
+    matrix_float4x4 volumeWorldMatrix;     // Volume model → world
+
+    float    splatScaleAlongTangent; // Scale along orbit tangent direction
+    float    splatScalePerp;         // Scale perpendicular to orbit tangent
+    float    opacity;                // Global opacity multiplier (0–1)
+    uint32_t activeSplatCount;       // How many splats to draw
+    float    time;                   // Animation time
+    float    brightnessScale;        // Global brightness multiplier
+    float    viewportWidth;          // Viewport width in pixels
+    float    viewportHeight;         // Viewport height in pixels
+} BuddhabrotSplatRenderUniforms;
+
+/// Stereo pair of splat render uniforms.
+typedef struct {
+    BuddhabrotSplatRenderUniforms uniforms[2];
+} BuddhabrotSplatRenderUniformsArray;
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - Buffer Indices
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -129,6 +219,15 @@ typedef NS_ENUM(EnumBackingType, BuddhabrotBufferIndex) {
     BuddhabrotBufferIndexDensityR      = 1, // RGB mode: short escapes (red channel)
     BuddhabrotBufferIndexDensityG      = 2, // RGB mode: medium escapes (green channel)
     BuddhabrotBufferIndexDensityB      = 3, // RGB mode: long escapes (blue channel)
+    BuddhabrotBufferIndexSplats        = 1, // Splat buffer (splat mode)
+    BuddhabrotBufferIndexAtomicCounter = 2, // Atomic counter for splat append
+    BuddhabrotBufferIndexSplatRenderUniforms = 0, // Per-eye splat render uniforms
+    // Sort buffers for 3DGS
+    BuddhabrotBufferIndexSortKeysIn    = 3, // RadixSortEntry input
+    BuddhabrotBufferIndexSortKeysOut   = 4, // RadixSortEntry output (ping-pong)
+    BuddhabrotBufferIndexHistogram     = 5, // Per-threadgroup histograms
+    BuddhabrotBufferIndexSortUniforms  = 6, // RadixSortUniforms
+    BuddhabrotBufferIndexSortedIndices = 1, // Sorted index buffer for render (reuses slot 1)
 };
 
 typedef NS_ENUM(EnumBackingType, BuddhabrotTextureIndex) {

@@ -60,6 +60,13 @@ struct MetalProjectTestApp: App {
             ContentView()
                 .environment(appModel)
                 .onAppear {
+                    // Dismiss any secondary windows that may have been restored
+                    // by the system from a previous session. Without this, windows
+                    // like Music Library can reappear and block immersive mode entry.
+                    dismissWindow(id: AppModel.libraryWindowID)
+                    dismissWindow(id: AppModel.fractalBrowserWindowID)
+                    dismissWindow(id: AppModel.onboardingWindowID)
+
                     // Set up handler for gesture-based window control
                     appModel.openMenuWindowHandler = {
                         openWindow(id: appModel.menuWindowID)

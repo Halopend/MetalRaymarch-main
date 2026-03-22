@@ -32,31 +32,64 @@ struct BuddhabrotControlsView: View {
                 
                 Divider()
                 
+                // MARK: - Render Mode
+                GroupBox("Render Mode") {
+                    Picker("", selection: Binding(
+                        get: { settings.renderMode },
+                        set: { settings.renderMode = $0; settings.needsClear = true }
+                    )) {
+                        ForEach(BuddhabrotRenderMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                
                 // MARK: - Accumulation Stats
                 GroupBox("Accumulation") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Samples: \(formatLargeNumber(settings.totalSamplesAccumulated))")
                             .font(.caption.monospacedDigit())
                         
-                        HStack {
-                            Text("Resolution")
-                            Spacer()
-                            Picker("", selection: Binding(
-                                get: { settings.resolution },
-                                set: { newVal in
-                                    settings.resolution = newVal
-                                    settings.needsClear = true
+                        if settings.renderMode == .volumeRayMarch {
+                            HStack {
+                                Text("Resolution")
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { settings.resolution },
+                                    set: { newVal in
+                                        settings.resolution = newVal
+                                        settings.needsClear = true
+                                    }
+                                )) {
+                                    Text("64³").tag(64)
+                                    Text("128³").tag(128)
+                                    Text("192³").tag(192)
+                                    Text("256³").tag(256)
+                                    Text("512³").tag(512)
+                                    Text("756³").tag(756)
                                 }
-                            )) {
-                                Text("64³").tag(64)
-                                Text("128³").tag(128)
-                                Text("192³").tag(192)
-                                Text("256³").tag(256)
-                                Text("512³").tag(512)
-                                Text("756³").tag(756)
+                                .pickerStyle(.menu)
+                                .frame(width: 140)
                             }
-                            .pickerStyle(.menu)
-                            .frame(width: 140)
+                        }
+                        
+                        if settings.renderMode == .gaussianSplats {
+                            HStack {
+                                Text("Max Splats")
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { settings.maxSplatCount },
+                                    set: { settings.maxSplatCount = $0; settings.needsClear = true }
+                                )) {
+                                    Text("64K").tag(65_536)
+                                    Text("128K").tag(131_072)
+                                    Text("256K").tag(262_144)
+                                    Text("512K").tag(524_288)
+                                }
+                                .pickerStyle(.menu)
+                                .frame(width: 140)
+                            }
                         }
                         
                         Button("Clear & Restart") {
@@ -116,62 +149,89 @@ struct BuddhabrotControlsView: View {
                             .frame(width: 200)
                         }
                         
-                        HStack {
-                            Text("Normalize Every")
-                            Spacer()
-                            Picker("", selection: Binding(
-                                get: { settings.normalizationInterval },
-                                set: { settings.normalizationInterval = $0 }
-                            )) {
-                                Text("1").tag(1)
-                                Text("2").tag(2)
-                                Text("4").tag(4)
-                                Text("8").tag(8)
+                        if settings.renderMode == .volumeRayMarch {
+                            HStack {
+                                Text("Normalize Every")
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { settings.normalizationInterval },
+                                    set: { settings.normalizationInterval = $0 }
+                                )) {
+                                    Text("1").tag(1)
+                                    Text("2").tag(2)
+                                    Text("4").tag(4)
+                                    Text("8").tag(8)
+                                }
+                                .pickerStyle(.segmented)
+                                .frame(width: 200)
+                                Text("frames")
                             }
-                            .pickerStyle(.segmented)
-                            .frame(width: 200)
-                            Text("frames")
+                            
+                            Toggle("RGB Nebulabrot Mode", isOn: Binding(
+                                get: { settings.useRGBMode },
+                                set: { settings.useRGBMode = $0; settings.needsClear = true }
+                            ))
                         }
-                        
-                        Toggle("RGB Nebulabrot Mode", isOn: Binding(
-                            get: { settings.useRGBMode },
-                            set: { settings.useRGBMode = $0; settings.needsClear = true }
-                        ))
                     }
                 }
                 
-                // MARK: - Transfer Function
-                GroupBox("Appearance") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SliderRow(label: "Density Scale", value: Binding(
-                            get: { settings.densityScale },
-                            set: { settings.densityScale = $0 }
-                        ), range: 0.01...10.0, format: "%.2f")
-                        
-                        SliderRow(label: "Gamma", value: Binding(
-                            get: { settings.gamma },
-                            set: { settings.gamma = $0 }
-                        ), range: 0.1...2.0, format: "%.2f")
-                        
-                        SliderRow(label: "Opacity", value: Binding(
-                            get: { settings.alphaScale },
-                            set: { settings.alphaScale = $0 }
-                        ), range: 0.5...30.0, format: "%.1f")
+                // MARK: - Appearance (mode-specific)
+                if settings.renderMode == .gaussianSplats {
+                    GroupBox("Splat Appearance") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SliderRow(label: "Scale (Tangent)", value: Binding(
+                                get: { settings.splatScaleAlongTangent },
+                                set: { settings.splatScaleAlongTangent = $0 }
+                            ), range: 0.005...0.2, format: "%.3f")
+                            
+                            SliderRow(label: "Scale (Perp)", value: Binding(
+                                get: { settings.splatScalePerp },
+                                set: { settings.splatScalePerp = $0 }
+                            ), range: 0.005...0.2, format: "%.3f")
+                            
+                            SliderRow(label: "Opacity", value: Binding(
+                                get: { settings.splatOpacity },
+                                set: { settings.splatOpacity = $0 }
+                            ), range: 0.01...1.0, format: "%.2f")
+                            
+                            SliderRow(label: "Brightness", value: Binding(
+                                get: { settings.brightnessScale },
+                                set: { settings.brightnessScale = $0 }
+                            ), range: 0.1...5.0, format: "%.2f")
+                        }
                     }
-                }
-                
-                // MARK: - Ray March Quality
-                GroupBox("Ray March") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SliderRow(label: "Steps", value: Binding(
-                            get: { Float(settings.maxRaySteps) },
-                            set: { settings.maxRaySteps = Int($0) }
-                        ), range: 32...192, format: "%.0f")
-                        
-                        SliderRow(label: "Early Exit Alpha", value: Binding(
-                            get: { settings.earlyExitAlpha },
-                            set: { settings.earlyExitAlpha = $0 }
-                        ), range: 0.5...1.0, format: "%.2f")
+                } else {
+                    GroupBox("Appearance") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SliderRow(label: "Density Scale", value: Binding(
+                                get: { settings.densityScale },
+                                set: { settings.densityScale = $0 }
+                            ), range: 0.01...10.0, format: "%.2f")
+                            
+                            SliderRow(label: "Gamma", value: Binding(
+                                get: { settings.gamma },
+                                set: { settings.gamma = $0 }
+                            ), range: 0.1...2.0, format: "%.2f")
+                            
+                            SliderRow(label: "Opacity", value: Binding(
+                                get: { settings.alphaScale },
+                                set: { settings.alphaScale = $0 }
+                            ), range: 0.5...30.0, format: "%.1f")
+                        }
+                    }
+                    
+                    GroupBox("Ray March") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            SliderRow(label: "Steps", value: Binding(
+                                get: { Float(settings.maxRaySteps) },
+                                set: { settings.maxRaySteps = Int($0) }
+                            ), range: 32...192, format: "%.0f")
+                            
+                            SliderRow(label: "Early Exit Alpha", value: Binding(
+                                get: { settings.earlyExitAlpha },
+                                set: { settings.earlyExitAlpha = $0 }
+                            ), range: 0.5...1.0, format: "%.2f")
+                        }
                     }
                 }
                 

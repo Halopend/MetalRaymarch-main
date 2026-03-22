@@ -192,6 +192,11 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
         )
     }
 
+    // ── Playlist Creation ─────────────────────────────────────────────────
+    func createPlaylist(name: String, trackNativeIDs: [String]) async -> String? {
+        await manager.createPlaylist(name: name, songIDs: trackNativeIDs.compactMap { UInt64($0) })
+    }
+
     // ── Audio Levels ─────────────────────────────────────────────────────
     var bassLevel: Float     { manager.bassLevel }
     var midLevel: Float      { manager.midLevel }

@@ -69,7 +69,7 @@ enum FractalDefaultsStore {
     /// Create factory defaults for a fractal type using its descriptor.
     static func makeFactoryDefaults(for fractalType: FractalModelType) -> StoredFractalDefaults {
         let desc = FractalTypeRegistry.descriptor(for: fractalType)
-        var formulaParams = desc.defaultFormulaParams()
+        var formulaParams = fractalType.defaultFormulaParams()
         let viewState = desc.defaultViewState
         let shape = desc.defaultShapeParams
 

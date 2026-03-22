@@ -120,16 +120,26 @@ enum FractalTypeRegistry {
         TheliPseudoKleinianDescriptor(),
         KleinianDescriptor(),
         BoxSphereFolderDescriptor(),
+        KaleidoIFSDescriptor(),
     ]
 
     private static let descriptors: [Int32: any FractalTypeDescriptor] = {
         var d: [Int32: any FractalTypeDescriptor] = [:]
         for desc in allDescriptors { d[desc.rawValue] = desc }
+        #if DEBUG
+        for c in FractalModelType.allCases {
+            assert(d[c.rawValue] != nil,
+                   "FractalTypeRegistry: missing descriptor for \(c) (rawValue \(c.rawValue))")
+        }
+        #endif
         return d
     }()
 
     static func descriptor(for type: FractalModelType) -> FractalTypeDescriptor {
-        descriptors[type.rawValue]!
+        guard let desc = descriptors[type.rawValue] else {
+            preconditionFailure("FractalTypeRegistry: no descriptor for \(type) (rawValue \(type.rawValue))")
+        }
+        return desc
     }
 }
 
@@ -368,6 +378,32 @@ private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
         fp.params.9 = 1.0   // ColorScale
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
+    }
+}
+
+private struct KaleidoIFSDescriptor: FractalTypeDescriptor {
+    let rawValue: Int32 = 21
+    let displayName = "Kaleido IFS"
+    let icon = "sparkles"
+    let category = "Kaleidoscopic IFS"
+    let codableString = "kaleidoIFS"
+    let isSelectableInUI = true
+    let supportedCoreGestureActions = standardCoreGestureActions
+    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
+    func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        fp.params.0 = 2.0    // Scale
+        fp.params.1 = 1.0    // Offset
+        fp.params.2 = 0.5    // NormalW
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+    var defaultViewState: FractalViewDefaults {
+        FractalViewDefaults(
+            position: SIMD3<Float>(0.0, 0.0, 0.0),
+            detailScale: 0.8,
+            safetyBubbleEnabled: false
+        )
     }
 }
 

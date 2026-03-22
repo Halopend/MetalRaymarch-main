@@ -24,11 +24,11 @@ final class ICloudBackupManager {
     // MARK: - Constants
 
     /// Folder name inside the ubiquity container's Documents directory.
-    private static let folderName = "threshold"
-    private static let settingsFile = "settings.json"
-    private static let presetsFile  = "presets.json"
-    private static let scenesFile   = "scenes.json"
-    private static let metadataFile = "backup_metadata.json"
+    private nonisolated(unsafe) static let folderName = "threshold"
+    private nonisolated(unsafe) static let settingsFile = "settings.json"
+    private nonisolated(unsafe) static let presetsFile  = "presets.json"
+    private nonisolated(unsafe) static let scenesFile   = "scenes.json"
+    private nonisolated(unsafe) static let metadataFile = "backup_metadata.json"
 
     // MARK: - Private
 
@@ -59,28 +59,30 @@ final class ICloudBackupManager {
     /// Discovers the ubiquity container on a background thread and caches the
     /// resolved folder URL.  Safe to call multiple times.
     func resolveContainer() {
-        Task.detached { [weak self] in
-            // url(forUbiquityContainerIdentifier:) can block — run off-main.
-            guard let containerURL = FileManager.default
-                    .url(forUbiquityContainerIdentifier: nil) else {
-                await MainActor.run { self?.isAvailable = false }
-                return
-            }
-
-            let folder = containerURL
-                .appendingPathComponent("Documents", isDirectory: true)
-                .appendingPathComponent(Self.folderName, isDirectory: true)
-
-            // Ensure the directory exists (FileManager creates intermediates).
-            try? FileManager.default.createDirectory(
-                at: folder, withIntermediateDirectories: true)
-
-            await MainActor.run {
-                self?.cloudFolderURL = folder
-                self?.isAvailable = true
-                self?.loadMetadata()
+        Task {
+            let folder = await Self.discoverCloudFolder()
+            if let folder {
+                self.cloudFolderURL = folder
+                self.isAvailable = true
+                self.loadMetadata()
+            } else {
+                self.isAvailable = false
             }
         }
+    }
+
+    /// Blocking ubiquity lookup — runs off main actor via nonisolated async.
+    private nonisolated static func discoverCloudFolder() async -> URL? {
+        guard let containerURL = FileManager.default
+                .url(forUbiquityContainerIdentifier: nil) else {
+            return nil
+        }
+        let folder = containerURL
+            .appendingPathComponent("Documents", isDirectory: true)
+            .appendingPathComponent(folderName, isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: folder, withIntermediateDirectories: true)
+        return folder
     }
 
     // MARK: - Backup
@@ -101,39 +103,59 @@ final class ICloudBackupManager {
         let presets = presetManager.presets
         let scenes = animationManager.userScenes
 
-        Task.detached { [weak self, encoder] in
-            do {
-                // Settings
-                let settingsData = try encoder.encode(settingsPayload)
-                try settingsData.write(to: folder.appendingPathComponent(Self.settingsFile), options: .atomic)
-
-                // Presets
-                let presetsData = try encoder.encode(presets)
-                try presetsData.write(to: folder.appendingPathComponent(Self.presetsFile), options: .atomic)
-
-                // User scenes
-                let scenesData = try encoder.encode(scenes)
-                try scenesData.write(to: folder.appendingPathComponent(Self.scenesFile), options: .atomic)
-
-                // Metadata
-                let meta = BackupMetadata(date: Date(), settingsCount: 8, presetsCount: presets.count, scenesCount: scenes.count)
-                let metaData = try encoder.encode(meta)
-                try metaData.write(to: folder.appendingPathComponent(Self.metadataFile), options: .atomic)
-
-                await MainActor.run {
-                    self?.lastBackupDate = meta.date
-                    self?.isBusy = false
-                }
-            } catch {
-                await MainActor.run {
-                    self?.lastError = error.localizedDescription
-                    self?.isBusy = false
-                }
+        Task {
+            let result = await Self.performBackup(
+                to: folder, settingsPayload: settingsPayload,
+                presets: presets, scenes: scenes
+            )
+            switch result {
+            case .success(let date):
+                self.lastBackupDate = date
+            case .failure(let error):
+                self.lastError = error.localizedDescription
             }
+            self.isBusy = false
+        }
+    }
+
+    /// File I/O for backup — runs off main actor.
+    private nonisolated static func performBackup(
+        to folder: URL,
+        settingsPayload: SettingsBackupPayload,
+        presets: [FractalPreset],
+        scenes: [AnimationScene]
+    ) async -> Result<Date, Error> {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+
+        do {
+            let settingsData = try encoder.encode(settingsPayload)
+            try settingsData.write(to: folder.appendingPathComponent(settingsFile), options: .atomic)
+
+            let presetsData = try encoder.encode(presets)
+            try presetsData.write(to: folder.appendingPathComponent(presetsFile), options: .atomic)
+
+            let scenesData = try encoder.encode(scenes)
+            try scenesData.write(to: folder.appendingPathComponent(scenesFile), options: .atomic)
+
+            let meta = BackupMetadata(date: Date(), settingsCount: 8, presetsCount: presets.count, scenesCount: scenes.count)
+            let metaData = try encoder.encode(meta)
+            try metaData.write(to: folder.appendingPathComponent(metadataFile), options: .atomic)
+
+            return .success(meta.date)
+        } catch {
+            return .failure(error)
         }
     }
 
     // MARK: - Restore
+
+    private struct RestoredData: Sendable {
+        let settings: SettingsBackupPayload?
+        let presets: [FractalPreset]?
+        let scenes: [AnimationScene]?
+    }
 
     /// Reads settings, presets, and scenes from iCloud Drive and applies them.
     func restore(into settings: RenderSettings, presetManager: PresetManager, animationManager: AnimationManager) {
@@ -146,48 +168,58 @@ final class ICloudBackupManager {
         isBusy = true
         lastError = nil
 
-        Task.detached { [weak self, decoder] in
-            do {
-                // Settings
-                let settingsURL = folder.appendingPathComponent(Self.settingsFile)
-                if FileManager.default.fileExists(atPath: settingsURL.path) {
-                    let data = try Data(contentsOf: settingsURL)
-                    let payload = try decoder.decode(SettingsBackupPayload.self, from: data)
-                    await MainActor.run {
-                        payload.apply(to: settings)
-                        SettingsPersistence.saveAll(from: settings)
-                    }
+        Task {
+            let result = await Self.performRestore(from: folder)
+            switch result {
+            case .success(let restored):
+                if let payload = restored.settings {
+                    payload.apply(to: settings)
+                    SettingsPersistence.saveAll(from: settings)
                 }
-
-                // Presets
-                let presetsURL = folder.appendingPathComponent(Self.presetsFile)
-                if FileManager.default.fileExists(atPath: presetsURL.path) {
-                    let data = try Data(contentsOf: presetsURL)
-                    let presets = try decoder.decode([FractalPreset].self, from: data)
-                    await MainActor.run {
-                        presetManager.replaceAll(with: presets)
-                    }
+                if let presets = restored.presets {
+                    presetManager.replaceAll(with: presets)
                 }
-
-                // Scenes
-                let scenesURL = folder.appendingPathComponent(Self.scenesFile)
-                if FileManager.default.fileExists(atPath: scenesURL.path) {
-                    let data = try Data(contentsOf: scenesURL)
-                    let scenes = try decoder.decode([AnimationScene].self, from: data)
-                    await MainActor.run {
-                        animationManager.replaceUserScenes(with: scenes)
-                    }
+                if let scenes = restored.scenes {
+                    animationManager.replaceUserScenes(with: scenes)
                 }
-
-                await MainActor.run {
-                    self?.isBusy = false
-                }
-            } catch {
-                await MainActor.run {
-                    self?.lastError = error.localizedDescription
-                    self?.isBusy = false
-                }
+            case .failure(let error):
+                self.lastError = error.localizedDescription
             }
+            self.isBusy = false
+        }
+    }
+
+    /// File I/O for restore — runs off main actor.
+    private nonisolated static func performRestore(from folder: URL) async -> Result<RestoredData, Error> {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        do {
+            var restoredSettings: SettingsBackupPayload?
+            var restoredPresets: [FractalPreset]?
+            var restoredScenes: [AnimationScene]?
+
+            let settingsURL = folder.appendingPathComponent(settingsFile)
+            if FileManager.default.fileExists(atPath: settingsURL.path) {
+                let data = try Data(contentsOf: settingsURL)
+                restoredSettings = try decoder.decode(SettingsBackupPayload.self, from: data)
+            }
+
+            let presetsURL = folder.appendingPathComponent(presetsFile)
+            if FileManager.default.fileExists(atPath: presetsURL.path) {
+                let data = try Data(contentsOf: presetsURL)
+                restoredPresets = try decoder.decode([FractalPreset].self, from: data)
+            }
+
+            let scenesURL = folder.appendingPathComponent(scenesFile)
+            if FileManager.default.fileExists(atPath: scenesURL.path) {
+                let data = try Data(contentsOf: scenesURL)
+                restoredScenes = try decoder.decode([AnimationScene].self, from: data)
+            }
+
+            return .success(RestoredData(settings: restoredSettings, presets: restoredPresets, scenes: restoredScenes))
+        } catch {
+            return .failure(error)
         }
     }
 

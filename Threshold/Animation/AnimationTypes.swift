@@ -225,6 +225,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.foldingLimit = geo.foldingLimit
         self.sphereRadius = geo.sphereRadius
         self.fractalScale = geo.fractalScale
+        self.scale = geo.scale
         self.positionX = geo.position.x
         self.positionY = geo.position.y
         self.positionZ = geo.position.z

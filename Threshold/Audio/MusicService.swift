@@ -366,6 +366,37 @@ final class MusicService {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    // SONG ATTACHMENT FROM LIBRARY TRACK
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Build a `SongAttachment` from a library track without requiring it
+    /// to be currently playing. Optionally cross-matches across services.
+    func makeAttachment(from track: UnifiedTrack, crossMatch: Bool = true) async -> SongAttachment {
+        let base = SongAttachment(
+            trackID: track.trackID,
+            title: track.title,
+            artist: track.artist
+        )
+        return crossMatch ? await crossMatchAttachment(base) : base
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // PLAYLIST CREATION
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Create a playlist on the active service from a set of song attachments.
+    /// Returns the new playlist name on success, or nil if unsupported/failed.
+    func createPlaylist(name: String, from attachments: [SongAttachment]) async -> String? {
+        guard let provider = activeProvider else { return nil }
+
+        let nativeIDs = attachments.compactMap { attachment -> String? in
+            attachment.trackIDs.first { $0.serviceID == provider.serviceID }?.nativeID
+        }
+        guard !nativeIDs.isEmpty else { return nil }
+        return await provider.createPlaylist(name: name, trackNativeIDs: nativeIDs)
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     // PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════════════════
 }

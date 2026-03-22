@@ -722,6 +722,39 @@
           "step": 0.01
         }
       ]
+    },
+    {
+      "id": "kaleidoIFS",
+      "name": "Kaleido IFS",
+      "fractalType": 21,
+      "category": "Kaleidoscopic IFS",
+      "description": "Kaleidoscopic IFS with plane reflections — crystalline geometry with directional coloring.",
+      "params": [
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 2.0,
+          "min": 1.0,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "Offset",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "Normal Weight",
+          "default": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01
+        }
+      ]
     }
   ]
 }

@@ -1,10 +1,10 @@
 {
   "fractalType" : "mandelbox",
   "colorMappingMode" : 0,
-  "colorSchemeContrast" : 1.02,
+  "colorSchemeContrast" : 1.15,
   "colorSchemeCurve" : 0,
   "colorSchemeGamma" : 0.75,
-  "colorSchemeHighlights" : 0,
+  "colorSchemeHighlights" : 1.0,
   "colorSchemeSaturation" : 1.5,
   "colorSchemeShadows" : 0,
   "colorSchemeVibrance" : 1.0,

@@ -32,14 +32,32 @@ final class GestureController {
     private var operationFrameCounter: UInt64 = 0
 
     // ==========================================================================
-    // PER-FRACTAL PARAMETER RANGES  (via FractalTypeDescriptor)
+    // PER-FRACTAL PARAMETER RANGES  (cached from FractalTypeDescriptor)
     // ==========================================================================
 
-    /// Get parameter ranges for current fractal type from its descriptor.
+    private var cachedFractalType: FractalModelType?
+    private var cachedScaleClamp: ClosedRange<Float> = 0.001...500.0
+    private var cachedRanges: GestureParamRanges = .standard
+    private var cachedRangesExtended: GestureParamRanges = .extended
+
+    /// Refresh cached descriptor values when the fractal type changes.
+    /// Call once per frame (or after preset load) — skips the registry
+    /// lookup when the type hasn't changed.
+    private func refreshCachedDescriptorValues() {
+        guard let settings = renderSettings else { return }
+        let current = settings.fractalType
+        guard current != cachedFractalType else { return }
+        let desc = FractalTypeRegistry.descriptor(for: current)
+        cachedScaleClamp = desc.grabScaleClamp
+        cachedRanges = desc.gestureRanges
+        cachedRangesExtended = desc.gestureRangesExtended
+        cachedFractalType = current
+    }
+
+    /// Get parameter ranges for current fractal type (from cache).
     private func currentRanges() -> GestureParamRanges {
         guard let settings = renderSettings else { return .standard }
-        let desc = FractalTypeRegistry.descriptor(for: settings.fractalType)
-        return settings.extendedGestureRange ? desc.gestureRangesExtended : desc.gestureRanges
+        return settings.extendedGestureRange ? cachedRangesExtended : cachedRanges
     }
 
     @discardableResult
@@ -131,6 +149,7 @@ final class GestureController {
     func syncWithSettings() {
         guard let settings = renderSettings else { return }
         accumulatedPosition = settings.effectiveTargetPosition
+        refreshCachedDescriptorValues()
         
         // Reset all gesture states to avoid stale data
         for digit in 1...3 { fingerGestureState[digit] = TwoHandGestureState() }
@@ -162,6 +181,7 @@ final class GestureController {
     @available(visionOS 2.0, *)
     func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
         operationFrameCounter &+= 1
+        refreshCachedDescriptorValues()
         leftHand = buildHandData(from: leftAnchor)
         rightHand = buildHandData(from: rightAnchor)
         
@@ -636,8 +656,8 @@ final class GestureController {
                 }
             }
             
-            // ── Per-fractal scale clamp (from descriptor) ────────────────
-            let scaleClamp = FractalTypeRegistry.descriptor(for: settings.fractalType).grabScaleClamp
+            // ── Per-fractal scale clamp (cached from descriptor) ─────────
+            let scaleClamp = cachedScaleClamp
 
             // ── Evaluate the mapping ─────────────────────────────────────
             let result: (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float)

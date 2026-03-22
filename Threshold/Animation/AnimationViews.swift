@@ -45,6 +45,8 @@ struct SceneListView: View {
     @State private var showingCreateSheet = false
     @State private var newSceneName = ""
     @State private var selectedSceneForEdit: AnimationScene?
+    @State private var showCreatePlaylist = false
+    @State private var playlistCreationStatus: String?
     
     var body: some View {
         if isInline {
@@ -173,10 +175,55 @@ struct SceneListView: View {
                     Text("Hidden Scenes")
                 }
             }
+
+            // Create playlist from scene songs
+            if scenesWithSongs.count > 0 {
+                Section {
+                    Button {
+                        showCreatePlaylist = true
+                    } label: {
+                        Label("Create Playlist from Scenes", systemImage: "music.note.list")
+                    }
+                    if let status = playlistCreationStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Playlist")
+                }
+            }
         }
         .listStyle(.plain)
+        .alert("Create Playlist", isPresented: $showCreatePlaylist) {
+            Button("Create") { createPlaylistFromScenes(name: "Threshold Scenes") }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Create an Apple Music playlist with \(scenesWithSongs.count) song(s) from your scenes?")
+        }
     }
-    
+
+    private var scenesWithSongs: [AnimationScene] {
+        animationManager.scenes.filter { $0.attachedSong != nil }
+    }
+
+    private func createPlaylistFromScenes(name: String) {
+        guard let music = appModel.musicService else { return }
+        let attachments = scenesWithSongs.compactMap(\.attachedSong)
+        guard !attachments.isEmpty else { return }
+
+        playlistCreationStatus = "Creating\u{2026}"
+        Task {
+            if let result = await music.createPlaylist(name: name, from: attachments) {
+                playlistCreationStatus = "Created \"\(result)\""
+            } else {
+                playlistCreationStatus = "Failed to create playlist"
+            }
+            try? await Task.sleep(for: .seconds(4))
+            playlistCreationStatus = nil
+        }
+    }
+
     private var createSheet: some View {
         CreateSceneSheet(
             sceneName: $newSceneName,
@@ -347,6 +394,7 @@ struct SceneEditorView: View {
     @State private var defaultDuration: Double = 2.0
     @State private var isEditMode: EditMode = .inactive
     @State private var showSceneSettings = false
+    @State private var showSongPicker = false
     
     var body: some View {
         if isInline {
@@ -552,11 +600,32 @@ struct SceneEditorView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(appModel.musicService.nowPlayingUnified == nil)
+
+                Button {
+                    showSongPicker = true
+                } label: {
+                    Label(
+                        scene.attachedSong == nil ? "Browse Library" : "Choose from Library",
+                        systemImage: "music.note.list"
+                    )
+                    .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(appModel.musicService?.hasAnyConnection != true)
             }
         }
         .padding(16)
         .frame(width: 280)
-    }
+        .sheet(isPresented: $showSongPicker) {
+            SongPickerSheet(musicService: appModel.musicService) { track in
+                Task {
+                    if let music = appModel.musicService {
+                        scene.attachedSong = await music.makeAttachment(from: track)
+                    }
+                }
+            }
+        }
     
     // Standalone: NavigationStack with toolbar – for sheet presentation
     private var standaloneContent: some View {
@@ -1075,6 +1144,19 @@ struct AnimationPlaybackControls: View {
                 
                 // Controls
                 HStack(spacing: 16) {
+                    // Record button
+                    Button {
+                        if animationManager.isRecording {
+                            animationManager.stopRecording()
+                        } else {
+                            animationManager.startRecording()
+                        }
+                    } label: {
+                        Image(systemName: animationManager.isRecording ? "stop.circle.fill" : "record.circle")
+                            .foregroundStyle(animationManager.isRecording ? .red : .primary)
+                    }
+                    .help(animationManager.isRecording ? "Stop recording" : "Record gestures")
+                    
                     Button {
                         animationManager.stop()
                     } label: {
@@ -1505,6 +1587,85 @@ struct EasingCurvePreview: View {
         }
         .background(Color.secondary.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: - Song Picker Sheet
+
+/// A compact song browser for attaching a library song to a scene.
+struct SongPickerSheet: View {
+    let musicService: MusicService?
+    let onSelect: (UnifiedTrack) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let music = musicService, let provider = music.activeProvider {
+                    let songs = filteredSongs(from: provider)
+                    List(songs, id: \.id) { track in
+                        Button {
+                            onSelect(track)
+                            dismiss()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "music.note")
+                                    .frame(width: 32, height: 32)
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(track.title)
+                                        .font(.body)
+                                        .lineLimit(1)
+                                    Text(track.artist)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "plus.circle")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listStyle(.plain)
+                    .overlay {
+                        if songs.isEmpty {
+                            ContentUnavailableView(
+                                "No Songs",
+                                systemImage: "music.note",
+                                description: Text(searchText.isEmpty ? "Your library is empty." : "No songs match your search.")
+                            )
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Music Service",
+                        systemImage: "music.note.list",
+                        description: Text("Connect a music service first.")
+                    )
+                }
+            }
+            .navigationTitle("Choose a Song")
+            .searchable(text: $searchText, prompt: "Search songs")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .frame(minWidth: 400, minHeight: 500)
+    }
+
+    private func filteredSongs(from provider: MusicServiceProvider) -> [UnifiedTrack] {
+        let all = provider.librarySongs
+        guard !searchText.isEmpty else { return all }
+        let query = searchText.lowercased()
+        return all.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.artist.lowercased().contains(query)
+        }
     }
 }
 

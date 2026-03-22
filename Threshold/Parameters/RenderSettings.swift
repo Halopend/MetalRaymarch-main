@@ -616,13 +616,19 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _fractalType = newValue
+                // Single descriptor lookup — reused for params and gesture validation.
+                let desc = FractalTypeRegistry.descriptor(for: newValue)
                 // Auto-set default formula params when switching types
-                _formulaParams = newValue.defaultFormulaParams()
+                if FormulaCatalog.shared.descriptor(for: newValue) != nil {
+                    _formulaParams = FormulaCatalog.shared.buildParams(for: newValue)
+                } else {
+                    _formulaParams = desc.defaultFormulaParams()
+                }
                 // Rebind any gesture fingers assigned to core actions unsupported by
                 // the new fractal type (e.g. fractalScale on non-Mandelbox), and
                 // clean cross-type .parameter() bindings that belong to a different
                 // fractal type.
-                let supported = Set(newValue.supportedCoreGestureActions)
+                let supported = Set(desc.supportedCoreGestureActions)
                 func sanitize(_ binding: inout GestureActionBinding) {
                     switch binding {
                     case .core(let action):
@@ -2006,7 +2012,7 @@ final class RenderSettings: @unchecked Sendable {
             let rotLerpT = 1.0 - exp(-12.0 * clampedDT)  // Same speed as main smoothing
             _worldRotation = simd_slerp(_worldRotation, _targetWorldRotation, rotLerpT)
             // Re-normalize only when drift exceeds threshold (saves sqrt per frame)
-            let rotLenSq = simd_length_squared(_worldRotation)
+            let rotLenSq = simd_length_squared(_worldRotation.vector)
             if abs(rotLenSq - 1.0) > 1e-4 {
                 _worldRotation = _worldRotation.normalized
             }
@@ -2175,7 +2181,7 @@ final class RenderSettings: @unchecked Sendable {
             
             // Rotation: slerp current toward new value
             _worldRotation = simd_slerp(_worldRotation, worldRotation, t)
-            let keyRotLenSq = simd_length_squared(_worldRotation)
+            let keyRotLenSq = simd_length_squared(_worldRotation.vector)
             if abs(keyRotLenSq - 1.0) > 1e-4 {
                 _worldRotation = _worldRotation.normalized
             }

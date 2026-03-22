@@ -196,6 +196,10 @@ protocol MusicServiceProvider: AnyObject {
     /// Returns the best match, or nil if nothing was found.
     func searchTrack(title: String, artist: String) async -> UnifiedTrack?
 
+    /// Create a new playlist on this service with the given tracks.
+    /// Returns the playlist name on success, or nil if unsupported.
+    func createPlaylist(name: String, trackNativeIDs: [String]) async -> String?
+
     // ── Audio Levels (render-thread readable) ─────────────────────────────
     /// These are read from the render thread for audio-reactive visuals.
     var bassLevel: Float { get }
@@ -212,4 +216,6 @@ protocol MusicServiceProvider: AnyObject {
 
 extension MusicServiceProvider {
     var isConnected: Bool { connectionStatus.isConnected }
+
+    func createPlaylist(name: String, trackNativeIDs: [String]) async -> String? { nil }
 }

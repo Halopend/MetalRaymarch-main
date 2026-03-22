@@ -388,4 +388,54 @@ final class AppleMusicManager {
         let secs = total % 60
         return String(format: "%d:%02d", minutes, secs)
     }
+
+    // ── Playlist Creation ────────────────────────────────────────────────
+
+    /// Create a new playlist in the user's Apple Music library.
+    /// Returns the playlist name on success, nil on failure.
+    func createPlaylist(name: String, songIDs: [UInt64]) async -> String? {
+        guard isAuthorized else { return nil }
+
+        if songLookup.isEmpty { refreshLibrary() }
+
+        let items = songIDs.compactMap { songLookup[$0] }
+        guard !items.isEmpty else { return nil }
+
+        let metadata = MPMediaPlaylistCreationMetadata(name: name)
+        metadata.descriptionText = "Created by Threshold"
+
+        return await withCheckedContinuation { continuation in
+            MPMediaLibrary.default().getPlaylist(
+                with: UUID(),
+                creationMetadata: metadata
+            ) { playlist, error in
+                guard let playlist = playlist, error == nil else {
+                    Task { @MainActor in
+                        continuation.resume(returning: nil)
+                    }
+                    return
+                }
+                playlist.addItem(withProductID: "", completionHandler: nil) // no-op warmup not needed
+
+                // Add items one at a time via persistent IDs
+                let group = DispatchGroup()
+                var anyFailed = false
+                for item in items {
+                    group.enter()
+                    playlist.addItem(
+                        withProductID: String(item.persistentID),
+                        completionHandler: { error in
+                            if error != nil { anyFailed = true }
+                            group.leave()
+                        }
+                    )
+                }
+                group.notify(queue: .main) {
+                    Task { @MainActor in
+                        continuation.resume(returning: anyFailed ? nil : name)
+                    }
+                }
+            }
+        }
+    }
 }

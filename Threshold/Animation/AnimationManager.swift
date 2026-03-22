@@ -8,6 +8,7 @@
 
 import Foundation
 import simd
+import QuartzCore
 
 @MainActor
 @Observable
@@ -132,6 +133,25 @@ final class AnimationManager {
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
+    // GESTURE RECORDING
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Whether we are currently recording gestures
+    var isRecording: Bool = false
+    
+    /// Accumulated timestamped samples during recording
+    @ObservationIgnored private var recordingSamples: [(time: TimeInterval, keyframe: AnimationKeyframe)] = []
+    
+    /// When recording started (monotonic clock)
+    @ObservationIgnored private var recordingStartTime: TimeInterval = 0
+    
+    /// Background task driving the sampling loop
+    @ObservationIgnored private var recordingTask: Task<Void, Never>?
+    
+    /// Sample rate for recording (samples per second)
+    private static let recordingSampleRate: Double = 5.0
+    
+    // ═══════════════════════════════════════════════════════════════════════════
     // RENDER SETTINGS REFERENCE
     // ═══════════════════════════════════════════════════════════════════════════
     
@@ -216,7 +236,7 @@ final class AnimationManager {
         saveScenes()
         
         print("🎬 Created scene '\(name)' with initial keyframe")
-        return scene
+        return sceneWithBubble
     }
     
     /// Delete a scene.
@@ -947,4 +967,172 @@ final class AnimationManager {
         }
     }
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GESTURE RECORDING
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /// Start recording gestures. Samples RenderSettings at 5Hz until stopped.
+    func startRecording() {
+        guard renderSettings != nil else {
+            print("⚠️ Cannot record — no render settings")
+            return
+        }
+        
+        // Stop any playback
+        if isPlaying { stop() }
+        
+        recordingSamples = []
+        recordingStartTime = CACurrentMediaTime()
+        isRecording = true
+        
+        print("🔴 Recording started")
+        
+        let interval = 1.0 / Self.recordingSampleRate
+        recordingTask = Task { [weak self] in
+            var nextSampleTime = CACurrentMediaTime()
+            while !Task.isCancelled {
+                guard let self, let settings = self.renderSettings else { return }
+                
+                let elapsed = CACurrentMediaTime() - self.recordingStartTime
+                var sample = AnimationKeyframe(from: settings, name: "", duration: 0)
+                sample.easingType = .linear
+                sample.bezierHandle = .linear
+                self.recordingSamples.append((time: elapsed, keyframe: sample))
+                
+                // Schedule next sample at fixed intervals to avoid drift
+                nextSampleTime += interval
+                let delay = max(0, nextSampleTime - CACurrentMediaTime())
+                try? await Task.sleep(for: .milliseconds(Int(delay * 1000)))
+            }
+        }
+    }
+    
+    /// Stop recording and convert samples into a new scene.
+    /// Returns the created scene, or nil if recording was too short.
+    @discardableResult
+    func stopRecording() -> AnimationScene? {
+        recordingTask?.cancel()
+        recordingTask = nil
+        isRecording = false
+        
+        let samples = recordingSamples
+        recordingSamples = []
+        
+        guard samples.count >= 2 else {
+            print("⚠️ Recording too short — need at least 2 samples")
+            return nil
+        }
+        
+        print("🔴 Recording stopped — \(samples.count) samples over \(String(format: "%.1f", samples.last!.time))s")
+        
+        // Simplify: remove samples where nothing changed significantly
+        let simplified = simplifySamples(samples)
+        print("🔴 Simplified to \(simplified.count) keyframes")
+        
+        // Build keyframes with proper durations
+        var keyframes: [AnimationKeyframe] = []
+        for (i, sample) in simplified.enumerated() {
+            var kf = sample.keyframe
+            kf.name = i == 0 ? "Start" : "KF \(i + 1)"
+            
+            if i == 0 {
+                kf.duration = 0
+            } else {
+                kf.duration = sample.time - simplified[i - 1].time
+            }
+            
+            keyframes.append(kf)
+        }
+        
+        // Create the scene
+        var scene = AnimationScene(name: "Recorded \(formattedTimestamp())")
+        scene.keyframes = keyframes
+        scene.isLooping = true
+        scene.fractalType = renderSettings?.fractalType
+        
+        // Capture scene-level color grading from current settings
+        if let settings = renderSettings {
+            scene.colorSchemeSaturation = settings.colorSchemeSaturation
+            scene.colorSchemeContrast = settings.colorSchemeContrast
+            scene.colorSchemeGamma = settings.colorSchemeGamma
+            scene.colorSchemeVibrance = settings.colorSchemeVibrance
+            scene.colorSchemeCurve = settings.colorSchemeCurve
+            scene.colorSchemeShadows = settings.colorSchemeShadows
+            scene.colorSchemeHighlights = settings.colorSchemeHighlights
+            scene.lightingSoftness = settings.lightingSoftness
+            scene.gradientPreset = settings.gradientPreset
+            scene.colorMappingMode = settings.colorMappingMode
+            scene.gradientRepeat = settings.gradientRepeat
+            scene.gradientOffset = settings.gradientOffset
+            scene.gradientSmoothing = settings.gradientSmoothing
+        }
+        
+        userScenes.append(scene)
+        saveScenes()
+        currentScene = scene
+        
+        print("🎬 Created recorded scene '\(scene.name)' with \(keyframes.count) keyframes, duration \(String(format: "%.1f", scene.totalDuration))s")
+        return scene
+    }
+    
+    /// Elapsed recording time for UI display
+    var recordingElapsed: TimeInterval {
+        guard isRecording else { return 0 }
+        return CACurrentMediaTime() - recordingStartTime
+    }
+    
+    /// Remove samples where parameters haven't changed enough to matter.
+    /// Always keeps first and last sample.
+    private func simplifySamples(_ samples: [(time: TimeInterval, keyframe: AnimationKeyframe)]) -> [(time: TimeInterval, keyframe: AnimationKeyframe)] {
+        guard samples.count > 2 else { return samples }
+        
+        var result: [(time: TimeInterval, keyframe: AnimationKeyframe)] = [samples[0]]
+        
+        for i in 1..<(samples.count - 1) {
+            let prev = result.last!.keyframe
+            let curr = samples[i].keyframe
+            
+            // Check if any parameter changed significantly
+            let positionDelta = simd_length(curr.position - prev.position)
+            let scaleDelta = abs(curr.detailScale - prev.detailScale)
+            let rotDelta = abs(1.0 - abs(simd_dot(curr.worldRotation, prev.worldRotation)))
+            let minDistDelta = abs(curr.minDistance - prev.minDistance)
+            let foldDelta = abs(curr.foldingLimit - prev.foldingLimit)
+            let sphereDelta = abs(curr.sphereRadius - prev.sphereRadius)
+            let fracScaleDelta = abs(curr.fractalScale - prev.fractalScale)
+            
+            // Check formula params
+            var formulaChanged = false
+            if let pVals = prev.formulaParamValues, let cVals = curr.formulaParamValues, pVals.count == cVals.count {
+                for j in 0..<pVals.count where abs(pVals[j] - cVals[j]) > 0.001 {
+                    formulaChanged = true
+                    break
+                }
+            } else if (prev.formulaParamValues == nil) != (curr.formulaParamValues == nil) {
+                formulaChanged = true
+            }
+            
+            let changed = positionDelta > 0.001
+                || scaleDelta > 0.01
+                || rotDelta > 0.0001
+                || minDistDelta > 0.001
+                || foldDelta > 0.001
+                || sphereDelta > 0.001
+                || fracScaleDelta > 0.001
+                || formulaChanged
+            
+            if changed {
+                result.append(samples[i])
+            }
+        }
+        
+        result.append(samples.last!)
+        return result
+    }
+    
+    private func formattedTimestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: Date())
+    }
 }

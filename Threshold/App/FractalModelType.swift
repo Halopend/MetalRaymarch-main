@@ -21,6 +21,7 @@ enum FractalModelType: Int32, CaseIterable {
     case theliPseudoKleinian = 15
     case kleinian              = 17
     case boxSphereFolder         = 20
+    case kaleidoIFS              = 21
     
     /// Descriptor from the registry — all metadata is defined there.
     var descriptor: FractalTypeDescriptor { FractalTypeRegistry.descriptor(for: self) }
@@ -35,7 +36,12 @@ enum FractalModelType: Int32, CaseIterable {
     /// Quick check whether a given effect tag is meaningful for this fractal.
     func supports(_ tag: EffectTag) -> Bool { descriptor.supportedEffectTags.contains(tag) }
 
-    func defaultFormulaParams() -> FormulaParams { descriptor.defaultFormulaParams() }
+    func defaultFormulaParams() -> FormulaParams {
+        if FormulaCatalog.shared.descriptor(for: self) != nil {
+            return FormulaCatalog.shared.buildParams(for: self)
+        }
+        return descriptor.defaultFormulaParams()
+    }
 }
 
 extension FractalModelType {
