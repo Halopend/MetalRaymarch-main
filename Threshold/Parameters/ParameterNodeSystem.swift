@@ -157,7 +157,9 @@ struct ParameterLayerStack: Sendable {
     static let defaultSmoothingTime: Float = 0.08
 
     private var ui: ParameterLayerEntry?
+    private var precompute: ParameterLayerEntry?
     private var gesture: ParameterLayerEntry?
+    private var system: ParameterLayerEntry?
     private var music: ParameterLayerEntry?
 
     private(set) var defaultValue: Float
@@ -214,13 +216,23 @@ struct ParameterLayerStack: Sendable {
     mutating func resolvedValue(at timestamp: TimeInterval) -> Float {
         // Copy layer entries to locals to avoid overlapping access on self
         var uiEntry = ui
+        var precomputeEntry = precompute
         var gestureEntry = gesture
+        var systemEntry = system
         var musicEntry = music
 
         var value = Self.resolve(entry: &uiEntry, at: timestamp) ?? defaultValue
 
+        if let p = Self.resolve(entry: &precomputeEntry, at: timestamp) {
+            value = p
+        }
+
         if let g = Self.resolve(entry: &gestureEntry, at: timestamp) {
             value = g
+        }
+
+        if let s = Self.resolve(entry: &systemEntry, at: timestamp) {
+            value = s
         }
 
         if let m = Self.resolve(entry: &musicEntry, at: timestamp) {
@@ -229,7 +241,9 @@ struct ParameterLayerStack: Sendable {
 
         // Write back smoothed state
         ui = uiEntry
+        precompute = precomputeEntry
         gesture = gestureEntry
+        system = systemEntry
         music = musicEntry
 
         return min(range.upperBound, max(range.lowerBound, value))
@@ -240,9 +254,10 @@ struct ParameterLayerStack: Sendable {
     private func get(for layer: ParameterLayer) -> ParameterLayerEntry? {
         switch layer {
         case .ui: return ui
+        case .precompute: return precompute
         case .gesture: return gesture
+        case .system: return system
         case .music: return music
-        case .precompute, .system: return nil
         }
     }
 
@@ -256,9 +271,10 @@ struct ParameterLayerStack: Sendable {
     private mutating func set(entry: ParameterLayerEntry?, for layer: ParameterLayer) {
         switch layer {
         case .ui: ui = entry
+        case .precompute: precompute = entry
         case .gesture: gesture = entry
+        case .system: system = entry
         case .music: music = entry
-        case .precompute, .system: break
         }
     }
 }
