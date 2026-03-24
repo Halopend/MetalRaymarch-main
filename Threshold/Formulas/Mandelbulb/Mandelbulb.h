@@ -4,8 +4,7 @@
 //
 //  Distance estimator for the Mandelbulb fractal.
 //  params[0]=Power, [1]=Bailout, [2]=DerivBias (DE multiplier for resolution),
-//  [3]=AlternateVer(bool),
-//  [4]=PolarRotation, [5]=PolarRotation2, [8]=Julia(bool), [9-11]=JuliaC
+//  [4]=PolarRotation, [8]=Julia(bool), [9-11]=JuliaC
 //
 //  Requires: FractalFormulaCommon.h
 //
@@ -30,9 +29,7 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     float power   = MB_POWER_CONST;
     float bailout = fp.params[1];
     float dBias   = max(fp.params[2], 0.01f);  // Clamp minimum for safety
-    bool  alternate = fp.params[3] > 0.5f;
     float polarRot  = fp.params[4];
-    float polarRot2 = fp.params[5];
     bool  julia     = fp.params[8] > 0.5f;
     float3 juliaC   = float3(fp.params[9], fp.params[10], fp.params[11]);
     // CPU precomputes identity flag — skip the 3x3 matmul when rotation is identity.
@@ -42,7 +39,6 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     float3 c = julia ? juliaC : pos;
     float dr = 1.0f;
     float r2 = dot(z, z);
-    float r  = fast::sqrt(r2);
 
     float trap = 1e20f;
     int trapIter = 0;
@@ -58,41 +54,24 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     for (; i < iterations && r2 < bailout2 && r2 > minR2Exit; ) {
         float invR  = fast::rsqrt(r2 + 1e-6f); // shared 1/r (avoids div-by-zero)
 
-        if (alternate) {
-            // Alternate "triplex" approach
-            float theta = fast::acos(clamp11(z.z * invR)) + polarRot;
-            float phi   = fast::atan2(z.y, z.x);
-            float rn    = fastPowR(r, power);
-            dr = fma(rn * power * invR, dr, 1.0f);
-            
-            float tP = theta * power, pP = phi * power;
-            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
-            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
-            
-            z = rn * float3(sTheta * cPhi,
-                            sTheta * sPhi,
-                            cTheta);
-        } else {
-            // Standard spherical coordinates
-            float theta = fast::asin(clamp11(z.z * invR)) + polarRot + polarRot2;
-            float phi   = fast::atan2(z.y, z.x);
-            float rn    = fastPowR(r, power);
-            dr = fma(rn * power * invR, dr, 1.0f);
-            
-            float tP = theta * power, pP = phi * power;
-            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
-            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
-            
-            z = rn * float3(cTheta * cPhi,
-                            cTheta * sPhi,
-                            sTheta);
-        }
+        float theta = fast::asin(clamp11(z.z * invR)) + polarRot;
+        float phi   = fast::atan2(z.y, z.x);
+        float rn    = fastPowFromR2(r2, power);
+        dr = fma(rn * power * invR, dr, 1.0f);
+
+        float tP = theta * power, pP = phi * power;
+        float cTheta, cPhi;
+        float sTheta = sincos(tP, cTheta);
+        float sPhi   = sincos(pP, cPhi);
+
+        z = rn * float3(cTheta * cPhi,
+                        cTheta * sPhi,
+                        sTheta);
 
         z += c;
         if (applyRot) z = rot * z;
 
         r2 = dot(z, z);
-        r  = fast::sqrt(r2);
 
         UpdateTrapMinR2(trap, trapIter, trapPos, r2, i, colorIterations, z);
         ++i;
@@ -107,18 +86,24 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     // dBias acts as a DE multiplier: <1 = finer surface detail, >1 = coarser/faster.
     // The additive bias in the loop is fixed at 1.0 for numerical stability;
     // dBias scales the final result for user-controllable resolution.
+    float r = fast::sqrt(r2);
     float safeR = max(r, 1e-6f);  // Prevent log2(~0) → -∞
-    return dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
+    float de = dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
+    // Clamp to bailout sphere distance: the DE formula overestimates when few
+    // iterations run (dr ≈ 1), causing rays to overshoot the fractal from afar.
+    if (r > bailout) {
+        de = min(de, r - bailout);
+    }
+    return de;
 }
 
 // Lean distance-only: no orbit tracking, no struct writes.
 FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {
     float power   = MB_POWER_CONST;
-    float bailout2 = fp.params[1] * fp.params[1];
+    float bailout = fp.params[1];
+    float bailout2 = bailout * bailout;
     float dBias   = max(fp.params[2], 0.01f);  // Clamp minimum for safety
-    bool  alternate = fp.params[3] > 0.5f;
     float polarRot  = fp.params[4];
-    float polarRot2 = fp.params[5];
     bool  julia     = fp.params[8] > 0.5f;
     float3 juliaC   = float3(fp.params[9], fp.params[10], fp.params[11]);
     bool applyRot = hasRot1Precomputed(fp);
@@ -127,45 +112,36 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
     float3 c = julia ? juliaC : pos;
     float dr = 1.0f;
     float r2 = dot(z, z);
-    float r  = fast::sqrt(r2);
 
     // Min-distance early exit: once r is tiny we're on/inside the surface.
     const float minR2Exit = 1e-12f;
 
     for (int i = 0; i < iterations && r2 < bailout2 && r2 > minR2Exit; ++i) {
         float invR  = fast::rsqrt(r2 + 1e-6f);
-        if (alternate) {
-            float theta = fast::acos(clamp11(z.z * invR)) + polarRot;
-            float phi   = fast::atan2(z.y, z.x);
-            float rn    = fastPowR(r, power);
-            dr = fma(rn * power * invR, dr, 1.0f);
-            float tP = theta * power, pP = phi * power;
-            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
-            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
-            z = rn * float3(sTheta * cPhi,
-                            sTheta * sPhi,
-                            cTheta);
-        } else {
-            float theta = fast::asin(clamp11(z.z * invR)) + polarRot + polarRot2;
-            float phi   = fast::atan2(z.y, z.x);
-            float rn    = fastPowR(r, power);
-            dr = fma(rn * power * invR, dr, 1.0f);
-            float tP = theta * power, pP = phi * power;
-            float sTheta = fast::sin(tP), cTheta = fast::cos(tP);
-            float sPhi   = fast::sin(pP), cPhi   = fast::cos(pP);
-            z = rn * float3(cTheta * cPhi,
-                            cTheta * sPhi,
-                            sTheta);
-        }
+        float theta = fast::asin(clamp11(z.z * invR)) + polarRot;
+        float phi   = fast::atan2(z.y, z.x);
+        float rn    = fastPowFromR2(r2, power);
+        dr = fma(rn * power * invR, dr, 1.0f);
+        float tP = theta * power, pP = phi * power;
+        float cTheta, cPhi;
+        float sTheta = sincos(tP, cTheta);
+        float sPhi   = sincos(pP, cPhi);
+        z = rn * float3(cTheta * cPhi,
+                        cTheta * sPhi,
+                        sTheta);
         z += c;
         if (applyRot) z = rot * z;
         r2 = dot(z, z);
-        r  = fast::sqrt(r2);
     }
 
-    // dBias as final DE multiplier for resolution control
+    float r = fast::sqrt(r2);
     float safeR = max(r, 1e-6f);  // Prevent log2(~0) → -∞
-    return dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
+    float de = dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
+    // Clamp to bailout sphere distance: prevents overshooting when few iterations run.
+    if (r > bailout) {
+        de = min(de, r - bailout);
+    }
+    return de;
 }
 
 #endif /* DE_Mandelbulb_h */

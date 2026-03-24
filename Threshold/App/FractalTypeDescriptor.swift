@@ -72,6 +72,11 @@ protocol FractalTypeDescriptor: Sendable {
     var grabScaleClamp: ClosedRange<Float> { get }
     var defaultViewState: FractalViewDefaults { get }
     var defaultShapeParams: FractalShapeDefaults { get }
+
+    /// Per-type default gesture bindings mapping single-hand slots to formula
+    /// parameter triplet groups (e.g. "Mins", "Maxs").  Resolved from the
+    /// formula catalog when the fractal type is switched.
+    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] { get }
 }
 
 // MARK: - Shared constants
@@ -84,7 +89,7 @@ extension FractalTypeDescriptor {
 
     /// Default core gesture actions for non-Mandelbox types.
     static var standardCoreGestureActions: [FingerGestureAction] {
-        [.none, .grab, .fractalScale, .translate]
+        [.none, .grab, .translate]
     }
 
     /// Base FormulaParams with identity rotation matrices and zeroed params.
@@ -102,6 +107,7 @@ extension FractalTypeDescriptor {
     var grabScaleClamp: ClosedRange<Float> { 0.001...500.0 }
     var defaultViewState: FractalViewDefaults { FractalViewDefaults() }
     var defaultShapeParams: FractalShapeDefaults { FractalShapeDefaults() }
+    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] { [] }
 }
 
 // MARK: - Registry
@@ -343,13 +349,18 @@ private struct KleinianDescriptor: FractalTypeDescriptor {
     let isSelectableInUI = true
     let supportedCoreGestureActions = standardCoreGestureActions
     var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
+    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
+        [
+            (GestureSlot(hand: .left, finger: .middle), "Mins"),
+            (GestureSlot(hand: .right, finger: .middle), "Maxs"),
+        ]
+    }
     func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = -0.3252; fp.params.1 = -0.7862; fp.params.2 = -0.0948
         fp.params.3 = 0.69
         fp.params.4 = 0.35; fp.params.5 = 1.0; fp.params.6 = 1.22
         fp.params.7 = 0.84
-        fp.params.8 = 0.25; fp.params.9 = 1.0
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }
@@ -374,8 +385,6 @@ private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
         fp.params.5 = 1.0   // MaxR2
         fp.params.6 = 1.15  // Scale
         fp.params.7 = 1.2   // ShapeR
-        fp.params.8 = 0.25  // ColorOfs
-        fp.params.9 = 1.0   // ColorScale
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }

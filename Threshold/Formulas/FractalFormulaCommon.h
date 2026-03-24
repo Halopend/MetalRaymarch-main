@@ -72,6 +72,21 @@ FORCE_INLINE float fastPowR(float r, float power) {
     return powr(max(r, 1e-10f), power);
 }
 
+// Compute r^power from r² without intermediate sqrt for even-integer powers.
+// For the hot inner loop, this saves one fast::sqrt (~2-4 ALU cycles) per iteration.
+FORCE_INLINE float fastPowFromR2(float r2, float power) {
+    // Even-integer powers: r^power = (r²)^(power/2) — pure integer power of r²
+    if (power == 2.0f)  return r2;
+    if (power == 4.0f)  return r2 * r2;
+    if (power == 6.0f)  return r2 * r2 * r2;
+    if (power == 8.0f)  { float r4 = r2 * r2; return r4 * r4; }
+    if (power == 10.0f) { float r4 = r2 * r2; return r4 * r4 * r2; }
+    if (power == 12.0f) { float r4 = r2 * r2; return r4 * r4 * r4; }
+    if (power == 16.0f) { float r4 = r2 * r2; float r8 = r4 * r4; return r8 * r8; }
+    // Odd/fractional: fall back through sqrt
+    return fastPowR(fast::sqrt(max(r2, 1e-20f)), power);
+}
+
 // Safe power: pow(a, b) for a >= 0
 inline float safePow(float a, float b) {
     return fast::exp2(b * fast::log2(max(a, 1e-30f)));
