@@ -791,10 +791,8 @@ actor Renderer {
                     case .overall: sourceValue = settings.audioLevel
                     }
 
-                    // ── 2. Scale audio level by intensity ──
+                    // ── 2. Scale audio intensity ──
                     let absAmount = abs(mapping.amount)
-                    let scaled = min(1.0, max(0.0, sourceValue * absAmount * globalAmount))
-                    let normalized = mapping.amount >= 0 ? scaled : (1.0 - scaled)
 
                     // ── 3. Compute final target value based on mode ──
                     // Music is always relative to the current animation/manual base.
@@ -832,7 +830,9 @@ actor Renderer {
                         ParameterOperation(
                             targetID: targetID,
                             source: .audio,
-                            value: .delta(finalOffset),
+                            // The music layer is itself additive, so it must receive the
+                            // raw offset to apply on top of the current base value.
+                            value: .absolute(finalOffset),
                             frameIndex: parameterOperationFrameIndex,
                             smoothing: ParameterOperationSmoothing(
                                 smoothingTime: max(0.02, mapping.smoothingWindow)

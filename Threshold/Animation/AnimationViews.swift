@@ -7,6 +7,215 @@
 
 import SwiftUI
 
+// MARK: - Window ID
+
+extension AppModel {
+    static let animationPlayerWindowID = "AnimationPlayerWindow"
+}
+
+// MARK: - Animation Player Window
+
+/// Utility window for animation playback controls, positioned below the main menu.
+struct AnimationPlayerWindowView: View {
+    @Environment(AppModel.self) private var appModel
+    
+    var body: some View {
+        Group {
+            if let animationManager = appModel.animationManager {
+                AnimationPlayerContent(animationManager: animationManager)
+            } else {
+                ContentUnavailableView(
+                    "Not Available",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("Animation manager not initialized")
+                )
+            }
+        }
+        .frame(minWidth: 600, minHeight: 140)
+        .glassBackgroundEffect()
+    }
+}
+
+/// Inner content for the player window — shows scene selector, playback controls, and timeline.
+private struct AnimationPlayerContent: View {
+    @Bindable var animationManager: AnimationManager
+    @State private var editingKeyframe: AnimationKeyframe?
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            // ── Scene selector ──
+            HStack {
+                Menu {
+                    ForEach(animationManager.scenes) { scene in
+                        Button {
+                            animationManager.currentScene = scene
+                        } label: {
+                            HStack {
+                                Text(scene.name)
+                                if animationManager.currentScene?.id == scene.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "film.stack")
+                        Text(animationManager.currentScene?.name ?? "No Scene")
+                            .lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                    }
+                    .font(.subheadline)
+                }
+                
+                Spacer()
+                
+                if let scene = animationManager.currentScene {
+                    Text(progressText(for: scene))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            // ── Timeline ──
+            if let scene = animationManager.currentScene {
+                KeyframeTimelineView(
+                    scene: scene,
+                    playhead: animationManager.uiPlayhead,
+                    onEditKeyframe: { keyframe in editingKeyframe = keyframe },
+                    onJumpToKeyframe: { index in animationManager.jumpToKeyframe(index) },
+                    onJumpToTime: { time in animationManager.jumpToTime(time) }
+                )
+                .frame(height: 44)
+            }
+            
+            // ── Transport controls ──
+            HStack(spacing: 16) {
+                // Record
+                Button {
+                    if animationManager.isRecording {
+                        animationManager.stopRecording()
+                    } else {
+                        animationManager.startRecording()
+                    }
+                } label: {
+                    Image(systemName: animationManager.isRecording ? "stop.circle.fill" : "record.circle")
+                        .foregroundStyle(animationManager.isRecording ? .red : .primary)
+                }
+                .help(animationManager.isRecording ? "Stop recording" : "Record gestures")
+                
+                // Stop
+                Button {
+                    animationManager.stop()
+                } label: {
+                    Image(systemName: "stop.fill")
+                }
+                .disabled(!animationManager.isPlaying && animationManager.uiPlayhead.state != .paused)
+                
+                // Disable overrides
+                Button {
+                    animationManager.disablePlaybackOverrides()
+                } label: {
+                    Label("Disable Overrides", systemImage: "nosign")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(animationManager.currentScene == nil)
+                
+                // Play/Pause
+                Button {
+                    animationManager.togglePlayPause()
+                } label: {
+                    Image(systemName: animationManager.isPlaying ? "pause.fill" : "play.fill")
+                }
+                .font(.title2)
+                
+                // Speed
+                Menu {
+                    Button("0.5x") { animationManager.playbackSpeed = 0.5 }
+                    Button("1x") { animationManager.playbackSpeed = 1.0 }
+                    Button("2x") { animationManager.playbackSpeed = 2.0 }
+                    Button("4x") { animationManager.playbackSpeed = 4.0 }
+                } label: {
+                    Text("\(String(format: "%.1f", animationManager.playbackSpeed))x")
+                        .font(.caption)
+                }
+                
+                // Easing
+                Menu {
+                    ForEach(EasingFunction.allCases, id: \.self) { easing in
+                        Button {
+                            animationManager.easingFunction = easing
+                        } label: {
+                            HStack {
+                                Text(easing.displayName)
+                                if animationManager.easingFunction == easing {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: animationManager.easingFunction == .smooth ? "waveform.path" : "curve.bezier")
+                        Text(animationManager.easingFunction.displayName)
+                            .font(.caption)
+                    }
+                }
+                
+                Spacer()
+                
+                // Keyframe indicator
+                if let scene = animationManager.currentScene {
+                    Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding()
+        .sheet(item: $editingKeyframe) { keyframe in
+            KeyframeEditorView(
+                keyframe: keyframe,
+                onSave: { updated in
+                    if var scene = animationManager.currentScene,
+                       let idx = scene.keyframes.firstIndex(where: { $0.id == keyframe.id }) {
+                        scene.keyframes[idx] = updated
+                        animationManager.updateScene(scene)
+                    }
+                    editingKeyframe = nil
+                },
+                onCancel: { editingKeyframe = nil }
+            )
+        }
+    }
+    
+    private func progressText(for scene: AnimationScene) -> String {
+        let current = currentTime(for: scene)
+        let total = scene.totalDuration
+        return "\(formatTime(current)) / \(formatTime(total))"
+    }
+    
+    private func currentTime(for scene: AnimationScene) -> TimeInterval {
+        var time: TimeInterval = 0
+        for i in 0..<animationManager.uiPlayhead.currentKeyframeIndex {
+            if i < scene.keyframes.count {
+                time += scene.keyframes[i].duration
+            }
+        }
+        time += animationManager.uiPlayhead.elapsedInSegment
+        return time
+    }
+    
+    private func formatTime(_ time: TimeInterval) -> String {
+        let seconds = Int(time) % 60
+        let tenths = Int((time - Double(Int(time))) * 10)
+        return "\(seconds).\(tenths)"
+    }
+}
+
 // MARK: - Animation Editor Window
 
 /// Utility window for scene management and editing.
@@ -156,25 +365,47 @@ struct SceneListView: View {
                 )
             } else {
                 ForEach(animationManager.scenes) { scene in
-                    SceneRowView(
-                        scene: scene,
-                        isSelected: animationManager.currentScene?.id == scene.id,
-                        isDefault: animationManager.isDefaultScene(scene),
-                        isEdited: animationManager.isEditedDefault(scene),
-                        onSelect: {
-                            animationManager.currentScene = scene
-                        },
-                        onEdit: isEditing ? nil : {
-                            if let onEditScene {
-                                onEditScene(scene)
-                            } else {
-                                selectedSceneForEdit = scene
+                    Group {
+                        if isInline {
+                            // Minimal row for the editor sidebar — name only
+                            HStack {
+                                Text(scene.name)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                Spacer()
+                                if animationManager.currentScene?.id == scene.id {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                        .font(.caption)
+                                }
                             }
-                        },
-                        onResetDefault: animationManager.isEditedDefault(scene) ? {
-                            animationManager.resetDefaultScene(scene.id)
-                        } : nil
-                    )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                animationManager.currentScene = scene
+                                if let onEditScene { onEditScene(scene) }
+                            }
+                        } else {
+                            SceneRowView(
+                                scene: scene,
+                                isSelected: animationManager.currentScene?.id == scene.id,
+                                isDefault: animationManager.isDefaultScene(scene),
+                                isEdited: animationManager.isEditedDefault(scene),
+                                onSelect: {
+                                    animationManager.currentScene = scene
+                                },
+                                onEdit: isEditing ? nil : {
+                                    if let onEditScene {
+                                        onEditScene(scene)
+                                    } else {
+                                        selectedSceneForEdit = scene
+                                    }
+                                },
+                                onResetDefault: animationManager.isEditedDefault(scene) ? {
+                                    animationManager.resetDefaultScene(scene.id)
+                                } : nil
+                            )
+                        }
+                    }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             animationManager.deleteScene(scene)
@@ -722,6 +953,13 @@ struct SceneEditorView: View {
                             },
                             onOverwrite: {
                                 overwriteKeyframe(at: index)
+                            },
+                            onDuplicate: {
+                                duplicateKeyframe(at: index)
+                            },
+                            onDurationChanged: { newDuration in
+                                guard index < scene.keyframes.count else { return }
+                                scene.keyframes[index].duration = newDuration
                             }
                         )
                     }
@@ -836,6 +1074,38 @@ struct SceneEditorView: View {
         scene.keyframes[index].formulaParamValues = vals
     }
     
+    private func duplicateKeyframe(at index: Int) {
+        guard index < scene.keyframes.count else { return }
+        var copy = scene.keyframes[index]
+        copy = AnimationKeyframe(
+            id: UUID(),
+            name: copy.name + " Copy",
+            duration: copy.duration,
+            minDistance: copy.minDistance,
+            foldingLimit: copy.foldingLimit,
+            sphereRadius: copy.sphereRadius,
+            fractalScale: copy.fractalScale,
+            baseFractalIterations: copy.baseFractalIterations,
+            baseMaxRaySteps: copy.baseMaxRaySteps,
+            scale: copy.scale,
+            position: copy.position,
+            detailScale: copy.detailScale,
+            worldRotation: copy.worldRotation,
+            lightingMode: copy.lightingMode,
+            lightingPreset: copy.lightingPreset,
+            hueRotationEffect: copy.hueRotationEffect,
+            pulseEffect: copy.pulseEffect,
+            glowEffect: copy.glowEffect,
+            bloomEffect: copy.bloomEffect,
+            fogEffect: copy.fogEffect,
+            gradientCycleEffect: copy.gradientCycleEffect,
+            easingType: copy.easingType,
+            bezierHandle: copy.bezierHandle,
+            formulaParamValues: copy.formulaParamValues
+        )
+        scene.keyframes.insert(copy, at: index + 1)
+    }
+    
     private func formatDuration(_ duration: TimeInterval) -> String {
         if duration < 60 {
             return String(format: "%.1fs", duration)
@@ -865,6 +1135,11 @@ struct KeyframeRowView: View {
     let onEdit: () -> Void
     let onJump: () -> Void
     let onOverwrite: () -> Void
+    var onDuplicate: (() -> Void)? = nil
+    var onDurationChanged: ((TimeInterval) -> Void)? = nil
+    
+    @State private var isDraggingDuration = false
+    @State private var dragDuration: TimeInterval = 0
     
     var body: some View {
         HStack {
@@ -874,59 +1149,69 @@ struct KeyframeRowView: View {
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(.secondary.opacity(0.3)))
             
-            VStack(alignment: .leading, spacing: 2) {
-                Text(keyframe.name)
-                    .font(.subheadline.bold())
-                
-                // Parameter preview
-                HStack(spacing: 8) {
-                    paramLabel("MD", value: keyframe.minDistance)
-                    paramLabel("FL", value: keyframe.foldingLimit)
-                    paramLabel("SR", value: keyframe.sphereRadius)
-                    paramLabel("SC", value: keyframe.fractalScale)
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            }
+            Text(keyframe.name)
+                .font(.subheadline.bold())
+                .lineLimit(1)
             
             Spacer()
             
-            // Duration (except for first keyframe)
+            // Duration (except for first keyframe) — draggable
             if index > 0 {
-                Text("\(String(format: "%.1f", keyframe.duration))s")
-                    .font(.caption)
+                let displayDuration = isDraggingDuration ? dragDuration : keyframe.duration
+                Text("\(String(format: "%.1f", displayDuration))s")
+                    .font(.caption.monospacedDigit())
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(.secondary.opacity(0.2)))
+                    .background(Capsule().fill(isDraggingDuration ? Color.blue.opacity(0.3) : Color.secondary.opacity(0.2)))
+                    .gesture(
+                        DragGesture(minimumDistance: 4)
+                            .onChanged { value in
+                                if !isDraggingDuration {
+                                    isDraggingDuration = true
+                                    dragDuration = keyframe.duration
+                                }
+                                // 100pt drag = 1 second change
+                                let delta = TimeInterval(value.translation.width / 100.0)
+                                dragDuration = max(0.1, keyframe.duration + delta)
+                            }
+                            .onEnded { _ in
+                                isDraggingDuration = false
+                                onDurationChanged?(dragDuration)
+                            }
+                    )
             }
             
-            // Overwrite button - replace keyframe with current settings
-            Button {
-                onOverwrite()
-            } label: {
+            // Restore — apply keyframe to current render
+            Button { onJump() } label: {
+                Image(systemName: "arrow.uturn.backward")
+            }
+            .buttonStyle(.plain)
+            .help("Restore — apply this keyframe's values")
+            
+            // Replace — overwrite keyframe with current settings
+            Button { onOverwrite() } label: {
                 Image(systemName: "arrow.down.circle")
             }
             .buttonStyle(.plain)
-            .help("Overwrite with current settings")
+            .help("Replace with current settings")
             
-            // Edit button
-            Button {
-                onEdit()
-            } label: {
+            // Duplicate
+            if let onDuplicate {
+                Button { onDuplicate() } label: {
+                    Image(systemName: "plus.square.on.square")
+                }
+                .buttonStyle(.plain)
+                .help("Duplicate keyframe")
+            }
+            
+            // Edit
+            Button { onEdit() } label: {
                 Image(systemName: "slider.horizontal.3")
             }
             .buttonStyle(.plain)
-            .help("Edit keyframe parameters")
+            .help("Edit keyframe")
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            onJump()
-        }
-    }
-    
-    private func paramLabel(_ label: String, value: Float) -> some View {
-        Text("\(label):\(String(format: "%.2f", value))")
-            .monospacedDigit()
     }
 }
 
@@ -940,63 +1225,89 @@ struct KeyframeEditorView: View {
     var body: some View {
         NavigationStack {
             HStack(spacing: 0) {
-                // ── LEFT COLUMN: Parameters ──
+                // ── LEFT COLUMN: Read-only parameter summary ──
                 ScrollView {
-                    VStack(spacing: 16) {
-                        // Name
-                        HStack {
-                            Text("Name").font(.subheadline).foregroundStyle(.secondary)
-                            Spacer()
-                            TextField("Keyframe Name", text: $keyframe.name)
-                                .multilineTextAlignment(.trailing)
-                                .textFieldStyle(.plain)
-                        }
-                        .padding(.horizontal, 16)
-                        
-                        Divider().padding(.horizontal, 16)
-                        
-                        // ── Duration ──
-                        compactSliderRow(icon: "timer", label: "Duration",
-                                         value: $keyframe.duration, range: 0...20, step: 0.5,
-                                         format: "%.1fs")
-                        
-                        Divider().padding(.horizontal, 16)
-                        
-                        // ── Shape Parameters ──
-                        VStack(spacing: 2) {
-                            sectionHeader("Shape Parameters")
-                            compactSliderRow(icon: "arrow.down.right.and.arrow.up.left", label: "Min Distance",
-                                             value: $keyframe.minDistance, range: 0.1...10.0, format: "%.3f")
-                            compactSliderRow(icon: "arrow.triangle.branch", label: "Folding Limit",
-                                             value: $keyframe.foldingLimit, range: 0.1...20.0, format: "%.3f")
-                            compactSliderRow(icon: "circle.dashed", label: "Sphere Radius",
-                                             value: $keyframe.sphereRadius, range: 0.01...5.0, format: "%.3f")
-                            compactSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Fractal Scale",
-                                             value: $keyframe.fractalScale, range: 0.5...6.0, format: "%.3f")
+                    VStack(spacing: 12) {
+                        // ── Core ──
+                        summarySection("Core") {
+                            summaryRow("Name", text: keyframe.name)
+                            summaryRow("Duration", text: String(format: "%.1fs", keyframe.duration))
+                            summaryRow("Easing", text: keyframe.easingType.displayName)
                         }
                         
-                        Divider().padding(.horizontal, 16)
-                        
-                        // ── Quality ──
-                        VStack(spacing: 2) {
-                            sectionHeader("Quality")
-                            compactStepperRow(icon: "square.stack.3d.up", label: "Iterations",
-                                              value: $keyframe.baseFractalIterations, range: 4...32)
-                            compactStepperRow(icon: "line.3.crossed.swirl.circle", label: "Ray Steps",
-                                              value: $keyframe.baseMaxRaySteps, range: 32...1024, step: 16)
+                        // ── Shape ──
+                        summarySection("Shape") {
+                            summaryRow("Min Distance", value: keyframe.minDistance)
+                            summaryRow("Folding Limit", value: keyframe.foldingLimit)
+                            summaryRow("Sphere Radius", value: keyframe.sphereRadius)
+                            summaryRow("Fractal Scale", value: keyframe.fractalScale)
+                            summaryRow("Detail Scale", value: keyframe.detailScale)
+                            summaryRow("Scale", value: keyframe.scale)
                         }
-                        
-                        Divider().padding(.horizontal, 16)
                         
                         // ── Position ──
-                        VStack(spacing: 2) {
-                            sectionHeader("Position")
-                            compactSliderRow(icon: "arrow.left.and.right", label: "X",
-                                             value: $keyframe.positionX, range: -5...5, format: "%.2f")
-                            compactSliderRow(icon: "arrow.up.and.down", label: "Y",
-                                             value: $keyframe.positionY, range: -5...5, format: "%.2f")
-                            compactSliderRow(icon: "arrow.forward", label: "Z",
-                                             value: $keyframe.positionZ, range: -5...5, format: "%.2f")
+                        summarySection("Position") {
+                            summaryRow("X", value: keyframe.positionX)
+                            summaryRow("Y", value: keyframe.positionY)
+                            summaryRow("Z", value: keyframe.positionZ)
+                        }
+                        
+                        // ── Rotation ──
+                        summarySection("Rotation") {
+                            summaryRow("X", value: keyframe.worldRotationX)
+                            summaryRow("Y", value: keyframe.worldRotationY)
+                            summaryRow("Z", value: keyframe.worldRotationZ)
+                            summaryRow("W", value: keyframe.worldRotationW)
+                        }
+                        
+                        // ── Quality ──
+                        summarySection("Quality") {
+                            summaryRow("Iterations", text: "\(keyframe.baseFractalIterations)")
+                            summaryRow("Ray Steps", text: "\(keyframe.baseMaxRaySteps)")
+                        }
+                        
+                        // ── Visual Effects ──
+                        if hasVisualEffects {
+                            summarySection("Visual Effects") {
+                                optionalEffectRow("Lighting Mode", value: keyframe.lightingMode?.displayName)
+                                optionalEffectRow("Lighting Preset", value: keyframe.lightingPreset?.displayName)
+                                optionalEffectRow("Glow", effect: keyframe.glowEffect, describe: { "intensity \(String(format: "%.2f", $0.intensity))" })
+                                optionalEffectRow("Bloom", effect: keyframe.bloomEffect, describe: { "strength \(String(format: "%.2f", $0.strength))" })
+                                optionalEffectRow("Fog", effect: keyframe.fogEffect, describe: { "intensity \(String(format: "%.2f", $0.intensity))" })
+                                optionalEffectRow("Hue Rotation", effect: keyframe.hueRotationEffect, describe: { "speed \(String(format: "%.2f", $0.speed))" })
+                                optionalEffectRow("Pulse", effect: keyframe.pulseEffect, describe: { "speed \(String(format: "%.2f", $0.speed))" })
+                                optionalEffectRow("Gradient Cycle", effect: keyframe.gradientCycleEffect, describe: { "speed \(String(format: "%.2f", $0.speed))" })
+                            }
+                        }
+                        
+                        // ── Color ──
+                        if hasColorOverrides {
+                            summarySection("Color") {
+                                optionalRow("Mapping Mode", value: keyframe.colorMappingMode?.displayName)
+                                optionalRow("Gradient Preset", value: keyframe.gradientPreset?.displayName)
+                                optionalRow("Gradient Repeat", float: keyframe.gradientRepeat)
+                                optionalRow("Gradient Offset", float: keyframe.gradientOffset)
+                                optionalRow("Gradient Smoothing", float: keyframe.gradientSmoothing)
+                                optionalRow("Saturation", float: keyframe.colorSchemeSaturation)
+                                optionalRow("Contrast", float: keyframe.colorSchemeContrast)
+                                optionalRow("Gamma", float: keyframe.colorSchemeGamma)
+                                optionalRow("Vibrance", float: keyframe.colorSchemeVibrance)
+                                optionalRow("Curve", float: keyframe.colorSchemeCurve)
+                                optionalRow("Shadows", float: keyframe.colorSchemeShadows)
+                                optionalRow("Highlights", float: keyframe.colorSchemeHighlights)
+                                optionalRow("Lighting Softness", float: keyframe.lightingSoftness)
+                            }
+                        }
+                        
+                        // ── Formula Params ──
+                        if let vals = keyframe.formulaParamValues, !vals.allSatisfy({ $0 == 0 }) {
+                            summarySection("Formula Parameters") {
+                                ForEach(Array(vals.enumerated()), id: \.offset) { i, val in
+                                    if val != 0 {
+                                        summaryRow("Param \(i)", value: val)
+                                    }
+                                }
+                            }
                         }
                         
                         Spacer(minLength: 20)
@@ -1006,7 +1317,7 @@ struct KeyframeEditorView: View {
                 
                 Divider()
                 
-                // ── RIGHT COLUMN: Easing ──
+                // ── RIGHT COLUMN: Easing (interactive) ──
                 ScrollView {
                     VStack(spacing: 12) {
                         sectionHeader("Easing Curve")
@@ -1022,7 +1333,6 @@ struct KeyframeEditorView: View {
                         .padding(.horizontal, 16)
                         
                         if keyframe.easingType == .bezier {
-                            // Bezier presets
                             Menu {
                                 Button("Linear") { keyframe.bezierHandle = .linear }
                                 Button("Ease In") { keyframe.bezierHandle = .easeIn }
@@ -1052,7 +1362,6 @@ struct KeyframeEditorView: View {
                             compactSliderRow(icon: "2.circle", label: "CP2 Y",
                                              value: $keyframe.bezierHandle.cp2y, range: -0.5...1.5, format: "%.2f")
                         } else {
-                            // Preview of the selected easing curve
                             EasingCurvePreview(easing: keyframe.easingType)
                                 .frame(height: 120)
                                 .padding(.horizontal, 16)
@@ -1068,7 +1377,7 @@ struct KeyframeEditorView: View {
                 }
                 .frame(width: 260)
             }
-            .navigationTitle("Edit Keyframe")
+            .navigationTitle("Keyframe Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1084,7 +1393,85 @@ struct KeyframeEditorView: View {
         .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
     }
     
-    // ── Compact slider row matching EffectSliderRow style ──
+    // MARK: - Summary Helpers
+    
+    private var hasVisualEffects: Bool {
+        keyframe.lightingMode != nil || keyframe.lightingPreset != nil ||
+        keyframe.glowEffect != nil || keyframe.bloomEffect != nil ||
+        keyframe.fogEffect != nil || keyframe.hueRotationEffect != nil ||
+        keyframe.pulseEffect != nil || keyframe.gradientCycleEffect != nil
+    }
+    
+    private var hasColorOverrides: Bool {
+        keyframe.colorMappingMode != nil || keyframe.gradientPreset != nil ||
+        keyframe.gradientRepeat != nil || keyframe.gradientOffset != nil ||
+        keyframe.gradientSmoothing != nil || keyframe.colorSchemeSaturation != nil ||
+        keyframe.colorSchemeContrast != nil || keyframe.colorSchemeGamma != nil ||
+        keyframe.colorSchemeVibrance != nil || keyframe.colorSchemeCurve != nil ||
+        keyframe.colorSchemeShadows != nil || keyframe.colorSchemeHighlights != nil ||
+        keyframe.lightingSoftness != nil
+    }
+    
+    @ViewBuilder
+    private func summarySection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            sectionHeader(title)
+            VStack(spacing: 2) {
+                content()
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+    
+    private func summaryRow(_ label: String, value: Float, format: String = "%.3f") -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(String(format: format, value))
+                .font(.caption.monospacedDigit())
+        }
+        .frame(height: 22)
+    }
+    
+    private func summaryRow(_ label: String, text: String) -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(text)
+                .font(.caption.monospacedDigit())
+        }
+        .frame(height: 22)
+    }
+    
+    @ViewBuilder
+    private func optionalRow(_ label: String, value: String?) -> some View {
+        if let value {
+            summaryRow(label, text: value)
+        }
+    }
+    
+    @ViewBuilder
+    private func optionalRow(_ label: String, float: Float?) -> some View {
+        if let float {
+            summaryRow(label, value: float)
+        }
+    }
+    
+    @ViewBuilder
+    private func optionalEffectRow<E>(_ label: String, effect: E?, describe: (E) -> String) -> some View {
+        if let effect {
+            summaryRow(label, text: describe(effect))
+        }
+    }
+    
+    @ViewBuilder
+    private func optionalEffectRow(_ label: String, value: String?) -> some View {
+        if let value {
+            summaryRow(label, text: value)
+        }
+    }
+    
+    // Slider row for bezier control points (easing pane — still interactive)
     private func compactSliderRow(icon: String, label: String, value: Binding<Float>,
                                    range: ClosedRange<Float>, step: Float? = nil, format: String = "%.3f") -> some View {
         HStack(spacing: 8) {
@@ -1094,9 +1481,9 @@ struct KeyframeEditorView: View {
                 .frame(width: 16)
             Text(label)
                 .font(.subheadline)
-                .frame(width: 135, alignment: .leading)
+                .frame(width: 56, alignment: .leading)
                 .lineLimit(1)
-            if let step = step {
+            if let step {
                 Slider(value: value, in: range, step: step)
             } else {
                 Slider(value: value, in: range)
@@ -1105,47 +1492,6 @@ struct KeyframeEditorView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 50, alignment: .trailing)
-        }
-        .frame(height: 32)
-        .padding(.horizontal, 16)
-    }
-    
-    // Duration-specific overload for TimeInterval binding
-    private func compactSliderRow(icon: String, label: String, value: Binding<TimeInterval>,
-                                   range: ClosedRange<TimeInterval>, step: Double = 0.5, format: String = "%.1fs") -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(.primary)
-                .frame(width: 16)
-            Text(label)
-                .font(.subheadline)
-                .frame(width: 135, alignment: .leading)
-                .lineLimit(1)
-            Slider(value: value, in: range, step: step)
-            Text(String(format: format, value.wrappedValue))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 50, alignment: .trailing)
-        }
-        .frame(height: 32)
-        .padding(.horizontal, 16)
-    }
-    
-    private func compactStepperRow(icon: String, label: String, value: Binding<Int>,
-                                    range: ClosedRange<Int>, step: Int = 1) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(.primary)
-                .frame(width: 16)
-            Text(label)
-                .font(.subheadline)
-                .frame(width: 135, alignment: .leading)
-                .lineLimit(1)
-            Spacer()
-            Stepper("\(value.wrappedValue)", value: value, in: range, step: step)
-                .fixedSize()
         }
         .frame(height: 32)
         .padding(.horizontal, 16)

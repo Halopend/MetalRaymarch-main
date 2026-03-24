@@ -54,16 +54,18 @@ final class RenderSettings: @unchecked Sendable {
         // Legacy toggles mapped to the new universal + formula-param targets.
         // foldingLimit → formulaParam1, sphereRadius → formulaParam2 (Mandelbox migration)
         let defaults = UserDefaults.standard
+        // Only enable a small set by default to avoid overwhelming the music tab.
+        // Users can add more mappings manually via the music tab or fractal page shortcuts.
         let legacyToggleByTarget: [(MusicReactiveTarget, String, Bool)] = [
             (.fractalScale,  "fractalAudioAffectsScale", true),
-            (.formulaParam1, "fractalAudioAffectsFolding", true),
-            (.formulaParam2, "fractalAudioAffectsRadius", true),
+            (.formulaParam1, "fractalAudioAffectsFolding", false),
+            (.formulaParam2, "fractalAudioAffectsRadius", false),
             (.colorMix,      "fractalAudioAffectsColorMix", true),
             (.glow,          "fractalAudioAffectsGlow", true),
             (.fog,           "fractalAudioAffectsFog", true),
-            (.bloom,         "fractalAudioAffectsBloom", true),
-            (.hueSpeed,      "fractalAudioAffectsHueSpeed", true),
-            (.saturation,    "fractalAudioAffectsSaturation", true),
+            (.bloom,         "fractalAudioAffectsBloom", false),
+            (.hueSpeed,      "fractalAudioAffectsHueSpeed", false),
+            (.saturation,    "fractalAudioAffectsSaturation", false),
             (.iterations,    "fractalAudioAffectsIterations", false)
         ]
 

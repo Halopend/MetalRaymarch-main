@@ -133,15 +133,6 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     contentPanel
                     
-                    // ── PLAYER: Fixed playback bar (only in Animate tab) ──
-                    if selectedTab == .animate,
-                       let animationManager = appModel.animationManager,
-                       animationManager.currentScene != nil {
-                        Divider()
-                        AnimationPlaybackControls(animationManager: animationManager)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                    }
-                    
                     Divider()
                     
                     // ── BOTTOM BAR: Persistent controls ──
@@ -629,21 +620,24 @@ struct ContentView: View {
         HStack(spacing: 12) {
             if let animationManager = appModel.animationManager {
                 Button {
-                    guard let scene = animationManager.currentScene ?? animationManager.scenes.first else { return }
-                    animationManager.currentScene = scene
-                    animationManager.play()
+                    // Auto-select scene if none selected, then open player window
+                    if animationManager.currentScene == nil {
+                        animationManager.currentScene = animationManager.scenes.first
+                    }
+                    openWindow(id: AppModel.animationPlayerWindowID)
                 } label: {
-                    Label("Play", systemImage: "play.fill")
+                    Label("Open Player", systemImage: "play.rectangle")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(animationManager.scenes.isEmpty)
 
+                Spacer()
+
                 Button {
                     openAnimationEditor()
                 } label: {
                     Label("Edit Scenes", systemImage: "pencil.and.list.clipboard")
-                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .buttonStyle(.bordered)
             }

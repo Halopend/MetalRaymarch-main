@@ -66,6 +66,7 @@ struct MetalProjectTestApp: App {
                     dismissWindow(id: AppModel.libraryWindowID)
                     dismissWindow(id: AppModel.fractalBrowserWindowID)
                     dismissWindow(id: AppModel.animationEditorWindowID)
+                    dismissWindow(id: AppModel.animationPlayerWindowID)
                     dismissWindow(id: AppModel.onboardingWindowID)
 
                     // Set up handler for gesture-based window control
@@ -124,6 +125,20 @@ struct MetalProjectTestApp: App {
         .defaultWindowPlacement { _, context in
             if let anchorWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) ?? context.windows.first {
                 return WindowPlacement(.trailing(anchorWindow))
+            }
+            return WindowPlacement(nil)
+        }
+        .windowResizability(.contentMinSize)
+
+        // Animation Player pop-out window (positioned below main menu)
+        Window("Animation Player", id: AppModel.animationPlayerWindowID) {
+            AnimationPlayerWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 700, height: 180)
+        .defaultWindowPlacement { _, context in
+            if let anchorWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) ?? context.windows.first {
+                return WindowPlacement(.below(anchorWindow))
             }
             return WindowPlacement(nil)
         }
