@@ -9,8 +9,6 @@ final class MusicTabViewModel {
         case albums = "Albums"
     }
 
-    private static let musicPresetStorageKey = "musicReactivePresets"
-
     let musicService: MusicService
 
     var showLibrary = false
@@ -23,7 +21,7 @@ final class MusicTabViewModel {
 
     init(musicService: MusicService) {
         self.musicService = musicService
-        self.musicPresets = Self.loadMusicPresets()
+        self.musicPresets = musicService.musicPresets
     }
 
     var connectedProviders: [MusicServiceProvider] { musicService.connectedProviders }
@@ -201,17 +199,7 @@ final class MusicTabViewModel {
         action()
     }
 
-    private static func loadMusicPresets() -> [MusicReactivePreset] {
-        guard let data = UserDefaults.standard.data(forKey: musicPresetStorageKey),
-              let decoded = try? JSONDecoder().decode([MusicReactivePreset].self, from: data) else {
-            return []
-        }
-        return decoded
-    }
-
     private func persistMusicPresets() {
-        if let encoded = try? JSONEncoder().encode(musicPresets) {
-            UserDefaults.standard.set(encoded, forKey: Self.musicPresetStorageKey)
-        }
+        musicService.saveMusicPresets(musicPresets)
     }
 }
