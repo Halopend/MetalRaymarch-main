@@ -115,6 +115,15 @@ final class MusicService {
         register(amAdapter)
     }
 
+
+    #if DEBUG
+    convenience init(previewProviders: [MusicServiceProvider], preferredServiceID: String? = nil) {
+        self.init(appleMusic: AppleMusicManager())
+        providers = previewProviders
+        self.preferredServiceID = preferredServiceID
+    }
+    #endif
+
     // ══════════════════════════════════════════════════════════════════════
     // NOW PLAYING (delegated to active provider)
     // ══════════════════════════════════════════════════════════════════════

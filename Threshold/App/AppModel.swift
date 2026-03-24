@@ -60,7 +60,7 @@ class AppModel {
     let appleMusicManager = AppleMusicManager()
     
     // Unified music service (wraps Apple Music)
-    private(set) var musicService: MusicService!
+    let musicService: MusicService
     
     // Hand tracking state
     var handTrackingEnabled: Bool = {

@@ -188,7 +188,7 @@ struct ContentView: View {
                 case .animate:  animateTabContent
                 case .coloring: coloringTabContent
                 case .effects:  effectsTabContent
-                case .music:    MusicTabContent(cache: cache)
+                case .music:    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings)
                 case .settings: settingsTabContent
                 }
             }
