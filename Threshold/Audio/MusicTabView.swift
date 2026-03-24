@@ -742,38 +742,9 @@ struct MusicTabContent: View {
                             }
                             .pickerStyle(.segmented)
 
-                            // ── Mode (always visible — changes what other controls appear) ──
-                            Picker("Mode", selection: Binding(
-                                get: { mappingAt(index)?.mode ?? .absolute },
-                                set: { newValue in updateMapping(index) { $0.mode = newValue } }
-                            )) {
-                                Text("Absolute").tag(MusicReactiveMode.absolute)
-                                Text("Relative").tag(MusicReactiveMode.relative)
-                            }
-                            .pickerStyle(.segmented)
-
-                            // ── Absolute: Min/Max define the output range ──
-                            if mappingAt(index)?.mode != .relative {
-                                sliderRow(label: "Min", value: Binding(
-                                    get: { mappingAt(index)?.rangeMin ?? mapping.target.defaultRange(for: cache.fractalType).lowerBound },
-                                    set: { newValue in
-                                        updateMapping(index) { m in
-                                            m.rangeMin = newValue
-                                            m.sanitizeInPlace(for: cache.fractalType)
-                                        }
-                                    }
-                                ), range: mapping.target.allowedRange(for: cache.fractalType))
-
-                                sliderRow(label: "Max", value: Binding(
-                                    get: { mappingAt(index)?.rangeMax ?? mapping.target.defaultRange(for: cache.fractalType).upperBound },
-                                    set: { newValue in
-                                        updateMapping(index) { m in
-                                            m.rangeMax = newValue
-                                            m.sanitizeInPlace(for: cache.fractalType)
-                                        }
-                                    }
-                                ), range: mapping.target.allowedRange(for: cache.fractalType))
-                            }
+                            Text("Music modulation is always relative to the current animation or manual base value.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
 
                             // ── Intensity: how much audio drives the parameter ──
                             sliderRow(label: "Intensity", value: Binding(

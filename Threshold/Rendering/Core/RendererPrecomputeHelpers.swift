@@ -102,7 +102,7 @@ extension Renderer {
 
     /// Precompute fog helpers (inverse intensity avoids divides on GPU).
     static func makePrecomputedFog(from settings: RenderSettingsSnapshot) -> PrecomputedFog {
-        let fogIntensity = settings.fogIntensity
+        let fogIntensity = settings.fogEnabled ? settings.fogIntensity : 0.0
         let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
         return PrecomputedFog(
             fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0)

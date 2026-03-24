@@ -375,7 +375,7 @@ final class ParameterNodeRegistry: Sendable {
             step: 0.01,
             isGestureMappable: false,
             readValue: { $0.lighting.glowEffect.intensity },
-            writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.push(\.glowEffect, value: cache.lighting.glowEffect) }
+            writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.commitGlowEffect() }
         )
 
         effectNodes["effect.fog"] = FloatParameterNode(
@@ -388,7 +388,7 @@ final class ParameterNodeRegistry: Sendable {
             step: 0.01,
             isGestureMappable: false,
             readValue: { $0.lighting.fogEffect.intensity },
-            writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.push(\.fogEffect, value: cache.lighting.fogEffect) }
+            writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.commitFogEffect() }
         )
 
         effectNodes["effect.bloom"] = FloatParameterNode(
@@ -401,7 +401,7 @@ final class ParameterNodeRegistry: Sendable {
             step: 0.01,
             isGestureMappable: false,
             readValue: { $0.lighting.bloomEffect.strength },
-            writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.push(\.bloomEffect, value: cache.lighting.bloomEffect) }
+            writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.commitBloomEffect() }
         )
 
         effectNodes["effect.hueSpeed"] = FloatParameterNode(
@@ -414,7 +414,7 @@ final class ParameterNodeRegistry: Sendable {
             step: 0.001,
             isGestureMappable: false,
             readValue: { $0.lighting.hueRotationEffect.speed },
-            writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) }
+            writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.commitHueRotationEffect() }
         )
 
         effectNodes["effect.saturation"] = FloatParameterNode(
@@ -427,7 +427,7 @@ final class ParameterNodeRegistry: Sendable {
             step: 0.01,
             isGestureMappable: false,
             readValue: { $0.color.colorSchemeSaturation },
-            writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.push(\.colorSchemeSaturation, value: v) }
+            writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.commitColorSchemeSaturation() }
         )
 
         return (coreNodes, effectNodes)
@@ -562,8 +562,13 @@ final class ParameterNodeRegistry: Sendable {
                 isGestureMappable: true,
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
                 writeValue: { cache, value in
-                    FormulaCatalog.setParam(&cache.formulaParams, index: param.index, value: value)
-                    cache.renderSettings?.formulaParams = cache.formulaParams
+                    if let settings = cache.renderSettings, settings.isAnimationPlaying {
+                        settings.setManualFormulaParamOverride(index: param.index, value: value)
+                        cache.formulaParams = settings.formulaParams
+                    } else {
+                        FormulaCatalog.setParam(&cache.formulaParams, index: param.index, value: value)
+                        cache.renderSettings?.formulaParams = cache.formulaParams
+                    }
                 }
             )
 

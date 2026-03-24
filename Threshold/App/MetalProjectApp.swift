@@ -65,6 +65,7 @@ struct MetalProjectTestApp: App {
                     // like Music Library can reappear and block immersive mode entry.
                     dismissWindow(id: AppModel.libraryWindowID)
                     dismissWindow(id: AppModel.fractalBrowserWindowID)
+                    dismissWindow(id: AppModel.animationEditorWindowID)
                     dismissWindow(id: AppModel.onboardingWindowID)
 
                     // Set up handler for gesture-based window control
@@ -107,6 +108,19 @@ struct MetalProjectTestApp: App {
                 .environment(appModel)
         }
         .defaultSize(width: 980, height: 700)
+        .defaultWindowPlacement { _, context in
+            if let anchorWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) ?? context.windows.first {
+                return WindowPlacement(.trailing(anchorWindow))
+            }
+            return WindowPlacement(nil)
+        }
+        .windowResizability(.contentMinSize)
+
+        Window("Animation Editor", id: AppModel.animationEditorWindowID) {
+            AnimationEditorWindowView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 1080, height: 760)
         .defaultWindowPlacement { _, context in
             if let anchorWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) ?? context.windows.first {
                 return WindowPlacement(.trailing(anchorWindow))

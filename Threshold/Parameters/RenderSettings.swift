@@ -277,7 +277,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeCurve: Float = 0.0              // Midtone curve adjustment (-1 to 1)
     private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.5 to 0.5)
     private var _colorSchemeHighlights: Float = 0.0         // Highlight boost/reduction (-0.5 to 1.0)
-    private var _lightingSoftness: Float = 0.0               // 0 = sharp vibrance-driven, 1 = classic soft lighting
+    private var _lightingSoftness: Float = 0.35              // 0 = sharp vibrance-driven, 1 = classic soft lighting
     
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
@@ -345,11 +345,24 @@ final class RenderSettings: @unchecked Sendable {
     private var _animationBaseSphereRadius: Float = 0.5
     private var _animationBaseFractalScale: Float = 2.8
     private var _animationBasePosition: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
+    private var _animationBaseGlowIntensity: Float = 0.0
+    private var _animationBaseBloomStrength: Float = 0.0
+    private var _animationBaseFogIntensity: Float = 0.32
+    private var _animationBaseSaturation: Float = 1.5
+    private var _animationBaseFormulaParams: [Float] = {
+        let defaults = FractalModelType.mandelbox.defaultFormulaParams()
+        return (0..<16).map { FormulaCatalog.getParam(defaults, index: $0) }
+    }()
     private var _manualOffsetMinDistance: Float = 0.0
     private var _manualOffsetFoldingLimit: Float = 0.0
     private var _manualOffsetSphereRadius: Float = 0.0
     private var _manualOffsetFractalScale: Float = 0.0
     private var _manualOffsetPosition: SIMD3<Float> = .zero
+    private var _manualOffsetGlowIntensity: Float = 0.0
+    private var _manualOffsetBloomStrength: Float = 0.0
+    private var _manualOffsetFogIntensity: Float = 0.0
+    private var _manualOffsetSaturation: Float = 0.0
+    private var _manualOffsetFormulaParams: [Float] = Array(repeating: 0.0, count: 16)
     
     // === VELOCITY STATE FOR SMOOTH DAMP ===
     // Track velocities for critically-damped spring interpolation
@@ -546,34 +559,30 @@ final class RenderSettings: @unchecked Sendable {
     // triggering _lightingPreset = .custom every frame.
     // ═══════════════════════════════════════════════════════════════════════════
     
-    /// Modulate glow intensity (auto-enables glow if needed)
+    /// Modulate glow intensity (respects user's enabled/disabled toggle)
     func audioModulateGlowIntensity(_ value: Float) {
         withLock {
-            _glowEffect.enabled = true
             _glowEffect.intensity = max(0.0, min(1.0, value))
         }
     }
     
-    /// Modulate fog intensity (auto-enables fog if needed)
+    /// Modulate fog intensity (respects user's enabled/disabled toggle)
     func audioModulateFogIntensity(_ value: Float) {
         withLock {
-            _fogEffect.enabled = true
             _fogEffect.intensity = max(0.0, min(1.0, value))
         }
     }
     
-    /// Modulate bloom strength (auto-enables bloom if needed)
+    /// Modulate bloom strength (respects user's enabled/disabled toggle)
     func audioModulateBloomStrength(_ value: Float) {
         withLock {
-            _bloomEffect.enabled = true
             _bloomEffect.strength = max(0.0, min(1.0, value))
         }
     }
     
-    /// Modulate hue rotation speed (auto-enables hue rotation if needed)
+    /// Modulate hue rotation speed (respects user's enabled/disabled toggle)
     func audioModulateHueSpeed(_ value: Float) {
         withLock {
-            _hueRotationEffect.enabled = true
             _hueRotationEffect.speed = max(0.0, min(0.5, value))
         }
     }
@@ -624,6 +633,8 @@ final class RenderSettings: @unchecked Sendable {
                 } else {
                     _formulaParams = desc.defaultFormulaParams()
                 }
+                _syncAnimationBaseFormulaParamsFromCurrent_locked()
+                _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)
                 // Rebind any gesture fingers assigned to core actions unsupported by
                 // the new fractal type (e.g. fractalScale on non-Mandelbox), and
                 // clean cross-type .parameter() bindings that belong to a different
@@ -681,7 +692,14 @@ final class RenderSettings: @unchecked Sendable {
 
     var formulaParams: FormulaParams {
         get { withLock { _formulaParams } }
-        set { withLock { _formulaParams = newValue } }
+        set {
+            withLock {
+                _formulaParams = newValue
+                if !_isAnimationPlaying {
+                    _syncAnimationBaseFormulaParamsFromCurrent_locked()
+                }
+            }
+        }
     }
 
     // 0 = disabled (standard per-pixel raymarch)
@@ -1585,6 +1603,7 @@ final class RenderSettings: @unchecked Sendable {
                 safetyBubbleStrength: _safetyBubbleStrength,
                 colorSchemeParams: makeColorSchemeParamsLocked(),
                 lightingSoftness: _lightingSoftness,
+                fogEnabled: _fogEffect.enabled,
                 fogIntensity: _fogEffect.intensity,
                 worldRotation: _worldRotation,
                 detailScale: _detailScale,
@@ -1711,6 +1730,26 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _animationBasePosition } }
         set { withLock { _animationBasePosition = newValue } }
     }
+
+    var animationBaseGlowIntensity: Float {
+        get { withLock { _animationBaseGlowIntensity } }
+        set { withLock { _animationBaseGlowIntensity = newValue } }
+    }
+
+    var animationBaseBloomStrength: Float {
+        get { withLock { _animationBaseBloomStrength } }
+        set { withLock { _animationBaseBloomStrength = newValue } }
+    }
+
+    var animationBaseFogIntensity: Float {
+        get { withLock { _animationBaseFogIntensity } }
+        set { withLock { _animationBaseFogIntensity = newValue } }
+    }
+
+    var animationBaseSaturation: Float {
+        get { withLock { _animationBaseSaturation } }
+        set { withLock { _animationBaseSaturation = newValue } }
+    }
     
     var manualOffsetMinDistance: Float {
         get { withLock { _manualOffsetMinDistance } }
@@ -1735,6 +1774,26 @@ final class RenderSettings: @unchecked Sendable {
     var manualOffsetPosition: SIMD3<Float> {
         get { withLock { _manualOffsetPosition } }
         set { withLock { _manualOffsetPosition = newValue } }
+    }
+
+    var manualOffsetGlowIntensity: Float {
+        get { withLock { _manualOffsetGlowIntensity } }
+        set { withLock { _manualOffsetGlowIntensity = newValue } }
+    }
+
+    var manualOffsetBloomStrength: Float {
+        get { withLock { _manualOffsetBloomStrength } }
+        set { withLock { _manualOffsetBloomStrength = newValue } }
+    }
+
+    var manualOffsetFogIntensity: Float {
+        get { withLock { _manualOffsetFogIntensity } }
+        set { withLock { _manualOffsetFogIntensity = newValue } }
+    }
+
+    var manualOffsetSaturation: Float {
+        get { withLock { _manualOffsetSaturation } }
+        set { withLock { _manualOffsetSaturation = newValue } }
     }
     
     var effectiveTargetMinDistance: Float {
@@ -1765,6 +1824,94 @@ final class RenderSettings: @unchecked Sendable {
         withLock {
             _isAnimationPlaying ? _animationBasePosition + _manualOffsetPosition : _targetPosition
         }
+    }
+
+    func setAnimationBaseFormulaParams(_ values: [Float]) {
+        withLock {
+            for index in 0..<16 {
+                let current = FormulaCatalog.getParam(_formulaParams, index: index)
+                let next = index < values.count ? values[index] : current
+                _animationBaseFormulaParams[index] = _clampFormulaParamValue_locked(next, index: index)
+            }
+            _rebuildFormulaParamsFromAnimationState_locked()
+        }
+    }
+
+    func setManualFormulaParamOverride(index: Int, value: Float) {
+        withLock {
+            guard index >= 0 && index < 16 else { return }
+            let clamped = _clampFormulaParamValue_locked(value, index: index)
+
+            if _isAnimationPlaying {
+                _manualOffsetFormulaParams[index] = clamped - _animationBaseFormulaParams[index]
+                _syncMandelboxAnimationShapeOffset_locked(index: index, value: clamped)
+                _rebuildFormulaParamsFromAnimationState_locked()
+            } else {
+                FormulaCatalog.setParam(&_formulaParams, index: index, value: clamped)
+                _syncAnimationBaseFormulaParamsFromCurrent_locked()
+            }
+        }
+    }
+
+    func setManualFormulaParamOverrides(_ values: [Float]) {
+        withLock {
+            for index in 0..<16 {
+                let current = FormulaCatalog.getParam(_formulaParams, index: index)
+                let next = index < values.count ? values[index] : current
+                let clamped = _clampFormulaParamValue_locked(next, index: index)
+                _manualOffsetFormulaParams[index] = clamped - _animationBaseFormulaParams[index]
+                _syncMandelboxAnimationShapeOffset_locked(index: index, value: clamped)
+            }
+            _rebuildFormulaParamsFromAnimationState_locked()
+        }
+    }
+
+    private func _syncAnimationBaseFormulaParamsFromCurrent_locked() {
+        for index in 0..<16 {
+            _animationBaseFormulaParams[index] = FormulaCatalog.getParam(_formulaParams, index: index)
+        }
+    }
+
+    private func _rebuildFormulaParamsFromAnimationState_locked() {
+        guard _isAnimationPlaying else { return }
+
+        var params = _formulaParams
+        for index in 0..<16 {
+            let resolved = _clampFormulaParamValue_locked(
+                _animationBaseFormulaParams[index] + _manualOffsetFormulaParams[index],
+                index: index
+            )
+            FormulaCatalog.setParam(&params, index: index, value: resolved)
+        }
+        _formulaParams = params
+    }
+
+    private func _syncMandelboxAnimationShapeOffset_locked(index: Int, value: Float) {
+        guard _fractalType == .mandelbox else { return }
+
+        switch index {
+        case 0:
+            _manualOffsetMinDistance = value - _animationBaseMinDistance
+        case 1:
+            _manualOffsetFoldingLimit = value - _animationBaseFoldingLimit
+        case 2:
+            _manualOffsetSphereRadius = value - _animationBaseSphereRadius
+        default:
+            break
+        }
+    }
+
+    private func _clampFormulaParamValue_locked(_ value: Float, index: Int) -> Float {
+        guard let descriptor = FormulaCatalog.shared.descriptor(for: _fractalType),
+              let param = descriptor.params.first(where: { $0.index == index }) else {
+            return value
+        }
+
+        if param.isBool == true {
+            return value >= 0.5 ? 1.0 : 0.0
+        }
+
+        return min(param.max, max(param.min, value))
     }
     
     // === SMOOTH DAMP PARAMETERS ===
@@ -1837,19 +1984,34 @@ final class RenderSettings: @unchecked Sendable {
             // as the source of truth. This prevents "sticky" gesture perturbations
             // that cause flickering when the user stops touching.
             // ═══════════════════════════════════════════════════════════════════════════
-            if _isAnimationPlaying && !_isGeometryGestureActive {
+            if _isAnimationPlaying && !_isGeometryGestureActive && !_isMenuInteractionActive {
                 let decayRate: Float = 1.0 - exp(-6.0 * clampedDT)  // ~6Hz half-life
                 _manualOffsetMinDistance   *= (1.0 - decayRate)
                 _manualOffsetFoldingLimit  *= (1.0 - decayRate)
                 _manualOffsetSphereRadius  *= (1.0 - decayRate)
                 _manualOffsetFractalScale  *= (1.0 - decayRate)
                 _manualOffsetPosition      *= (1.0 - decayRate)
+                _manualOffsetGlowIntensity *= (1.0 - decayRate)
+                _manualOffsetBloomStrength *= (1.0 - decayRate)
+                _manualOffsetFogIntensity  *= (1.0 - decayRate)
+                _manualOffsetSaturation    *= (1.0 - decayRate)
+                for index in 0..<16 {
+                    _manualOffsetFormulaParams[index] *= (1.0 - decayRate)
+                    if abs(_manualOffsetFormulaParams[index]) < 1e-5 {
+                        _manualOffsetFormulaParams[index] = 0
+                    }
+                }
                 // Snap to zero when negligible to avoid micro-drift
                 if abs(_manualOffsetMinDistance)  < 1e-5 { _manualOffsetMinDistance = 0 }
                 if abs(_manualOffsetFoldingLimit) < 1e-5 { _manualOffsetFoldingLimit = 0 }
                 if abs(_manualOffsetSphereRadius) < 1e-5 { _manualOffsetSphereRadius = 0 }
                 if abs(_manualOffsetFractalScale) < 1e-5 { _manualOffsetFractalScale = 0 }
                 if simd_length_squared(_manualOffsetPosition) < 1e-10 { _manualOffsetPosition = .zero }
+                if abs(_manualOffsetGlowIntensity) < 1e-5 { _manualOffsetGlowIntensity = 0 }
+                if abs(_manualOffsetBloomStrength) < 1e-5 { _manualOffsetBloomStrength = 0 }
+                if abs(_manualOffsetFogIntensity) < 1e-5 { _manualOffsetFogIntensity = 0 }
+                if abs(_manualOffsetSaturation) < 1e-5 { _manualOffsetSaturation = 0 }
+                _rebuildFormulaParamsFromAnimationState_locked()
             }
 
             // ═══════════════════════════════════════════════════════════════════════════
@@ -2115,6 +2277,12 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetSphereRadius = 0.0
             _manualOffsetFractalScale = 0.0
             _manualOffsetPosition = .zero
+            _manualOffsetGlowIntensity = 0.0
+            _manualOffsetBloomStrength = 0.0
+            _manualOffsetFogIntensity = 0.0
+            _manualOffsetSaturation = 0.0
+            _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)
+            _syncAnimationBaseFormulaParamsFromCurrent_locked()
             // Zero spring velocities so interpolation doesn't overshoot
             _velocityMinDistance = 0.0
             _velocityFoldingLimit = 0.0
@@ -2133,6 +2301,12 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetSphereRadius = 0.0
             _manualOffsetFractalScale = 0.0
             _manualOffsetPosition = .zero
+            _manualOffsetGlowIntensity = 0.0
+            _manualOffsetBloomStrength = 0.0
+            _manualOffsetFogIntensity = 0.0
+            _manualOffsetSaturation = 0.0
+            _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)
+            _rebuildFormulaParamsFromAnimationState_locked()
             _velocityMinDistance = 0.0
             _velocityFoldingLimit = 0.0
             _velocitySphereRadius = 0.0

@@ -289,8 +289,21 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
                 state.formulaStacks[operation.targetID] = stack
                 return resolved
             }
-            FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
-            settings.formulaParams = params
+            let usesPlaybackRelativeManualOverride: Bool = settings.isAnimationPlaying && {
+                switch operation.source {
+                case .gesture, .slider, .windowSlider:
+                    return true
+                default:
+                    return false
+                }
+            }()
+
+            if usesPlaybackRelativeManualOverride {
+                settings.setManualFormulaParamOverride(index: formulaIndex, value: resolved)
+            } else {
+                FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
+                settings.formulaParams = params
+            }
             if debugTraceEnabled {
                 print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
             }

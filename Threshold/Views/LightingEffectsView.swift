@@ -151,7 +151,7 @@ struct LightingEffectsSection: View {
                 icon: "paintpalette.fill",
                 enabled: hueEnabledBinding,
                 onToggle: {
-                    cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect)
+                    cache.commitHueRotationEffect()
                 }
             ) {
                 VStack(spacing: 6) {
@@ -164,7 +164,7 @@ struct LightingEffectsSection: View {
                     }
                     Slider(value: hueSpeedBinding, in: 0...0.5, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect)
+                            cache.commitHueRotationEffect()
                         }
                     })
                     
@@ -177,7 +177,7 @@ struct LightingEffectsSection: View {
                     }
                     Slider(value: hueIntensityBinding, in: 0...1, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect)
+                            cache.commitHueRotationEffect()
                         }
                     })
                 }
@@ -189,7 +189,7 @@ struct LightingEffectsSection: View {
                 icon: "waveform.path.ecg",
                 enabled: pulseEnabledBinding,
                 onToggle: {
-                    cache.push(\.pulseEffect, value: cache.lighting.pulseEffect)
+                    cache.commitPulseEffect()
                 }
             ) {
                 VStack(spacing: 6) {
@@ -202,7 +202,7 @@ struct LightingEffectsSection: View {
                     }
                     Slider(value: pulseSpeedBinding, in: 0...2, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.pulseEffect, value: cache.lighting.pulseEffect)
+                            cache.commitPulseEffect()
                         }
                     })
                     
@@ -215,7 +215,7 @@ struct LightingEffectsSection: View {
                     }
                     Slider(value: pulseAmountBinding, in: 0...1, onEditingChanged: { editing in
                         if !editing {
-                            cache.push(\.pulseEffect, value: cache.lighting.pulseEffect)
+                            cache.commitPulseEffect()
                         }
                     })
                 }
@@ -227,7 +227,7 @@ struct LightingEffectsSection: View {
                 icon: "light.max",
                 enabled: glowEnabledBinding,
                 onToggle: {
-                    cache.push(\.glowEffect, value: cache.lighting.glowEffect)
+                    cache.commitGlowEffect()
                 }
             ) {
                 HStack {
@@ -239,7 +239,7 @@ struct LightingEffectsSection: View {
                 }
                 Slider(value: glowIntensityBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.glowEffect, value: cache.lighting.glowEffect)
+                        cache.commitGlowEffect()
                     }
                 })
             }
@@ -250,7 +250,7 @@ struct LightingEffectsSection: View {
                 icon: "sun.max.fill",
                 enabled: bloomEnabledBinding,
                 onToggle: {
-                    cache.push(\.bloomEffect, value: cache.lighting.bloomEffect)
+                    cache.commitBloomEffect()
                 }
             ) {
                 HStack {
@@ -262,7 +262,7 @@ struct LightingEffectsSection: View {
                 }
                 Slider(value: bloomStrengthBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.bloomEffect, value: cache.lighting.bloomEffect)
+                        cache.commitBloomEffect()
                     }
                 })
             }
@@ -273,7 +273,7 @@ struct LightingEffectsSection: View {
                 icon: "bolt.fill",
                 enabled: beatFlashEnabledBinding,
                 onToggle: {
-                    cache.push(\.beatFlashEffect, value: cache.lighting.beatFlashEffect)
+                    cache.commitBeatFlashEffect()
                 }
             ) {
                 HStack {
@@ -285,7 +285,7 @@ struct LightingEffectsSection: View {
                 }
                 Slider(value: beatFlashIntensityBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.beatFlashEffect, value: cache.lighting.beatFlashEffect)
+                        cache.commitBeatFlashEffect()
                     }
                 })
                 Text("Orange edge glow synced to music beat")
@@ -299,7 +299,7 @@ struct LightingEffectsSection: View {
                 icon: "cloud.fog.fill",
                 enabled: fogEnabledBinding,
                 onToggle: {
-                    cache.push(\.fogEffect, value: cache.lighting.fogEffect)
+                    cache.commitFogEffect()
                 }
             ) {
                 HStack {
@@ -311,7 +311,7 @@ struct LightingEffectsSection: View {
                 }
                 Slider(value: fogIntensityBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.fogEffect, value: cache.lighting.fogEffect)
+                        cache.commitFogEffect()
                     }
                 })
             }
@@ -322,7 +322,7 @@ struct LightingEffectsSection: View {
                 icon: "arrow.trianglehead.2.clockwise.rotate.90",
                 enabled: gradientCycleEnabledBinding,
                 onToggle: {
-                    cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect)
+                    cache.commitGradientCycleEffect()
                 }
             ) {
                 HStack {
@@ -334,7 +334,7 @@ struct LightingEffectsSection: View {
                 }
                 Slider(value: gradientCycleSpeedBinding, in: 0...1, onEditingChanged: { editing in
                     if !editing {
-                        cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect)
+                        cache.commitGradientCycleEffect()
                     }
                 })
             }

@@ -8,21 +8,30 @@
 
 import Foundation
 
-enum MusicReactiveMode: String, CaseIterable, Codable, Sendable {
+enum MusicReactiveMode: String, Codable, Sendable {
     case absolute
     case relative
 
+    static let allCases: [MusicReactiveMode] = [.relative]
+
     var displayName: String {
         switch self {
-        case .absolute: return "Absolute"
+        case .absolute: return "Relative"
         case .relative: return "Relative"
         }
     }
 
     var helpText: String {
         switch self {
-        case .absolute: return "Music sets the value directly within min/max range"
-        case .relative: return "Music adds a delta around the current animation/gesture value"
+        case .absolute: return "Legacy mappings are migrated to relative modulation around the current base value"
+        case .relative: return "Music adds a delta around the current animation or manual base value"
+        }
+    }
+
+    var runtimeMode: MusicReactiveMode {
+        switch self {
+        case .absolute: return .relative
+        case .relative: return .relative
         }
     }
 }
@@ -380,7 +389,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
          responseSpeed: Float,
          amount: Float,
          isEnabled: Bool,
-         mode: MusicReactiveMode = .absolute,
+         mode: MusicReactiveMode = .relative,
          lfo: LFOSettings = .default,
          smoothingWindow: Float = 0.0) {
         self.id = id
@@ -398,6 +407,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     }
 
     mutating func sanitizeInPlace() {
+        mode = mode.runtimeMode
         let allowed = target.allowedRange
         rangeMin = min(allowed.upperBound, max(allowed.lowerBound, rangeMin))
         rangeMax = min(allowed.upperBound, max(allowed.lowerBound, rangeMax))
@@ -412,6 +422,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
 
     /// Sanitize with fractal-type-aware ranges (for formula params).
     mutating func sanitizeInPlace(for fractalType: FractalModelType) {
+        mode = mode.runtimeMode
         let allowed = target.allowedRange(for: fractalType)
         rangeMin = min(allowed.upperBound, max(allowed.lowerBound, rangeMin))
         rangeMax = min(allowed.upperBound, max(allowed.lowerBound, rangeMax))
@@ -446,7 +457,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.responseSpeed = try c.decode(Float.self, forKey: .responseSpeed)
         self.amount = try c.decode(Float.self, forKey: .amount)
         self.isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
-        self.mode = try c.decodeIfPresent(MusicReactiveMode.self, forKey: .mode) ?? .absolute
+        self.mode = (try c.decodeIfPresent(MusicReactiveMode.self, forKey: .mode) ?? .relative).runtimeMode
         self.lfo = try c.decodeIfPresent(LFOSettings.self, forKey: .lfo) ?? .default
         self.smoothingWindow = try c.decodeIfPresent(Float.self, forKey: .smoothingWindow) ?? 0.0
     }
@@ -458,6 +469,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         for var mapping in mappings {
             let newTarget = mapping.target.migrated
             mapping.target = newTarget
+            mapping.mode = mapping.mode.runtimeMode
             guard seen.insert(newTarget).inserted else { continue }
             result.append(mapping)
         }

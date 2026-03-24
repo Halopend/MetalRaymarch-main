@@ -262,7 +262,7 @@ FORCE_INLINE LightingParams computeBlendedLighting(float vibrance, float lightin
     // Current system: vibrance drives sun direction and intensity
     float3 sunDirNew = mix(sunDirSoft, sunDirSharp, vibrance);
     float sunDiffuseNew = 0.15f;        // Slightly lower than classic for sharper look when vibrant
-    float intensityScaleNew = mix(0.5f, 1.2f, vibrance);
+    float intensityScaleNew = mix(0.7f, 1.2f, vibrance);
     
     // Classic system: fixed sun direction, fixed diffuse, no intensity scaling
     float3 sunDirClassic = sunDirSoft;  // Original un-normalized direction

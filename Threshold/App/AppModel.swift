@@ -16,6 +16,7 @@ class AppModel {
     let menuWindowID = "MenuWindow"
     static let onboardingWindowID = "OnboardingWindow"
     static let fractalBrowserWindowID = "FractalBrowserWindow"
+    static let animationEditorWindowID = "AnimationEditorWindow"
     static let fractalSettingsDidChangeNotification = Notification.Name("AppModel.fractalSettingsDidChange")
     
     enum ImmersiveSpaceState {

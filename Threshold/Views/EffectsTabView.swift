@@ -22,19 +22,19 @@ struct EffectsStaticView: View {
                     value: Binding(get: { cache.lighting.glowEffect.intensity }, set: { cache.lighting.glowEffect.intensity = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.glowEffect.enabled }, set: { cache.lighting.glowEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.glowEffect, value: cache.lighting.glowEffect) })
+                    onChanged: { cache.commitGlowEffect() })
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
                     value: Binding(get: { cache.lighting.bloomEffect.strength }, set: { cache.lighting.bloomEffect.strength = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.bloomEffect.enabled }, set: { cache.lighting.bloomEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.bloomEffect, value: cache.lighting.bloomEffect) })
+                    onChanged: { cache.commitBloomEffect() })
                 Divider().padding(.leading, 114)
                 EffectSliderRow(icon: "cloud.fog.fill", label: "Fog",
                     value: Binding(get: { cache.lighting.fogEffect.intensity }, set: { cache.lighting.fogEffect.intensity = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.fogEffect, value: cache.lighting.fogEffect) })
+                    onChanged: { cache.commitFogEffect() })
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
@@ -81,7 +81,7 @@ struct EffectsDynamicView: View {
                     value: Binding(get: { cache.lighting.gradientCycleEffect.speed }, set: { cache.lighting.gradientCycleEffect.speed = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.gradientCycleEffect.enabled }, set: { cache.lighting.gradientCycleEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect) })
+                    onChanged: { cache.commitGradientCycleEffect() })
                 if cache.lighting.gradientCycleEffect.enabled {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.triangle.2.circlepath")
@@ -96,7 +96,7 @@ struct EffectsDynamicView: View {
                             get: { cache.lighting.gradientCycleEffect.mirrorLoop },
                             set: { newVal in
                                 cache.lighting.gradientCycleEffect.mirrorLoop = newVal
-                                cache.push(\.gradientCycleEffect, value: cache.lighting.gradientCycleEffect)
+                                cache.commitGradientCycleEffect()
                             }))
                             .labelsHidden()
                             .toggleStyle(.switch)
@@ -109,12 +109,12 @@ struct EffectsDynamicView: View {
                     value: Binding(get: { cache.lighting.hueRotationEffect.speed }, set: { cache.lighting.hueRotationEffect.speed = $0 }),
                     range: 0...0.5,
                     enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) })
+                    onChanged: { cache.commitHueRotationEffect() })
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
                     value: Binding(get: { cache.lighting.hueRotationEffect.intensity }, set: { cache.lighting.hueRotationEffect.intensity = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.hueRotationEffect, value: cache.lighting.hueRotationEffect) },
+                    onChanged: { cache.commitHueRotationEffect() },
                     showToggle: false)
             }
             .padding(10)
@@ -126,12 +126,12 @@ struct EffectsDynamicView: View {
                     value: Binding(get: { cache.lighting.pulseEffect.speed }, set: { cache.lighting.pulseEffect.speed = $0 }),
                     range: 0...2,
                     enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.lighting.pulseEffect) })
+                    onChanged: { cache.commitPulseEffect() })
                 EffectSliderRow(icon: "waveform.path", label: "Pulse Amount",
                     value: Binding(get: { cache.lighting.pulseEffect.amount }, set: { cache.lighting.pulseEffect.amount = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.pulseEffect.enabled }, set: { cache.lighting.pulseEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.pulseEffect, value: cache.lighting.pulseEffect) },
+                    onChanged: { cache.commitPulseEffect() },
                     showToggle: false)
             }
             .padding(10)
@@ -143,7 +143,7 @@ struct EffectsDynamicView: View {
                     value: Binding(get: { cache.lighting.beatFlashEffect.intensity }, set: { cache.lighting.beatFlashEffect.intensity = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.beatFlashEffect.enabled }, set: { cache.lighting.beatFlashEffect.enabled = $0 }),
-                    onChanged: { cache.push(\.beatFlashEffect, value: cache.lighting.beatFlashEffect) })
+                    onChanged: { cache.commitBeatFlashEffect() })
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))

@@ -729,11 +729,7 @@ final class AnimationManager {
         
         // Apply formula params for all types (unified path)
         if let vals = keyframe.formulaParamValues {
-            var fp = settings.formulaParams
-            for i in 0..<min(16, vals.count) {
-                FormulaCatalog.setParam(&fp, index: i, value: vals[i])
-            }
-            settings.formulaParams = fp
+            settings.setAnimationBaseFormulaParams(vals)
         }
 
           if let lightingMode = keyframe.lightingMode,
@@ -744,25 +740,34 @@ final class AnimationManager {
               settings.lightingPreset != lightingPreset {
             settings.lightingPreset = lightingPreset
         }
-          if let hueRotationEffect = keyframe.hueRotationEffect,
-              settings.hueRotationEffect != hueRotationEffect {
-            settings.hueRotationEffect = hueRotationEffect
+                    if let hueRotationEffect = keyframe.hueRotationEffect,
+                            settings.hueRotationEffect != hueRotationEffect {
+                        settings.hueRotationEffect = hueRotationEffect
         }
           if let pulseEffect = keyframe.pulseEffect,
               settings.pulseEffect != pulseEffect {
             settings.pulseEffect = pulseEffect
         }
           if let glowEffect = keyframe.glowEffect,
-              settings.glowEffect != glowEffect {
-            settings.glowEffect = glowEffect
+                            settings.glowEffect != glowEffect {
+                        settings.animationBaseGlowIntensity = glowEffect.intensity
+                        var resolvedEffect = glowEffect
+                        resolvedEffect.intensity = max(0.0, min(1.0, glowEffect.intensity + settings.manualOffsetGlowIntensity))
+                        settings.glowEffect = resolvedEffect
         }
           if let bloomEffect = keyframe.bloomEffect,
-              settings.bloomEffect != bloomEffect {
-            settings.bloomEffect = bloomEffect
+                            settings.bloomEffect != bloomEffect {
+                        settings.animationBaseBloomStrength = bloomEffect.strength
+                        var resolvedEffect = bloomEffect
+                        resolvedEffect.strength = max(0.0, min(1.0, bloomEffect.strength + settings.manualOffsetBloomStrength))
+                        settings.bloomEffect = resolvedEffect
         }
           if let fogEffect = keyframe.fogEffect,
-              settings.fogEffect != fogEffect {
-            settings.fogEffect = fogEffect
+                            settings.fogEffect != fogEffect {
+                        settings.animationBaseFogIntensity = fogEffect.intensity
+                        var resolvedEffect = fogEffect
+                        resolvedEffect.intensity = max(0.0, min(1.0, fogEffect.intensity + settings.manualOffsetFogIntensity))
+                        settings.fogEffect = resolvedEffect
         }
           if let gradientCycleEffect = keyframe.gradientCycleEffect,
               settings.gradientCycleEffect != gradientCycleEffect {
@@ -787,7 +792,8 @@ final class AnimationManager {
             settings.gradientSmoothing = sm
         }
         if let sat = keyframe.colorSchemeSaturation {
-            settings.colorSchemeSaturation = sat
+            settings.animationBaseSaturation = sat
+            settings.colorSchemeSaturation = max(0.0, min(3.0, sat + settings.manualOffsetSaturation))
         }
         if let con = keyframe.colorSchemeContrast {
             settings.colorSchemeContrast = con

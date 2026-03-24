@@ -7,17 +7,16 @@
 
 import SwiftUI
 
-// MARK: - Scenes Window View
+// MARK: - Animation Editor Window
 
-/// Wrapper view for the standalone scenes window
-struct ScenesWindowView: View {
+/// Utility window for scene management and editing.
+struct AnimationEditorWindowView: View {
     @Environment(AppModel.self) private var appModel
-    @Environment(\.dismissWindow) private var dismissWindow
     
     var body: some View {
         Group {
             if let animationManager = appModel.animationManager {
-                SceneListView(animationManager: animationManager, appModel: appModel)
+                AnimationEditorWorkspaceView(animationManager: animationManager, appModel: appModel)
             } else {
                 ContentUnavailableView(
                     "Not Available",
@@ -26,8 +25,51 @@ struct ScenesWindowView: View {
                 )
             }
         }
-        .frame(minWidth: 450, minHeight: 400)
+        .frame(minWidth: 920, minHeight: 620)
         .glassBackgroundEffect()
+    }
+}
+
+private struct AnimationEditorWorkspaceView: View {
+    @Bindable var animationManager: AnimationManager
+    @Bindable var appModel: AppModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SceneListView(
+                animationManager: animationManager,
+                appModel: appModel,
+                onEditScene: { scene in
+                    animationManager.currentScene = scene
+                },
+                isInline: true,
+                isEditing: false
+            )
+            .frame(width: 280)
+
+            Divider()
+
+            if let scene = animationManager.currentScene {
+                SceneEditorView(
+                    scene: scene,
+                    animationManager: animationManager,
+                    appModel: appModel,
+                    onDismiss: {
+                        animationManager.currentScene = nil
+                    },
+                    isInline: true
+                )
+                .id(scene.id)
+                .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    "Select a Scene",
+                    systemImage: "pencil.and.list.clipboard",
+                    description: Text("Choose a scene on the left to edit it in this utility window.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
     }
 }
 
@@ -395,6 +437,7 @@ struct SceneEditorView: View {
     @State private var isEditMode: EditMode = .inactive
     @State private var showSceneSettings = false
     @State private var showSongPicker = false
+    @State private var hasPersistedScene = false
     
     var body: some View {
         if isInline {
@@ -410,8 +453,7 @@ struct SceneEditorView: View {
             // Header bar
             HStack {
                 Button {
-                    animationManager.updateScene(scene)
-                    onDismiss()
+                    closeEditor()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -463,6 +505,7 @@ struct SceneEditorView: View {
                 .environment(\.editMode, $isEditMode)
         }
         .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
+        .onDisappear { persistSceneIfNeeded() }
     }
     
     // Scene settings popover
@@ -636,8 +679,7 @@ struct SceneEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
-                        animationManager.updateScene(scene)
-                        onDismiss()
+                        closeEditor()
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -656,6 +698,7 @@ struct SceneEditorView: View {
             }
             .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
         }
+        .onDisappear { persistSceneIfNeeded() }
     }
     
     // Shared list content
@@ -722,6 +765,17 @@ struct SceneEditorView: View {
                 selectedKeyframeForEdit = nil
             }
         )
+    }
+
+    private func persistSceneIfNeeded() {
+        guard hasPersistedScene == false else { return }
+        animationManager.updateScene(scene)
+        hasPersistedScene = true
+    }
+
+    private func closeEditor() {
+        persistSceneIfNeeded()
+        onDismiss()
     }
     
     private func addKeyframe() {

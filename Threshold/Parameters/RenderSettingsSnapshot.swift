@@ -38,7 +38,8 @@ struct RenderSettingsSnapshot {
     let colorSchemeParams: ColorSchemeParams
     let lightingSoftness: Float
     
-    // Fog intensity for CPU precomputation (not sent to GPU in ColorSchemeParams)
+    // Fog for CPU precomputation (not sent to GPU in ColorSchemeParams)
+    let fogEnabled: Bool
     let fogIntensity: Float
     
     // Two-point grab world rotation + detail scale

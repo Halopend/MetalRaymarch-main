@@ -173,9 +173,9 @@ actor Renderer {
     let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS
     private var lastFPSConsoleLogTime: TimeInterval = 0  // For periodic FPS console logging
 
-    // Music-reactive fractal anchors (prevent parameter drift)
-    private var musicFractalAnchorValid: Bool = false
-    private var musicAnchorByTarget: [MusicReactiveTarget: Float] = [:]
+    // Tracks whether the music layer has been activated so we can clear it when
+    // music reactivity is turned off.
+    private var musicReactiveLayerActive: Bool = false
     private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
 
     private var parameterOperationFrameIndex: UInt64 = 0
@@ -743,25 +743,7 @@ actor Renderer {
 
             // Music drives fractal geometry AND effects (Fractal Forge-inspired)
             if settings.fractalAudioReactiveEnabled {
-                if !musicFractalAnchorValid {
-                    let anchorFP = settings.formulaParams
-                    let activeFractalType = settings.fractalType
-                    musicAnchorByTarget[.fractalScale] = settings.targetFractalScale
-                    musicAnchorByTarget[.colorMix] = settings.colorMix
-                    musicAnchorByTarget[.glow] = settings.glowEffect.intensity
-                    musicAnchorByTarget[.fog] = settings.fogEffect.intensity
-                    musicAnchorByTarget[.bloom] = settings.bloomEffect.strength
-                    musicAnchorByTarget[.hueSpeed] = settings.hueRotationEffect.speed
-                    musicAnchorByTarget[.saturation] = settings.colorSchemeSaturation
-                    musicAnchorByTarget[.iterations] = Float(settings.fractalIterations)
-                    let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
-                    for target in [MusicReactiveTarget.formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3] {
-                        if let slot = target.formulaParamSlot, slot < floatParams.count {
-                            musicAnchorByTarget[target] = FormulaCatalog.getParam(anchorFP, index: floatParams[slot].index)
-                        }
-                    }
-                    musicFractalAnchorValid = true
-                }
+                musicReactiveLayerActive = true
 
                 let bass = settings.bassLevel
                 let mid = settings.midLevel
@@ -815,62 +797,28 @@ actor Renderer {
                     let normalized = mapping.amount >= 0 ? scaled : (1.0 - scaled)
 
                     // ── 3. Compute final target value based on mode ──
-                    let rawTargetValue: Float
-                    switch mapping.mode {
-                    case .absolute:
-                        // Music sets the value directly within the user-defined min/max range
-                        let minValue = min(mapping.rangeMin, mapping.rangeMax)
-                        let maxValue = max(mapping.rangeMin, mapping.rangeMax)
-                        let rangeSpan = maxValue - minValue
+                    // Music is always relative to the current animation/manual base.
+                    // Legacy absolute mappings are migrated to .relative at decode time.
+                    let allowed = mapping.target.allowedRange(for: activeFractalType)
+                    let allowedSpan = allowed.upperBound - allowed.lowerBound
+                    let maxDeviation = allowedSpan * 0.15 * absAmount * globalAmount
 
-                        var lfoOffset: Float = 0
-                        if mapping.lfo.enabled {
-                            var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
-                            phase += mapping.lfo.frequency * dt
-                            phase = phase - floor(phase)
-                            musicLFOPhaseByTarget[mapping.target] = phase
-                            lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * rangeSpan
-                        }
-
-                        rawTargetValue = minValue + rangeSpan * normalized + lfoOffset
-
-                    case .relative:
-                        // Music adds a deviation around the CURRENT base value
-                        // (set by sliders, gestures, animations). The layer stack
-                        // adds the music offset on top of the live UI/gesture value,
-                        // so we only need to produce the pure delta here.
-                        let allowed = mapping.target.allowedRange(for: activeFractalType)
-                        let allowedSpan = allowed.upperBound - allowed.lowerBound
-                        let maxDeviation = allowedSpan * 0.15 * absAmount * globalAmount
-
-                        var lfoOffset: Float = 0
-                        if mapping.lfo.enabled {
-                            var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
-                            phase += mapping.lfo.frequency * dt
-                            phase = phase - floor(phase)
-                            musicLFOPhaseByTarget[mapping.target] = phase
-                            lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
-                        }
-
-                        let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
-                        let delta = sourceValue * maxDeviation * sign
-                        rawTargetValue = delta + lfoOffset
+                    var lfoOffset: Float = 0
+                    if mapping.lfo.enabled {
+                        var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
+                        phase += mapping.lfo.frequency * dt
+                        phase = phase - floor(phase)
+                        musicLFOPhaseByTarget[mapping.target] = phase
+                        lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
                     }
+
+                    let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
+                    let delta = sourceValue * maxDeviation * sign
+                    let rawTargetValue = delta + lfoOffset
 
                     // ── 5. Dispatch to parameter system (LayerStack handles smoothing) ──
                     guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
-                    // In absolute mode, convert the raw target to an offset from the
-                    // captured anchor so the layer stack's additive music layer
-                    // produces the correct final value.
-                    // In relative mode, rawTargetValue is already a pure delta that
-                    // the layer stack adds on top of the live UI/gesture base value.
-                    let offset: Float
-                    if mapping.mode == .absolute {
-                        let anchor = musicAnchorByTarget[mapping.target] ?? rawTargetValue
-                        offset = rawTargetValue - anchor
-                    } else {
-                        offset = rawTargetValue
-                    }
+                    let offset = rawTargetValue
 
                     // Apply triplet gain for formula param targets
                     let finalOffset: Float
@@ -899,19 +847,17 @@ actor Renderer {
                 }
                 
             } else {
-                if musicFractalAnchorValid {
+                if musicReactiveLayerActive {
                     parameterOperationDispatcher.clearMusicLayers(settings: settings)
                 }
-                musicFractalAnchorValid = false
-                musicAnchorByTarget.removeAll()
+                musicReactiveLayerActive = false
                 musicLFOPhaseByTarget.removeAll()
             }
         } else {
-            if musicFractalAnchorValid {
+            if musicReactiveLayerActive {
                 parameterOperationDispatcher.clearMusicLayers(settings: settings)
             }
-            musicFractalAnchorValid = false
-            musicAnchorByTarget.removeAll()
+            musicReactiveLayerActive = false
             musicLFOPhaseByTarget.removeAll()
         }
         let settingsSnapshot = settings.snapshot()

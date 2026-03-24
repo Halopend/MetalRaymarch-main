@@ -276,13 +276,92 @@ final class UISettingsCache {
     
     /// Reset formula params to defaults for the current type and push.
     func resetFormulaParams() {
+        parameterOperationDispatcher.clearFormulaStacks()
         formulaParams = fractalType.defaultFormulaParams()
-        settings?.formulaParams = formulaParams
+        if let settings, settings.isAnimationPlaying {
+            settings.setManualFormulaParamOverrides((0..<16).map { FormulaCatalog.getParam(formulaParams, index: $0) })
+            formulaParams = settings.formulaParams
+        } else {
+            settings?.formulaParams = formulaParams
+        }
     }
     
     func reloadLightingEffects() {
         guard let settings = settings else { return }
         lighting = settings.lightingConfig
+    }
+
+    /// Route effect intensity/strength through the ParameterLayerStack so audio
+    /// modulation combines additively with the slider value instead of overwriting it.
+    func pushEffectParam(_ targetID: String, value: Float) {
+        let op = ParameterOperation(
+            targetID: targetID,
+            source: .slider,
+            value: .absolute(value),
+            frameIndex: 0
+        )
+        parameterOperationDispatcher.dispatch([op], cache: self)
+    }
+
+    func commitHueRotationEffect() {
+        push(\.hueRotationEffect, value: lighting.hueRotationEffect)
+        pushEffectParam("effect.hueSpeed", value: lighting.hueRotationEffect.speed)
+    }
+
+    func commitPulseEffect() {
+        push(\.pulseEffect, value: lighting.pulseEffect)
+    }
+
+    func commitGlowEffect() {
+        guard let settings else { return }
+        if settings.isAnimationPlaying {
+            settings.manualOffsetGlowIntensity = lighting.glowEffect.intensity - settings.animationBaseGlowIntensity
+            settings.glowEffect = lighting.glowEffect
+        } else {
+            push(\.glowEffect, value: lighting.glowEffect)
+            pushEffectParam("effect.glow", value: lighting.glowEffect.intensity)
+        }
+    }
+
+    func commitBloomEffect() {
+        guard let settings else { return }
+        if settings.isAnimationPlaying {
+            settings.manualOffsetBloomStrength = lighting.bloomEffect.strength - settings.animationBaseBloomStrength
+            settings.bloomEffect = lighting.bloomEffect
+        } else {
+            push(\.bloomEffect, value: lighting.bloomEffect)
+            pushEffectParam("effect.bloom", value: lighting.bloomEffect.strength)
+        }
+    }
+
+    func commitFogEffect() {
+        guard let settings else { return }
+        if settings.isAnimationPlaying {
+            settings.manualOffsetFogIntensity = lighting.fogEffect.intensity - settings.animationBaseFogIntensity
+            settings.fogEffect = lighting.fogEffect
+        } else {
+            push(\.fogEffect, value: lighting.fogEffect)
+            pushEffectParam("effect.fog", value: lighting.fogEffect.intensity)
+        }
+    }
+
+    func commitGradientCycleEffect() {
+        push(\.gradientCycleEffect, value: lighting.gradientCycleEffect)
+    }
+
+    func commitBeatFlashEffect() {
+        push(\.beatFlashEffect, value: lighting.beatFlashEffect)
+    }
+
+    func commitColorSchemeSaturation() {
+        guard let settings else { return }
+        if settings.isAnimationPlaying {
+            settings.manualOffsetSaturation = color.colorSchemeSaturation - settings.animationBaseSaturation
+            settings.colorSchemeSaturation = color.colorSchemeSaturation
+        } else {
+            push(\.colorSchemeSaturation, value: color.colorSchemeSaturation)
+            pushEffectParam("effect.saturation", value: color.colorSchemeSaturation)
+        }
     }
 }
 
