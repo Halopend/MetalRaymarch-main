@@ -36,6 +36,33 @@ enum SettingsPersistence {
         case gesture        = "cfg.gesture"
         case safetyBubble   = "cfg.safetyBubble"
         case display        = "cfg.display"
+        case music          = "cfg.music"
+    }
+
+    enum LegacyKey {
+        static let musicPreferredServiceID = "music.preferredServiceID"
+        static let musicServicePriority = "music.servicePriority"
+        static let musicReactivePresets = "musicReactivePresets"
+    }
+
+    struct MusicPreferences: Codable, Sendable {
+        var preferredServiceID: String?
+        var servicePriority: [String]
+
+        init(preferredServiceID: String? = nil, servicePriority: [String] = []) {
+            self.preferredServiceID = preferredServiceID
+            self.servicePriority = servicePriority
+        }
+    }
+
+    struct MusicConfig: Codable, Sendable {
+        var preferences: MusicPreferences
+        var presets: [MusicReactivePreset]
+
+        init(preferences: MusicPreferences = .init(), presets: [MusicReactivePreset] = []) {
+            self.preferences = preferences
+            self.presets = presets
+        }
     }
 
     // MARK: Throttle
@@ -100,5 +127,82 @@ enum SettingsPersistence {
         if let c = load(GestureConfig.self,       domain: .gesture)       { settings.gestureConfig = c }
         if let c = load(SafetyBubbleConfig.self,  domain: .safetyBubble)  { settings.safetyBubbleConfig = c }
         if let c = load(DisplayConfig.self,       domain: .display)       { settings.displayConfig = c }
+    }
+
+    // MARK: - Music (Typed Section)
+
+    static func loadMusicConfig(defaultServicePriority: [String] = []) -> MusicConfig {
+        var config = load(MusicConfig.self, domain: .music) ?? .init()
+        let migrated = migrateLegacyMusicKeys(into: &config, defaultServicePriority: defaultServicePriority)
+        if config.preferences.servicePriority.isEmpty {
+            config.preferences.servicePriority = defaultServicePriority
+        }
+        if migrated {
+            save(config, domain: .music)
+        }
+        return config
+    }
+
+    static func saveMusicConfig(_ config: MusicConfig) {
+        save(config, domain: .music)
+    }
+
+    static func loadMusicPreferences(defaultServicePriority: [String] = []) -> MusicPreferences {
+        loadMusicConfig(defaultServicePriority: defaultServicePriority).preferences
+    }
+
+    static func saveMusicPreferences(_ preferences: MusicPreferences, defaultServicePriority: [String] = []) {
+        var config = loadMusicConfig(defaultServicePriority: defaultServicePriority)
+        config.preferences = preferences
+        saveMusicConfig(config)
+    }
+
+    static func loadMusicPresets() -> [MusicReactivePreset] {
+        loadMusicConfig().presets
+    }
+
+    static func saveMusicPresets(_ presets: [MusicReactivePreset]) {
+        var config = loadMusicConfig()
+        config.presets = presets
+        saveMusicConfig(config)
+    }
+
+    @discardableResult
+    private static func migrateLegacyMusicKeys(into config: inout MusicConfig, defaultServicePriority: [String]) -> Bool {
+        var migrated = false
+
+        if config.preferences.preferredServiceID == nil,
+           let preferred = defaults.string(forKey: LegacyKey.musicPreferredServiceID) {
+            config.preferences.preferredServiceID = preferred
+            migrated = true
+        }
+
+        if config.preferences.servicePriority.isEmpty,
+           let data = defaults.data(forKey: LegacyKey.musicServicePriority),
+           let ids = try? decoder.decode([String].self, from: data),
+           !ids.isEmpty {
+            config.preferences.servicePriority = ids
+            migrated = true
+        }
+
+        if config.presets.isEmpty,
+           let data = defaults.data(forKey: LegacyKey.musicReactivePresets),
+           let presets = try? decoder.decode([MusicReactivePreset].self, from: data),
+           !presets.isEmpty {
+            config.presets = presets
+            migrated = true
+        }
+
+        if config.preferences.servicePriority.isEmpty, !defaultServicePriority.isEmpty {
+            config.preferences.servicePriority = defaultServicePriority
+        }
+
+        if migrated {
+            defaults.removeObject(forKey: LegacyKey.musicPreferredServiceID)
+            defaults.removeObject(forKey: LegacyKey.musicServicePriority)
+            defaults.removeObject(forKey: LegacyKey.musicReactivePresets)
+        }
+
+        return migrated
     }
 }

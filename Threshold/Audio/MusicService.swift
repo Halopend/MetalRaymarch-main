@@ -46,8 +46,12 @@ final class MusicService {
     /// User-selected preferred service ID (nil = auto-detect).
     /// Persisted across launches.
     var preferredServiceID: String? {
-        get { UserDefaults.standard.string(forKey: "music.preferredServiceID") }
-        set { UserDefaults.standard.set(newValue, forKey: "music.preferredServiceID") }
+        get { SettingsPersistence.loadMusicPreferences(defaultServicePriority: providers.map(\.serviceID)).preferredServiceID }
+        set {
+            var preferences = SettingsPersistence.loadMusicPreferences(defaultServicePriority: providers.map(\.serviceID))
+            preferences.preferredServiceID = newValue
+            SettingsPersistence.saveMusicPreferences(preferences, defaultServicePriority: providers.map(\.serviceID))
+        }
     }
 
     /// The currently active provider.
@@ -250,17 +254,22 @@ final class MusicService {
     /// If empty/nil, uses the default provider registration order.
     var servicePriority: [String] {
         get {
-            guard let data = UserDefaults.standard.data(forKey: "music.servicePriority"),
-                  let ids = try? JSONDecoder().decode([String].self, from: data) else {
-                return providers.map(\.serviceID)
-            }
-            return ids
+            let preferences = SettingsPersistence.loadMusicPreferences(defaultServicePriority: providers.map(\.serviceID))
+            return preferences.servicePriority.isEmpty ? providers.map(\.serviceID) : preferences.servicePriority
         }
         set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: "music.servicePriority")
-            }
+            var preferences = SettingsPersistence.loadMusicPreferences(defaultServicePriority: providers.map(\.serviceID))
+            preferences.servicePriority = newValue
+            SettingsPersistence.saveMusicPreferences(preferences, defaultServicePriority: providers.map(\.serviceID))
         }
+    }
+
+    var musicPresets: [MusicReactivePreset] {
+        SettingsPersistence.loadMusicPresets()
+    }
+
+    func saveMusicPresets(_ presets: [MusicReactivePreset]) {
+        SettingsPersistence.saveMusicPresets(presets)
     }
 
     /// Move a service up in the priority list.
