@@ -10,73 +10,71 @@ import Foundation
 
 struct GestureConfig: Codable, Equatable, Sendable {
     // 9-slot gesture binding dictionary (hand × finger)
-    var gestureBindings: [String: GestureActionBinding] = GestureConfig.defaultBindings
+    var gestureBindings: [String: GestureActionBinding] = GestureDefaults.defaultBindings
 
     // Sensitivity & smoothing
-    var gestureSensitivity: Float = 5.0          // 1.0 - 10.0
-    var useRelativeGestures: Bool = false
-    var extendedGestureRange: Bool = false
-    var translationSensitivity: Float = 1.0      // 0.2 - 3.0
+    var gestureSensitivity: Float = GestureDefaults.gestureSensitivity
+    var useRelativeGestures: Bool = GestureDefaults.useRelativeGestures
+    var extendedGestureRange: Bool = GestureDefaults.extendedGestureRange
+    var translationSensitivity: Float = GestureDefaults.translationSensitivity
 
     // Rotation auto-snap
-    var rotationAutoSnap: Bool = false
-    var rotationSnapWindowDegrees: Float = 6.0   // 1.0 - 30.0
-    var rotationBreakawayDegrees: Float = 10.0   // 0.0 - 45.0
+    var rotationAutoSnap: Bool = GestureDefaults.rotationAutoSnap
+    var rotationSnapWindowDegrees: Float = GestureDefaults.rotationSnapWindowDegrees
+    var rotationBreakawayDegrees: Float = GestureDefaults.rotationBreakawayDegrees
 
     // Menu toggle gesture
-    var menuToggleGestureEnabled: Bool = true
-    var menuToggleGestureMode: MenuToggleGestureMode = .middleToPalm
-    var menuToggleHoldDuration: Float = 0.15     // 0.05 - 0.6
-    var menuToggleCooldown: Float = 0.5          // 0.1 - 2.5
-    var menuToggleActivateThreshold: Float = 0.6 // 0.2 - 0.95
-    var menuToggleReleaseThreshold: Float = 0.3  // 0.1 - 0.9
+    var menuToggleGestureEnabled: Bool = GestureDefaults.menuToggleGestureEnabled
+    var menuToggleGestureMode: MenuToggleGestureMode = GestureDefaults.menuToggleGestureMode
+    var menuToggleHoldDuration: Float = GestureDefaults.menuToggleHoldDuration
+    var menuToggleCooldown: Float = GestureDefaults.menuToggleCooldown
+    var menuToggleActivateThreshold: Float = GestureDefaults.menuToggleActivateThreshold
+    var menuToggleReleaseThreshold: Float = GestureDefaults.menuToggleReleaseThreshold
 
     // Two-hand pinch thresholds
-    var twoHandPinchActivateThreshold: Float = 0.7   // 0.2 - 0.98
-    var twoHandPinchReleaseThreshold: Float = 0.3    // 0.1 - 0.95
+    var twoHandPinchActivateThreshold: Float = GestureDefaults.twoHandPinchActivateThreshold
+    var twoHandPinchReleaseThreshold: Float = GestureDefaults.twoHandPinchReleaseThreshold
 
     // Ring pinch thresholds
-    var ringPinchActivateThreshold: Float = 0.55     // 0.1 - 0.95
-    var ringPinchReleaseThreshold: Float = 0.25      // 0.05 - 0.9
+    var ringPinchActivateThreshold: Float = GestureDefaults.ringPinchActivateThreshold
+    var ringPinchReleaseThreshold: Float = GestureDefaults.ringPinchReleaseThreshold
 
     // Hand distance limits
-    var gestureMinHandDistance: Float = 0.06     // 0.02 - 0.25
-    var gestureMaxHandDistance: Float = 0.5      // 0.2 - 1.2
-    var gestureMaxStartHandDistance: Float = 0.35    // 0.08 - 1.0
-    var gestureMaxActiveHandDistance: Float = 0.75   // 0.1 - 1.5
-
-    // MARK: - Defaults
-
-    static let defaultBindings: [String: GestureActionBinding] = [
-        GestureSlot(hand: .right, finger: .index).persistenceKey: .core(.translate),
-        GestureSlot(hand: .right, finger: .middle).persistenceKey: .core(.none),
-        GestureSlot(hand: .right, finger: .ring).persistenceKey: .core(.none),
-        GestureSlot(hand: .left, finger: .index).persistenceKey: .core(.none),
-        GestureSlot(hand: .left, finger: .middle).persistenceKey: .core(.none),
-        GestureSlot(hand: .left, finger: .ring).persistenceKey: .core(.none),
-        GestureSlot(hand: .both, finger: .index).persistenceKey: .core(.grab),
-        GestureSlot(hand: .both, finger: .middle).persistenceKey: .core(.minDistance),
-        GestureSlot(hand: .both, finger: .ring).persistenceKey: .core(.fractalScale),
-    ]
+    var gestureMinHandDistance: Float = GestureDefaults.gestureMinHandDistance
+    var gestureMaxHandDistance: Float = GestureDefaults.gestureMaxHandDistance
+    var gestureMaxStartHandDistance: Float = GestureDefaults.gestureMaxStartHandDistance
+    var gestureMaxActiveHandDistance: Float = GestureDefaults.gestureMaxActiveHandDistance
 
     // MARK: - Validation
 
     mutating func clamp() {
-        gestureSensitivity = max(1.0, min(10.0, gestureSensitivity))
-        translationSensitivity = max(0.2, min(3.0, translationSensitivity))
-        rotationSnapWindowDegrees = max(1.0, min(30.0, rotationSnapWindowDegrees))
-        rotationBreakawayDegrees = max(0.0, min(45.0, rotationBreakawayDegrees))
-        menuToggleHoldDuration = max(0.05, min(0.6, menuToggleHoldDuration))
-        menuToggleCooldown = max(0.1, min(2.5, menuToggleCooldown))
-        menuToggleActivateThreshold = max(0.2, min(0.95, menuToggleActivateThreshold))
-        menuToggleReleaseThreshold = max(0.1, min(0.9, menuToggleReleaseThreshold))
-        twoHandPinchActivateThreshold = max(0.2, min(0.98, twoHandPinchActivateThreshold))
-        twoHandPinchReleaseThreshold = max(0.1, min(0.95, twoHandPinchReleaseThreshold))
-        ringPinchActivateThreshold = max(0.1, min(0.95, ringPinchActivateThreshold))
-        ringPinchReleaseThreshold = max(0.05, min(0.9, ringPinchReleaseThreshold))
-        gestureMinHandDistance = max(0.02, min(0.25, gestureMinHandDistance))
-        gestureMaxHandDistance = max(gestureMinHandDistance + 0.05, min(1.2, gestureMaxHandDistance))
-        gestureMaxStartHandDistance = max(0.08, min(1.0, gestureMaxStartHandDistance))
-        gestureMaxActiveHandDistance = max(gestureMaxStartHandDistance, min(1.5, gestureMaxActiveHandDistance))
+        gestureSensitivity = gestureSensitivity.clamped(to: GestureDefaults.gestureSensitivityRange)
+        translationSensitivity = translationSensitivity.clamped(to: GestureDefaults.translationSensitivityRange)
+        rotationSnapWindowDegrees = rotationSnapWindowDegrees.clamped(to: GestureDefaults.rotationSnapWindowDegreesRange)
+        rotationBreakawayDegrees = rotationBreakawayDegrees.clamped(to: GestureDefaults.rotationBreakawayDegreesRange)
+        menuToggleHoldDuration = menuToggleHoldDuration.clamped(to: GestureDefaults.menuToggleHoldDurationRange)
+        menuToggleCooldown = menuToggleCooldown.clamped(to: GestureDefaults.menuToggleCooldownRange)
+        menuToggleActivateThreshold = menuToggleActivateThreshold.clamped(to: GestureDefaults.menuToggleActivateThresholdRange)
+        menuToggleReleaseThreshold = menuToggleReleaseThreshold.clamped(to: GestureDefaults.menuToggleReleaseThresholdRange)
+        twoHandPinchActivateThreshold = twoHandPinchActivateThreshold.clamped(to: GestureDefaults.twoHandPinchActivateThresholdRange)
+        twoHandPinchReleaseThreshold = twoHandPinchReleaseThreshold.clamped(to: GestureDefaults.twoHandPinchReleaseThresholdRange)
+        ringPinchActivateThreshold = ringPinchActivateThreshold.clamped(to: GestureDefaults.ringPinchActivateThresholdRange)
+        ringPinchReleaseThreshold = ringPinchReleaseThreshold.clamped(to: GestureDefaults.ringPinchReleaseThresholdRange)
+        gestureMinHandDistance = gestureMinHandDistance.clamped(to: GestureDefaults.gestureMinHandDistanceRange)
+        gestureMaxHandDistance = max(
+            gestureMinHandDistance + GestureDefaults.gestureMaxHandDistanceDeltaFromMin,
+            min(GestureDefaults.gestureMaxHandDistanceUpperBound, gestureMaxHandDistance)
+        )
+        gestureMaxStartHandDistance = gestureMaxStartHandDistance.clamped(to: GestureDefaults.gestureMaxStartHandDistanceRange)
+        gestureMaxActiveHandDistance = max(
+            gestureMaxStartHandDistance,
+            min(GestureDefaults.gestureMaxActiveHandDistanceUpperBound, gestureMaxActiveHandDistance)
+        )
+    }
+}
+
+private extension Float {
+    func clamped(to range: ClosedRange<Float>) -> Float {
+        max(range.lowerBound, min(range.upperBound, self))
     }
 }

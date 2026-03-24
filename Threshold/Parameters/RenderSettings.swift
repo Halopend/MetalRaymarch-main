@@ -33,6 +33,78 @@ final class RenderSettings: @unchecked Sendable {
         return v > 0 ? v : fallback
     }
 
+    private static let gestureSemanticsMigrationKey = "gestureDefaultsSemanticsMigrationV1"
+    private static let gestureDomainKey = SettingsPersistence.Domain.gesture.rawValue
+
+    private static func loadGestureBool(_ key: String, default fallback: Bool) -> Bool {
+        ensureGestureSemanticsMigrationIfNeeded()
+        return loadBool(key, default: fallback)
+    }
+
+    private static func loadGestureFloat(_ key: String, default fallback: Float) -> Float {
+        ensureGestureSemanticsMigrationIfNeeded()
+        return loadFloat(key, default: fallback)
+    }
+
+    private static func ensureGestureSemanticsMigrationIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: gestureSemanticsMigrationKey) else { return }
+        defer { defaults.set(true, forKey: gestureSemanticsMigrationKey) }
+
+        // If a typed gesture domain already exists, preserve it untouched.
+        guard defaults.data(forKey: gestureDomainKey) == nil else { return }
+        guard hasLikelyPersistedAppData(defaults) else { return } // Fresh install / clean store.
+
+        // Migration of defaults where semantics changed from legacy boot-time values.
+        let legacyFloatDefaults: [(String, Float)] = [
+            ("gestureSensitivity", 3.0),
+            ("rotationBreakawayDegrees", 12.0),
+            ("menuToggleHoldDuration", 0.06),
+            ("menuToggleCooldown", 0.35),
+            ("menuToggleActivateThreshold", 0.48),
+            ("twoHandPinchActivateThreshold", 0.88),
+            ("twoHandPinchReleaseThreshold", 0.65),
+            ("ringPinchActivateThreshold", 0.58),
+            ("ringPinchReleaseThreshold", 0.38),
+            ("gestureMinHandDistance", 0.05),
+            ("gestureMaxHandDistance", 0.60),
+            ("gestureMaxStartHandDistance", 0.45),
+            ("gestureMaxActiveHandDistance", 0.90),
+        ]
+
+        let legacyBoolDefaults: [(String, Bool)] = [
+            ("useRelativeGestures", true),
+            ("extendedGestureRange", true),
+        ]
+
+        for (key, value) in legacyFloatDefaults where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+        for (key, value) in legacyBoolDefaults where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+        if defaults.object(forKey: "menuToggleGestureMode") == nil {
+            defaults.set(Int(MenuToggleGestureMode.middleAndRingToPalm.rawValue), forKey: "menuToggleGestureMode")
+        }
+    }
+
+    private static func hasLikelyPersistedAppData(_ defaults: UserDefaults) -> Bool {
+        let keys = defaults.dictionaryRepresentation().keys
+        let knownAppPrefixes = ["cfg.", "music.", "fractal", "gesture", "left", "right", "both"]
+        let knownKeys: Set<String> = [
+            "handTrackingEnabled",
+            "menuToggleGestureMode",
+            "rotationBreakawayDegrees",
+            "indexFingerBinding",
+            "middleFingerBinding",
+            "ringFingerBinding",
+            "musicReactiveMappings",
+        ]
+        return keys.contains { key in
+            knownKeys.contains(key) || knownAppPrefixes.contains(where: { prefix in key.hasPrefix(prefix) })
+        }
+    }
+
     private static func loadGestureBinding(_ key: String,
                                            legacyKey: String? = nil,
                                            default fallback: GestureActionBinding) -> GestureActionBinding {
@@ -109,6 +181,35 @@ final class RenderSettings: @unchecked Sendable {
         }
         return cleaned
     }
+
+    init() {
+        Self.assertGestureConfigBaselineOnCleanStore()
+    }
+
+    private static func assertGestureConfigBaselineOnCleanStore(
+        file: StaticString = #fileID,
+        line: UInt = #line
+    ) {
+        let defaults = UserDefaults.standard
+        guard defaults.data(forKey: gestureDomainKey) == nil else { return }
+        guard !hasLikelyPersistedAppData(defaults) else { return }
+
+        let expected = GestureConfig()
+        let settings = RenderSettings(assertBaseline: false)
+        let actual = settings.gestureConfig
+        assert(
+            actual == expected,
+            "Gesture baseline mismatch: RenderSettings.gestureConfig should match GestureConfig() for a clean store.",
+            file: file,
+            line: line
+        )
+    }
+
+    private init(assertBaseline: Bool) {
+        if assertBaseline {
+            Self.assertGestureConfigBaselineOnCleanStore()
+        }
+    }
     
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
@@ -151,18 +252,19 @@ final class RenderSettings: @unchecked Sendable {
     private var _showMusicShortcuts: Bool = loadBool("showMusicShortcuts", default: false)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    private var _useRelativeGestures: Bool = true    // Use relative gestures (delta-based) instead of absolute mapping
-    private var _extendedGestureRange: Bool = true   // Allow extended parameter ranges for gestures
-    private var _rotationAutoSnap: Bool = false       // Snap rotation to nearest 45° multiple within snap window
-    private var _rotationSnapWindowDegrees: Float = 6.0  // ±halfWindow snap threshold per axis (degrees)
-    private var _rotationBreakawayDegrees: Float = loadFloat("rotationBreakawayDegrees", default: 12.0)
-    private var _gestureSensitivity: Float           = loadFloat("gestureSensitivity", default: 3.0)
-    private var _menuToggleGestureEnabled: Bool        = loadBool("menuToggleGestureEnabled", default: true)
+    private var _useRelativeGestures: Bool = loadGestureBool("useRelativeGestures", default: GestureDefaults.useRelativeGestures)
+    private var _extendedGestureRange: Bool = loadGestureBool("extendedGestureRange", default: GestureDefaults.extendedGestureRange)
+    private var _rotationAutoSnap: Bool = loadGestureBool("rotationAutoSnap", default: GestureDefaults.rotationAutoSnap)
+    private var _rotationSnapWindowDegrees: Float = loadGestureFloat("rotationSnapWindowDegrees", default: GestureDefaults.rotationSnapWindowDegrees)
+    private var _rotationBreakawayDegrees: Float = loadGestureFloat("rotationBreakawayDegrees", default: GestureDefaults.rotationBreakawayDegrees)
+    private var _gestureSensitivity: Float = loadGestureFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
+    private var _menuToggleGestureEnabled: Bool = loadGestureBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
+        ensureGestureSemanticsMigrationIfNeeded()
         let key = "menuToggleGestureMode"
-        guard UserDefaults.standard.object(forKey: key) != nil else { return .middleAndRingToPalm }
+        guard UserDefaults.standard.object(forKey: key) != nil else { return GestureDefaults.menuToggleGestureMode }
         let raw = UserDefaults.standard.integer(forKey: key)
-        return MenuToggleGestureMode(rawValue: Int32(raw)) ?? .middleAndRingToPalm
+        return MenuToggleGestureMode(rawValue: Int32(raw)) ?? GestureDefaults.menuToggleGestureMode
     }()
 
     // ── Per-hand × per-finger gesture binding slots (9 total) ──────────────
@@ -171,17 +273,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _gestureBindings: [String: GestureActionBinding] = {
         var bindings: [String: GestureActionBinding] = [:]
         // Defaults
-        let defaults: [String: GestureActionBinding] = [
-            "leftIndexBinding":   .core(.none),
-            "leftMiddleBinding":  .core(.none),
-            "leftRingBinding":    .core(.none),
-            "rightIndexBinding":  .core(.translate),
-            "rightMiddleBinding": .core(.none),
-            "rightRingBinding":   .core(.none),
-            "bothIndexBinding":   .core(.grab),
-            "bothMiddleBinding":  .core(.minDistance),
-            "bothRingBinding":    .core(.fractalScale),
-        ]
+        let defaults = GestureDefaults.defaultBindings
         // Helper: infer hand mode from persistence key for validation
         func handMode(for key: String) -> GestureHandMode {
             if key.hasPrefix("left")  { return .left }
@@ -239,19 +331,19 @@ final class RenderSettings: @unchecked Sendable {
 
         return bindings
     }()
-    private var _menuToggleHoldDuration: Float        = loadFloat("menuToggleHoldDuration", default: 0.06)
-    private var _menuToggleCooldown: Float              = loadFloat("menuToggleCooldown", default: 0.35)
-    private var _menuToggleActivateThreshold: Float     = loadFloat("menuToggleActivateThreshold", default: 0.48)
-    private var _menuToggleReleaseThreshold: Float      = loadFloat("menuToggleReleaseThreshold", default: 0.30)
-    private var _twoHandPinchActivateThreshold: Float   = loadFloat("twoHandPinchActivateThreshold", default: 0.88)
-    private var _twoHandPinchReleaseThreshold: Float    = loadFloat("twoHandPinchReleaseThreshold", default: 0.65)
-    private var _ringPinchActivateThreshold: Float      = loadFloat("ringPinchActivateThreshold", default: 0.58)
-    private var _ringPinchReleaseThreshold: Float       = loadFloat("ringPinchReleaseThreshold", default: 0.38)
-    private var _gestureMinHandDistance: Float          = loadFloat("gestureMinHandDistance", default: 0.05)
-    private var _gestureMaxHandDistance: Float          = loadFloat("gestureMaxHandDistance", default: 0.60)
-    private var _gestureMaxStartHandDistance: Float     = loadFloat("gestureMaxStartHandDistance", default: 0.45)
-    private var _gestureMaxActiveHandDistance: Float    = loadFloat("gestureMaxActiveHandDistance", default: 0.90)
-    private var _translationSensitivity: Float          = loadFloat("translationSensitivity", default: 1.0)
+    private var _menuToggleHoldDuration: Float = loadGestureFloat("menuToggleHoldDuration", default: GestureDefaults.menuToggleHoldDuration)
+    private var _menuToggleCooldown: Float = loadGestureFloat("menuToggleCooldown", default: GestureDefaults.menuToggleCooldown)
+    private var _menuToggleActivateThreshold: Float = loadGestureFloat("menuToggleActivateThreshold", default: GestureDefaults.menuToggleActivateThreshold)
+    private var _menuToggleReleaseThreshold: Float = loadGestureFloat("menuToggleReleaseThreshold", default: GestureDefaults.menuToggleReleaseThreshold)
+    private var _twoHandPinchActivateThreshold: Float = loadGestureFloat("twoHandPinchActivateThreshold", default: GestureDefaults.twoHandPinchActivateThreshold)
+    private var _twoHandPinchReleaseThreshold: Float = loadGestureFloat("twoHandPinchReleaseThreshold", default: GestureDefaults.twoHandPinchReleaseThreshold)
+    private var _ringPinchActivateThreshold: Float = loadGestureFloat("ringPinchActivateThreshold", default: GestureDefaults.ringPinchActivateThreshold)
+    private var _ringPinchReleaseThreshold: Float = loadGestureFloat("ringPinchReleaseThreshold", default: GestureDefaults.ringPinchReleaseThreshold)
+    private var _gestureMinHandDistance: Float = loadGestureFloat("gestureMinHandDistance", default: GestureDefaults.gestureMinHandDistance)
+    private var _gestureMaxHandDistance: Float = loadGestureFloat("gestureMaxHandDistance", default: GestureDefaults.gestureMaxHandDistance)
+    private var _gestureMaxStartHandDistance: Float = loadGestureFloat("gestureMaxStartHandDistance", default: GestureDefaults.gestureMaxStartHandDistance)
+    private var _gestureMaxActiveHandDistance: Float = loadGestureFloat("gestureMaxActiveHandDistance", default: GestureDefaults.gestureMaxActiveHandDistance)
+    private var _translationSensitivity: Float = loadGestureFloat("translationSensitivity", default: GestureDefaults.translationSensitivity)
 
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
@@ -2836,4 +2928,3 @@ final class RenderSettings: @unchecked Sendable {
     }
 
 }
-
