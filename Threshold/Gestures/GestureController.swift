@@ -30,6 +30,12 @@ import simd
 final class GestureController {
     let operationDispatcher: ParameterOperationDispatcher
     private var operationFrameCounter: UInt64 = 0
+    private let featureFlags = GestureFeatureFlags()
+    private let menuToggleEngine = MenuToggleGestureEngine()
+    private let arbitrationEngine = GestureArbitrationEngine()
+    private let twoHandScalarEngine = TwoHandScalarGestureEngine()
+    private let twoPointGrabEngine = TwoPointGrabEngine()
+    private let singleHandDragEngine = SingleHandDragEngine()
 
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES  (cached from FractalTypeDescriptor)
@@ -75,34 +81,7 @@ final class GestureController {
     private var leftHand: HandData = .zero
     private var rightHand: HandData = .zero
     
-    // Two-hand gesture states — one per finger (index/middle/ring), action-agnostic.
-    // The action each finger performs is read from RenderSettings at dispatch time.
-    private var fingerGestureState: [Int: TwoHandGestureState] = [
-        1: TwoHandGestureState(),   // index
-        2: TwoHandGestureState(),   // middle
-        3: TwoHandGestureState(),   // ring
-    ]
-    
-    // === TWO-POINT GRAB STATE ===
-    private var grabActive: Bool = false
-    private var grabEndCooldown: Float = 0
-    private var grabMapping: GrabZoomMapping?
-    private var grabOriginalAxis: SIMD3<Float> = .zero
-    private var rotationBrokenAway: Bool = false
-    
-    // === UNIFIED SINGLE-HAND DRAG STATE (per GestureSlot) ===
-    struct SingleHandDragState {
-        var isActive: Bool = false
-        var prevPos: SIMD3<Float> = .zero
-        var prevPalm: SIMD3<Float> = .zero
-        var startValues: SIMD3<Float> = .zero   // for triplets
-        var startValue: Float = 0                // for scalars
-        var accumulatedPosition: SIMD3<Float> = .zero  // for translate
-    }
-    private var singleHandDragState: [String: SingleHandDragState] = [:]
-    
-    // Accumulated position from drag gestures (shared for translate bindings)
-    private var accumulatedPosition: SIMD3<Float> = .zero
+    // State is owned by mode engines; controller coordinates lifecycle only.
 
     // Left hand tracking stability: prevents two-hand gesture false triggers when
     // the left hand briefly enters ARKit's tracking field without the user intending
@@ -113,10 +92,6 @@ final class GestureController {
     /// Minimum frames left hand must be continuously tracked before two-hand gestures activate (~0.33s at 90Hz)
     private static let leftHandStabilityThreshold: Int = 30
     
-    // === MENU TOGGLE GESTURE STATE (Right hand, configurable mode) ===
-    private var menuToggleActive: Bool = false
-    private var menuToggleHoldTimer: Float = 0
-    private var menuToggleCooldown: Float = 0  // Prevent rapid toggling
     
     /// True when the left hand has been continuously tracked long enough to
     /// participate in two-hand gestures.  This prevents false triggers when the
@@ -124,6 +99,22 @@ final class GestureController {
     private var leftHandStable: Bool {
         leftHandStableFrames >= Self.leftHandStabilityThreshold
     }
+
+    private var twoHandStateByDigit: [Int: TwoHandGestureState] {
+        get { twoHandScalarEngine.state.perDigit }
+        set { twoHandScalarEngine.state.perDigit = newValue }
+    }
+
+    private var grabState: TwoPointGrabGestureState {
+        get { twoPointGrabEngine.state }
+        set { twoPointGrabEngine.state = newValue }
+    }
+
+    private var singleHandState: SingleHandDragEngineState {
+        get { singleHandDragEngine.state }
+        set { singleHandDragEngine.state = newValue }
+    }
+
     
     // Gesture callbacks
     var onMenuToggle: (() -> Void)?
@@ -136,8 +127,8 @@ final class GestureController {
         self.renderSettings = renderSettings
         self.operationDispatcher = operationDispatcher ?? ParameterOperationDispatcher()
         
-        // Initialize accumulated position from current settings
-        accumulatedPosition = renderSettings.position
+        // Initialize drag engine state from current settings
+        singleHandDragEngine.reset(accumulatedPosition: renderSettings.position)
     }
     
     func setDebugTraceEnabled(_ enabled: Bool) {
@@ -148,18 +139,14 @@ final class GestureController {
     /// Call this after loading a preset to prevent jumps when gestures resume.
     func syncWithSettings() {
         guard let settings = renderSettings else { return }
-        accumulatedPosition = settings.effectiveTargetPosition
+        singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
         refreshCachedDescriptorValues()
         
         // Reset all gesture states to avoid stale data
-        for digit in 1...3 { fingerGestureState[digit] = TwoHandGestureState() }
-        grabActive = false
-        grabEndCooldown = 0
-        grabMapping = nil
-        singleHandDragState.removeAll()
-        menuToggleActive = false
-        menuToggleHoldTimer = 0
-        menuToggleCooldown = 0
+        twoHandScalarEngine.reset()
+        twoPointGrabEngine.reset()
+        singleHandDragEngine.reset(accumulatedPosition: settings.effectiveTargetPosition)
+        menuToggleEngine.reset()
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -197,19 +184,24 @@ final class GestureController {
         }
         leftHandWasTracked = leftHand.isTracked
         
-        // Update cooldown timers
-        if menuToggleCooldown > 0 {
-            menuToggleCooldown = max(0, menuToggleCooldown - deltaTime)
-        }
-        if grabEndCooldown > 0 {
-            grabEndCooldown = max(0, grabEndCooldown - deltaTime)
+        // Update cooldown timers in engine states
+        if twoPointGrabEngine.state.endCooldown > 0 {
+            twoPointGrabEngine.state.endCooldown = max(0, twoPointGrabEngine.state.endCooldown - deltaTime)
         }
         
         // Process all gesture mappings (sets targets on RenderSettings)
         processGestures()
         
         // Process special gestures
-        processMenuToggleGesture(deltaTime: deltaTime)
+        let context = GestureContext(leftHand: leftHand, rightHand: rightHand, leftHandStable: leftHandStable, suppressParameterGestures: suppressParameterGestures, deltaTime: deltaTime, ranges: currentRanges(), frameIndex: operationFrameCounter)
+        if featureFlags.useMenuToggleEngine, let settings = renderSettings {
+            let ops = menuToggleEngine.process(context: context, settings: settings)
+            if ops.contains(where: { if case .toggleMenu = $0 { return true } else { return false } }) {
+                onMenuToggle?()
+            }
+        } else {
+            processMenuToggleGesture(deltaTime: deltaTime)
+        }
     }
     
     @available(visionOS 2.0, *)
@@ -306,14 +298,14 @@ final class GestureController {
         guard let settings = renderSettings else { return }
 
         guard settings.menuToggleGestureEnabled else {
-            menuToggleActive = false
-            menuToggleHoldTimer = 0
+            menuToggleEngine.state.isActive = false
+            menuToggleEngine.state.holdTimer = 0
             return
         }
 
         guard rightHand.isTracked else {
-            menuToggleActive = false
-            menuToggleHoldTimer = 0
+            menuToggleEngine.state.isActive = false
+            menuToggleEngine.state.holdTimer = 0
             return
         }
 
@@ -321,23 +313,23 @@ final class GestureController {
         let strength = menuToggleStrength(for: mode)
         let thresholds = menuToggleThresholds(for: mode, settings: settings)
 
-        let shouldBeActive: Bool = menuToggleActive
+        let shouldBeActive: Bool = menuToggleEngine.state.isActive
             ? (strength >= thresholds.release)
             : (strength >= thresholds.activate)
 
         if shouldBeActive {
-            if !menuToggleActive {
-                menuToggleHoldTimer += deltaTime
-                if menuToggleCooldown <= 0, menuToggleHoldTimer >= settings.menuToggleHoldDuration {
-                    menuToggleActive = true
-                    menuToggleHoldTimer = 0
-                    menuToggleCooldown = settings.menuToggleCooldown
+            if !menuToggleEngine.state.isActive {
+                menuToggleEngine.state.holdTimer += deltaTime
+                if menuToggleEngine.state.cooldown <= 0, menuToggleEngine.state.holdTimer >= settings.menuToggleHoldDuration {
+                    menuToggleEngine.state.isActive = true
+                    menuToggleEngine.state.holdTimer = 0
+                    menuToggleEngine.state.cooldown = settings.menuToggleCooldown
                     onMenuToggle?()
                 }
             }
         } else {
-            menuToggleActive = false
-            menuToggleHoldTimer = 0
+            menuToggleEngine.state.isActive = false
+            menuToggleEngine.state.holdTimer = 0
         }
     }
     
@@ -349,10 +341,10 @@ final class GestureController {
         // ── Suppress parameter gestures while the user is interacting with the menu window ──
         if suppressParameterGestures {
             for digit in 1...3 {
-                if fingerGestureState[digit]?.isActive == true { fingerGestureState[digit]?.isActive = false }
+                if twoHandStateByDigit[digit]?.isActive == true { twoHandStateByDigit[digit]?.isActive = false }
             }
-            if grabActive { grabActive = false; grabMapping = nil }
-            for key in singleHandDragState.keys { singleHandDragState[key]?.isActive = false }
+            if grabState.isActive { grabState.isActive = false; grabState.mapping = nil }
+            for key in singleHandState.perSlot.keys { singleHandState.perSlot[key]?.isActive = false }
             settings.activeGestureIndex = 0
             settings.isGeometryGestureActive = false
             return
@@ -369,10 +361,28 @@ final class GestureController {
             guard let finger = FingerDigit(rawValue: digit) else { continue }
             let leftKey = GestureSlot(hand: .left, finger: finger).persistenceKey
             let rightKey = GestureSlot(hand: .right, finger: finger).persistenceKey
-            if singleHandDragState[leftKey]?.isActive == true ||
-               singleHandDragState[rightKey]?.isActive == true {
-                if fingerGestureState[digit]?.isActive == true {
-                    fingerGestureState[digit]?.isActive = false
+            if featureFlags.useArbitrationEngine {
+                let decision = arbitrationEngine.decide(
+                    GestureArbitrationInput(
+                        digit: digit,
+                        twoHandCandidate: true,
+                        twoHandCurrentlyActive: twoHandStateByDigit[digit]?.isActive == true,
+                        leftSingleActive: singleHandState.perSlot[leftKey]?.isActive == true,
+                        rightSingleActive: singleHandState.perSlot[rightKey]?.isActive == true,
+                        grabActive: grabState.isActive,
+                        grabEndCooldown: grabState.endCooldown
+                    )
+                )
+                if !decision.allowTwoHand {
+                    if twoHandStateByDigit[digit]?.isActive == true {
+                        twoHandStateByDigit[digit]?.isActive = false
+                    }
+                    continue
+                }
+            } else if singleHandState.perSlot[leftKey]?.isActive == true ||
+                        singleHandState.perSlot[rightKey]?.isActive == true {
+                if twoHandStateByDigit[digit]?.isActive == true {
+                    twoHandStateByDigit[digit]?.isActive = false
                 }
                 continue
             }
@@ -380,10 +390,10 @@ final class GestureController {
             if case .parameter(let descriptor) = binding,
                let formulaIndex = descriptor.formulaIndex,
                let node = ParameterNodeRegistry.shared.node(for: descriptor) {
-                guard fingerGestureState[digit] != nil else { continue }
+                guard twoHandStateByDigit[digit] != nil else { continue }
                 processTwoHandGesture(
                     digit: digit,
-                    state: &fingerGestureState[digit]!,
+                    state: &twoHandStateByDigit[digit]!,
                     currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
                     range: node.range,
                     parameterID: node.id
@@ -397,13 +407,13 @@ final class GestureController {
                     self.operationDispatcher.dispatch([op], settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
-                if fingerGestureState[digit]!.isActive { activeDigit = digit }
+                if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
                 continue
             }
 
             guard case .core(let action) = binding else {
-                if fingerGestureState[digit]?.isActive == true {
-                    fingerGestureState[digit]?.isActive = false
+                if twoHandStateByDigit[digit]?.isActive == true {
+                    twoHandStateByDigit[digit]?.isActive = false
                 }
                 continue
             }
@@ -411,12 +421,12 @@ final class GestureController {
             switch action {
             case .grab:
                 processTwoPointGrab(digit: digit)
-                if grabActive { activeDigit = digit }
+                if grabState.isActive { activeDigit = digit }
                 
             case .minDistance, .foldingLimit, .sphereRadius:
                 guard settings.fractalType == .mandelbox else {
-                    if fingerGestureState[digit]?.isActive == true {
-                        fingerGestureState[digit]?.isActive = false
+                    if twoHandStateByDigit[digit]?.isActive == true {
+                        twoHandStateByDigit[digit]?.isActive = false
                     }
                     continue
                 }
@@ -427,8 +437,8 @@ final class GestureController {
                 
             case .none, .translate:
                 // translate is only valid for single-hand; deactivate any stale two-hand state
-                if fingerGestureState[digit]?.isActive == true {
-                    fingerGestureState[digit]?.isActive = false
+                if twoHandStateByDigit[digit]?.isActive == true {
+                    twoHandStateByDigit[digit]?.isActive = false
                 }
             }
         }
@@ -447,9 +457,9 @@ final class GestureController {
         settings.activeGestureIndex = activeDigit
         
         // Wire geometry gesture flag
-        let anySingleHandActive = singleHandDragState.values.contains { $0.isActive }
-        let anyGeometryGestureActive = grabActive || anySingleHandActive ||
-            (1...3).contains(where: { fingerGestureState[$0]?.isActive == true })
+        let anySingleHandActive = singleHandState.perSlot.values.contains { $0.isActive }
+        let anyGeometryGestureActive = grabState.isActive || anySingleHandActive ||
+            (1...3).contains(where: { twoHandStateByDigit[$0]?.isActive == true })
         settings.isGeometryGestureActive = anyGeometryGestureActive
     }
     
@@ -505,7 +515,7 @@ final class GestureController {
 
         processTwoHandGesture(
             digit: digit,
-            state: &fingerGestureState[digit]!,
+            state: &twoHandStateByDigit[digit]!,
             currentTarget: info.target(settings),
             range: info.range(ranges),
             parameterID: node.id
@@ -522,7 +532,7 @@ final class GestureController {
             operationDispatcher.dispatch([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
-        if fingerGestureState[digit]!.isActive { activeDigit = digit }
+        if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
     }
 
     /// Dispatches a two-hand gesture for the universal fractalScale core parameter.
@@ -536,7 +546,7 @@ final class GestureController {
     ) {
         processTwoHandGesture(
             digit: digit,
-            state: &fingerGestureState[digit]!,
+            state: &twoHandStateByDigit[digit]!,
             currentTarget: settings.effectiveTargetFractalScale,
             range: ranges.fractalScale,
             parameterID: "core.targetFractalScale"
@@ -553,7 +563,7 @@ final class GestureController {
             operationDispatcher.dispatch([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
-        if fingerGestureState[digit]!.isActive { activeDigit = digit }
+        if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
     }
     
     // MARK: - Two-Point Grab Gesture (Configurable Finger, Both Hands)
@@ -592,7 +602,7 @@ final class GestureController {
         
         // Check if both hands are pinching
         let bothActive: Bool
-        if grabActive {
+        if grabState.isActive {
             // Already active — use release thresholds, no stability requirement
             bothActive = leftHand.isTracked && rightHand.isTracked &&
                          leftPosValid && rightPosValid &&
@@ -610,39 +620,39 @@ final class GestureController {
         }
         
         // === GESTURE START ===
-        if bothActive && !grabActive {
-            grabActive = true
+        if bothActive && !grabState.isActive {
+            grabState.isActive = true
             
             // Capture CURRENT values (what's visually shown), not targets.
             // Build the pre-computed inverse mapping from gesture → fractal space.
-            grabMapping = GrabZoomMapping(
+            grabState.mapping = GrabZoomMapping(
                 leftPos: leftPos, rightPos: rightPos,
                 position: settings.position,
                 rotation: settings.worldRotation,
                 detailScale: settings.detailScale
             )
-            grabOriginalAxis = grabMapping!.startAxis
-            rotationBrokenAway = !settings.rotationAutoSnap  // If snap disabled, act as if already broken away
+            grabState.originalAxis = grabState.mapping!.startAxis
+            grabState.rotationBrokenAway = !settings.rotationAutoSnap  // If snap disabled, act as if already broken away
         }
         
         // === GESTURE ACTIVE ===
-        if bothActive && grabActive, var mapping = grabMapping {
+        if bothActive && grabState.isActive, var mapping = grabState.mapping {
             
             // ── Rotation breakaway gate ──────────────────────────────────
             // Rotation is suppressed until the hand axis diverges enough from
             // the original start axis. On breakaway, rebase the entire mapping
             // to the current state so scale+position+rotation all continue
             // smoothly from here with no jump.
-            if !rotationBrokenAway {
+            if !grabState.rotationBrokenAway {
                 let currentAxis = rightPos - leftPos
                 let currentAxisLen = simd_length(currentAxis)
-                let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : grabOriginalAxis
-                let dot = simd_clamp(simd_dot(grabOriginalAxis, currentAxisNorm), -1.0, 1.0)
+                let currentAxisNorm = currentAxisLen > 1e-4 ? currentAxis / currentAxisLen : grabState.originalAxis
+                let dot = simd_clamp(simd_dot(grabState.originalAxis, currentAxisNorm), -1.0, 1.0)
                 let breakawayAngleRad = acos(dot)
                 let breakawayThresholdRad = settings.rotationBreakawayDegrees * (.pi / 180.0)
                 
                 if breakawayAngleRad >= breakawayThresholdRad {
-                    rotationBrokenAway = true
+                    grabState.rotationBrokenAway = true
                     // Rebase: snapshot current state as the new baseline for
                     // the mapping so rotation, scale, and position all start
                     // from the current values — no jump.
@@ -652,7 +662,7 @@ final class GestureController {
                         rotation: settings.worldRotation,
                         detailScale: settings.detailScale
                     )
-                    grabMapping = mapping
+                    grabState.mapping = mapping
                 }
             }
             
@@ -661,7 +671,7 @@ final class GestureController {
 
             // ── Evaluate the mapping ─────────────────────────────────────
             let result: (position: SIMD3<Float>, rotation: simd_quatf, detailScale: Float)
-            if rotationBrokenAway {
+            if grabState.rotationBrokenAway {
                 result = mapping.evaluate(leftPos: leftPos, rightPos: rightPos, scaleClamp: scaleClamp)
             } else {
                 result = mapping.evaluateScaleOnly(leftPos: leftPos, rightPos: rightPos, scaleClamp: scaleClamp)
@@ -685,17 +695,17 @@ final class GestureController {
                     detailScale: result.detailScale,
                     responsiveness: 1.0  // Near-direct 1:1 tracking
                 )
-                accumulatedPosition = result.position
+                singleHandState.accumulatedPosition = result.position
             }
             
             UsageAnalytics.shared.trackHandGestureUsed()
         }
         
         // === GESTURE END ===
-        if !bothActive && grabActive {
-            grabActive = false
-            grabMapping = nil
-            grabEndCooldown = 0.15  // 150ms cooldown prevents drag from stealing
+        if !bothActive && grabState.isActive {
+            grabState.isActive = false
+            grabState.mapping = nil
+            grabState.endCooldown = 0.15  // 150ms cooldown prevents drag from stealing
 
             // Apply rotation auto-snap on release
             settings.applyRotationSnap()
@@ -852,19 +862,19 @@ final class GestureController {
 
         // Skip unassigned slots
         if case .core(.none) = binding { 
-            singleHandDragState[key]?.isActive = false
+            singleHandState.perSlot[key]?.isActive = false
             return
         }
 
         // Block if BOTH-hand two-hand gesture is active for this digit
-        if fingerGestureState[digit]?.isActive == true {
-            singleHandDragState[key]?.isActive = false
+        if twoHandStateByDigit[digit]?.isActive == true {
+            singleHandState.perSlot[key]?.isActive = false
             return
         }
 
         // Block during grab-end cooldown
-        if grabEndCooldown > 0 || grabActive {
-            singleHandDragState[key]?.isActive = false
+        if grabState.endCooldown > 0 || grabState.isActive {
+            singleHandState.perSlot[key]?.isActive = false
             return
         }
 
@@ -886,7 +896,7 @@ final class GestureController {
                 // so don't treat this pinch as a two-hand attempt.
                 if let finger = FingerDigit(rawValue: d) {
                     let otherKey = GestureSlot(hand: otherHandMode, finger: finger).persistenceKey
-                    if singleHandDragState[otherKey]?.isActive == true { continue }
+                    if singleHandState.perSlot[otherKey]?.isActive == true { continue }
                 }
                 let threshold: Float = (d == 3) ? 0.45 : 0.55
                 if otherHand.pinchStrength(digit: d) >= threshold {
@@ -897,7 +907,7 @@ final class GestureController {
         }
 
         let pinch = hand.pinchStrength(digit: digit)
-        var state = singleHandDragState[key] ?? SingleHandDragState()
+        var state = singleHandState.perSlot[key] ?? SingleHandDragPerSlotState()
         let active: Bool
         if state.isActive {
             // Once active, only deactivate when the hand releases the pinch.
@@ -916,7 +926,7 @@ final class GestureController {
             if active && !state.isActive {
                 state.isActive = true
                 state.accumulatedPosition = settings.effectiveTargetPosition
-                accumulatedPosition = settings.effectiveTargetPosition
+                singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
                 state.prevPos = hand.pinchPosition(digit: digit)
                 state.prevPalm = hand.palmPosition
             }
@@ -939,11 +949,11 @@ final class GestureController {
 
                 let maxZoomCompensation: Float = (settings.fractalType == .mandelbulb) ? 2.0 : 3.0
                 let zoomCompensation = simd_clamp(1.0 / sqrt(max(settings.detailScale, 0.01)), 0.35, maxZoomCompensation)
-                accumulatedPosition = accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
+                singleHandState.accumulatedPosition = singleHandState.accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
                 if settings.isAnimationPlaying {
-                    settings.manualOffsetPosition = accumulatedPosition - settings.animationBasePosition
+                    settings.manualOffsetPosition = singleHandState.accumulatedPosition - settings.animationBasePosition
                 } else {
-                    settings.targetPosition = accumulatedPosition
+                    settings.targetPosition = singleHandState.accumulatedPosition
                 }
                 state.prevPos = currentPos
                 state.prevPalm = currentPos
@@ -997,7 +1007,7 @@ final class GestureController {
             guard let formulaIndex = descriptor.formulaIndex,
                   let node = ParameterNodeRegistry.shared.node(for: descriptor) else {
                 state.isActive = false
-                singleHandDragState[key] = state
+                singleHandState.perSlot[key] = state
                 return
             }
             if active && !state.isActive {
@@ -1033,7 +1043,7 @@ final class GestureController {
             state.isActive = false
         }
 
-        singleHandDragState[key] = state
+        singleHandState.perSlot[key] = state
     }
     
 }
