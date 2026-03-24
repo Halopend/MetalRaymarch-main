@@ -168,7 +168,7 @@ struct BuddhabrotSettingsSnapshot {
 
 /// Manages all GPU resources and passes for 3D Buddhabrot volume rendering.
 /// Designed to be owned by the main Renderer actor and called from the render loop.
-final class BuddhabrotRenderer {
+final class BuddhabrotRenderer: @unchecked Sendable {
     
     // MARK: - GPU Resources
     

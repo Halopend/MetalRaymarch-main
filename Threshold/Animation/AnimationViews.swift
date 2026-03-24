@@ -481,13 +481,12 @@ struct SceneListView: View {
     }
 
     private func createPlaylistFromScenes(name: String) {
-        guard let music = appModel.musicService else { return }
         let attachments = scenesWithSongs.compactMap(\.attachedSong)
         guard !attachments.isEmpty else { return }
 
         playlistCreationStatus = "Creating\u{2026}"
         Task {
-            if let result = await music.createPlaylist(name: name, from: attachments) {
+            if let result = await appModel.musicService.createPlaylist(name: name, from: attachments) {
                 playlistCreationStatus = "Created \"\(result)\""
             } else {
                 playlistCreationStatus = "Failed to create playlist"
@@ -886,7 +885,7 @@ struct SceneEditorView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(appModel.musicService?.hasAnyConnection != true)
+                .disabled(!appModel.musicService.hasAnyConnection)
             }
         }
         .padding(16)
@@ -894,9 +893,7 @@ struct SceneEditorView: View {
         .sheet(isPresented: $showSongPicker) {
             SongPickerSheet(musicService: appModel.musicService) { track in
                 Task {
-                    if let music = appModel.musicService {
-                        scene.attachedSong = await music.makeAttachment(from: track)
-                    }
+                    scene.attachedSong = await appModel.musicService.makeAttachment(from: track)
                 }
             }
         }
@@ -1119,11 +1116,11 @@ struct SceneEditorView: View {
     // ── Service icon / color helpers ──────────────────────────────────────
 
     private func iconName(for serviceID: String) -> String {
-        appModel.musicService?.provider(for: serviceID)?.iconName ?? "music.note"
+        appModel.musicService.provider(for: serviceID)?.iconName ?? "music.note"
     }
 
     private func iconColor(for serviceID: String) -> Color {
-        appModel.musicService?.provider(for: serviceID)?.accentColor ?? .secondary
+        appModel.musicService.provider(for: serviceID)?.accentColor ?? .secondary
     }
 }
 

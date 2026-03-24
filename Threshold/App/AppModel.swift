@@ -147,12 +147,12 @@ class AppModel {
     }
     
     init() {
+        // Initialize unified music service first since it's a non-optional constant
+        musicService = MusicService(appleMusic: appleMusicManager)
+        
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings)
         gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
-        
-        // Initialize unified music service
-        musicService = MusicService(appleMusic: appleMusicManager)
         
         // Initialize animation manager
         animationManager = AnimationManager(renderSettings: renderSettings)
