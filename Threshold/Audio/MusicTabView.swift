@@ -13,22 +13,21 @@ import SwiftUI
 // MARK: - Music Tab Content
 
 struct MusicTabContent: View {
-    @Environment(AppModel.self) private var appModel
     @Environment(\.openWindow) private var openWindow
     @Bindable var cache: UISettingsCache
 
-    // Library browsing state
-    @State private var showLibrary = false
-    @State private var libraryScope: LibraryScope = .songs
-    @State private var librarySearch = ""
-    @State private var libraryShuffle = false
-    @State private var musicPresetName = ""
-    @State private var musicPresets: [MusicReactivePreset] = Self.loadMusicPresets()
+    private let musicService: MusicService
+    private let audioAnalyzer: AudioAnalyzer
+    private let renderSettings: RenderSettings
 
-    private enum LibraryScope: String, CaseIterable {
-        case songs = "Songs"
-        case playlists = "Playlists"
-        case albums = "Albums"
+    @State private var viewModel: MusicTabViewModel
+
+    init(cache: UISettingsCache, musicService: MusicService, audioAnalyzer: AudioAnalyzer, renderSettings: RenderSettings) {
+        self.cache = cache
+        self.musicService = musicService
+        self.audioAnalyzer = audioAnalyzer
+        self.renderSettings = renderSettings
+        _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
     }
 
     var body: some View {
@@ -41,7 +40,14 @@ struct MusicTabContent: View {
                 nowPlayingCard
 
                 // 3. Open Library button (pops into its own window)
-                if appModel.musicService.activeProvider?.isConnected == true {
+                if let commandErrorMessage = viewModel.commandErrorMessage {
+                    Text(commandErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if viewModel.hasConnectedProvider {
                     openLibraryButton
                 }
 
@@ -58,7 +64,7 @@ struct MusicTabContent: View {
                 connectionsSection
 
                 // 8. Fallback priority ordering
-                if appModel.musicService.connectedProviders.count > 1 {
+                if viewModel.hasMultipleConnectedProviders {
                     servicePrioritySection
                 }
             }
@@ -67,10 +73,28 @@ struct MusicTabContent: View {
         }
     }
 
+
+
+    private var libraryScopeBinding: Binding<MusicTabViewModel.LibraryScope> {
+        Binding(get: { viewModel.libraryScope }, set: { viewModel.libraryScope = $0 })
+    }
+
+    private var libraryShuffleBinding: Binding<Bool> {
+        Binding(get: { viewModel.libraryShuffle }, set: { viewModel.libraryShuffle = $0 })
+    }
+
+    private var librarySearchBinding: Binding<String> {
+        Binding(get: { viewModel.librarySearch }, set: { viewModel.librarySearch = $0 })
+    }
+
+    private var musicPresetNameBinding: Binding<String> {
+        Binding(get: { viewModel.musicPresetName }, set: { viewModel.musicPresetName = $0 })
+    }
+
     // MARK: - Service Toggle
 
     private var serviceToggle: some View {
-        let music = appModel.musicService!
+        let music = musicService
         let connected = music.connectedProviders
         return Group {
             if connected.count > 1 {
@@ -81,8 +105,8 @@ struct MusicTabContent: View {
                         Spacer()
                     }
                     Picker("Service", selection: Binding(
-                        get: { music.preferredServiceID ?? music.activeProvider?.serviceID ?? "" },
-                        set: { newID in music.setPreferredService(newID) }
+                        get: { viewModel.activeServiceSelectionID },
+                        set: { newID in viewModel.setActiveService(newID) }
                     )) {
                         ForEach(connected, id: \.serviceID) { provider in
                             Label(provider.displayName, systemImage: provider.iconName)
@@ -135,7 +159,7 @@ struct MusicTabContent: View {
     // MARK: - Unified Now Playing
 
     private var nowPlayingCard: some View {
-        let music = appModel.musicService!
+        let music = musicService
         return VStack(spacing: 10) {
             if let track = music.nowPlaying {
                 // Track info
@@ -188,19 +212,19 @@ struct MusicTabContent: View {
                 // Transport
                 HStack(spacing: 24) {
                     Spacer()
-                    Button { music.previous() } label: {
+                    Button { viewModel.previousTrack() } label: {
                         Image(systemName: "backward.fill").font(.title3)
                     }
                     .buttonStyle(.plain)
 
-                    Button { music.togglePlayPause() } label: {
+                    Button { viewModel.togglePlayPause() } label: {
                         Image(systemName: music.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 40))
                     }
                     .buttonStyle(.plain)
                     .tint(music.accentColor)
 
-                    Button { music.next() } label: {
+                    Button { viewModel.nextTrack() } label: {
                         Image(systemName: "forward.fill").font(.title3)
                     }
                     .buttonStyle(.plain)
@@ -240,7 +264,7 @@ struct MusicTabContent: View {
     // MARK: - Service Connections
 
     private var connectionsSection: some View {
-        let music = appModel.musicService!
+        let music = musicService
         return VStack(spacing: 6) {
             HStack {
                 Text("Services")
@@ -260,17 +284,17 @@ struct MusicTabContent: View {
 
             // Microphone row
             HStack {
-                Image(systemName: appModel.audioAnalyzer.isCapturing ? "mic.fill" : "mic.slash.fill")
+                Image(systemName: audioAnalyzer.isCapturing ? "mic.fill" : "mic.slash.fill")
                     .font(.caption)
-                    .foregroundStyle(appModel.audioAnalyzer.isCapturing ? .green : .secondary)
+                    .foregroundStyle(audioAnalyzer.isCapturing ? .green : .secondary)
                 Text("Microphone")
                     .font(.subheadline)
                 Spacer()
-                Button(appModel.audioAnalyzer.isCapturing ? "Stop" : "Start") {
-                    if appModel.audioAnalyzer.isCapturing {
-                        appModel.audioAnalyzer.stopCapture()
+                Button(audioAnalyzer.isCapturing ? "Stop" : "Start") {
+                    if audioAnalyzer.isCapturing {
+                        audioAnalyzer.stopCapture()
                     } else {
-                        appModel.audioAnalyzer.startCapture()
+                        audioAnalyzer.startCapture()
                     }
                 }
                 .buttonStyle(.bordered)
@@ -298,7 +322,7 @@ struct MusicTabContent: View {
                         .foregroundStyle(.green)
                 } else {
                     Button("Disconnect") {
-                        provider.disconnect()
+                        viewModel.disconnect(provider)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -314,7 +338,7 @@ struct MusicTabContent: View {
                     .controlSize(.small)
             case .disconnected:
                 Button("Connect") {
-                    provider.connect()
+                    viewModel.connect(provider)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -326,7 +350,7 @@ struct MusicTabContent: View {
     // MARK: - Service Priority
 
     private var servicePrioritySection: some View {
-        let music = appModel.musicService!
+        let music = musicService
         let order = music.servicePriority
 
         return VStack(spacing: 6) {
@@ -390,11 +414,11 @@ struct MusicTabContent: View {
     // MARK: - Unified Library Browser
 
     private var librarySection: some View {
-        let music = appModel.musicService!
+        let music = musicService
         let activeServiceName = music.activeProvider?.displayName ?? "Library"
         return VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { showLibrary.toggle() }
+                withAnimation(.easeInOut(duration: 0.2)) { viewModel.showLibrary.toggle() }
             } label: {
                 HStack {
                     Image(systemName: "music.note.list")
@@ -402,14 +426,14 @@ struct MusicTabContent: View {
                     Text("\(activeServiceName) Library")
                         .font(.subheadline.bold())
                     Spacer()
-                    Image(systemName: showLibrary ? "chevron.up" : "chevron.down")
+                    Image(systemName: viewModel.showLibrary ? "chevron.up" : "chevron.down")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
             .buttonStyle(.plain)
 
-            if showLibrary {
+            if viewModel.showLibrary {
                 libraryBrowser
             }
         }
@@ -418,23 +442,23 @@ struct MusicTabContent: View {
     }
 
     private var libraryBrowser: some View {
-        let music = appModel.musicService!
+        let music = musicService
         let activeID = music.activeProvider?.serviceID
         return VStack(spacing: 8) {
             HStack {
-                Picker("", selection: $libraryScope) {
-                    ForEach(LibraryScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                Picker("", selection: libraryScopeBinding) {
+                    ForEach(MusicTabViewModel.LibraryScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
 
-                if libraryScope != .songs {
-                    Toggle("", isOn: $libraryShuffle)
+                if viewModel.libraryScope != .songs {
+                    Toggle("", isOn: libraryShuffleBinding)
                         .toggleStyle(.switch)
                         .labelsHidden()
                 }
 
                 Button {
-                    music.refreshLibrary(for: activeID)
+                    viewModel.refreshLibrary()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption)
@@ -443,7 +467,7 @@ struct MusicTabContent: View {
                 .controlSize(.small)
             }
 
-            TextField("Search…", text: $librarySearch)
+            TextField("Search…", text: librarySearchBinding)
                 .textFieldStyle(.roundedBorder)
 
             if music.isLibraryLoading(for: activeID) {
@@ -456,18 +480,18 @@ struct MusicTabContent: View {
 
                 ScrollView {
                     LazyVStack(spacing: 6) {
-                        switch libraryScope {
+                        switch viewModel.libraryScope {
                         case .songs:
-                            ForEach(Array(filteredSongs(for: activeID).prefix(100)), id: \.id) { track in
-                                unifiedSongRow(track, music: music)
+                            ForEach(Array(viewModel.filteredSongs(for: activeID).prefix(100)), id: \.id) { track in
+                                unifiedSongRow(track)
                             }
                         case .playlists:
-                            ForEach(Array(filteredPlaylists(for: activeID).prefix(100)), id: \.id) { pl in
-                                unifiedPlaylistRow(pl, music: music)
+                            ForEach(Array(viewModel.filteredPlaylists(for: activeID).prefix(100)), id: \.id) { pl in
+                                unifiedPlaylistRow(pl)
                             }
                         case .albums:
-                            ForEach(Array(filteredAlbums(for: activeID).prefix(100)), id: \.id) { album in
-                                unifiedAlbumRow(album, music: music)
+                            ForEach(Array(viewModel.filteredAlbums(for: activeID).prefix(100)), id: \.id) { album in
+                                unifiedAlbumRow(album)
                             }
                         }
                     }
@@ -478,39 +502,15 @@ struct MusicTabContent: View {
         .onAppear {
             if music.librarySongs(for: activeID).isEmpty,
                !music.isLibraryLoading(for: activeID) {
-                music.refreshLibrary(for: activeID)
+                viewModel.refreshLibrary()
             }
         }
     }
 
-    // MARK: - Unified Library Filters
-
-    private var query: String {
-        librarySearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
-    private func filteredSongs(for serviceID: String?) -> [UnifiedTrack] {
-        let s = appModel.musicService.librarySongs(for: serviceID)
-        guard !query.isEmpty else { return s }
-        return s.filter { $0.title.lowercased().contains(query) || $0.artist.lowercased().contains(query) }
-    }
-
-    private func filteredPlaylists(for serviceID: String?) -> [UnifiedPlaylist] {
-        let p = appModel.musicService.libraryPlaylists(for: serviceID)
-        guard !query.isEmpty else { return p }
-        return p.filter { $0.name.lowercased().contains(query) }
-    }
-
-    private func filteredAlbums(for serviceID: String?) -> [UnifiedAlbum] {
-        let a = appModel.musicService.libraryAlbums(for: serviceID)
-        guard !query.isEmpty else { return a }
-        return a.filter { $0.title.lowercased().contains(query) || $0.artist.lowercased().contains(query) }
-    }
-
     // MARK: - Unified Library Rows
 
-    private func unifiedSongRow(_ track: UnifiedTrack, music: MusicService) -> some View {
-        Button { music.playSong(track) } label: {
+    private func unifiedSongRow(_ track: UnifiedTrack) -> some View {
+        Button { viewModel.playSong(track) } label: {
             HStack(spacing: 8) {
                 if let url = track.artworkURL {
                     AsyncImage(url: url) { img in
@@ -539,8 +539,8 @@ struct MusicTabContent: View {
         .buttonStyle(.plain)
     }
 
-    private func unifiedPlaylistRow(_ pl: UnifiedPlaylist, music: MusicService) -> some View {
-        Button { music.playPlaylist(pl, shuffle: libraryShuffle) } label: {
+    private func unifiedPlaylistRow(_ pl: UnifiedPlaylist) -> some View {
+        Button { viewModel.playPlaylist(pl) } label: {
             HStack(spacing: 8) {
                 if let url = pl.artworkURL {
                     AsyncImage(url: url) { img in
@@ -569,8 +569,8 @@ struct MusicTabContent: View {
         .buttonStyle(.plain)
     }
 
-    private func unifiedAlbumRow(_ album: UnifiedAlbum, music: MusicService) -> some View {
-        Button { music.playAlbum(album, shuffle: libraryShuffle) } label: {
+    private func unifiedAlbumRow(_ album: UnifiedAlbum) -> some View {
+        Button { viewModel.playAlbum(album) } label: {
             HStack(spacing: 8) {
                 if let url = album.artworkURL {
                     AsyncImage(url: url) { img in
@@ -827,20 +827,20 @@ struct MusicTabContent: View {
                 .font(.subheadline.bold())
 
             HStack(spacing: 6) {
-                TextField("Preset Name", text: $musicPresetName)
+                TextField("Preset Name", text: musicPresetNameBinding)
                     .textFieldStyle(.roundedBorder)
-                Button("Save") { saveMusicPreset() }
+                Button("Save") { viewModel.saveMusicPreset(using: cache) }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(viewModel.musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            if musicPresets.isEmpty {
+            if viewModel.musicPresets.isEmpty {
                 Text("No music presets saved yet")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(musicPresets) { preset in
+                ForEach(viewModel.musicPresets) { preset in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(preset.name)
@@ -850,10 +850,10 @@ struct MusicTabContent: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Load") { loadMusicPreset(preset) }
+                        Button("Load") { viewModel.loadMusicPreset(preset, into: cache) }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                        Button(role: .destructive) { deleteMusicPreset(preset.id) } label: {
+                        Button(role: .destructive) { viewModel.deleteMusicPreset(preset.id) } label: {
                             Image(systemName: "trash")
                                 .font(.caption2)
                         }
@@ -929,68 +929,11 @@ struct MusicTabContent: View {
         cache.push(\.musicReactiveMappings, value: mappings)
     }
 
-    private static let musicPresetStorageKey = "musicReactivePresets"
-
-    private static func loadMusicPresets() -> [MusicReactivePreset] {
-        guard let data = UserDefaults.standard.data(forKey: musicPresetStorageKey),
-              let decoded = try? JSONDecoder().decode([MusicReactivePreset].self, from: data) else {
-            return []
-        }
-        return decoded
-    }
-
-    private func persistMusicPresets() {
-        if let encoded = try? JSONEncoder().encode(musicPresets) {
-            UserDefaults.standard.set(encoded, forKey: Self.musicPresetStorageKey)
-        }
-    }
-
-    private func saveMusicPreset() {
-        let trimmed = musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let preset = MusicReactivePreset(
-            name: trimmed,
-            audioAmount: cache.audioReactive.fractalAudioAmount,
-            beatPunch: cache.audioReactive.fractalBeatPunch,
-            bassSensitivity: cache.audioReactive.bassSensitivity,
-            midSensitivity: cache.audioReactive.midSensitivity,
-            trebleSensitivity: cache.audioReactive.trebleSensitivity,
-            beatSensitivity: cache.audioReactive.beatSensitivity,
-            mappings: cache.audioReactive.musicReactiveMappings
-        )
-        musicPresets.append(preset)
-        persistMusicPresets()
-        musicPresetName = ""
-    }
-
-    private func loadMusicPreset(_ preset: MusicReactivePreset) {
-        cache.audioReactive.fractalAudioAmount = preset.audioAmount
-        cache.audioReactive.fractalBeatPunch = preset.beatPunch
-        cache.audioReactive.bassSensitivity = preset.bassSensitivity
-        cache.audioReactive.midSensitivity = preset.midSensitivity
-        cache.audioReactive.trebleSensitivity = preset.trebleSensitivity
-        cache.audioReactive.beatSensitivity = preset.beatSensitivity
-        cache.audioReactive.musicReactiveMappings = preset.mappings
-
-        cache.push(\.fractalAudioAmount, value: preset.audioAmount)
-        cache.push(\.fractalBeatPunch, value: preset.beatPunch)
-        cache.push(\.bassSensitivity, value: preset.bassSensitivity)
-        cache.push(\.midSensitivity, value: preset.midSensitivity)
-        cache.push(\.trebleSensitivity, value: preset.trebleSensitivity)
-        cache.push(\.beatSensitivity, value: preset.beatSensitivity)
-        cache.push(\.musicReactiveMappings, value: preset.mappings)
-    }
-
-    private func deleteMusicPreset(_ id: UUID) {
-        musicPresets.removeAll { $0.id == id }
-        persistMusicPresets()
-    }
-
     // MARK: - Level Meters
 
     private var levelMeters: some View {
         TimelineView(.animation) { _ in
-            let rs = appModel.renderSettings
+            let rs = renderSettings
             VStack(alignment: .leading, spacing: 8) {
                 Text("Audio Levels")
                     .font(.caption2.bold())
@@ -1060,3 +1003,167 @@ struct MusicTabContent: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+#if DEBUG
+@MainActor
+private final class PreviewMusicProvider: MusicServiceProvider {
+    let serviceID: String
+    let displayName: String
+    let iconName: String
+    let accentColor: Color
+
+    var connectionStatus: MusicServiceConnectionStatus
+    var nowPlaying: UnifiedTrack?
+    var isPlaying: Bool
+
+    var progressFraction: Float = 0.45
+    var currentTimeString: String = "1:12"
+    var totalTimeString: String = "3:40"
+
+    var librarySongs: [UnifiedTrack] = []
+    var libraryPlaylists: [UnifiedPlaylist] = []
+    var libraryAlbums: [UnifiedAlbum] = []
+    var isLibraryLoading: Bool = false
+    var libraryError: String?
+
+    var bassLevel: Float = 0.2
+    var midLevel: Float = 0.35
+    var trebleLevel: Float = 0.45
+    var beatIntensity: Float = 0.4
+    var overallLevel: Float = 0.33
+
+    init(serviceID: String,
+         displayName: String,
+         iconName: String,
+         accentColor: Color,
+         connectionStatus: MusicServiceConnectionStatus,
+         nowPlaying: UnifiedTrack? = nil,
+         isPlaying: Bool = false,
+         libraryError: String? = nil) {
+        self.serviceID = serviceID
+        self.displayName = displayName
+        self.iconName = iconName
+        self.accentColor = accentColor
+        self.connectionStatus = connectionStatus
+        self.nowPlaying = nowPlaying
+        self.isPlaying = isPlaying
+        self.libraryError = libraryError
+    }
+
+    func connect() { connectionStatus = .connected }
+    func disconnect() { connectionStatus = .disconnected }
+    func togglePlayPause() async { isPlaying.toggle() }
+    func next() async {}
+    func previous() async {}
+    func seek(fraction: Float) async {}
+    func refreshLibrary() async {}
+    func playSong(_ track: UnifiedTrack) async { nowPlaying = track; isPlaying = true }
+    func playSongByNativeID(_ nativeID: String) async -> Bool { true }
+    func playPlaylist(_ playlist: UnifiedPlaylist, shuffle: Bool) async {}
+    func playAlbum(_ album: UnifiedAlbum, shuffle: Bool) async {}
+    func fetchPlaylistTracks(_ playlist: UnifiedPlaylist) async -> [UnifiedTrack] { [] }
+    func searchTrack(title: String, artist: String) async -> UnifiedTrack? { nil }
+    func updateFrame() {}
+}
+
+@MainActor
+private struct MusicTabPreviewHarness: View {
+    @State private var cache = UISettingsCache()
+
+    let musicService: MusicService
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(title)
+                .font(.headline)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            MusicTabContent(
+                cache: cache,
+                musicService: musicService,
+                audioAnalyzer: AudioAnalyzer(),
+                renderSettings: RenderSettings()
+            )
+        }
+        .frame(width: 460, height: 860)
+    }
+}
+
+#Preview("No providers") {
+    MusicTabPreviewHarness(
+        musicService: MusicService(previewProviders: []),
+        title: "No Connected Providers"
+    )
+}
+
+#Preview("One provider") {
+    let track = UnifiedTrack(
+        id: "song-1",
+        serviceID: "appleMusic",
+        title: "Threshold Pulse",
+        artist: "Codex",
+        album: "Raymarch Dreams",
+        artworkURL: nil,
+        durationSeconds: 220
+    )
+    let provider = PreviewMusicProvider(
+        serviceID: "appleMusic",
+        displayName: "Apple Music",
+        iconName: "apple.logo",
+        accentColor: .pink,
+        connectionStatus: .connected,
+        nowPlaying: track,
+        isPlaying: true
+    )
+    MusicTabPreviewHarness(
+        musicService: MusicService(previewProviders: [provider], preferredServiceID: provider.serviceID),
+        title: "Single Connected Provider"
+    )
+}
+
+#Preview("Multiple providers") {
+    let apple = PreviewMusicProvider(
+        serviceID: "appleMusic",
+        displayName: "Apple Music",
+        iconName: "apple.logo",
+        accentColor: .pink,
+        connectionStatus: .connected,
+        nowPlaying: UnifiedTrack(id: "song-2", serviceID: "appleMusic", title: "Synth Bloom", artist: "Skyline", album: "A", artworkURL: nil, durationSeconds: 210),
+        isPlaying: true
+    )
+    let spotify = PreviewMusicProvider(
+        serviceID: "spotify",
+        displayName: "Spotify",
+        iconName: "waveform",
+        accentColor: .green,
+        connectionStatus: .connected
+    )
+    MusicTabPreviewHarness(
+        musicService: MusicService(previewProviders: [apple, spotify], preferredServiceID: apple.serviceID),
+        title: "Multiple Connected Providers"
+    )
+}
+
+#Preview("Disconnected + Error") {
+    let disconnected = PreviewMusicProvider(
+        serviceID: "appleMusic",
+        displayName: "Apple Music",
+        iconName: "apple.logo",
+        accentColor: .pink,
+        connectionStatus: .disconnected
+    )
+    let errorProvider = PreviewMusicProvider(
+        serviceID: "spotify",
+        displayName: "Spotify",
+        iconName: "waveform",
+        accentColor: .green,
+        connectionStatus: .error("Token expired"),
+        libraryError: "Refresh failed"
+    )
+    MusicTabPreviewHarness(
+        musicService: MusicService(previewProviders: [disconnected, errorProvider]),
+        title: "Disconnected / Error States"
+    )
+}
+#endif
