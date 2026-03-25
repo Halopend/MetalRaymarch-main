@@ -28,7 +28,7 @@ import simd
 /// - Smoothing prevents jitter and provides natural feel
 @MainActor
 final class GestureController {
-    let operationDispatcher: ParameterOperationDispatcher
+    let parameterPipeline: ParameterPipeline
     private var operationFrameCounter: UInt64 = 0
     private let featureFlags = GestureFeatureFlags()
     private let menuToggleEngine = MenuToggleGestureEngine()
@@ -123,16 +123,16 @@ final class GestureController {
     private weak var renderSettings: RenderSettings?
     
     init(renderSettings: RenderSettings,
-         operationDispatcher: ParameterOperationDispatcher? = nil) {
+         parameterPipeline: ParameterPipeline) {
         self.renderSettings = renderSettings
-        self.operationDispatcher = operationDispatcher ?? ParameterOperationDispatcher()
+        self.parameterPipeline = parameterPipeline
         
         // Initialize drag engine state from current settings
         singleHandDragEngine.reset(accumulatedPosition: renderSettings.position)
     }
     
     func setDebugTraceEnabled(_ enabled: Bool) {
-        operationDispatcher.debugTraceEnabled = enabled
+        parameterPipeline.setDebugTraceEnabled(enabled)
     }
 
     /// Sync internal state with current render settings.
@@ -404,7 +404,7 @@ final class GestureController {
                         value: .absolute(newValue),
                         frameIndex: self.operationFrameCounter
                     )
-                    self.operationDispatcher.dispatch([op], settings: settings)
+                    self.parameterPipeline.dispatchGesture([op], settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
@@ -529,7 +529,7 @@ final class GestureController {
                 value: .absolute(newValue),
                 frameIndex: operationFrameCounter
             )
-            operationDispatcher.dispatch([op], settings: settings)
+            parameterPipeline.dispatchGesture([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
         if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
@@ -560,7 +560,7 @@ final class GestureController {
                 value: .absolute(newValue),
                 frameIndex: operationFrameCounter
             )
-            operationDispatcher.dispatch([op], settings: settings)
+            parameterPipeline.dispatchGesture([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
         if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
@@ -994,7 +994,7 @@ final class GestureController {
                         ParameterOperation(targetID: triplet.yNodeID, source: .gesture, value: .absolute(state.startValues.y), frameIndex: operationFrameCounter),
                         ParameterOperation(targetID: triplet.zNodeID, source: .gesture, value: .absolute(state.startValues.z), frameIndex: operationFrameCounter),
                     ]
-                    operationDispatcher.dispatch(ops, settings: settings)
+                    parameterPipeline.dispatchGesture(ops, settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
                 state.prevPos = currentPos
@@ -1031,7 +1031,7 @@ final class GestureController {
                     value: .absolute(state.startValue),
                     frameIndex: operationFrameCounter
                 )
-                operationDispatcher.dispatch([op], settings: settings)
+                parameterPipeline.dispatchGesture([op], settings: settings)
                 UsageAnalytics.shared.trackHandGestureUsed()
                 state.prevPos = currentPos
                 activeDigit = digit

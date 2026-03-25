@@ -33,7 +33,7 @@ final class GradientLibrary {
 @MainActor
 @Observable
 final class UISettingsCache {
-    let parameterOperationDispatcher = ParameterOperationDispatcher()
+    private var parameterPipeline: ParameterPipeline?
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Domain Config Struct Backing Stores
     // These 7 structs replace ~84 individual stored properties.
@@ -125,6 +125,7 @@ final class UISettingsCache {
     func startSync(with settings: RenderSettings, appModel: AppModel) {
         self.settings = settings
         self._appModel = appModel
+        self.parameterPipeline = appModel.parameterPipeline
         loadFromSettings()
         syncTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -197,7 +198,7 @@ final class UISettingsCache {
     }
 
     func dispatchParameterOperation(_ operation: ParameterOperation) {
-        parameterOperationDispatcher.dispatch([operation], cache: self)
+        parameterPipeline?.dispatchUI([operation], cache: self)
     }
 
     
@@ -235,7 +236,7 @@ final class UISettingsCache {
         settings?.fractalType = type
         if oldType != type {
             // Clear stale formula parameter layer stacks from the old type
-            parameterOperationDispatcher.clearFormulaStacks()
+            parameterPipeline?.clearFormulaStacks()
             gestureController?.applyFractalDefaults()
             loadFromSettings()
         }
@@ -271,12 +272,12 @@ final class UISettingsCache {
             value: .absolute(value),
             frameIndex: 0
         )
-        parameterOperationDispatcher.dispatch([op], cache: self)
+        parameterPipeline?.dispatchUI([op], cache: self)
     }
     
     /// Reset formula params to defaults for the current type and push.
     func resetFormulaParams() {
-        parameterOperationDispatcher.clearFormulaStacks()
+        parameterPipeline?.clearFormulaStacks()
         formulaParams = fractalType.defaultFormulaParams()
         if let settings, settings.isAnimationPlaying {
             settings.setManualFormulaParamOverrides((0..<16).map { FormulaCatalog.getParam(formulaParams, index: $0) })
@@ -300,7 +301,7 @@ final class UISettingsCache {
             value: .absolute(value),
             frameIndex: 0
         )
-        parameterOperationDispatcher.dispatch([op], cache: self)
+        parameterPipeline?.dispatchUI([op], cache: self)
     }
 
     func commitHueRotationEffect() {
