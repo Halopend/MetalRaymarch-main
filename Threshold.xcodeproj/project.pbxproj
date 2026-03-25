@@ -15,7 +15,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				App/Info.plist,
-				Utilities/MB3DImporter/mb3d_import_cli.swift,
 			);
 			target = D7D716902CEAC4B100CEEA51 /* Threshold */;
 		};
