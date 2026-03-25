@@ -26,7 +26,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
 
     // Debug
     var debugHierarchical: Bool = false
-    var recreateLegacyComputeCacheBug: Bool = false
 
     // MARK: - Validation
 

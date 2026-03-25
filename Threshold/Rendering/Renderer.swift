@@ -48,7 +48,6 @@ actor Renderer {
     var lastComputeFI: Int = -1
     var lastComputeRS: Int = -1
     var lastComputePower: Int32?
-    var lastComputeLegacyBugMode: Bool = false
     var lastSelectedComputePipeline: MTLComputePipelineState?
     
     // === UI UPDATE COORDINATION ===

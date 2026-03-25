@@ -476,10 +476,9 @@ extension Renderer {
             return nil
         }()
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
-        let recreateLegacyBug = appModel.renderSettings.recreateLegacyComputeCacheBug
-
+        
         // Fast-path: parameters unchanged since last call
-        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower && recreateLegacyBug == lastComputeLegacyBugMode,
+        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower,
            let cached = lastSelectedComputePipeline {
             recordPipelineTelemetry(computeHit: true)
             return cached
@@ -498,7 +497,6 @@ extension Renderer {
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
             lastComputePower = mbPowerInt
-            lastComputeLegacyBugMode = recreateLegacyBug
             lastSelectedComputePipeline = pipeline
             return pipeline
         }
@@ -514,41 +512,8 @@ extension Renderer {
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
             lastComputePower = mbPowerInt
-            lastComputeLegacyBugMode = recreateLegacyBug
             lastSelectedComputePipeline = pipeline
             return pipeline
-        }
-
-        if recreateLegacyBug {
-            let nearest = computePipelineCache
-                .compactMap { entry -> (key: String, pipeline: MTLComputePipelineState, score: Int)? in
-                    let key = entry.key
-                    guard let fiRange = key.range(of: "FI"),
-                          let rsRange = key.range(of: "_RS", range: fiRange.upperBound..<key.endIndex) else { return nil }
-                    let fiText = String(key[fiRange.upperBound..<rsRange.lowerBound])
-                    let rsSuffix = key[rsRange.upperBound...]
-                    let rsText = rsSuffix.prefix { $0.isNumber }
-                    guard let fi = Int(fiText), let rs = Int(rsText) else { return nil }
-                    let score = abs(fi - fractalIterations) * 1000 + abs(rs - maxRaySteps)
-                    return (key: key, pipeline: entry.value, score: score)
-                }
-                .sorted { $0.score < $1.score }
-                .first
-
-            if let nearest {
-                recordPipelineTelemetry(computeHit: true)
-                if RENDERER_DEBUG && lastComputePipelineKey != "legacyNearest_\(nearest.key)" {
-                    print("🪲 [ComputeCache] Legacy bug mode: nearest fallback \(nearest.key) for requested FT=\(fractalType.rawValue) FI=\(fractalIterations) RS=\(maxRaySteps)")
-                    lastComputePipelineKey = "legacyNearest_\(nearest.key)"
-                }
-                lastComputeFT = fractalType.rawValue
-                lastComputeFI = fractalIterations
-                lastComputeRS = maxRaySteps
-                lastComputePower = mbPowerInt
-                lastComputeLegacyBugMode = recreateLegacyBug
-                lastSelectedComputePipeline = nearest.pipeline
-                return nearest.pipeline
-            }
         }
 
         // 3. Build on-demand for this exact configuration
@@ -572,7 +537,6 @@ extension Renderer {
                 lastComputeFI = fractalIterations
                 lastComputeRS = maxRaySteps
                 lastComputePower = mbPowerInt
-                lastComputeLegacyBugMode = recreateLegacyBug
                 lastSelectedComputePipeline = pipeline
                 return pipeline
             }
@@ -590,7 +554,6 @@ extension Renderer {
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
         lastComputePower = mbPowerInt
-        lastComputeLegacyBugMode = recreateLegacyBug
         lastSelectedComputePipeline = fallback
         return fallback
     }
