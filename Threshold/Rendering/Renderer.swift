@@ -179,7 +179,6 @@ actor Renderer {
     private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
 
     private var parameterOperationFrameIndex: UInt64 = 0
-    private let parameterOperationDispatcher = ParameterOperationDispatcher()
     // Lifetime is bounded to init/deinit; the task body still hops back onto the actor.
     nonisolated(unsafe) private var setupTask: Task<Void, Never>?
 
@@ -842,20 +841,20 @@ actor Renderer {
                 }
 
                 if !audioOperations.isEmpty {
-                    parameterOperationDispatcher.dispatch(audioOperations, settings: settings)
+                    appModel.parameterPipeline.dispatchAudio(audioOperations, settings: settings)
                     parameterOperationFrameIndex &+= 1
                 }
                 
             } else {
                 if musicReactiveLayerActive {
-                    parameterOperationDispatcher.clearMusicLayers(settings: settings)
+                    appModel.parameterPipeline.clearMusicLayers(settings: settings)
                 }
                 musicReactiveLayerActive = false
                 musicLFOPhaseByTarget.removeAll()
             }
         } else {
             if musicReactiveLayerActive {
-                parameterOperationDispatcher.clearMusicLayers(settings: settings)
+                appModel.parameterPipeline.clearMusicLayers(settings: settings)
             }
             musicReactiveLayerActive = false
             musicLFOPhaseByTarget.removeAll()

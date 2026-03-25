@@ -49,6 +49,7 @@ class AppModel {
     @ObservationIgnored nonisolated(unsafe) var isUsingSpecializedPipeline: Bool = false
     
     nonisolated let renderSettings = RenderSettings()
+    nonisolated let parameterPipeline = ParameterPipeline()
     
     // Buddhabrot volume renderer settings (shared between UI and render loop)
     nonisolated let buddhabrotSettings = BuddhabrotSettings()
@@ -142,6 +143,7 @@ class AppModel {
 
     var parameterOperationDebugTrace: Bool = false {
         didSet {
+            parameterPipeline.setDebugTraceEnabled(parameterOperationDebugTrace)
             gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
         }
     }
@@ -151,7 +153,8 @@ class AppModel {
         musicService = MusicService(appleMusic: appleMusicManager)
         
         // Initialize gesture controller with render settings
-        gestureController = GestureController(renderSettings: renderSettings)
+        gestureController = GestureController(renderSettings: renderSettings, parameterPipeline: parameterPipeline)
+        parameterPipeline.setDebugTraceEnabled(parameterOperationDebugTrace)
         gestureController?.setDebugTraceEnabled(parameterOperationDebugTrace)
         
         // Initialize animation manager
@@ -275,4 +278,3 @@ class AppModel {
     }
 
 }
-
