@@ -119,57 +119,59 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let write: (RenderSettings, Float) -> Void
     }
 
+    static let routableDescriptorTargetIDs: Set<String> = Set(ParameterTargetID.coreAndEffect)
+
     private let coreDescriptors: [String: CoreParameterDescriptor] = [
-        "core.targetFractalScale": CoreParameterDescriptor(
+        ParameterTargetID.Core.fractalScale: CoreParameterDescriptor(
             range: -5.0...8.0,
             bundle: .scale,
             motionStrategy: .smoothDamp,
             read: { $0.targetFractalScale },
             write: { settings, value in settings.targetFractalScale = value }
         ),
-        "core.colorMix": CoreParameterDescriptor(
+        ParameterTargetID.Core.colorMix: CoreParameterDescriptor(
             range: 0.0...1.0,
             bundle: .color,
             motionStrategy: .layerLerp,
             read: { $0.colorMix },
             write: { settings, value in settings.colorMix = value }
         ),
-        "core.fractalIterations": CoreParameterDescriptor(
+        ParameterTargetID.Core.iterations: CoreParameterDescriptor(
             range: 2.0...24.0,
             bundle: .fractalCore,
             motionStrategy: .layerLerp,
             read: { Float($0.fractalIterations) },
             write: { settings, value in settings.fractalIterations = max(2, min(24, Int(round(value)))) }
         ),
-        "effect.glow": CoreParameterDescriptor(
+        ParameterTargetID.Effect.glow: CoreParameterDescriptor(
             range: 0.0...2.0,
             bundle: .lighting,
             motionStrategy: .layerLerp,
             read: { $0.glowEffect.intensity },
             write: { settings, value in settings.audioModulateGlowIntensity(value) }
         ),
-        "effect.fog": CoreParameterDescriptor(
+        ParameterTargetID.Effect.fog: CoreParameterDescriptor(
             range: 0.0...1.0,
             bundle: .lighting,
             motionStrategy: .layerLerp,
             read: { $0.fogEffect.intensity },
             write: { settings, value in settings.audioModulateFogIntensity(value) }
         ),
-        "effect.bloom": CoreParameterDescriptor(
+        ParameterTargetID.Effect.bloom: CoreParameterDescriptor(
             range: 0.0...2.0,
             bundle: .lighting,
             motionStrategy: .layerLerp,
             read: { $0.bloomEffect.strength },
             write: { settings, value in settings.audioModulateBloomStrength(value) }
         ),
-        "effect.hueSpeed": CoreParameterDescriptor(
+        ParameterTargetID.Effect.hueSpeed: CoreParameterDescriptor(
             range: 0.0...0.5,
             bundle: .color,
             motionStrategy: .layerLerp,
             read: { $0.hueRotationEffect.speed },
             write: { settings, value in settings.audioModulateHueSpeed(value) }
         ),
-        "effect.saturation": CoreParameterDescriptor(
+        ParameterTargetID.Effect.saturation: CoreParameterDescriptor(
             range: 0.0...3.0,
             bundle: .color,
             motionStrategy: .layerLerp,
@@ -275,12 +277,9 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     private func apply(_ operation: ParameterOperation, settings: RenderSettings) {
         let timestamp = operation.timestamp
         let layer = layer(for: operation.source)
-        let pieces = operation.targetID.split(separator: ".")
-        if pieces.count >= 4,
-           pieces[0] == "formula",
-           let fractalRaw = Int(pieces[1]),
-           let formulaIndex = Int(pieces[2]),
-           let fractalType = FractalModelType(rawValue: Int32(fractalRaw)) {
+        if let formulaID = ParameterTargetID.parseFormulaID(operation.targetID) {
+            let fractalType = formulaID.fractalType
+            let formulaIndex = formulaID.formulaIndex
             var params = settings.formulaParams
             let current = FormulaCatalog.getParam(params, index: formulaIndex)
             let nodeRange: ClosedRange<Float> = ParameterNodeRegistry.shared
@@ -383,9 +382,8 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             for (id, var stack) in state.formulaStacks {
                 let resolved = stack.apply(layer: .music, value: 0, smoothingTime: 0, timestamp: timestamp)
                 state.formulaStacks[id] = stack
-                let pieces = id.split(separator: ".")
-                if pieces.count >= 3, pieces[0] == "formula",
-                   let formulaIndex = Int(pieces[2]) {
+                if let formula = ParameterTargetID.parseFormulaID(id) {
+                    let formulaIndex = formula.formulaIndex
                     formulaWrites.append((formulaIndex, resolved))
                 }
             }

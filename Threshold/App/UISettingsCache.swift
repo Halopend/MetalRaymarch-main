@@ -265,7 +265,7 @@ final class UISettingsCache {
     /// Routes through the parameter operation dispatcher so layer precedence is respected.
     func pushFormulaParam(index: Int, value: Float) {
         guard let settings else { return }
-        let targetID = "formula.\(settings.fractalType.rawValue).\(index)"
+        guard let targetID = ParameterNodeRegistry.shared.node(for: settings.fractalType, formulaIndex: index)?.id else { return }
         let op = ParameterOperation(
             targetID: targetID,
             source: .slider,
@@ -306,7 +306,7 @@ final class UISettingsCache {
 
     func commitHueRotationEffect() {
         push(\.hueRotationEffect, value: lighting.hueRotationEffect)
-        pushEffectParam("effect.hueSpeed", value: lighting.hueRotationEffect.speed)
+        pushEffectParam(ParameterTargetID.Effect.hueSpeed, value: lighting.hueRotationEffect.speed)
     }
 
     func commitPulseEffect() {
@@ -320,7 +320,7 @@ final class UISettingsCache {
             settings.glowEffect = lighting.glowEffect
         } else {
             push(\.glowEffect, value: lighting.glowEffect)
-            pushEffectParam("effect.glow", value: lighting.glowEffect.intensity)
+            pushEffectParam(ParameterTargetID.Effect.glow, value: lighting.glowEffect.intensity)
         }
     }
 
@@ -331,7 +331,7 @@ final class UISettingsCache {
             settings.bloomEffect = lighting.bloomEffect
         } else {
             push(\.bloomEffect, value: lighting.bloomEffect)
-            pushEffectParam("effect.bloom", value: lighting.bloomEffect.strength)
+            pushEffectParam(ParameterTargetID.Effect.bloom, value: lighting.bloomEffect.strength)
         }
     }
 
@@ -342,7 +342,7 @@ final class UISettingsCache {
             settings.fogEffect = lighting.fogEffect
         } else {
             push(\.fogEffect, value: lighting.fogEffect)
-            pushEffectParam("effect.fog", value: lighting.fogEffect.intensity)
+            pushEffectParam(ParameterTargetID.Effect.fog, value: lighting.fogEffect.intensity)
         }
     }
 
@@ -361,7 +361,7 @@ final class UISettingsCache {
             settings.colorSchemeSaturation = color.colorSchemeSaturation
         } else {
             push(\.colorSchemeSaturation, value: color.colorSchemeSaturation)
-            pushEffectParam("effect.saturation", value: color.colorSchemeSaturation)
+            pushEffectParam(ParameterTargetID.Effect.saturation, value: color.colorSchemeSaturation)
         }
     }
 }

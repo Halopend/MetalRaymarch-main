@@ -318,7 +318,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// Formula param targets require the active fractal type to resolve.
     func parameterTargetID(for fractalType: FractalModelType) -> String? {
         if let desc = formulaDescriptor(for: fractalType) {
-            return "formula.\(fractalType.rawValue).\(desc.index).\(desc.name)"
+            return ParameterTargetID.formula(fractalType: fractalType, formulaIndex: desc.index, name: desc.name)
         }
         return parameterTargetID
     }
@@ -326,17 +326,17 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// Static target ID — returns nil for formula param targets (they need fractal context).
     var parameterTargetID: String? {
         switch self {
-        case .fractalScale: return "core.targetFractalScale"
-        case .colorMix: return "core.colorMix"
-        case .iterations: return "core.fractalIterations"
-        case .glow: return "effect.glow"
-        case .fog: return "effect.fog"
-        case .bloom: return "effect.bloom"
-        case .hueSpeed: return "effect.hueSpeed"
-        case .saturation: return "effect.saturation"
+        case .fractalScale: return ParameterTargetID.Core.fractalScale
+        case .colorMix: return ParameterTargetID.Core.colorMix
+        case .iterations: return ParameterTargetID.Core.iterations
+        case .glow: return ParameterTargetID.Effect.glow
+        case .fog: return ParameterTargetID.Effect.fog
+        case .bloom: return ParameterTargetID.Effect.bloom
+        case .hueSpeed: return ParameterTargetID.Effect.hueSpeed
+        case .saturation: return ParameterTargetID.Effect.saturation
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3: return nil
-        case .foldingLimit: return "formula.0.1.Folding Limit"
-        case .sphereRadius: return "formula.0.2.Sphere Radius"
+        case .foldingLimit: return ParameterTargetID.formula(fractalType: .mandelbox, formulaIndex: 1, name: "Folding Limit")
+        case .sphereRadius: return ParameterTargetID.formula(fractalType: .mandelbox, formulaIndex: 2, name: "Sphere Radius")
         }
     }
 

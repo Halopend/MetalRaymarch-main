@@ -812,9 +812,9 @@ final class RenderSettings: @unchecked Sendable {
                         let triplet = GestureBindableTriplet(
                             fractalType: newValue,
                             groupName: groupName,
-                            xNodeID: "formula.\(newValue.rawValue).\(x.index).\(x.name)",
-                            yNodeID: "formula.\(newValue.rawValue).\(y.index).\(y.name)",
-                            zNodeID: "formula.\(newValue.rawValue).\(z.index).\(z.name)",
+                            xNodeID: ParameterTargetID.formula(fractalType: newValue, formulaIndex: x.index, name: x.name),
+                            yNodeID: ParameterTargetID.formula(fractalType: newValue, formulaIndex: y.index, name: y.name),
+                            zNodeID: ParameterTargetID.formula(fractalType: newValue, formulaIndex: z.index, name: z.name),
                             xFormulaIndex: x.index,
                             yFormulaIndex: y.index,
                             zFormulaIndex: z.index,
