@@ -264,22 +264,12 @@ struct GradientCycleEffect: LightingEffect {
 /// Only meaningful for fractal types that declare `.polarRotation` in their supported tags.
 struct PolarRotationEffect: LightingEffect {
     /// Direction of rotation (off / clockwise / counterclockwise).
-    /// Replaces the old `enabled` bool — `.off` means disabled.
     var direction: PolarRotationDirection = .off
     var speed: Float = 0.15         // Rotation speed (0–1)
 
-    /// Backward-compatible enabled accessor (true when direction != .off)
     var enabled: Bool {
         get { direction != .off }
         set { direction = newValue ? .clockwise : .off }
-    }
-
-    /// Legacy amplitude — now derived from direction sign.
-    /// Reading returns 1.0 (cw), -1.0 (ccw), or 0 (off).
-    /// Writing is accepted silently for JSON backward compatibility.
-    var amplitude: Float {
-        get { direction.sign }
-        set { /* ignored — direction drives sign now */ }
     }
 
     var primaryValue: Float {
@@ -304,47 +294,14 @@ struct PolarRotationEffect: LightingEffect {
         PolarRotationEffect(direction: .clockwise, speed: 0.4)
     }
 
-    // ── Codable ──────────────────────────────────────────────────────────
-    // Custom coding so we can read legacy files that have `enabled` + `amplitude`
-    // while writing the new `direction` key.
-
-    enum CodingKeys: String, CodingKey {
-        case direction, speed
-        // Legacy keys for reading old files
-        case enabled, amplitude
-    }
-
     init(direction: PolarRotationDirection = .off, speed: Float = 0.15) {
         self.direction = direction
         self.speed = speed
     }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        speed = try c.decodeIfPresent(Float.self, forKey: .speed) ?? 0.15
-
-        // Prefer new `direction` key; fall back to legacy `enabled` + `amplitude`
-        if let dir = try c.decodeIfPresent(PolarRotationDirection.self, forKey: .direction) {
-            direction = dir
-        } else {
-            let wasEnabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
-            let amp = try c.decodeIfPresent(Float.self, forKey: .amplitude) ?? 1.0
-            if !wasEnabled {
-                direction = .off
-            } else {
-                direction = amp < 0 ? .counterclockwise : .clockwise
-            }
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(direction, forKey: .direction)
-        try c.encode(speed, forKey: .speed)
-    }
 }
 
 /// Rotation direction for `PolarRotationEffect`.
+
 enum PolarRotationDirection: String, Codable, CaseIterable, Equatable {
     case off              = "off"
     case clockwise        = "clockwise"

@@ -54,28 +54,6 @@ extension FractalModelType {
 extension FractalModelType: Codable {
     private var codableString: String { descriptor.codableString }
 
-    /// Maps removed/renamed fractal type strings to their replacements.
-    private static let legacyStringMap: [String: FractalModelType] = [
-        "apollonianGasket": .theliPseudoKleinian,
-        "apollonianLight": .theliPseudoKleinian,
-        "amazingSurface": .mandelbox,
-        "pseudoKnightyan": .mandelbox,
-        "mandalayBox": .mandelbox,
-        "icosahedron": .dodecahedron,
-        "surfaceKIFS": .mengerSphere,
-    ]
-
-    /// Maps removed raw Int32 values to their replacements.
-    private static let legacyRawMap: [Int32: FractalModelType] = [
-        5: .theliPseudoKleinian,   // pseudoKleinian
-        7: .mandelbox,             // amazingSurface
-        8: .mandelbox,             // pseudoKnightyan
-        9: .mandelbox,             // mandalayBox
-        12: .dodecahedron,         // icosahedron
-        13: .mengerSphere,         // surfaceKIFS
-        16: .theliPseudoKleinian,  // old apollonian
-    ]
-
     private static let stringMap: [String: FractalModelType] = {
         var map: [String: FractalModelType] = [:]
         for c in FractalModelType.allCases { map[c.codableString] = c }
@@ -89,18 +67,10 @@ extension FractalModelType: Codable {
                 self = value
                 return
             }
-            if let legacy = Self.legacyStringMap[str] {
-                self = legacy
-                return
-            }
         }
         if let raw = try? container.decode(Int32.self) {
             if let value = FractalModelType(rawValue: raw) {
                 self = value
-                return
-            }
-            if let legacy = Self.legacyRawMap[raw] {
-                self = legacy
                 return
             }
         }

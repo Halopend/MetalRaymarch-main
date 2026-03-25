@@ -33,142 +33,40 @@ final class RenderSettings: @unchecked Sendable {
         return v > 0 ? v : fallback
     }
 
-    private static let gestureSemanticsMigrationKey = "gestureDefaultsSemanticsMigrationV1"
-    private static let gestureDomainKey = SettingsPersistence.Domain.gesture.rawValue
-
     private static func loadGestureBool(_ key: String, default fallback: Bool) -> Bool {
-        ensureGestureSemanticsMigrationIfNeeded()
-        return loadBool(key, default: fallback)
+        loadBool(key, default: fallback)
     }
 
     private static func loadGestureFloat(_ key: String, default fallback: Float) -> Float {
-        ensureGestureSemanticsMigrationIfNeeded()
-        return loadFloat(key, default: fallback)
-    }
-
-    private static func ensureGestureSemanticsMigrationIfNeeded() {
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: gestureSemanticsMigrationKey) else { return }
-        defer { defaults.set(true, forKey: gestureSemanticsMigrationKey) }
-
-        // If a typed gesture domain already exists, preserve it untouched.
-        guard defaults.data(forKey: gestureDomainKey) == nil else { return }
-        guard hasLikelyPersistedAppData(defaults) else { return } // Fresh install / clean store.
-
-        // Migration of defaults where semantics changed from legacy boot-time values.
-        let legacyFloatDefaults: [(String, Float)] = [
-            ("gestureSensitivity", 3.0),
-            ("rotationBreakawayDegrees", 12.0),
-            ("menuToggleHoldDuration", 0.06),
-            ("menuToggleCooldown", 0.35),
-            ("menuToggleActivateThreshold", 0.48),
-            ("twoHandPinchActivateThreshold", 0.88),
-            ("twoHandPinchReleaseThreshold", 0.65),
-            ("ringPinchActivateThreshold", 0.58),
-            ("ringPinchReleaseThreshold", 0.38),
-            ("gestureMinHandDistance", 0.05),
-            ("gestureMaxHandDistance", 0.60),
-            ("gestureMaxStartHandDistance", 0.45),
-            ("gestureMaxActiveHandDistance", 0.90),
-        ]
-
-        let legacyBoolDefaults: [(String, Bool)] = [
-            ("useRelativeGestures", true),
-            ("extendedGestureRange", true),
-        ]
-
-        for (key, value) in legacyFloatDefaults where defaults.object(forKey: key) == nil {
-            defaults.set(value, forKey: key)
-        }
-        for (key, value) in legacyBoolDefaults where defaults.object(forKey: key) == nil {
-            defaults.set(value, forKey: key)
-        }
-        if defaults.object(forKey: "menuToggleGestureMode") == nil {
-            defaults.set(Int(MenuToggleGestureMode.middleAndRingToPalm.rawValue), forKey: "menuToggleGestureMode")
-        }
-    }
-
-    private static func hasLikelyPersistedAppData(_ defaults: UserDefaults) -> Bool {
-        let keys = defaults.dictionaryRepresentation().keys
-        let knownAppPrefixes = ["cfg.", "music.", "fractal", "gesture", "left", "right", "both"]
-        let knownKeys: Set<String> = [
-            "handTrackingEnabled",
-            "menuToggleGestureMode",
-            "rotationBreakawayDegrees",
-            "indexFingerBinding",
-            "middleFingerBinding",
-            "ringFingerBinding",
-            "musicReactiveMappings",
-        ]
-        return keys.contains { key in
-            knownKeys.contains(key) || knownAppPrefixes.contains(where: { prefix in key.hasPrefix(prefix) })
-        }
+        loadFloat(key, default: fallback)
     }
 
     private static func loadGestureBinding(_ key: String,
-                                           legacyKey: String? = nil,
                                            default fallback: GestureActionBinding) -> GestureActionBinding {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: key),
            let decoded = try? JSONDecoder().decode(GestureActionBinding.self, from: data) {
             return decoded
         }
-        // Legacy migration: old Int32 FingerGestureAction raw values
-        guard let legacyKey = legacyKey,
-              defaults.object(forKey: legacyKey) != nil else { return fallback }
-        let legacyRaw = Int32(defaults.integer(forKey: legacyKey))
-        guard let legacy = FingerGestureAction(rawValue: legacyRaw),
-              FingerGestureAction.coreCases.contains(legacy) else { return fallback }
-        return .core(legacy)
-    }
-
-    private static func defaultMusicReactiveMappingsFromLegacyToggles() -> [MusicReactiveMapping] {
-        // Legacy toggles mapped to the new universal + formula-param targets.
-        // foldingLimit → formulaParam1, sphereRadius → formulaParam2 (Mandelbox migration)
-        let defaults = UserDefaults.standard
-        // Only enable a small set by default to avoid overwhelming the music tab.
-        // Users can add more mappings manually via the music tab or fractal page shortcuts.
-        let legacyToggleByTarget: [(MusicReactiveTarget, String, Bool)] = [
-            (.fractalScale,  "fractalAudioAffectsScale", true),
-            (.formulaParam1, "fractalAudioAffectsFolding", false),
-            (.formulaParam2, "fractalAudioAffectsRadius", false),
-            (.colorMix,      "fractalAudioAffectsColorMix", true),
-            (.glow,          "fractalAudioAffectsGlow", true),
-            (.fog,           "fractalAudioAffectsFog", true),
-            (.bloom,         "fractalAudioAffectsBloom", false),
-            (.hueSpeed,      "fractalAudioAffectsHueSpeed", false),
-            (.saturation,    "fractalAudioAffectsSaturation", false),
-            (.iterations,    "fractalAudioAffectsIterations", false)
-        ]
-
-        var mappings: [MusicReactiveMapping] = []
-        for (target, key, fallback) in legacyToggleByTarget {
-            let enabled: Bool
-            if defaults.object(forKey: key) != nil {
-                enabled = defaults.bool(forKey: key)
-            } else {
-                enabled = fallback
-            }
-            if enabled {
-                mappings.append(target.defaultMapping(enabled: true))
-            }
-        }
-        return mappings
+        return fallback
     }
 
     private static func loadMusicReactiveMappings(_ key: String) -> [MusicReactiveMapping] {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: key),
            let decoded = try? JSONDecoder().decode([MusicReactiveMapping].self, from: data) {
-            // Migrate legacy Mandelbox-specific targets (foldingLimit → formulaParam1, etc.)
-            let migrated = MusicReactiveMapping.migrateLegacy(decoded)
-            return sanitizeMusicReactiveMappings(migrated)
+            return sanitizeMusicReactiveMappings(decoded)
         }
-        let migrated = defaultMusicReactiveMappingsFromLegacyToggles()
-        if let data = try? JSONEncoder().encode(migrated) {
+        let defaultsList: [MusicReactiveMapping] = [
+            MusicReactiveTarget.fractalScale.defaultMapping(enabled: true),
+            MusicReactiveTarget.colorMix.defaultMapping(enabled: true),
+            MusicReactiveTarget.glow.defaultMapping(enabled: true),
+            MusicReactiveTarget.fog.defaultMapping(enabled: true),
+        ]
+        if let data = try? JSONEncoder().encode(defaultsList) {
             defaults.set(data, forKey: key)
         }
-        return migrated
+        return defaultsList
     }
 
     private static func sanitizeMusicReactiveMappings(_ input: [MusicReactiveMapping]) -> [MusicReactiveMapping] {
@@ -182,35 +80,8 @@ final class RenderSettings: @unchecked Sendable {
         return cleaned
     }
 
-    init() {
-        Self.assertGestureConfigBaselineOnCleanStore()
-    }
+    init() {}
 
-    private static func assertGestureConfigBaselineOnCleanStore(
-        file: StaticString = #fileID,
-        line: UInt = #line
-    ) {
-        let defaults = UserDefaults.standard
-        guard defaults.data(forKey: gestureDomainKey) == nil else { return }
-        guard !hasLikelyPersistedAppData(defaults) else { return }
-
-        let expected = GestureConfig()
-        let settings = RenderSettings(assertBaseline: false)
-        let actual = settings.gestureConfig
-        assert(
-            actual == expected,
-            "Gesture baseline mismatch: RenderSettings.gestureConfig should match GestureConfig() for a clean store.",
-            file: file,
-            line: line
-        )
-    }
-
-    private init(assertBaseline: Bool) {
-        if assertBaseline {
-            Self.assertGestureConfigBaselineOnCleanStore()
-        }
-    }
-    
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
     private var _position: SIMD3<Float> = SIMD3<Float>(0.1, 0.1, 0.1)
@@ -260,7 +131,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _gestureSensitivity: Float = loadGestureFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
     private var _menuToggleGestureEnabled: Bool = loadGestureBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
-        ensureGestureSemanticsMigrationIfNeeded()
         let key = "menuToggleGestureMode"
         guard UserDefaults.standard.object(forKey: key) != nil else { return GestureDefaults.menuToggleGestureMode }
         let raw = UserDefaults.standard.integer(forKey: key)
@@ -268,65 +138,19 @@ final class RenderSettings: @unchecked Sendable {
     }()
 
     // ── Per-hand × per-finger gesture binding slots (9 total) ──────────────
-    // Migration: on first launch after upgrade, old 4-finger keys are mapped
-    // to the new "both" hand slots (two-hand gestures), and right-index gets translate.
     private var _gestureBindings: [String: GestureActionBinding] = {
         var bindings: [String: GestureActionBinding] = [:]
-        // Defaults
         let defaults = GestureDefaults.defaultBindings
-        // Helper: infer hand mode from persistence key for validation
+
         func handMode(for key: String) -> GestureHandMode {
             if key.hasPrefix("left")  { return .left }
             if key.hasPrefix("right") { return .right }
             return .both
         }
 
-        // Check if we've already migrated (new keys exist)
-        let migrated = UserDefaults.standard.data(forKey: "bothIndexBinding") != nil
-        if migrated {
-            // Load from new keys, validating each against its hand mode
-            for (key, fallback) in defaults {
-                let loaded = loadGestureBinding(key, legacyKey: nil, default: fallback)
-                bindings[key] = RenderSettings.validated(loaded, forHandMode: handMode(for: key))
-            }
-        } else {
-            // Migrate from old 4-finger keys → both-hand slots
-            let oldIndex  = loadGestureBinding("indexFingerBinding",  legacyKey: "indexFingerAction",  default: .core(.grab))
-            let oldMiddle = loadGestureBinding("middleFingerBinding", legacyKey: "middleFingerAction", default: .core(.minDistance))
-            let oldRing   = loadGestureBinding("ringFingerBinding",   legacyKey: "ringFingerAction",   default: .core(.fractalScale))
-            // Map old finger bindings → both-hand (validated for two-hand mode)
-            bindings["bothIndexBinding"]  = RenderSettings.validated(oldIndex,  forHandMode: .both)
-            bindings["bothMiddleBinding"] = RenderSettings.validated(oldMiddle, forHandMode: .both)
-            bindings["bothRingBinding"]   = RenderSettings.validated(oldRing,   forHandMode: .both)
-            // Single-hand defaults
-            bindings["rightIndexBinding"]  = .core(.translate)
-            bindings["rightMiddleBinding"] = .core(.none)
-            bindings["rightRingBinding"]   = .core(.none)
-            bindings["leftIndexBinding"]   = .core(.none)
-            bindings["leftMiddleBinding"]  = .core(.none)
-            bindings["leftRingBinding"]    = .core(.none)
-            // Persist new keys
-            let encoder = JSONEncoder()
-            for (key, value) in bindings {
-                if let data = try? encoder.encode(value) {
-                    UserDefaults.standard.set(data, forKey: key)
-                }
-            }
-        }
-
-        // Final pass: enforce mutual exclusion — if both single-hand slots AND
-        // the both-hand slot are non-none for the same digit, clear the both-hand.
-        for finger in FingerDigit.allCases {
-            let lKey = GestureSlot(hand: .left,  finger: finger).persistenceKey
-            let rKey = GestureSlot(hand: .right, finger: finger).persistenceKey
-            let bKey = GestureSlot(hand: .both,  finger: finger).persistenceKey
-            let lNone = (bindings[lKey].map { if case .core(.none) = $0 { return true } else { return false } }) ?? true
-            let rNone = (bindings[rKey].map { if case .core(.none) = $0 { return true } else { return false } }) ?? true
-            let bNone = (bindings[bKey].map { if case .core(.none) = $0 { return true } else { return false } }) ?? true
-            if !lNone && !rNone && !bNone {
-                // Both single-hands active AND both-hand active → clear both-hand
-                bindings[bKey] = .core(.none)
-            }
+        for (key, fallback) in defaults {
+            let loaded = loadGestureBinding(key, default: fallback)
+            bindings[key] = RenderSettings.validated(loaded, forHandMode: handMode(for: key))
         }
 
         return bindings
