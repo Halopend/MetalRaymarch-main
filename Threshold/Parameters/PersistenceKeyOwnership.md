@@ -1,6 +1,6 @@
 # Persistence Key Ownership by Domain
 
-This note documents which domain owns which persisted key-space. Feature modules should depend on typed persistence APIs and avoid raw key strings.
+This note documents ownership of persisted key-space by domain. Feature modules should call typed persistence APIs and avoid raw key strings.
 
 ## Domain ownership
 
@@ -13,8 +13,15 @@ This note documents which domain owns which persisted key-space. Feature modules
 - `cfg.safetyBubble` → comfort/safety bubble config.
 - `cfg.display` → display and compositor config.
 - `cfg.music` → music integration config:
-  - service selection and priority (`MusicPreferences`)
+  - service preferences (`preferredServiceID`)
+  - service fallback priority (`servicePriority`)
   - saved music-reactive presets (`[MusicReactivePreset]`)
+
+## Key ownership policy
+
+- Feature/UI modules (`Threshold/Audio`, `Threshold/Views`, etc.) should never call `UserDefaults.standard` directly.
+- Persistence ownership lives in typed facades (`SettingsPersistence` and other persistence stores).
+- Lint check: `scripts/check_userdefaults_usage.sh` enforces this boundary in CI.
 
 ## Legacy key migration (music)
 
