@@ -1,34 +1,98 @@
-# Legacy / Fractured Code Cut List (excluding root `Sources/`)
+# Legacy / Cruft Cut List (focused on another 4k–5k LOC)
 
-This is a brutal shortlist of the next deletions for a **20% LOC reduction**.
+Scope requested:
+- **Ignore Buddhabrot** for this pass.
+- **MB3D support can be removed entirely**.
+- Prefer removing legacy compatibility paths even if old settings stop loading.
 
-## Current baseline
-- Approx code lines scanned (Swift/Metal/C-family, excluding `Sources/`, assets, xcodeproj): **38,314**.
-- 20% target from this baseline: remove **~7,663** lines.
-- This change set already removed: **1,192** lines.
-- Remaining to hit 20% target: **~6,471** lines.
+## Quick read
+If you want a fast 4k–5k removal **without touching Buddhabrot**, the biggest wins are:
 
-## Biggest remaining deletion targets
-1. `Threshold/Animation/AnimationViews.swift` (~2,077)
-2. `Threshold/Animation/AnimationTypes.swift` (~1,189)
-3. `Threshold/Animation/AnimationManager.swift` (~1,144)
-4. `Threshold/Formulas/Buddhabrot/BuddhabrotRenderer.swift` (~1,392)
-5. `Threshold/Formulas/Buddhabrot/BuddhabrotShaders.metal` (~1,011)
-6. `Threshold/Audio/MusicTabView.swift` (~1,169)
+1. Remove or hard-disable the full animation authoring/playback stack:
+   - `Threshold/Animation/AnimationViews.swift` (2,077)
+   - `Threshold/Animation/AnimationTypes.swift` (1,189)
+   - `Threshold/Animation/AnimationManager.swift` (1,144)
+   - **Subtotal: 4,410 LOC**
 
-Combined removal of Animation + Buddhabrot alone is roughly **6,813 lines**, which would nearly close the remaining gap by itself.
+2. Then remove MB3D remnants:
+   - `Threshold/Utilities/MB3DImporter/*` (currently stubbed, 20 LOC)
+   - `Threshold.xcodeproj/project.pbxproj` MB3D exception entry
+   - **Subtotal: small LOC, but deletes dead feature surface completely**
 
-## Legacy marker hotspots (textual indicators)
-High legacy/backward-compat concentration remains in:
-- `Threshold/Animation/AnimationTypes.swift`
-- `Threshold/Rendering/Renderer.swift`
-- `Threshold/App/LightingTypes.swift`
-- `Threshold/App/FractalModelType.swift`
-- `Threshold/Parameters/RenderSettings.swift`
+Animation stack removal alone already lands in your requested band.
 
-## Recommended “break-it-to-simplify” migration order
-1. Drop old animation scene formats and keep only one current schema.
-2. Remove Buddhabrot pipeline if not a top-tier formula path.
-3. Remove SharePlay/collaboration if usage is low.
-4. Collapse music reactive settings into one typed domain and delete per-key fallback logic.
-5. Remove all raw-value enum decode fallbacks and legacy key aliasing.
+---
+
+## Concrete deletion bundles (excluding Buddhabrot)
+
+### Bundle A — Animation legacy purge (target ~4.4k)
+- Delete:
+  - `Threshold/Animation/AnimationViews.swift` (2,077)
+  - `Threshold/Animation/AnimationTypes.swift` (1,189)
+  - `Threshold/Animation/AnimationManager.swift` (1,144)
+- Expected removal: **~4,410 LOC**
+- Why this is legacy-heavy:
+  - `AnimationTypes` has explicit backward-compat decode logic, legacy track fields, old Spotify fallback synthesis, and round-trip safety fields.
+
+### Bundle B — Audio service abstraction + fallback stack (target ~4.2k with A-lite)
+If you want to preserve *some* animation but still nuke legacy complexity:
+- Delete (audio stack):
+  - `Threshold/Audio/MusicTabView.swift` (1,169)
+  - `Threshold/Audio/MusicReactiveTypes.swift` (596)
+  - `Threshold/Audio/MusicLibraryWindow.swift` (407)
+  - `Threshold/Audio/MusicService.swift` (409)
+  - `Threshold/Audio/MusicServiceProtocol.swift` (221)
+  - `Threshold/Audio/AppleMusicManager.swift` (442)
+  - Audio subtotal: **3,244 LOC**
+- Plus one animation core file:
+  - `Threshold/Animation/AnimationTypes.swift` (1,189)
+- Expected removal: **~4,433 LOC**
+
+### Bundle C — Settings compatibility amputation (target ~4.3k)
+- Delete or radically rewrite down to strict v2-only schema:
+  - `Threshold/Parameters/RenderSettings.swift` (2,756)
+  - `Threshold/Parameters/FractalPreset.swift` (566)
+  - `Threshold/Parameters/GradientColorSystem.swift` (405)
+  - `Threshold/App/LightingTypes.swift` (425)
+- Plus either:
+  - `Threshold/Animation/AnimationManager.swift` (1,144) **or**
+  - `Threshold/Audio/MusicReactiveTypes.swift` (596) + `Threshold/Audio/MusicService.swift` (409)
+- Expected removal: **~4.1k to ~5.3k LOC**, depending on choice.
+
+---
+
+## MB3D removal checklist (feature truly gone)
+Even though importer files are now tiny placeholders, if MB3D is officially dead you can remove all traces:
+
+1. Delete directory:
+   - `Threshold/Utilities/MB3DImporter/`
+2. Remove project exception/reference:
+   - `Threshold.xcodeproj/project.pbxproj` entry for `Utilities/MB3DImporter/mb3d_import_cli.swift`
+3. Remove any docs mentioning MB3D migration preservation:
+   - e.g. stale notes in `V2_REWRITE_PLAN.md` if you want docs aligned.
+
+This won’t save many LOC now, but it prevents future regression and reduces maintenance surface.
+
+---
+
+## Legacy hotspots worth stripping (high compat density)
+If old settings compatibility is intentionally dropped, these are the richest cleanup targets:
+
+1. `Threshold/Animation/AnimationTypes.swift`
+   - Backward-compatible `Codable`, legacy trackID/source migration, old format synthesis.
+2. `Threshold/Audio/MusicReactiveTypes.swift`
+   - Legacy Mandelbox mapping migration + backward-compatible decode defaults.
+3. `Threshold/Parameters/RenderSettings.swift`
+   - Huge per-key UserDefaults fallback behavior and compatibility shims.
+4. `Threshold/Parameters/GradientColorSystem.swift`
+   - Explicit old archive decoding (`useGradientColoring` legacy discard path).
+5. `Threshold/App/LightingTypes.swift`
+   - Decode alias behavior for old key names (e.g. smoothLoop/mirrorLoop behavior).
+
+---
+
+## Suggested order (lowest risk to hit 4k quickly)
+1. **Animation stack purge** (4,410 LOC) to immediately hit target.
+2. **MB3D trace removal** (small LOC, removes dead feature contract).
+3. **Then compatibility shims** in `RenderSettings` and music-reactive decoding if you want another 1k–3k after that.
+
