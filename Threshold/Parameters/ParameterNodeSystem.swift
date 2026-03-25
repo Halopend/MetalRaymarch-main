@@ -11,6 +11,13 @@ enum ParameterLayer: String, Codable, Sendable {
     case system
 }
 
+enum ParameterMotionStrategy: String, Codable, Sendable {
+    case none
+    case layerLerp
+    case smoothDamp
+    case slerp
+}
+
 struct ParameterGroup: Hashable, Codable, Sendable {
     let id: String
     let title: String
@@ -25,17 +32,20 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
     let group: ParameterGroup?
     let icon: String
     let isGestureMappable: Bool
+    let motionStrategy: ParameterMotionStrategy
 
     init(id: String,
          name: String,
          group: ParameterGroup?,
          icon: String,
-         isGestureMappable: Bool) {
+         isGestureMappable: Bool,
+         motionStrategy: ParameterMotionStrategy) {
         self.id = id
         self.name = name
         self.group = group
         self.icon = icon
         self.isGestureMappable = isGestureMappable
+        self.motionStrategy = motionStrategy
     }
 }
 
@@ -56,6 +66,7 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
          range: ClosedRange<Float>,
          step: Float,
          isGestureMappable: Bool,
+         motionStrategy: ParameterMotionStrategy = .layerLerp,
          readValue: @MainActor @escaping (UISettingsCache) -> Float,
          writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
         self.range = range
@@ -67,7 +78,8 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
                    name: name,
                    group: group,
                    icon: icon,
-                   isGestureMappable: isGestureMappable)
+                   isGestureMappable: isGestureMappable,
+                   motionStrategy: motionStrategy)
     }
 
     @discardableResult
@@ -104,6 +116,7 @@ final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
          icon: String,
          defaultValue: Bool,
          isGestureMappable: Bool,
+         motionStrategy: ParameterMotionStrategy = .none,
          readValue: @MainActor @escaping (UISettingsCache) -> Bool,
          writeValue: @MainActor @escaping (UISettingsCache, Bool) -> Void) {
         self.readValue = readValue
@@ -112,7 +125,8 @@ final class BoolParameterNode: AnyParameterNodeBase, @unchecked Sendable {
                    name: name,
                    group: group,
                    icon: icon,
-                   isGestureMappable: isGestureMappable)
+                   isGestureMappable: isGestureMappable,
+                   motionStrategy: motionStrategy)
     }
 }
 
@@ -347,6 +361,7 @@ final class ParameterNodeRegistry: Sendable {
             range: -5.0...8.0,
             step: 0.01,
             isGestureMappable: true,
+            motionStrategy: .smoothDamp,
             readValue: { $0.fractalScale },
             writeValue: { cache, v in cache.fractalScale = v; cache.push(\.targetFractalScale, value: v) }
         )
@@ -560,6 +575,7 @@ final class ParameterNodeRegistry: Sendable {
                 range: param.min...param.max,
                 step: param.step,
                 isGestureMappable: true,
+                motionStrategy: Self.formulaMotionStrategy(for: type, index: param.index),
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },
                 writeValue: { cache, value in
                     if let settings = cache.renderSettings, settings.isAnimationPlaying {
@@ -612,6 +628,16 @@ final class ParameterNodeRegistry: Sendable {
         if name.contains("pre") { return "arrow.right" }
         if name.contains("bubble") { return "circle.grid.3x3" }
         return "slider.horizontal.3"
+    }
+
+    private static func formulaMotionStrategy(for type: FractalModelType,
+                                              index: Int) -> ParameterMotionStrategy {
+        switch (type, index) {
+        case (.mandelbox, 0...2):
+            return .smoothDamp
+        default:
+            return .layerLerp
+        }
     }
 
 }

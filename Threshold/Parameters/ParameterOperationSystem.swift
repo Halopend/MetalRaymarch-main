@@ -114,6 +114,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     private struct CoreParameterDescriptor {
         let range: ClosedRange<Float>
         let bundle: ParameterBundle
+        let motionStrategy: ParameterMotionStrategy
         let read: (RenderSettings) -> Float
         let write: (RenderSettings, Float) -> Void
     }
@@ -122,48 +123,56 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         "core.targetFractalScale": CoreParameterDescriptor(
             range: -5.0...8.0,
             bundle: .scale,
+            motionStrategy: .smoothDamp,
             read: { $0.targetFractalScale },
             write: { settings, value in settings.targetFractalScale = value }
         ),
         "core.colorMix": CoreParameterDescriptor(
             range: 0.0...1.0,
             bundle: .color,
+            motionStrategy: .layerLerp,
             read: { $0.colorMix },
             write: { settings, value in settings.colorMix = value }
         ),
         "core.fractalIterations": CoreParameterDescriptor(
             range: 2.0...24.0,
             bundle: .fractalCore,
+            motionStrategy: .layerLerp,
             read: { Float($0.fractalIterations) },
             write: { settings, value in settings.fractalIterations = max(2, min(24, Int(round(value)))) }
         ),
         "effect.glow": CoreParameterDescriptor(
             range: 0.0...2.0,
             bundle: .lighting,
+            motionStrategy: .layerLerp,
             read: { $0.glowEffect.intensity },
             write: { settings, value in settings.audioModulateGlowIntensity(value) }
         ),
         "effect.fog": CoreParameterDescriptor(
             range: 0.0...1.0,
             bundle: .lighting,
+            motionStrategy: .layerLerp,
             read: { $0.fogEffect.intensity },
             write: { settings, value in settings.audioModulateFogIntensity(value) }
         ),
         "effect.bloom": CoreParameterDescriptor(
             range: 0.0...2.0,
             bundle: .lighting,
+            motionStrategy: .layerLerp,
             read: { $0.bloomEffect.strength },
             write: { settings, value in settings.audioModulateBloomStrength(value) }
         ),
         "effect.hueSpeed": CoreParameterDescriptor(
             range: 0.0...0.5,
             bundle: .color,
+            motionStrategy: .layerLerp,
             read: { $0.hueRotationEffect.speed },
             write: { settings, value in settings.audioModulateHueSpeed(value) }
         ),
         "effect.saturation": CoreParameterDescriptor(
             range: 0.0...3.0,
             bundle: .color,
+            motionStrategy: .layerLerp,
             read: { $0.colorSchemeSaturation },
             write: { settings, value in settings.audioModulateSaturation(value) }
         )
@@ -280,11 +289,10 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
                 var stack = state.formulaStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: current, range: nodeRange, timestamp: timestamp)
                 stack.setBaseIfNeeded(current, timestamp: timestamp)
                 let incoming = operation.value.resolved(from: stack.resolvedValue(at: timestamp))
-                // Mandelbox shape params (indices 0-2) use smoothDamp in
-                // interpolateToTargets via the bridge, so bypass the layer stack's
-                // own exponential lerp to avoid double-smoothing.
-                let useSmoothDampBridge = fractalType == .mandelbox && formulaIndex <= 2
-                let effectiveSmoothTime = useSmoothDampBridge ? Float(0) : operation.smoothing.smoothingTime
+                let strategy = ParameterNodeRegistry.shared
+                    .node(for: fractalType, formulaIndex: formulaIndex)?
+                    .motionStrategy ?? .layerLerp
+                let effectiveSmoothTime = smoothingTime(for: strategy, requested: operation.smoothing.smoothingTime)
                 let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: timestamp)
                 state.formulaStacks[operation.targetID] = stack
                 return resolved
@@ -313,19 +321,9 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         applyCore(operation, settings: settings, layer: layer)
     }
 
-    /// Core parameters that already have smoothDamp in `interpolateToTargets()`.
-    /// For these, the layer stack resolves priority (which source wins) but does NOT
-    /// add its own exponential lerp — that caused double-smoothing and stall bugs
-    /// where the partially-lerped value froze when operations stopped arriving.
-    private static let smoothDampedCoreIDs: Set<String> = [
-        "core.targetFractalScale"
-    ]
-
     private func applyCore(_ operation: ParameterOperation, settings: RenderSettings?, layer: ParameterLayer) {
         guard let settings else { return }
         guard let descriptor = coreDescriptors[operation.targetID] else { return }
-
-        let bypassLayerSmoothing = Self.smoothDampedCoreIDs.contains(operation.targetID)
 
         let base = descriptor.read(settings)
         let resolved = _state.withLock { state -> Float in
@@ -334,18 +332,8 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
             let current = stack.resolvedValue(at: operation.timestamp)
             let incoming = operation.value.resolved(from: current)
-            let resolved: Float
-
-            if bypassLayerSmoothing {
-                // smoothDamp in interpolateToTargets() handles animation, so bypass the
-                // layer stack's own exponential lerp (smoothingTime=0). However, use the
-                // stack's *resolved* value for the write so that the music layer's
-                // additive offset is correctly combined with the base (gesture/slider)
-                // value instead of overwriting it with the raw incoming offset.
-                resolved = stack.apply(layer: layer, value: incoming, smoothingTime: 0, timestamp: operation.timestamp)
-            } else {
-                resolved = stack.apply(layer: layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: operation.timestamp)
-            }
+            let effectiveSmoothTime = smoothingTime(for: descriptor.motionStrategy, requested: operation.smoothing.smoothingTime)
+            let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: operation.timestamp)
 
             state.coreStacks[operation.targetID] = stack
             return min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved))
@@ -365,6 +353,15 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         case .precompute: return .precompute
         case .audio: return .music
         case .animation, .system: return .system
+        }
+    }
+
+    private func smoothingTime(for strategy: ParameterMotionStrategy, requested: Float?) -> Float? {
+        switch strategy {
+        case .none, .smoothDamp, .slerp:
+            return 0
+        case .layerLerp:
+            return requested
         }
     }
 
