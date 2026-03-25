@@ -388,10 +388,10 @@ final class ParameterNodeRegistry: Sendable {
             range: 2.0...24.0,
             step: 1.0,
             isGestureMappable: false,
-            readValue: { Float($0.geometry.fractalIterations) },
+            readValue: { Float($0.liveFractalIterations) },
             writeValue: { cache, v in
                 let rounded = max(2, min(24, Int(round(v))))
-                cache.geometry.fractalIterations = rounded
+                cache.liveFractalIterations = rounded
                 cache.push(\.fractalIterations, value: rounded)
             }
         )
