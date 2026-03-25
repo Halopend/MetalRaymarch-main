@@ -49,7 +49,8 @@ actor Renderer {
     var lastComputeRS: Int = -1
     var lastComputePower: Int32?
     var lastSelectedComputePipeline: MTLComputePipelineState?
-    
+    var lastComputeLegacyBugMode: Bool = false
+
     // === UI UPDATE COORDINATION ===
     /// Coordinates UI updates without blocking MainActor during heavy rendering
     private(set) var uiUpdateCoordinator: UIUpdateCoordinator?

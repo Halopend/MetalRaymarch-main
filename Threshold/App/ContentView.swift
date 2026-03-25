@@ -479,7 +479,7 @@ struct ContentView: View {
     
     private var fractalQualityContent: some View {
         VStack(spacing: 12) {
-            Text("Quality Presets").font(.headline)
+            Text("Compute alloted").font(.headline)
             HStack(spacing: 8) {
                 ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
                     Button {
@@ -1573,6 +1573,16 @@ struct ContentView: View {
                             if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) }
                         })
                     }
+                    Toggle("Recreate Legacy Compute Cache Bug", isOn: Binding(
+                        get: { cache.quality.recreateLegacyComputeCacheBug },
+                        set: {
+                            cache.quality.recreateLegacyComputeCacheBug = $0
+                            cache.push(\.recreateLegacyComputeCacheBug, value: $0)
+                        }
+                    ))
+                    Text("Caps pipeline iterations at 6 while uniforms keep the slider value, recreating the original distance-estimator mismatch artifact.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             

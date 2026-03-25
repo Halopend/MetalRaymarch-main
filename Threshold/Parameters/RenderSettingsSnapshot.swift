@@ -58,6 +58,7 @@ struct RenderSettingsSnapshot {
     // Step over-relaxation factor for raymarch convergence acceleration
     // ═══════════════════════════════════════════════════════════════════════════
     let stepMultiplier: Float
+    let recreateLegacyComputeCacheBug: Bool
 }
 
 extension RenderSettingsSnapshot {

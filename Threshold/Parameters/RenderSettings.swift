@@ -117,6 +117,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
+    private var _recreateLegacyComputeCacheBug: Bool = false  // Intentionally allow nearest-pipeline mismatch for legacy look
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -683,6 +684,12 @@ final class RenderSettings: @unchecked Sendable {
     var debugHierarchical: Bool {
         get { withLock { _debugHierarchical } }
         set { withLock { _debugHierarchical = newValue } }
+    }
+
+    /// Intentionally reenables legacy nearest-pipeline fallback to reproduce historical artifacts.
+    var recreateLegacyComputeCacheBug: Bool {
+        get { withLock { _recreateLegacyComputeCacheBug } }
+        set { withLock { _recreateLegacyComputeCacheBug = newValue } }
     }
     
     /// Flash intensity for limit feedback (0-1). Set to 1.0 to trigger flash, decays automatically.
@@ -1580,7 +1587,8 @@ final class RenderSettings: @unchecked Sendable {
                 detailScale: _detailScale,
                 geometryState: _geometryState,
                 isGeometryGestureActive: _isGeometryGestureActive,
-                stepMultiplier: _stepMultiplier
+                stepMultiplier: _stepMultiplier,
+                recreateLegacyComputeCacheBug: _recreateLegacyComputeCacheBug
             )
         }
     }
@@ -2523,6 +2531,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.dynamicRenderQualityMin = _dynamicRenderQualityMin
                 c.dynamicRenderQualityMax = _dynamicRenderQualityMax
                 c.debugHierarchical = _debugHierarchical
+                c.recreateLegacyComputeCacheBug = _recreateLegacyComputeCacheBug
                 return c
             }
         }
@@ -2539,6 +2548,7 @@ final class RenderSettings: @unchecked Sendable {
                 _dynamicRenderQualityMin = newValue.dynamicRenderQualityMin
                 _dynamicRenderQualityMax = newValue.dynamicRenderQualityMax
                 _debugHierarchical = newValue.debugHierarchical
+                _recreateLegacyComputeCacheBug = newValue.recreateLegacyComputeCacheBug
             }
         }
     }
