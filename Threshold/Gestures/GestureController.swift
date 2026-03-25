@@ -549,13 +549,13 @@ final class GestureController {
             state: &twoHandStateByDigit[digit]!,
             currentTarget: settings.effectiveTargetFractalScale,
             range: ranges.fractalScale,
-            parameterID: "core.targetFractalScale"
+            parameterID: ParameterTargetID.Core.fractalScale
         ) { newValue in
             if settings.isAnimationPlaying {
                 settings.manualOffsetFractalScale = newValue - settings.animationBaseFractalScale
             }
             let op = ParameterOperation(
-                targetID: "core.targetFractalScale",
+                targetID: ParameterTargetID.Core.fractalScale,
                 source: .gesture,
                 value: .absolute(newValue),
                 frameIndex: operationFrameCounter

@@ -323,7 +323,7 @@ final class ParameterNodeRegistry: Sendable {
 
     private let formulaBatches: [FractalModelType: ParameterNodeBatch]
     /// Core parameter nodes (fractalScale, colorMix).
-    /// Keyed by their targetID string (e.g. "core.fractalScale").
+    /// Keyed by their canonical targetID string (e.g. "core.fractalScale").
     let coreNodes: [String: FloatParameterNode]
     /// Effect parameter nodes (glow, fog, bloom, hueSpeed, saturation).
     let effectNodes: [String: FloatParameterNode]
@@ -352,8 +352,8 @@ final class ParameterNodeRegistry: Sendable {
 
         // --- Core geometry nodes ---
 
-        coreNodes["core.fractalScale"] = FloatParameterNode(
-            id: "core.fractalScale",
+        coreNodes[ParameterTargetID.Core.fractalScale] = FloatParameterNode(
+            id: ParameterTargetID.Core.fractalScale,
             name: "Fractal Scale",
             group: coreGroup,
             icon: "arrow.up.left.and.arrow.down.right",
@@ -366,8 +366,8 @@ final class ParameterNodeRegistry: Sendable {
             writeValue: { cache, v in cache.fractalScale = v; cache.push(\.targetFractalScale, value: v) }
         )
 
-        coreNodes["core.colorMix"] = FloatParameterNode(
-            id: "core.colorMix",
+        coreNodes[ParameterTargetID.Core.colorMix] = FloatParameterNode(
+            id: ParameterTargetID.Core.colorMix,
             name: "Color Mix",
             group: coreGroup,
             icon: "paintpalette",
@@ -379,9 +379,26 @@ final class ParameterNodeRegistry: Sendable {
             writeValue: { cache, v in cache.color.colorMix = v; cache.push(\.colorMix, value: v) }
         )
 
+        coreNodes[ParameterTargetID.Core.iterations] = FloatParameterNode(
+            id: ParameterTargetID.Core.iterations,
+            name: "Iterations",
+            group: coreGroup,
+            icon: "number",
+            defaultValue: 12.0,
+            range: 2.0...24.0,
+            step: 1.0,
+            isGestureMappable: false,
+            readValue: { Float($0.geometry.fractalIterations) },
+            writeValue: { cache, v in
+                let rounded = max(2, min(24, Int(round(v))))
+                cache.geometry.fractalIterations = rounded
+                cache.push(\.fractalIterations, value: rounded)
+            }
+        )
+
         // --- Effect nodes ---
-        effectNodes["effect.glow"] = FloatParameterNode(
-            id: "effect.glow",
+        effectNodes[ParameterTargetID.Effect.glow] = FloatParameterNode(
+            id: ParameterTargetID.Effect.glow,
             name: "Glow",
             group: effectGroup,
             icon: "sun.max",
@@ -393,8 +410,8 @@ final class ParameterNodeRegistry: Sendable {
             writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.commitGlowEffect() }
         )
 
-        effectNodes["effect.fog"] = FloatParameterNode(
-            id: "effect.fog",
+        effectNodes[ParameterTargetID.Effect.fog] = FloatParameterNode(
+            id: ParameterTargetID.Effect.fog,
             name: "Fog",
             group: effectGroup,
             icon: "cloud.fog",
@@ -406,8 +423,8 @@ final class ParameterNodeRegistry: Sendable {
             writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.commitFogEffect() }
         )
 
-        effectNodes["effect.bloom"] = FloatParameterNode(
-            id: "effect.bloom",
+        effectNodes[ParameterTargetID.Effect.bloom] = FloatParameterNode(
+            id: ParameterTargetID.Effect.bloom,
             name: "Bloom",
             group: effectGroup,
             icon: "sparkle",
@@ -419,8 +436,8 @@ final class ParameterNodeRegistry: Sendable {
             writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.commitBloomEffect() }
         )
 
-        effectNodes["effect.hueSpeed"] = FloatParameterNode(
-            id: "effect.hueSpeed",
+        effectNodes[ParameterTargetID.Effect.hueSpeed] = FloatParameterNode(
+            id: ParameterTargetID.Effect.hueSpeed,
             name: "Hue Speed",
             group: effectGroup,
             icon: "arrow.trianglehead.2.clockwise.rotate.90",
@@ -432,8 +449,8 @@ final class ParameterNodeRegistry: Sendable {
             writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.commitHueRotationEffect() }
         )
 
-        effectNodes["effect.saturation"] = FloatParameterNode(
-            id: "effect.saturation",
+        effectNodes[ParameterTargetID.Effect.saturation] = FloatParameterNode(
+            id: ParameterTargetID.Effect.saturation,
             name: "Saturation",
             group: effectGroup,
             icon: "drop.halffull",
@@ -547,7 +564,7 @@ final class ParameterNodeRegistry: Sendable {
 
             let label = Self.displayLabel(for: param.name)
             let icon = Self.icon(for: param.name)
-            let id = "formula.\(type.rawValue).\(param.index).\(param.name)"
+            let id = ParameterTargetID.formula(fractalType: type, formulaIndex: param.index, name: param.name)
 
             if param.isBool == true {
                 boolNodes.append(BoolParameterNode(

@@ -149,6 +149,8 @@ class AppModel {
     }
     
     init() {
+        ParameterRoutingValidation.validateStartupRouting()
+
         // Initialize unified music service first since it's a non-optional constant
         musicService = MusicService(appleMusic: appleMusicManager)
         
