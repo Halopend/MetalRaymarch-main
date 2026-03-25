@@ -64,16 +64,6 @@ struct DeveloperToolsView: View {
                             if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) }
                         })
                     }
-                    Toggle("Recreate Legacy Compute Cache Bug", isOn: Binding(
-                        get: { cache.quality.recreateLegacyComputeCacheBug },
-                        set: {
-                            cache.quality.recreateLegacyComputeCacheBug = $0
-                            cache.push(\.recreateLegacyComputeCacheBug, value: $0)
-                        }
-                    ))
-                    Text("Uses nearest cached compute pipeline even when FI/RS mismatch, reproducing the old artifact look.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
