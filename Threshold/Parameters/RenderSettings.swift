@@ -1405,7 +1405,9 @@ final class RenderSettings: @unchecked Sendable {
 
             // Accumulate polar rotation angle when enabled and fractal supports it
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
-                _polarRotationAccum += deltaTime * _polarRotationEffect.speed * _polarRotationEffect.amplitude
+                // Apply rotation based on configured speed and direction
+                let effectSpeed = _polarRotationEffect.speed * _polarRotationEffect.direction.sign
+                _polarRotationAccum += deltaTime * effectSpeed
             }
             
             // Handle ongoing transition
