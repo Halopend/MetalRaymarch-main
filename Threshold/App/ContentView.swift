@@ -46,6 +46,7 @@ enum SettingsSubTab: String, CaseIterable { case general = "General", exportShar
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     
     @State private var cache = UISettingsCache()
     @State private var selectedTab: SidebarTab = .fractal
@@ -69,12 +70,14 @@ struct ContentView: View {
     var body: some View {
         @Bindable var appModel = appModel
         
+        let isOpen = appModel.immersiveSpaceState == .open
         ZStack {
-            if appModel.immersiveSpaceState == .open {
-                immersiveLayout
-            } else {
-                preImmersiveLayout
-            }
+            preImmersiveLayout
+                .opacity(isOpen ? 0 : 1)
+                .allowsHitTesting(!isOpen)
+            immersiveLayout
+                .opacity(isOpen ? 1 : 0)
+                .allowsHitTesting(isOpen)
         }
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
@@ -205,7 +208,22 @@ struct ContentView: View {
             Divider().frame(height: 20)
             
             FPSIndicatorView()
-            
+
+            if let animationManager = appModel.animationManager, !animationManager.scenes.isEmpty {
+                Divider().frame(height: 20)
+                Button {
+                    if animationManager.currentScene == nil {
+                        animationManager.currentScene = animationManager.scenes.first
+                    }
+                    openWindow(id: AppModel.animationPlayerWindowID)
+                } label: {
+                    Label("Player", systemImage: "play.rectangle")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
             Spacer()
             
             PresetButton(
@@ -666,7 +684,12 @@ struct ContentView: View {
                                 onEdit: {
                                     openAnimationEditor(for: scene)
                                 },
-                                onPlay: { animationManager.currentScene = scene; animationManager.play() }
+                                onPlay: {
+                                    animationManager.currentScene = scene
+                                    animationManager.play()
+                                    openWindow(id: AppModel.animationPlayerWindowID)
+                                    dismissWindow(id: appModel.menuWindowID)
+                                }
                             )
                         }
                     }
@@ -1386,7 +1409,7 @@ struct ContentView: View {
 
     
     private var fpsColor: Color {
-        // Use cache.liveFPS for the settings panel to avoid @Observable invalidation from appModel.fps
+        // Use cache.liveFPS for the settings panel to avoid observation of RenderMetrics
         let fps = cache.liveFPS
         if fps >= 85 { return .green }; if fps >= 60 { return .yellow }; return .red
     }
@@ -1769,13 +1792,13 @@ private struct HoldToSaveResetButton: View {
 
 // MARK: - FPS Indicator (isolated to prevent 90Hz invalidation of ContentView)
 
-/// Standalone view that reads `appModel.fps` so the ~90Hz render-loop updates
+/// Standalone view that reads `renderMetrics.fps` so the ~2Hz render-loop updates
 /// only invalidate this small capsule, not the entire ContentView tree.
 private struct FPSIndicatorView: View {
     @Environment(AppModel.self) private var appModel
 
     private var indicatorColor: Color {
-        let fps = appModel.fps
+        let fps = appModel.renderMetrics.fps
         if fps >= 85 { return .green }
         else if fps >= 60 { return .yellow }
         else if fps >= 45 { return .orange }
@@ -1788,7 +1811,7 @@ private struct FPSIndicatorView: View {
                 .font(.caption2)
                 .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
             Circle().fill(indicatorColor).frame(width: 8, height: 8)
-            Text("\(appModel.fps, specifier: "%.0f") FPS")
+            Text("\(appModel.renderMetrics.fps, specifier: "%.0f") FPS")
                 .font(.caption.bold()).monospacedDigit()
         }
         .padding(.horizontal, 8)

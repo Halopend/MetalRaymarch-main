@@ -953,13 +953,20 @@ actor Renderer {
         let currentIterations = settingsSnapshot.fractalIterations
         let currentRaySteps = settingsSnapshot.maxRaySteps
         
+        // Legacy bug mode: cap pipeline FC_FRACTAL_ITERATIONS at 6 while CPU
+        // uniforms keep the slider value, recreating the distance-estimator
+        // mismatch from the original "Accidental Sphere Projection".
+        let pipelineIterations = settingsSnapshot.recreateLegacyComputeCacheBug
+            ? min(currentIterations, 6)
+            : currentIterations
+        
         // Detect neon mode from colorSchemeParams.neonIntensity
         let isNeonMode = settingsSnapshot.colorSchemeParams.neonIntensity > 0
         
         // Use specialized pipeline with fixed iteration count
         // This enables Map() loop auto-unrolling via function constants
         let selectedPipeline = selectPipeline(
-            forIterations: currentIterations,
+            forIterations: pipelineIterations,
             raySteps: currentRaySteps,
             useQuadShared: useQuadShared,
             neonMode: isNeonMode

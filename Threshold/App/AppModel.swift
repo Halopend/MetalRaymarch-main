@@ -9,6 +9,14 @@ import SwiftUI
 import ARKit
 import CoreGraphics
 
+/// High-frequency render metrics isolated from AppModel to avoid
+/// broad observation invalidation on every FPS update.
+@MainActor
+@Observable
+final class RenderMetrics {
+    var fps: Double = 0
+}
+
 @MainActor
 @Observable
 class AppModel {
@@ -43,8 +51,11 @@ class AppModel {
     // @ObservationIgnored + nonisolated(unsafe) allows cross-thread access without @Observable macro interference
     @ObservationIgnored nonisolated(unsafe) var isAppActive: Bool = true
 
-    var fps: Double = 0
-    
+    /// Isolated container for high-frequency render metrics.
+    /// Reading renderMetrics.fps only invalidates views that subscribe to RenderMetrics,
+    /// not all AppModel observers.
+    let renderMetrics = RenderMetrics()
+
     /// Whether the renderer is currently using a specialized (compiled) pipeline vs generic fallback
     @ObservationIgnored nonisolated(unsafe) var isUsingSpecializedPipeline: Bool = false
     

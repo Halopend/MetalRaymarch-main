@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Foundation
+import ImageIO
 import simd
 
 /// Represents a saved preset with all render settings and a preview image
@@ -510,6 +511,9 @@ struct FractalPreset: Codable, Identifiable {
     }
     
     /// Get the thumbnail as a UIImage (visionOS/iOS) or NSImage (macOS)
+    /// Uses ImageIO to downsample to display size, avoiding full-resolution decoding.
+    private static let thumbnailMaxPixelSize: CGFloat = 240 // 120pt @2x
+
     #if os(visionOS) || os(iOS)
     nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, UIImage>()
 
@@ -530,11 +534,28 @@ struct FractalPreset: Codable, Identifiable {
         if let cached = Self.thumbnailCache.object(forKey: cacheKey) {
             return cached
         }
-        guard let decoded = UIImage(data: data) else {
+        guard let decoded = Self.downsampledImage(from: data) else {
             return nil
         }
         Self.thumbnailCache.setObject(decoded, forKey: cacheKey)
         return decoded
+    }
+
+    private static func downsampledImage(from data: Data) -> UIImage? {
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
+            return nil
+        }
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
     }
     #elseif os(macOS)
     nonisolated(unsafe) private static let thumbnailCache = NSCache<NSString, NSImage>()
@@ -556,11 +577,28 @@ struct FractalPreset: Codable, Identifiable {
         if let cached = Self.thumbnailCache.object(forKey: cacheKey) {
             return cached
         }
-        guard let decoded = NSImage(data: data) else {
+        guard let decoded = Self.downsampledImage(from: data) else {
             return nil
         }
         Self.thumbnailCache.setObject(decoded, forKey: cacheKey)
         return decoded
+    }
+
+    private static func downsampledImage(from data: Data) -> NSImage? {
+        let options: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
+            return nil
+        }
+        let downsampleOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
     #endif
 }

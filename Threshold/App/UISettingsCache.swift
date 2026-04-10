@@ -115,7 +115,7 @@ final class UISettingsCache {
     var livePosition: SIMD3<Float> = .zero
     var liveDetailScale: Float = 1.0
     var liveWorldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-    var liveFPS: Double = 0  // Mirrors appModel.fps without triggering @Observable invalidation
+    var liveFPS: Double = 0  // Mirrors renderMetrics.fps without observing RenderMetrics directly
     
     private weak var _appModel: AppModel?
     private var syncTimer: Timer?
@@ -141,8 +141,9 @@ final class UISettingsCache {
     
     private func syncLiveStats() {
         guard let settings else { return }
-        // Skip syncing when app is backgrounded — no UI visible to update
-        guard _appModel?.isAppActive ?? false else { return }
+        // Skip syncing when app is backgrounded or immersive space is closed — no live stats to update
+        guard let appModel = _appModel, appModel.isAppActive,
+              appModel.immersiveSpaceState == .open else { return }
         currentRenderQuality = settings.currentRenderQuality
         liveFractalIterations = settings.fractalIterations
         liveMaxRaySteps = settings.maxRaySteps
@@ -150,9 +151,7 @@ final class UISettingsCache {
         livePosition = settings.position
         liveDetailScale = settings.detailScale
         liveWorldRotation = settings.worldRotation
-        if let appModel = _appModel {
-            liveFPS = appModel.fps
-        }
+        liveFPS = appModel.renderMetrics.fps
     }
     
     func loadFromSettings() {

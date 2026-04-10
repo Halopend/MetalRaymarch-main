@@ -41,7 +41,7 @@ final class UIUpdateCoordinator: Sendable {
             guard let appModel else { return }
 
             if let fps = pendingWork.fps {
-                appModel.fps = fps
+                appModel.renderMetrics.fps = fps
             }
 
             if pendingWork.shouldUpdateAnalytics {
@@ -53,7 +53,7 @@ final class UIUpdateCoordinator: Sendable {
 
                 UsageAnalytics.shared.sample(
                     settings: settings,
-                    fps: pendingWork.analyticsFPS ?? pendingWork.fps ?? appModel.fps,
+                    fps: pendingWork.analyticsFPS ?? pendingWork.fps ?? appModel.renderMetrics.fps,
                     currentQuality: qualityPreset
                 )
             }

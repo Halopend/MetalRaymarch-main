@@ -74,6 +74,7 @@
 import Foundation
 import CloudKit
 import UIKit
+import Observation
 
 /// Anonymous usage statistics collected during a session
 struct UsageSnapshot: Codable {
@@ -130,7 +131,8 @@ struct UsageSnapshot: Codable {
 
 /// Tracks usage patterns and uploads anonymously to CloudKit
 @MainActor
-class UsageAnalytics: ObservableObject {
+@Observable
+final class UsageAnalytics {
     static let shared = UsageAnalytics()
     
     // CloudKit container - uses your app's default container
@@ -185,7 +187,7 @@ class UsageAnalytics: ObservableObject {
     // Persistence key
     private let pendingUploadsKey = "PendingUsageSnapshots"
     
-    @Published var analyticsEnabled: Bool {
+    var analyticsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(analyticsEnabled, forKey: "AnalyticsEnabled")
         }
