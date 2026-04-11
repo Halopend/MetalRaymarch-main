@@ -1295,6 +1295,205 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 }
 
 // =============================================================================
+// === SIMD GROUP COOPERATIVE RAYMARCHING ===
+// Uses 4 anchor lanes per 32-lane SIMD group (12.5% of lanes) to sample the DE,
+// then broadcasts those samples to derive a conservative lower-bound step for
+// every lane using the DE's 1-Lipschitz property:
+//
+//   d(p_lane) >= d(p_anchor) - |p_lane - p_anchor|
+//
+// Taking the best lower bound from all anchors per lane, then the SIMD-wide
+// minimum across lanes, yields a shared step that is safe for the whole group.
+// This cuts coarse-phase DE traffic from 32 calls to just 4 calls per step while
+// keeping the existing per-pixel fine march and hit shading unchanged.
+// =============================================================================
+
+constant ushort kSIMDAnchorLaneCount = 4;
+constant ushort kSIMDAnchorLanes[kSIMDAnchorLaneCount] = { 0, 7, 24, 31 };
+
+FORCE_INLINE bool isSIMDGroupAnchorLane(uint simdLaneId)
+{
+    return simdLaneId == uint(kSIMDAnchorLanes[0]) ||
+           simdLaneId == uint(kSIMDAnchorLanes[1]) ||
+           simdLaneId == uint(kSIMDAnchorLanes[2]) ||
+           simdLaneId == uint(kSIMDAnchorLanes[3]);
+}
+
+FORCE_INLINE float SIMDGroupConservativeStep(float3 p, float sampledDistance)
+{
+    float bestLowerBound = 0.0f;
+
+    for (ushort i = 0; i < kSIMDAnchorLaneCount; ++i) {
+        ushort anchorLane = kSIMDAnchorLanes[i];
+        float3 anchorP = simd_broadcast(p, anchorLane);
+        float anchorDistance = simd_broadcast(sampledDistance, anchorLane);
+        float candidate = max(anchorDistance - length(p - anchorP), 0.0f);
+        bestLowerBound = max(bestLowerBound, candidate);
+    }
+
+    return simd_min(bestLowerBound);
+}
+
+FORCE_INLINE SceneResult SceneWithCacheSIMDGroup(
+    float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam,
+    float glowIntensity, float foldingLimit, FractalParams params, int iterations,
+    float time, int fractalType, FormulaParams fp, int colorIterations,
+    float boundingSphereRadius, float stepMultiplier, float maxRayDistance,
+    uint simdLaneId)
+{
+    SceneResult result;
+    result.cache = makeEmptyOrbitCache();
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+
+    float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
+    bool isMandelbulb = (type == FractalTypeMandelbulb);
+    float t = (isMandelbulb ? 0.005f : 0.05f) + dither;
+
+    // Bounding sphere pre-test (per-thread, rays diverge)
+    if (boundingSphereRadius > 0.0) {
+        float sphereT = rayIntersectBoundingSphere(rO, rD, float3(0.0), boundingSphereRadius);
+        if (sphereT < 0.0) {
+            result.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
+            return result;
+        }
+        t = max(t, sphereT);
+    }
+
+    float glow = 0.0;
+    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
+    int totalBudget = max(int(float(baseMaxSteps) * quality), 4);
+
+    // === PHASE 1: SIMD-COOPERATIVE COARSE MARCH ===
+    // Four anchor lanes sample the DE once per step. Every lane turns those
+    // samples into a conservative lower bound on its own distance using the
+    // DE's Lipschitz-1 property, then the SIMD-wide minimum becomes the shared
+    // step. This keeps all lanes in lockstep while dropping coarse traversal to
+    // 4 DE calls per 32-lane group-step.
+    bool isAnchorLane = isSIMDGroupAnchorLane(simdLaneId);
+    float coarseThreshold = isMandelbulb ? 0.02f : 0.08f;
+    t = simd_min(t);
+    float coarseStepScale = isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier;
+    int coarseBudget = min(totalBudget / 2, 40);
+    int j = 0;
+    for (; j < coarseBudget; j++) {
+        float3 p = fma(rD, float3(t), rO);
+        float sampledH = isAnchorLane
+            ? MapUnified(p, params, foldingLimit, iterations, type, fp)
+            : 0.0f;
+        float groupMinH = SIMDGroupConservativeStep(p, sampledH);
+
+        if (UNLIKELY(groupMinH < coarseThreshold)) break;
+        if (UNLIKELY(t > maxRayDistance)) {
+            result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+            return result;
+        }
+
+        glow = fma(saturate(0.04f - groupMinH), glowIntensity, glow);
+        t += groupMinH * coarseStepScale;
+    }
+
+    // === PHASE 2: PER-THREAD FINE MARCH ===
+    // All threads now evaluate DE independently for accurate per-pixel hits.
+    int fineBudget = totalBudget - j;
+    for (int k = 0; k < fineBudget; k++) {
+        float threshold = isMandelbulb
+            ? fma(t, 0.0002f, 0.00012f) + (1.0f - quality) * 0.001f
+            : fma(t, 0.0008f, 0.0005f)  + (1.0f - quality) * 0.003f;
+
+        float3 p = fma(rD, float3(t), rO);
+        float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
+
+        if (UNLIKELY(h < threshold)) {
+            OrbitCache hitCache;
+            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, type, fp, colorIterations, hitCache);
+            result.cache = hitCache;
+            result.distGlow = float2(t, saturate(glow * 0.25));
+            return result;
+        }
+
+        if (UNLIKELY(t > maxRayDistance)) break;
+
+        glow = fma(saturate(0.04f - h), glowIntensity, glow);
+        t += h * (isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier);
+    }
+
+    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+    return result;
+}
+
+// SIMD group cooperative raymarch starting from a known distance (temporal reprojection)
+FORCE_INLINE SceneResult SceneWithCacheFromStartSIMDGroup(
+    float3 rO, float3 rD, float startT, float2 fragCoord, float quality,
+    int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params,
+    int iterations, float time, int fractalType, FormulaParams fp,
+    int colorIterations, float stepMultiplier, uint simdLaneId)
+{
+    SceneResult result;
+    result.cache = makeEmptyOrbitCache();
+    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
+
+    float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
+    bool isMandelbulb = (type == FractalTypeMandelbulb);
+    float t = max(isMandelbulb ? 0.002f : 0.01f, startT - 0.3f) + dither;
+
+    float glow = 0.0;
+    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
+    float stepScale = (startT > 1.0f) ? 0.25f : 0.5f;
+    int totalBudget = max(int(float(baseMaxSteps) * quality * stepScale), 8);
+    float endT = startT + 2.0;
+
+    // SIMD cooperative coarse phase using 4 anchor lanes per SIMD group.
+    bool isAnchorLane = isSIMDGroupAnchorLane(simdLaneId);
+    float coarseThreshold = isMandelbulb ? 0.015f : 0.06f;
+    t = simd_min(t);
+    float coarseStepScale = isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier;
+    int coarseBudget = min(totalBudget / 2, 20);
+    int j = 0;
+    for (; j < coarseBudget; j++) {
+        float3 p = fma(rD, float3(t), rO);
+        float sampledH = isAnchorLane
+            ? MapUnified(p, params, foldingLimit, iterations, type, fp)
+            : 0.0f;
+        float groupMinH = SIMDGroupConservativeStep(p, sampledH);
+
+        if (UNLIKELY(groupMinH < coarseThreshold)) break;
+        if (UNLIKELY(t > endT)) {
+            result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+            return result;
+        }
+
+        glow = fma(saturate(0.04f - groupMinH), glowIntensity, glow);
+        t += groupMinH * coarseStepScale;
+    }
+
+    // Per-thread fine march
+    int fineBudget = totalBudget - j;
+    for (int k = 0; k < fineBudget; k++) {
+        float threshold = isMandelbulb
+            ? fma(t, 0.00015f, 0.00012f)
+            : fma(t, 0.0006f, 0.0005f);
+        float3 p = fma(rD, float3(t), rO);
+        float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
+
+        if (UNLIKELY(h < threshold)) {
+            OrbitCache hitCache;
+            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, type, fp, colorIterations, hitCache);
+            result.cache = hitCache;
+            result.distGlow = float2(t, saturate(glow * 0.25));
+            return result;
+        }
+
+        if (UNLIKELY(t > endT)) break;
+
+        glow = fma(saturate(0.04f - h), glowIntensity, glow);
+        t += h * (isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier);
+    }
+
+    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
+    return result;
+}
+
+// =============================================================================
 
 // Post effects with color scheme support and dynamic animation
 // Consumes precomputed audio aggregates for lightweight audio-reactive modulation.
@@ -1499,6 +1698,7 @@ kernel void adaptiveHierarchical8x8(
     uint2 tileId [[threadgroup_position_in_grid]],
     uint2 localId [[thread_position_in_threadgroup]],
     uint localIndex [[thread_index_in_threadgroup]],
+    uint simdLaneId [[thread_index_in_simdgroup]],
     constant TileUniforms& uniforms [[buffer(0)]],
     texture2d_array<float, access::write> outputTexture [[texture(0)]],
     texture2d_array<float, access::read> prevDepthTexture [[texture(1)]],
@@ -1762,11 +1962,11 @@ kernel void adaptiveHierarchical8x8(
     // all other formulas did a full march every frame, wasting temporal data.
     SceneResult sceneResult;
     if (fineStartT > 0.06f) {
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
-                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
+        sceneResult = SceneWithCacheFromStartSIMDGroup(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
+                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, simdLaneId);
     } else {
-        sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
+        sceneResult = SceneWithCacheSIMDGroup(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
+                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, simdLaneId);
     }
     
     float adjustedDist = sceneResult.distGlow.x;
