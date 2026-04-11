@@ -15,6 +15,7 @@ import RealityKit
 // ═══════════════════════════════════════════════════════════════════════════════
 
 enum SidebarTab: String, CaseIterable {
+    case formulas = "Formulas"
     case fractal = "Fractal"
     case animate = "Animate"
     case coloring = "Coloring"
@@ -24,6 +25,7 @@ enum SidebarTab: String, CaseIterable {
     
     var icon: String {
         switch self {
+        case .formulas: return "square.grid.2x2.fill"
         case .fractal:  return "cube.fill"
         case .animate:  return "film.stack"
         case .coloring: return "paintpalette.fill"
@@ -55,7 +57,6 @@ struct ContentView: View {
     @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
-    @State private var showFractalTypePopover = false
     
     // Developer state
     @State private var isProfilerRunning = false
@@ -187,6 +188,7 @@ struct ContentView: View {
                 BuddhabrotControlsView()
             } else {
                 switch selectedTab {
+                case .formulas: FractalGridView(cache: cache)
                 case .fractal:  fractalTabContent
                 case .animate:  animateTabContent
                 case .coloring: coloringTabContent
@@ -279,64 +281,16 @@ struct ContentView: View {
     private var fractalShapeContent: some View {
         VStack(spacing: 12) {
             HStack {
-                Label("Fractal Type", systemImage: "cube.fill").font(.headline)
+                Label(cache.fractalType.displayName, systemImage: cache.fractalType.icon)
+                    .font(.headline)
                 Spacer()
                 Button {
-                    openWindow(id: AppModel.fractalBrowserWindowID)
+                    selectedTab = .formulas
                 } label: {
-                    Label("Browser", systemImage: "rectangle.on.rectangle")
+                    Label("Change", systemImage: "square.grid.2x2")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-
-                Button {
-                    showFractalTypePopover.toggle()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: cache.fractalType.icon)
-                        Text(cache.fractalType.displayName)
-                            .lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $showFractalTypePopover, arrowEdge: .top) {
-                    ScrollView(.vertical) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(FractalModelType.selectableCases, id: \.self) { type in
-                                Button {
-                                    cache.fractalType = type
-                                    cache.pushFractalType(type, gestureController: appModel.gestureController)
-                                    showFractalTypePopover = false
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: type.icon)
-                                        Text(type.displayName)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        if type == cache.fractalType {
-                                            Image(systemName: "checkmark")
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 8)
-                                }
-                                .buttonStyle(.plain)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(type == cache.fractalType ? Color.blue.opacity(0.14) : Color.clear)
-                                )
-                            }
-                        }
-                        .padding(8)
-                    }
-                    .frame(width: 280, height: 320)
-                }
             }
 
             Divider()

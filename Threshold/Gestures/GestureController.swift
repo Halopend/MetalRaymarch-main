@@ -806,7 +806,13 @@ final class GestureController {
                 // Per-parameter sensitivity: lets users tune how much this specific
                 // parameter changes per meter of hand separation.
                 let perParamSens = parameterID.map { GestureSensitivityStore.shared.sensitivity(for: $0) } ?? 1.0
-                let sensitivityMultiplier = baseSensitivityMultiplier * verticalScaleFactor * perParamSens
+                
+                // Zoom compensation: when zoomed in, reduce sensitivity so fine
+                // adjustments are easier.  10× zoom → ~3× less sensitive.
+                // Uses pow(scale, -0.5) for a dampened inverse relationship.
+                let zoomScale = max(settings.detailScale, 0.01)
+                let zoomCompensation: Float = zoomScale > 1.001 ? pow(zoomScale, -0.5) : 1.0
+                let sensitivityMultiplier = baseSensitivityMultiplier * verticalScaleFactor * perParamSens * zoomCompensation
                 
                 let rangeSpan = range.upperBound - range.lowerBound
                 let distSpan = max(maxHandDistance - minHandDistance, 0.001)
@@ -922,13 +928,14 @@ final class GestureController {
         // ── Handle by binding type ──────────────────────────────────────
         switch binding {
         case .core(.translate):
-            // Position XYZ pinch-drag (previously processRightIndexDrag)
+            // Position XYZ pinch-drag — drives spring blob for momentum-based navigation
             if active && !state.isActive {
                 state.isActive = true
                 state.accumulatedPosition = settings.effectiveTargetPosition
                 singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
                 state.prevPos = hand.pinchPosition(digit: digit)
                 state.prevPalm = hand.palmPosition
+                settings.springActive = true
             }
             if active && state.isActive {
                 var currentPos = hand.palmPosition
@@ -947,19 +954,23 @@ final class GestureController {
                     scaledDelta = direction * min(deltaLength * baseMultiplier, maxStep)
                 }
 
-                let maxZoomCompensation: Float = (settings.fractalType == .mandelbulb) ? 2.0 : 3.0
-                let zoomCompensation = simd_clamp(1.0 / sqrt(max(settings.detailScale, 0.01)), 0.35, maxZoomCompensation)
-                singleHandState.accumulatedPosition = singleHandState.accumulatedPosition + scaledDelta * settings.translationSensitivity * zoomCompensation
-                if settings.isAnimationPlaying {
-                    settings.manualOffsetPosition = singleHandState.accumulatedPosition - settings.animationBasePosition
-                } else {
-                    settings.targetPosition = singleHandState.accumulatedPosition
-                }
+                let maxZoomCompensation: Float = (settings.fractalType == .mandelbulb) ? 1.5 : 2.0
+                let zoomCompensation = simd_clamp(1.0 / pow(max(settings.detailScale, 0.01), 0.3), 0.5, maxZoomCompensation)
+                let inputDelta = scaledDelta * settings.translationSensitivity * zoomCompensation
+
+                // Drive spring displacement (accumulates stretch while held)
+                settings.springDisplacement = settings.springDisplacement + inputDelta
+                // Store velocity for fling on release
+                settings.springVelocity = inputDelta * 90.0  // ~1/90s per hand tracking update
+
                 state.prevPos = currentPos
                 state.prevPalm = currentPos
                 activeDigit = digit
             }
-            if !active && state.isActive { state.isActive = false }
+            if !active && state.isActive {
+                state.isActive = false
+                settings.springActive = false  // Release: spring flings
+            }
 
         case .parameterTriplet(let triplet):
             // XYZ triplet pinch-drag
@@ -981,9 +992,13 @@ final class GestureController {
                 let sensitivity = settings.gestureSensitivity
                 let rangeSpan = triplet.range.upperBound - triplet.range.lowerBound
 
+                // Zoom compensation: dampen sensitivity when zoomed in.
+                let zoomScale = max(settings.detailScale, 0.01)
+                let zoomComp: Float = zoomScale > 1.001 ? pow(zoomScale, -0.5) : 1.0
+
                 if deltaLength > 0 {
                     let direction = rawDelta / deltaLength
-                    let scaledDelta = direction * min(deltaLength * sensitivity, maxStep) * rangeSpan
+                    let scaledDelta = direction * min(deltaLength * sensitivity * zoomComp, maxStep) * rangeSpan
 
                     state.startValues.x = simd_clamp(state.startValues.x + scaledDelta.x, triplet.range.lowerBound, triplet.range.upperBound)
                     state.startValues.y = simd_clamp(state.startValues.y + scaledDelta.y, triplet.range.lowerBound, triplet.range.upperBound)
@@ -1022,7 +1037,10 @@ final class GestureController {
                 let rangeSpan = node.range.upperBound - node.range.lowerBound
                 let maxStep: Float = 0.15
 
-                let scaledDelta = simd_clamp(verticalDelta * sensitivity * rangeSpan, -maxStep * rangeSpan, maxStep * rangeSpan)
+                // Zoom compensation: dampen sensitivity when zoomed in.
+                let zoomScale = max(settings.detailScale, 0.01)
+                let zoomComp: Float = zoomScale > 1.001 ? pow(zoomScale, -0.5) : 1.0
+                let scaledDelta = simd_clamp(verticalDelta * sensitivity * zoomComp * rangeSpan, -maxStep * rangeSpan, maxStep * rangeSpan)
                 state.startValue = simd_clamp(state.startValue + scaledDelta, node.range.lowerBound, node.range.upperBound)
 
                 let op = ParameterOperation(

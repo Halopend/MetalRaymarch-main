@@ -12,6 +12,18 @@ extension Renderer {
         let smoothedPosition = settingsSnapshot.position  // Already smoothed by interpolateToTargets
         smoothedScale = smoothedScale + (settingsSnapshot.scale - smoothedScale) * smoothFactor
 
+        // === SPRING BLOB PHYSICS ===
+        // Tick the spring each frame. When released, the spring fling drives position.
+        let springDelta = appModel.renderSettings.tickSpring(dt: cachedDeltaTime)
+        if simd_length_squared(springDelta) > 1e-8 {
+            let settings = appModel.renderSettings
+            if settings.isAnimationPlaying {
+                settings.manualOffsetPosition = settings.manualOffsetPosition + springDelta
+            } else {
+                settings.targetPosition = settings.targetPosition + springDelta
+            }
+        }
+
         // Use cached base rotation matrix (constant −90° Y) combined with user world rotation
         let userRotationMatrix = matrix4x4_from_quaternion(settingsSnapshot.worldRotation)
         let combinedRotationMatrix = userRotationMatrix * cachedRotationMatrix

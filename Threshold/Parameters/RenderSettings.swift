@@ -169,6 +169,13 @@ final class RenderSettings: @unchecked Sendable {
     private var _gestureMaxStartHandDistance: Float = loadGestureFloat("gestureMaxStartHandDistance", default: GestureDefaults.gestureMaxStartHandDistance)
     private var _gestureMaxActiveHandDistance: Float = loadGestureFloat("gestureMaxActiveHandDistance", default: GestureDefaults.gestureMaxActiveHandDistance)
     private var _translationSensitivity: Float = loadGestureFloat("translationSensitivity", default: GestureDefaults.translationSensitivity)
+    private var _leftHandedMode: Bool = UserDefaults.standard.bool(forKey: "leftHandedMode")
+
+    // === SPRING BLOB NAVIGATION ===
+    // Spring physics state — driven by translate gesture, ticked in Renderer
+    private var _springDisplacement: SIMD3<Float> = .zero  // Current displacement from rest
+    private var _springVelocity: SIMD3<Float> = .zero      // Current velocity
+    private var _springActive: Bool = false                 // Is the user pulling the spring?
 
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
@@ -989,6 +996,72 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    var leftHandedMode: Bool {
+        get { withLock { _leftHandedMode } }
+        set {
+            withLock { _leftHandedMode = newValue }
+            UserDefaults.standard.set(newValue, forKey: "leftHandedMode")
+        }
+    }
+
+    // MARK: - Spring Blob State
+
+    var springDisplacement: SIMD3<Float> {
+        get { withLock { _springDisplacement } }
+        set { withLock { _springDisplacement = newValue } }
+    }
+
+    var springVelocity: SIMD3<Float> {
+        get { withLock { _springVelocity } }
+        set { withLock { _springVelocity = newValue } }
+    }
+
+    var springActive: Bool {
+        get { withLock { _springActive } }
+        set { withLock { _springActive = newValue } }
+    }
+
+    /// Tick spring physics. Call once per frame from render loop.
+    /// Returns the position delta to apply to the fractal this frame.
+    func tickSpring(dt: Float) -> SIMD3<Float> {
+        withLock {
+            let stiffness: Float = 45.0   // Spring constant (higher = snappier return)
+            let damping: Float = 6.0      // Damping (higher = less oscillation)
+            let maxDisplacement: Float = 0.5 // Max stretch in logical units
+            let flingMultiplier: Float = 2.5 // How much velocity converts to position fling
+
+            if _springActive {
+                // While pulling: spring provides resistance (displacement grows sublinearly)
+                // Velocity is stored for fling on release
+                // No position delta applied while pulling — movement happens on release
+                let force = -stiffness * _springDisplacement - damping * _springVelocity
+                _springVelocity += force * dt
+                // Clamp displacement magnitude
+                let mag = simd_length(_springDisplacement)
+                if mag > maxDisplacement {
+                    _springDisplacement = simd_normalize(_springDisplacement) * maxDisplacement
+                }
+                return .zero
+            } else {
+                // Released: spring drives position via velocity fling + decay
+                let force = -stiffness * _springDisplacement - damping * _springVelocity
+                _springVelocity += force * dt
+                _springDisplacement += _springVelocity * dt
+
+                // Position delta: velocity scaled for fling effect
+                let positionDelta = _springVelocity * dt * flingMultiplier
+
+                // Kill tiny oscillations
+                if simd_length(_springDisplacement) < 0.001 && simd_length(_springVelocity) < 0.001 {
+                    _springDisplacement = .zero
+                    _springVelocity = .zero
+                }
+
+                return positionDelta
+            }
+        }
+    }
+
     /// Enable safety bubble around the camera to prevent clipping into fractal geometry
     var safetyBubbleEnabled: Bool {
         get { withLock { _safetyBubbleEnabled } }
@@ -1588,7 +1661,10 @@ final class RenderSettings: @unchecked Sendable {
                 geometryState: _geometryState,
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier,
-                recreateLegacyComputeCacheBug: _recreateLegacyComputeCacheBug
+                recreateLegacyComputeCacheBug: _recreateLegacyComputeCacheBug,
+                springDisplacement: _springDisplacement,
+                springActive: _springActive,
+                leftHandedMode: _leftHandedMode
             )
         }
     }

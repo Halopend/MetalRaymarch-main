@@ -59,6 +59,11 @@ struct RenderSettingsSnapshot {
     // ═══════════════════════════════════════════════════════════════════════════
     let stepMultiplier: Float
     let recreateLegacyComputeCacheBug: Bool
+
+    // Spring blob navigation
+    let springDisplacement: SIMD3<Float>
+    let springActive: Bool
+    let leftHandedMode: Bool
 }
 
 extension RenderSettingsSnapshot {
