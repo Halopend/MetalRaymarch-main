@@ -230,6 +230,7 @@ struct MusicTabContent: View {
                     .buttonStyle(.plain)
                     Spacer()
                 }
+                .frame(maxWidth: .infinity)
             } else {
                 // Empty state
                 VStack(spacing: 8) {
@@ -742,6 +743,17 @@ struct MusicTabContent: View {
                             }
                             .pickerStyle(.segmented)
 
+                            // ── Response curve ──
+                            Picker("Curve", selection: Binding(
+                                get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
+                                set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
+                            )) {
+                                ForEach(ResponseCurve.allCases, id: \.self) { curve in
+                                    Label(curve.displayName, systemImage: curve.icon).tag(curve)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
                             Text("Music modulation is always relative to the current animation or manual base value.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -890,12 +902,8 @@ struct MusicTabContent: View {
 
     private var availableMappingTargetsToAdd: [MusicReactiveTarget] {
         let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.target))
-        let formulaCount = MusicReactiveTarget.floatFormulaParams(for: cache.fractalType).count
-        return MusicReactiveTarget.availableCases.filter { target in
-            if existing.contains(target) { return false }
-            // Hide formula param slots beyond what this fractal supports
-            if let slot = target.formulaParamSlot, slot >= formulaCount { return false }
-            return true
+        return MusicReactiveTarget.availableCases(for: cache.fractalType).filter { target in
+            !existing.contains(target)
         }
     }
 

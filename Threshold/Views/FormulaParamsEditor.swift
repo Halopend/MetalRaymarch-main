@@ -404,6 +404,28 @@ private struct ParameterNodeRow: View {
                 }
 
                 if mappingIndex != nil {
+                    // Response curve
+                    HStack(spacing: 4) {
+                        Image(systemName: "waveform")
+                            .font(.caption2)
+                            .foregroundStyle(.pink)
+                            .frame(width: 16)
+                        Picker("", selection: Binding(
+                            get: {
+                                guard let idx = musicMappingIndex(for: target),
+                                      idx < cache.audioReactive.musicReactiveMappings.count else { return ResponseCurve.sinusoidal }
+                                return cache.audioReactive.musicReactiveMappings[idx].responseCurve
+                            },
+                            set: { curve in updateMusicMapping(target) { $0.responseCurve = curve } }
+                        )) {
+                            ForEach(ResponseCurve.allCases, id: \.self) { c in
+                                Image(systemName: c.icon).tag(c)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .controlSize(.mini)
+                    }
+
                     // Intensity
                     HStack(spacing: 4) {
                         Text("Intensity")
@@ -511,12 +533,8 @@ private struct ParameterNodeRow: View {
         guard pieces.count >= 3, let formulaIndex = Int(pieces[2]) else { return nil }
         let floatParams = MusicReactiveTarget.floatFormulaParams(for: cache.fractalType)
         guard let slotIndex = floatParams.firstIndex(where: { $0.index == formulaIndex }) else { return nil }
-        switch slotIndex {
-        case 0: return .formulaParam0
-        case 1: return .formulaParam1
-        case 2: return .formulaParam2
-        default: return nil
-        }
+        guard slotIndex < MusicReactiveTarget.allFormulaParamCases.count else { return nil }
+        return MusicReactiveTarget.allFormulaParamCases[slotIndex]
     }
 
     private func hasMusicMapping(_ target: MusicReactiveTarget) -> Bool {

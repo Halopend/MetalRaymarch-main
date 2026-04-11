@@ -9,29 +9,45 @@
 import Foundation
 
 enum MusicReactiveMode: String, Codable, Sendable {
-    case absolute
     case relative
 
     static let allCases: [MusicReactiveMode] = [.relative]
 
     var displayName: String {
-        switch self {
-        case .absolute: return "Relative"
-        case .relative: return "Relative"
-        }
+        "Relative"
     }
 
     var helpText: String {
+        "Music adds a sinusoidal offset around the current animation or manual base value"
+    }
+}
+
+/// How audio energy shapes the parameter offset.
+/// Each curve produces a different delta shape from the same source level (0–1).
+enum ResponseCurve: String, CaseIterable, Codable, Sendable {
+    /// Smooth sinusoidal oscillation around the base value.
+    /// Audio energy modulates the amplitude of the oscillation.
+    case sinusoidal
+    /// Fast attack, exponential decay — ideal for beat-driven effects.
+    /// Produces a sharp spike on onset that decays until the next beat.
+    case pulse
+    /// Heavily smoothed, slow-moving modulation — ideal for color drift.
+    /// Audio energy causes a gentle, lagging offset from the base.
+    case drift
+
+    var displayName: String {
         switch self {
-        case .absolute: return "Legacy mappings are migrated to relative modulation around the current base value"
-        case .relative: return "Music adds a delta around the current animation or manual base value"
+        case .sinusoidal: return "Wave"
+        case .pulse:      return "Pulse"
+        case .drift:      return "Drift"
         }
     }
 
-    var runtimeMode: MusicReactiveMode {
+    var icon: String {
         switch self {
-        case .absolute: return .relative
-        case .relative: return .relative
+        case .sinusoidal: return "waveform.path"
+        case .pulse:      return "bolt.fill"
+        case .drift:      return "wind"
         }
     }
 }
@@ -124,10 +140,23 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
 
     // Dynamic formula-parameter slots — resolve via FormulaCatalog for the active fractal.
     // formulaParam0 maps to the 1st non-bool param, formulaParam1 to the 2nd, etc.
+    // Supports up to 16 slots to match FormulaParams capacity.
     case formulaParam0
     case formulaParam1
     case formulaParam2
     case formulaParam3
+    case formulaParam4
+    case formulaParam5
+    case formulaParam6
+    case formulaParam7
+    case formulaParam8
+    case formulaParam9
+    case formulaParam10
+    case formulaParam11
+    case formulaParam12
+    case formulaParam13
+    case formulaParam14
+    case formulaParam15
 
     // Legacy (kept for Codable backward-compat; migrated to formulaParam on load)
     case foldingLimit
@@ -135,30 +164,38 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
 
     // MARK: - Availability
 
+    /// All formula param cases in slot order.
+    static let allFormulaParamCases: [MusicReactiveTarget] = [
+        .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+        .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+        .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+        .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15
+    ]
+
     /// Cases shown in the UI add-menu. Excludes legacy/deprecated targets.
+    /// Formula param slots beyond what the active fractal supports are hidden.
     static var availableCases: [MusicReactiveTarget] {
         [.fractalScale, .colorMix, .iterations,
-         .glow, .fog, .bloom, .hueSpeed, .saturation,
-         .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3]
+         .glow, .fog, .bloom, .hueSpeed, .saturation]
+    }
+
+    /// Returns the full list of available targets for a given fractal type,
+    /// including only formula param slots that exist for that fractal.
+    static func availableCases(for fractalType: FractalModelType) -> [MusicReactiveTarget] {
+        let formulaCount = floatFormulaParams(for: fractalType).count
+        let formulaSlots = Array(allFormulaParamCases.prefix(formulaCount))
+        return [.fractalScale, .colorMix, .iterations,
+                .glow, .fog, .bloom, .hueSpeed, .saturation] + formulaSlots
     }
 
     /// Whether this target is a dynamic formula parameter slot.
     var isFormulaParam: Bool {
-        switch self {
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3: return true
-        default: return false
-        }
+        Self.allFormulaParamCases.contains(self)
     }
 
-    /// The ordinal slot (0, 1, 2) for formula-param targets; nil otherwise.
+    /// The ordinal slot (0–15) for formula-param targets; nil otherwise.
     var formulaParamSlot: Int? {
-        switch self {
-        case .formulaParam0: return 0
-        case .formulaParam1: return 1
-        case .formulaParam2: return 2
-        case .formulaParam3: return 3
-        default: return nil
-        }
+        Self.allFormulaParamCases.firstIndex(of: self)
     }
 
     /// Returns the catalog descriptor for this formula param slot, for the given fractal type.
@@ -209,6 +246,18 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .formulaParam1: return "Formula Param 2"
         case .formulaParam2: return "Formula Param 3"
         case .formulaParam3: return "Formula Param 4"
+        case .formulaParam4: return "Formula Param 5"
+        case .formulaParam5: return "Formula Param 6"
+        case .formulaParam6: return "Formula Param 7"
+        case .formulaParam7: return "Formula Param 8"
+        case .formulaParam8: return "Formula Param 9"
+        case .formulaParam9: return "Formula Param 10"
+        case .formulaParam10: return "Formula Param 11"
+        case .formulaParam11: return "Formula Param 12"
+        case .formulaParam12: return "Formula Param 13"
+        case .formulaParam13: return "Formula Param 14"
+        case .formulaParam14: return "Formula Param 15"
+        case .formulaParam15: return "Formula Param 16"
         case .foldingLimit: return "Folding Limit"
         case .sphereRadius: return "Sphere Radius"
         }
@@ -231,7 +280,10 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return "sun.max"
         case .hueSpeed: return "dial.high"
         case .saturation: return "circle.lefthalf.filled"
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3: return "function"
+        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return "function"
         case .foldingLimit: return "square.dashed"
         case .sphereRadius: return "circle.circle"
         }
@@ -256,7 +308,10 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return 0.0...2.0
         case .hueSpeed: return 0.0...0.5
         case .saturation: return 0.0...3.0
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3: return -10.0...64.0
+        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return -10.0...64.0
         case .foldingLimit: return -10.0...30.0
         case .sphereRadius: return -5.0...8.0
         }
@@ -287,7 +342,10 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return 0.1...0.8
         case .hueSpeed: return 0.02...0.25
         case .saturation: return 0.8...2.0
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3: return 0.0...1.0
+        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return 0.0...1.0
         case .foldingLimit: return 0.9...1.35
         case .sphereRadius: return 0.25...0.8
         }
@@ -307,8 +365,41 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .formulaParam1: return .mid
         case .formulaParam2: return .treble
         case .formulaParam3: return .mid
+        case .formulaParam4: return .bass
+        case .formulaParam5: return .mid
+        case .formulaParam6: return .treble
+        case .formulaParam7: return .mid
+        case .formulaParam8: return .bass
+        case .formulaParam9: return .mid
+        case .formulaParam10: return .treble
+        case .formulaParam11: return .mid
+        case .formulaParam12: return .bass
+        case .formulaParam13: return .mid
+        case .formulaParam14: return .treble
+        case .formulaParam15: return .mid
         case .foldingLimit: return .bass
         case .sphereRadius: return .mid
+        }
+    }
+
+    /// Default response curve for this target type.
+    var defaultResponseCurve: ResponseCurve {
+        switch self {
+        case .fractalScale:  return .sinusoidal
+        case .colorMix:      return .drift
+        case .iterations:   return .sinusoidal
+        case .glow:          return .pulse
+        case .fog:           return .drift
+        case .bloom:         return .pulse
+        case .hueSpeed:      return .drift
+        case .saturation:    return .drift
+        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15:
+            return .sinusoidal
+        case .foldingLimit:  return .sinusoidal
+        case .sphereRadius:  return .sinusoidal
         }
     }
 
@@ -334,7 +425,10 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return ParameterTargetID.Effect.bloom
         case .hueSpeed: return ParameterTargetID.Effect.hueSpeed
         case .saturation: return ParameterTargetID.Effect.saturation
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3: return nil
+        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return nil
         case .foldingLimit: return ParameterTargetID.formula(fractalType: .mandelbox, formulaIndex: 1, name: "Folding Limit")
         case .sphereRadius: return ParameterTargetID.formula(fractalType: .mandelbox, formulaIndex: 2, name: "Sphere Radius")
         }
@@ -378,6 +472,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     var amount: Float
     var isEnabled: Bool
     var mode: MusicReactiveMode
+    var responseCurve: ResponseCurve
     var lfo: LFOSettings
     var smoothingWindow: Float
 
@@ -390,6 +485,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
          amount: Float,
          isEnabled: Bool,
          mode: MusicReactiveMode = .relative,
+         responseCurve: ResponseCurve? = nil,
          lfo: LFOSettings = .default,
          smoothingWindow: Float = 0.0) {
         self.id = id
@@ -401,13 +497,13 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.amount = amount
         self.isEnabled = isEnabled
         self.mode = mode
+        self.responseCurve = responseCurve ?? target.defaultResponseCurve
         self.lfo = lfo
         self.smoothingWindow = smoothingWindow
         sanitizeInPlace()
     }
 
     mutating func sanitizeInPlace() {
-        mode = mode.runtimeMode
         let allowed = target.allowedRange
         rangeMin = min(allowed.upperBound, max(allowed.lowerBound, rangeMin))
         rangeMax = min(allowed.upperBound, max(allowed.lowerBound, rangeMax))
@@ -422,7 +518,6 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
 
     /// Sanitize with fractal-type-aware ranges (for formula params).
     mutating func sanitizeInPlace(for fractalType: FractalModelType) {
-        mode = mode.runtimeMode
         let allowed = target.allowedRange(for: fractalType)
         rangeMin = min(allowed.upperBound, max(allowed.lowerBound, rangeMin))
         rangeMax = min(allowed.upperBound, max(allowed.lowerBound, rangeMax))
@@ -444,7 +539,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, target, source, rangeMin, rangeMax, responseSpeed, amount, isEnabled
-        case mode, lfo, smoothingWindow
+        case mode, responseCurve, lfo, smoothingWindow
     }
 
     init(from decoder: Decoder) throws {
@@ -457,9 +552,14 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.responseSpeed = try c.decode(Float.self, forKey: .responseSpeed)
         self.amount = try c.decode(Float.self, forKey: .amount)
         self.isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
-        self.mode = (try c.decodeIfPresent(MusicReactiveMode.self, forKey: .mode) ?? .relative).runtimeMode
+        // Backward compat: old data may store .absolute mode
+        let rawMode = try c.decodeIfPresent(MusicReactiveMode.self, forKey: .mode) ?? .relative
+        self.mode = .relative
+        self.responseCurve = try c.decodeIfPresent(ResponseCurve.self, forKey: .responseCurve)
+            ?? target.defaultResponseCurve
         self.lfo = try c.decodeIfPresent(LFOSettings.self, forKey: .lfo) ?? .default
         self.smoothingWindow = try c.decodeIfPresent(Float.self, forKey: .smoothingWindow) ?? 0.0
+        _ = rawMode // consumed for backward compat only
     }
 
     /// Migrate legacy Mandelbox-specific mappings to generic formula param slots.
@@ -469,7 +569,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         for var mapping in mappings {
             let newTarget = mapping.target.migrated
             mapping.target = newTarget
-            mapping.mode = mapping.mode.runtimeMode
+            mapping.mode = .relative
             guard seen.insert(newTarget).inserted else { continue }
             result.append(mapping)
         }
@@ -543,17 +643,29 @@ enum ReactivityPreset: String, CaseIterable {
         }
     }
     
-    /// Which geometry / formula parameters this preset enables
-    var geometryProfile: (scale: Bool, param0: Bool, param1: Bool, param2: Bool, param3: Bool, colorMix: Bool) {
+    /// Which formula-param slots (by index) this preset enables.
+    /// Slots beyond what the active fractal supports are silently ignored.
+    var formulaParamSlots: [Int] {
         switch self {
-        case .electronic: return (true,  true,  true,  true,  false, true )
-        case .ambient:    return (true,  false, false, false, false, true )
-        case .rock:       return (true,  true,  true,  false, false, false)
-        case .classical:  return (false, false, false, true,  false, true )
-        case .hiphop:     return (true,  true,  true,  false, false, false)
+        case .electronic: return [0, 1, 2, 3]
+        case .ambient:    return []
+        case .rock:       return [0, 1, 2]
+        case .classical:  return [3]
+        case .hiphop:     return [0, 1, 2]
         }
     }
-    
+
+    /// Whether this preset enables fractalScale and colorMix.
+    var enablesScaleAndColor: (scale: Bool, colorMix: Bool) {
+        switch self {
+        case .electronic: return (true,  true )
+        case .ambient:    return (true,  true )
+        case .rock:       return (true,  false)
+        case .classical:  return (false, true )
+        case .hiphop:     return (true,  false)
+        }
+    }
+
     /// Which effect parameters this preset enables
     var effectsProfile: (glow: Bool, fog: Bool, bloom: Bool, hueSpeed: Bool, saturation: Bool, iterations: Bool) {
         switch self {
@@ -568,17 +680,18 @@ enum ReactivityPreset: String, CaseIterable {
     /// Build mappings for a specific fractal type — only includes formula param slots
     /// that actually exist for that fractal.
     func defaultMappings(for fractalType: FractalModelType) -> [MusicReactiveMapping] {
-        let geometry = geometryProfile
+        let geo = enablesScaleAndColor
         let effects = effectsProfile
+        let slots = formulaParamSlots
+        let formulaSlots = MusicReactiveTarget.allFormulaParamCases
         let formulaCount = MusicReactiveTarget.floatFormulaParams(for: fractalType).count
         var result: [MusicReactiveMapping] = []
 
-        if geometry.scale     { result.append(MusicReactiveTarget.fractalScale.defaultMapping(for: fractalType)) }
-        if geometry.param0, formulaCount > 0 { result.append(MusicReactiveTarget.formulaParam0.defaultMapping(for: fractalType)) }
-        if geometry.param1, formulaCount > 1 { result.append(MusicReactiveTarget.formulaParam1.defaultMapping(for: fractalType)) }
-        if geometry.param2, formulaCount > 2 { result.append(MusicReactiveTarget.formulaParam2.defaultMapping(for: fractalType)) }
-        if geometry.param3, formulaCount > 3 { result.append(MusicReactiveTarget.formulaParam3.defaultMapping(for: fractalType)) }
-        if geometry.colorMix  { result.append(MusicReactiveTarget.colorMix.defaultMapping(for: fractalType)) }
+        if geo.scale     { result.append(MusicReactiveTarget.fractalScale.defaultMapping(for: fractalType)) }
+        for slot in slots where slot < formulaCount && slot < formulaSlots.count {
+            result.append(formulaSlots[slot].defaultMapping(for: fractalType))
+        }
+        if geo.colorMix  { result.append(MusicReactiveTarget.colorMix.defaultMapping(for: fractalType)) }
         if effects.glow       { result.append(MusicReactiveTarget.glow.defaultMapping(for: fractalType)) }
         if effects.fog        { result.append(MusicReactiveTarget.fog.defaultMapping(for: fractalType)) }
         if effects.bloom      { result.append(MusicReactiveTarget.bloom.defaultMapping(for: fractalType)) }

@@ -177,6 +177,9 @@ actor Renderer {
     // Tracks whether the music layer has been activated so we can clear it when
     // music reactivity is turned off.
     private var musicReactiveLayerActive: Bool = false
+    private var musicReactivePhaseByTarget: [MusicReactiveTarget: Float] = [:]
+    private var musicReactiveDecayByTarget: [MusicReactiveTarget: Float] = [:]
+    private var musicReactiveDriftByTarget: [MusicReactiveTarget: Float] = [:]
     private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
 
     private var parameterOperationFrameIndex: UInt64 = 0
@@ -793,14 +796,51 @@ actor Renderer {
 
                     // ── 2. Scale audio intensity ──
                     let absAmount = abs(mapping.amount)
+                    let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
 
-                    // ── 3. Compute final target value based on mode ──
-                    // Music is always relative to the current animation/manual base.
-                    // Legacy absolute mappings are migrated to .relative at decode time.
+                    // ── 3. Compute max deviation (fraction of allowed range) ──
                     let allowed = mapping.target.allowedRange(for: activeFractalType)
                     let allowedSpan = allowed.upperBound - allowed.lowerBound
                     let maxDeviation = allowedSpan * 0.15 * absAmount * globalAmount
 
+                    // ── 4. Apply response curve to produce a bipolar offset ──
+                    // Audio energy modulates the AMPLITUDE of an oscillation centered at zero,
+                    // so the parameter oscillates around the user's manual/animation base value.
+                    let delta: Float
+                    switch mapping.responseCurve {
+                    case .sinusoidal:
+                        // Continuous phase-locked oscillation; audio modulates amplitude.
+                        // When audio is silent → offset = 0 (no drift from base).
+                        // When audio is loud  → offset oscillates ±maxDeviation.
+                        let phaseSpeed: Float = 2.0 + sourceValue * 4.0  // faster when louder
+                        var phase = musicReactivePhaseByTarget[mapping.target] ?? 0
+                        phase += phaseSpeed * dt
+                        phase = phase - floor(phase)
+                        musicReactivePhaseByTarget[mapping.target] = phase
+                        delta = sin(phase * 2.0 * .pi) * sourceValue * maxDeviation * sign
+
+                    case .pulse:
+                        // Fast attack on beat onset, exponential decay.
+                        // Produces a sharp spike that fades, ideal for bloom/glow.
+                        let attack = sourceValue * sourceValue  // quadratic for sharper onset
+                        var decay = musicReactiveDecayByTarget[mapping.target] ?? 0
+                        decay = max(attack, decay * exp(-6.0 * dt))  // ~170ms decay constant
+                        musicReactiveDecayByTarget[mapping.target] = decay
+                        delta = decay * maxDeviation * sign
+
+                    case .drift:
+                        // Heavily smoothed, slow-moving offset.
+                        // Audio energy gently pushes the parameter; the large smoothing
+                        // window makes it lag behind the beat for a "color drift" feel.
+                        let target = sourceValue * maxDeviation * sign
+                        var drifted = musicReactiveDriftByTarget[mapping.target] ?? 0
+                        let driftRate: Float = 2.0  // seconds to converge
+                        drifted += (target - drifted) * min(1.0, dt / driftRate)
+                        musicReactiveDriftByTarget[mapping.target] = drifted
+                        delta = drifted
+                    }
+
+                    // ── 5. Optional LFO overlay ──
                     var lfoOffset: Float = 0
                     if mapping.lfo.enabled {
                         var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
@@ -810,11 +850,9 @@ actor Renderer {
                         lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
                     }
 
-                    let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
-                    let delta = sourceValue * maxDeviation * sign
                     let rawTargetValue = delta + lfoOffset
 
-                    // ── 5. Dispatch to parameter system (LayerStack handles smoothing) ──
+                    // ── 6. Dispatch to parameter system (LayerStack handles smoothing) ──
                     guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
                     let offset = rawTargetValue
 
@@ -851,6 +889,9 @@ actor Renderer {
                     appModel.parameterPipeline.clearMusicLayers(settings: settings)
                 }
                 musicReactiveLayerActive = false
+                musicReactivePhaseByTarget.removeAll()
+                musicReactiveDecayByTarget.removeAll()
+                musicReactiveDriftByTarget.removeAll()
                 musicLFOPhaseByTarget.removeAll()
             }
         } else {
@@ -858,6 +899,9 @@ actor Renderer {
                 appModel.parameterPipeline.clearMusicLayers(settings: settings)
             }
             musicReactiveLayerActive = false
+            musicReactivePhaseByTarget.removeAll()
+            musicReactiveDecayByTarget.removeAll()
+            musicReactiveDriftByTarget.removeAll()
             musicLFOPhaseByTarget.removeAll()
         }
         let settingsSnapshot = settings.snapshot()
