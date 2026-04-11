@@ -115,7 +115,7 @@ struct CubicBezier {
 /// A single keyframe capturing shape parameters at a point in time.
 /// Duration represents how long to animate FROM the previous keyframe TO this one.
 struct AnimationKeyframe: Codable, Identifiable, Equatable {
-    let id: UUID
+    var id: UUID = UUID()
     var name: String
     var duration: TimeInterval  // Seconds to reach this keyframe from previous (0 for first keyframe)
     

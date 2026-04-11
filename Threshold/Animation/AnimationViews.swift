@@ -40,6 +40,7 @@ struct AnimationPlayerWindowView: View {
 private struct AnimationPlayerContent: View {
     @Bindable var animationManager: AnimationManager
     @State private var editingKeyframe: AnimationKeyframe?
+    @State private var wasPlayingBeforeScrub = false
     
     var body: some View {
         VStack(spacing: 10) {
@@ -85,43 +86,36 @@ private struct AnimationPlayerContent: View {
                     playhead: animationManager.uiPlayhead,
                     onEditKeyframe: { keyframe in editingKeyframe = keyframe },
                     onJumpToKeyframe: { index in animationManager.jumpToKeyframe(index) },
-                    onJumpToTime: { time in animationManager.jumpToTime(time) }
+                    onJumpToTime: { time in animationManager.jumpToTime(time) },
+                    onAddKeyframe: {
+                        animationManager.addKeyframeToScene(scene.id, duration: 2.0)
+                    },
+                    onDeleteKeyframe: { index in
+                        animationManager.removeKeyframe(at: index, from: scene.id)
+                    },
+                    onOverwriteKeyframe: { index in
+                        animationManager.overwriteKeyframe(at: index, in: scene.id)
+                    },
+                    onScrubBegin: {
+                        wasPlayingBeforeScrub = animationManager.isPlaying
+                        if animationManager.isPlaying { animationManager.pause() }
+                    },
+                    onScrubEnd: {
+                        if wasPlayingBeforeScrub { animationManager.play() }
+                    }
                 )
                 .frame(height: 44)
             }
             
             // ── Transport controls ──
-            HStack(spacing: 16) {
-                // Record
+            HStack(spacing: 12) {
+                // Skip to start
                 Button {
-                    if animationManager.isRecording {
-                        animationManager.stopRecording()
-                    } else {
-                        animationManager.startRecording()
-                    }
+                    if animationManager.isPlaying { animationManager.stop() }
+                    else { animationManager.jumpToKeyframe(0) }
                 } label: {
-                    Image(systemName: animationManager.isRecording ? "stop.circle.fill" : "record.circle")
-                        .foregroundStyle(animationManager.isRecording ? .red : .primary)
+                    Image(systemName: "backward.end.fill")
                 }
-                .help(animationManager.isRecording ? "Stop recording" : "Record gestures")
-                
-                // Stop
-                Button {
-                    animationManager.stop()
-                } label: {
-                    Image(systemName: "stop.fill")
-                }
-                .disabled(!animationManager.isPlaying && animationManager.uiPlayhead.state != .paused)
-                
-                // Disable overrides
-                Button {
-                    animationManager.disablePlaybackOverrides()
-                } label: {
-                    Label("Disable Overrides", systemImage: "nosign")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 .disabled(animationManager.currentScene == nil)
                 
                 // Play/Pause
@@ -166,6 +160,15 @@ private struct AnimationPlayerContent: View {
                 }
                 
                 Spacer()
+                
+                // Reset overrides (compact icon)
+                Button {
+                    animationManager.disablePlaybackOverrides()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                }
+                .help("Reset to scene values")
+                .disabled(animationManager.currentScene == nil)
                 
                 // Keyframe indicator
                 if let scene = animationManager.currentScene {
@@ -1510,6 +1513,7 @@ struct KeyframeEditorView: View {
 struct AnimationPlaybackControls: View {
     @Bindable var animationManager: AnimationManager
     @State private var editingKeyframe: AnimationKeyframe?
+    @State private var wasPlayingBeforeScrub = false
     
     var body: some View {
         VStack(spacing: 8) {
@@ -1536,43 +1540,38 @@ struct AnimationPlaybackControls: View {
                     },
                     onJumpToTime: { time in
                         animationManager.jumpToTime(time)
+                    },
+                    onAddKeyframe: {
+                        animationManager.addKeyframeToScene(scene.id, duration: 2.0)
+                    },
+                    onDeleteKeyframe: { index in
+                        animationManager.removeKeyframe(at: index, from: scene.id)
+                    },
+                    onOverwriteKeyframe: { index in
+                        animationManager.overwriteKeyframe(at: index, in: scene.id)
+                    },
+                    onScrubBegin: {
+                        wasPlayingBeforeScrub = animationManager.isPlaying
+                        if animationManager.isPlaying { animationManager.pause() }
+                    },
+                    onScrubEnd: {
+                        if wasPlayingBeforeScrub { animationManager.play() }
                     }
                 )
                 .frame(height: 44)
                 
                 // Controls
-                HStack(spacing: 16) {
-                    // Record button
+                HStack(spacing: 12) {
+                    // Skip to start
                     Button {
-                        if animationManager.isRecording {
-                            animationManager.stopRecording()
-                        } else {
-                            animationManager.startRecording()
-                        }
+                        if animationManager.isPlaying { animationManager.stop() }
+                        else { animationManager.jumpToKeyframe(0) }
                     } label: {
-                        Image(systemName: animationManager.isRecording ? "stop.circle.fill" : "record.circle")
-                            .foregroundStyle(animationManager.isRecording ? .red : .primary)
+                        Image(systemName: "backward.end.fill")
                     }
-                    .help(animationManager.isRecording ? "Stop recording" : "Record gestures")
-                    
-                    Button {
-                        animationManager.stop()
-                    } label: {
-                        Image(systemName: "stop.fill")
-                    }
-                    .disabled(!animationManager.isPlaying && animationManager.uiPlayhead.state != .paused)
-
-                    Button {
-                        animationManager.disablePlaybackOverrides()
-                    } label: {
-                        Label("Disable Overrides", systemImage: "nosign")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Disable manual playback overrides and restore scene values")
                     .disabled(animationManager.currentScene == nil)
-                    
+
+                    // Play/Pause
                     Button {
                         animationManager.togglePlayPause()
                     } label: {
@@ -1614,7 +1613,16 @@ struct AnimationPlaybackControls: View {
                     }
                     
                     Spacer()
-                    
+
+                    // Reset overrides (compact icon)
+                    Button {
+                        animationManager.disablePlaybackOverrides()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                    }
+                    .help("Reset to scene values")
+                    .disabled(animationManager.currentScene == nil)
+
                     // Keyframe indicator
                     Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
                         .font(.caption)
@@ -1675,15 +1683,21 @@ struct AnimationPlaybackControls: View {
 // MARK: - Keyframe Timeline View
 
 /// Visual timeline showing keyframe markers positioned proportionally along a track.
-/// Supports tap to jump and long-press to edit.
+/// Supports: drag-to-scrub (auto-pauses during drag, resumes after), tap to jump,
+/// double-tap to edit keyframe, context menu for keyframe actions.
 struct KeyframeTimelineView: View {
     let scene: AnimationScene
     let playhead: AnimationPlayhead
     let onEditKeyframe: (AnimationKeyframe) -> Void
     let onJumpToKeyframe: (Int) -> Void
     var onJumpToTime: ((TimeInterval) -> Void)? = nil
+    var onAddKeyframe: (() -> Void)? = nil
+    var onDeleteKeyframe: ((Int) -> Void)? = nil
+    var onOverwriteKeyframe: ((Int) -> Void)? = nil
+    var onScrubBegin: (() -> Void)? = nil
+    var onScrubEnd: (() -> Void)? = nil
     
-    @State private var longPressKeyframeID: UUID?
+    @State private var isScrubbing = false
     
     /// Cumulative time at the start of each keyframe segment
     private var cumulativeTimes: [TimeInterval] {
@@ -1721,6 +1735,7 @@ struct KeyframeTimelineView: View {
             
             ZStack(alignment: .topLeading) {
                 // ── Interactive scrubbing area ──
+                // Drag-to-scrub: pauses playback on drag start, resumes on release
                 Rectangle()
                     .fill(Color.white.opacity(0.001))
                     .frame(height: trackHeight + 30)
@@ -1729,8 +1744,16 @@ struct KeyframeTimelineView: View {
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
                                 guard totalDuration > 0 else { return }
+                                if !isScrubbing {
+                                    isScrubbing = true
+                                    onScrubBegin?()
+                                }
                                 let fraction = max(0, min(value.location.x / w, 1.0))
                                 onJumpToTime?(totalDuration * Double(fraction))
+                            }
+                            .onEnded { _ in
+                                isScrubbing = false
+                                onScrubEnd?()
                             }
                     )
                 
@@ -1743,22 +1766,22 @@ struct KeyframeTimelineView: View {
                 
                 // ── Played portion ──
                 Capsule()
-                    .fill(Color.blue.opacity(0.6))
+                    .fill(isScrubbing ? Color.orange.opacity(0.6) : Color.blue.opacity(0.6))
                     .frame(width: max(0, w * playheadFraction), height: trackHeight)
                     .offset(y: trackY - trackHeight / 2)
                 
                 // ── Playhead indicator ──
                 Circle()
-                    .fill(Color.blue)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: .blue.opacity(0.5), radius: 3)
-                    .offset(x: w * playheadFraction - 4, y: trackY - 4)
+                    .fill(isScrubbing ? Color.orange : Color.blue)
+                    .frame(width: isScrubbing ? 10 : 8, height: isScrubbing ? 10 : 8)
+                    .shadow(color: (isScrubbing ? Color.orange : Color.blue).opacity(0.5), radius: 3)
+                    .offset(x: w * playheadFraction - (isScrubbing ? 5 : 4), y: trackY - (isScrubbing ? 5 : 4))
+                    .animation(.easeInOut(duration: 0.15), value: isScrubbing)
                 
                 // ── Keyframe markers + labels ──
                 ForEach(Array(scene.keyframes.enumerated()), id: \.element.id) { index, keyframe in
                     let fraction = totalDuration > 0 ? CGFloat(cumulativeTimes[index] / totalDuration) : CGFloat(index) / CGFloat(max(scene.keyframes.count - 1, 1))
                     let isActive = index == playhead.currentKeyframeIndex
-                    let isHeld = longPressKeyframeID == keyframe.id
                     let x = w * fraction
                     
                     VStack(spacing: 2) {
@@ -1771,28 +1794,53 @@ struct KeyframeTimelineView: View {
                         
                         // Marker diamond
                         Image(systemName: "diamond.fill")
-                            .font(.system(size: isHeld ? 14 : (isActive ? 12 : 10)))
+                            .font(.system(size: isActive ? 12 : 10))
                             .foregroundStyle(
-                                isHeld ? Color.orange :
                                 isActive ? Color.blue :
                                 Color.secondary.opacity(0.7)
                             )
-                            .scaleEffect(isHeld ? 1.3 : 1.0)
-                            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isHeld)
                     }
                     .offset(x: x - 14, y: 0)
                     .frame(width: 28)
                     .contentShape(Rectangle().size(width: 32, height: h))
-                    .onTapGesture {
-                        onJumpToKeyframe(index)
-                    }
-                    .onLongPressGesture(minimumDuration: 0.4, pressing: { pressing in
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            longPressKeyframeID = pressing ? keyframe.id : nil
-                        }
-                    }) {
+                    .onTapGesture(count: 2) {
                         onEditKeyframe(keyframe)
                     }
+                    .onTapGesture(count: 1) {
+                        onJumpToKeyframe(index)
+                    }
+                    .contextMenu {
+                        Button {
+                            onEditKeyframe(keyframe)
+                        } label: {
+                            Label("Edit", systemImage: "slider.horizontal.3")
+                        }
+                        Button {
+                            onOverwriteKeyframe?(index)
+                        } label: {
+                            Label("Overwrite with Current", systemImage: "arrow.down.circle")
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            onDeleteKeyframe?(index)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+                
+                // ── Add keyframe button at end of track ──
+                if let onAddKeyframe, !scene.keyframes.isEmpty {
+                    let endFraction: CGFloat = totalDuration > 0 ? 1.0 : 1.0
+                    Button {
+                        onAddKeyframe()
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: w * endFraction - 6, y: trackY - 6)
                 }
                 
                 // ── Duration labels between markers ──

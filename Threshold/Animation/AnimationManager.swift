@@ -335,6 +335,25 @@ final class AnimationManager {
         }
     }
     
+    /// Overwrite a keyframe at the given index with current render settings.
+    /// Preserves the keyframe's name, duration, and ID.
+    func overwriteKeyframe(at index: Int, in sceneID: UUID) {
+        guard let settings = renderSettings else { return }
+        var scene: AnimationScene?
+        if DefaultScenes.isDefault(sceneID) {
+            scene = editedDefaultOverrides[sceneID]
+                ?? DefaultScenes.all().first { $0.id == sceneID }
+        } else if let si = userScenes.firstIndex(where: { $0.id == sceneID }) {
+            scene = userScenes[si]
+        }
+        guard var s = scene, s.keyframes.indices.contains(index) else { return }
+        
+        var kf = AnimationKeyframe(from: settings, name: s.keyframes[index].name, duration: s.keyframes[index].duration)
+        kf.id = s.keyframes[index].id
+        s.keyframes[index] = kf
+        updateScene(s)
+    }
+    
     /// Update a specific keyframe in a scene
     func updateKeyframe(_ keyframe: AnimationKeyframe, in sceneID: UUID) {
         if DefaultScenes.isDefault(sceneID) {
