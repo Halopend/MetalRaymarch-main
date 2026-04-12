@@ -72,14 +72,17 @@ struct ContentView: View {
         @Bindable var appModel = appModel
         
         let isOpen = appModel.immersiveSpaceState == .open
-        ZStack {
-            preImmersiveLayout
-                .opacity(isOpen ? 0 : 1)
-                .allowsHitTesting(!isOpen)
-            immersiveLayout
-                .opacity(isOpen ? 1 : 0)
-                .allowsHitTesting(isOpen)
+        Group {
+            if isOpen {
+                immersiveLayout
+            } else {
+                preImmersiveLayout
+            }
         }
+        .environment(\.menuAdjustmentActions, MenuAdjustmentActions(
+            begin: { appModel.beginMenuAdjustment() },
+            end: { appModel.endMenuAdjustment() }
+        ))
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
         .onHover { hovering in
@@ -188,7 +191,7 @@ struct ContentView: View {
                 BuddhabrotControlsView()
             } else {
                 switch selectedTab {
-                case .formulas: FractalGridView(cache: cache)
+                case .formulas: FractalGridView(cache: cache, gestureController: appModel.gestureController)
                 case .fractal:  fractalTabContent
                 case .animate:  animateTabContent
                 case .coloring: coloringTabContent
@@ -312,6 +315,8 @@ struct ContentView: View {
     }
     
     private var fractalSpaceContent: some View {
+        let rotationEuler = eulerAngles(from: cache.liveWorldRotation)
+
         VStack(spacing: 12) {
             // ── Safety Bubble ────────────────────────────────────────────────
             VStack(spacing: 8) {
@@ -399,17 +404,16 @@ struct ContentView: View {
                 HStack {
                     Label("Rotation", systemImage: "rotate.3d").font(.caption)
                     Spacer()
-                    let euler = eulerAngles(from: cache.liveWorldRotation)
-                    Text(String(format: "%.0f° %.0f° %.0f°", euler.x, euler.y, euler.z))
+                    Text(String(format: "%.0f° %.0f° %.0f°", rotationEuler.x, rotationEuler.y, rotationEuler.z))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
 
                 EffectSliderRow(icon: "arrow.left.and.right", label: "Pitch",
                     value: Binding(
-                        get: { eulerAngles(from: cache.liveWorldRotation).x },
+                        get: { rotationEuler.x },
                         set: { newValue in
-                            var e = eulerAngles(from: cache.liveWorldRotation)
+                            var e = rotationEuler
                             e.x = newValue
                             setDetailRotationEuler(e)
                         }
@@ -420,9 +424,9 @@ struct ContentView: View {
 
                 EffectSliderRow(icon: "arrow.clockwise", label: "Yaw",
                     value: Binding(
-                        get: { eulerAngles(from: cache.liveWorldRotation).y },
+                        get: { rotationEuler.y },
                         set: { newValue in
-                            var e = eulerAngles(from: cache.liveWorldRotation)
+                            var e = rotationEuler
                             e.y = newValue
                             setDetailRotationEuler(e)
                         }
@@ -433,9 +437,9 @@ struct ContentView: View {
 
                 EffectSliderRow(icon: "arrow.up.and.down", label: "Roll",
                     value: Binding(
-                        get: { eulerAngles(from: cache.liveWorldRotation).z },
+                        get: { rotationEuler.z },
                         set: { newValue in
-                            var e = eulerAngles(from: cache.liveWorldRotation)
+                            var e = rotationEuler
                             e.z = newValue
                             setDetailRotationEuler(e)
                         }
@@ -1127,7 +1131,7 @@ struct ContentView: View {
                     Spacer()
                 }
 
-                HandTrackingStatusView()
+                HandTrackingStatusView(state: appModel.handTrackingState)
                     .padding(.vertical, 2)
 
                 Toggle("Enable Hand Gesture Controls", isOn: Binding(

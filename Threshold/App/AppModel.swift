@@ -17,6 +17,17 @@ final class RenderMetrics {
     var fps: Double = 0
 }
 
+/// High-frequency hand tracking UI state isolated from AppModel so that
+/// ~15 Hz updates (gestureStatus, leftHandTracked, rightHandTracked) only
+/// invalidate HandTrackingStatusView, not every AppModel observer.
+@MainActor
+@Observable
+final class HandTrackingState {
+    var gestureStatus: String = "Waiting for immersive space…"
+    var leftHandTracked: Bool = false
+    var rightHandTracked: Bool = false
+}
+
 @MainActor
 @Observable
 class AppModel {
@@ -56,6 +67,11 @@ class AppModel {
     /// not all AppModel observers.
     let renderMetrics = RenderMetrics()
 
+    /// Isolated container for high-frequency hand tracking UI state.
+    /// Reading handTrackingState.gestureStatus only invalidates views that subscribe
+    /// to HandTrackingState, not all AppModel observers.
+    let handTrackingState = HandTrackingState()
+
     /// Whether the renderer is currently using a specialized (compiled) pipeline vs generic fallback
     @ObservationIgnored nonisolated(unsafe) var isUsingSpecializedPipeline: Bool = false
     
@@ -89,12 +105,21 @@ class AppModel {
             }
         }
     }
-    var leftHandTracked: Bool = false
-    var rightHandTracked: Bool = false
-    
-    /// Diagnostic string describing why gestures may not be working.
-    /// Updated by the render loop and displayed in the Gesture Controls UI section.
-    var gestureStatus: String = "Waiting for immersive space…"
+    /// Forwarding accessors for hand tracking UI state.
+    /// Reads/writes route to the isolated `handTrackingState` container so that
+    /// high-frequency updates don't invalidate all AppModel observers.
+    var leftHandTracked: Bool {
+        get { handTrackingState.leftHandTracked }
+        set { handTrackingState.leftHandTracked = newValue }
+    }
+    var rightHandTracked: Bool {
+        get { handTrackingState.rightHandTracked }
+        set { handTrackingState.rightHandTracked = newValue }
+    }
+    var gestureStatus: String {
+        get { handTrackingState.gestureStatus }
+        set { handTrackingState.gestureStatus = newValue }
+    }
     
     /// Whether the hand tracking ARKit provider is actively running.
     /// Only written by the render loop, never read by SwiftUI views — skip observation.

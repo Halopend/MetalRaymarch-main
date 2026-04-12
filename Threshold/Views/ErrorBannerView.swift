@@ -10,10 +10,10 @@
 import SwiftUI
 
 struct ErrorBannerView: View {
-    @Environment(AppModel.self) private var appModel
+    var errorReporter: ErrorReporter
 
     var body: some View {
-        if let error = appModel.errorReporter.currentError {
+        if let error = errorReporter.currentError {
             HStack(spacing: 10) {
                 Image(systemName: iconName(for: error.severity))
                     .foregroundStyle(iconColor(for: error.severity))
@@ -26,7 +26,7 @@ struct ErrorBannerView: View {
 
                 Button {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        appModel.errorReporter.dismiss()
+                        errorReporter.dismiss()
                     }
                 } label: {
                     Image(systemName: "xmark.circle.fill")

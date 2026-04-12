@@ -23,7 +23,7 @@ struct GestureSettingsView: View {
                 Spacer()
             }
 
-            HandTrackingStatusView()
+            HandTrackingStatusView(state: appModel.handTrackingState)
                 .padding(.vertical, 2)
 
             Toggle("Enable Hand Gesture Controls", isOn: Binding(

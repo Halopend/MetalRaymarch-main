@@ -64,11 +64,35 @@ struct SharePlayControlsView: View {
     private var buttonTint: Color { switch shareSession.state { case .inactive: return .blue; default: return .red } }
 }
 
+// MARK: - Menu Adjustment Environment
+
+/// Lightweight environment value carrying only the begin/end slider-editing
+/// callbacks so EffectSliderRow doesn't subscribe to the full AppModel.
+struct MenuAdjustmentActions: Sendable {
+    var begin: @Sendable @MainActor () -> Void = {}
+    var end: @Sendable @MainActor () -> Void = {}
+}
+
+extension MenuAdjustmentActions: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+
+private struct MenuAdjustmentActionsKey: EnvironmentKey {
+    static let defaultValue = MenuAdjustmentActions()
+}
+
+extension EnvironmentValues {
+    var menuAdjustmentActions: MenuAdjustmentActions {
+        get { self[MenuAdjustmentActionsKey.self] }
+        set { self[MenuAdjustmentActionsKey.self] = newValue }
+    }
+}
+
 // MARK: - Condensed Effect Slider Row
 
 /// Single-line effect row: icon + label | slider | on/off toggle
 struct EffectSliderRow: View {
-    @Environment(AppModel.self) private var appModel
+    @Environment(\.menuAdjustmentActions) private var menuActions
     let icon: String
     let label: String
     @Binding var value: Float
@@ -90,9 +114,9 @@ struct EffectSliderRow: View {
                 .lineLimit(1)
             Slider(value: $value, in: range, onEditingChanged: { editing in
                 if editing {
-                    appModel.beginMenuAdjustment()
+                    menuActions.begin()
                 } else {
-                    appModel.endMenuAdjustment()
+                    menuActions.end()
                 }
             })
             .disabled(!enabled)

@@ -8,27 +8,35 @@
 import SwiftUI
 
 struct FractalGridView: View {
-    @Environment(AppModel.self) private var appModel
     var cache: UISettingsCache
+    let gestureController: GestureController?
 
     private let columns = [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 12)]
 
-    /// Categories in display order, derived from descriptors.
-    private var categorizedTypes: [(category: String, types: [FractalModelType])] {
+    /// Categories in display order, derived once from the selectable descriptors.
+    private let categorizedTypes: [(category: String, types: [FractalModelType])]
+
+    init(cache: UISettingsCache, gestureController: GestureController?) {
+        self.cache = cache
+        self.gestureController = gestureController
+        self.categorizedTypes = Self.makeCategorizedTypes()
+    }
+
+    private static func makeCategorizedTypes() -> [(category: String, types: [FractalModelType])] {
         let selectable = FractalModelType.selectableCases
         var seen: [String: [FractalModelType]] = [:]
         var order: [String] = []
         for type in selectable {
-            let cat = type.category
-            if seen[cat] == nil { order.append(cat) }
-            seen[cat, default: []].append(type)
+            let category = type.category
+            if seen[category] == nil { order.append(category) }
+            seen[category, default: []].append(type)
         }
-        return order.map { (category: $0, types: seen[$0]!) }
+        return order.map { category in (category: category, types: seen[category] ?? []) }
     }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 ForEach(categorizedTypes, id: \.category) { group in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(group.category)
@@ -43,7 +51,7 @@ struct FractalGridView: View {
                                     isSelected: type == cache.fractalType
                                 ) {
                                     cache.fractalType = type
-                                    cache.pushFractalType(type, gestureController: appModel.gestureController)
+                                    cache.pushFractalType(type, gestureController: gestureController)
                                 }
                             }
                         }

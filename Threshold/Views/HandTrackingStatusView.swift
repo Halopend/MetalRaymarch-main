@@ -10,10 +10,10 @@
 import SwiftUI
 
 struct HandTrackingStatusView: View {
-    @Environment(AppModel.self) private var appModel
+    var state: HandTrackingState
 
     private var statusColor: Color {
-        let status = appModel.gestureStatus
+        let status = state.gestureStatus
         if status.hasPrefix("Active:") { return .green }
         if status.hasPrefix("Ready") { return .cyan }
         if status.contains("Suppressed") { return .yellow }
@@ -29,18 +29,18 @@ struct HandTrackingStatusView: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
-            Text(appModel.gestureStatus)
+            Text(state.gestureStatus)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            if appModel.leftHandTracked || appModel.rightHandTracked {
+            if state.leftHandTracked || state.rightHandTracked {
                 HStack(spacing: 4) {
-                    if appModel.leftHandTracked {
+                    if state.leftHandTracked {
                         Image(systemName: "hand.raised.fill")
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }
-                    if appModel.rightHandTracked {
+                    if state.rightHandTracked {
                         Image(systemName: "hand.raised.fill")
                             .font(.caption2)
                             .foregroundStyle(.green)

@@ -1163,15 +1163,16 @@ actor Renderer {
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
             blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
-            springDisplacement: settingsSnapshot.springDisplacement,
             springStretch: simd_length(settingsSnapshot.springDisplacement),
-            springAnchorNDC: SIMD2<Float>(0.7, -0.7),  // Bottom-right corner in NDC
             springVisible: settingsSnapshot.springActive ? 1 : 0,
             springRestRadius: 0.06,
+            _pad_spring: 0,
+            springDisplacement: settingsSnapshot.springDisplacement,
+            _pad_spring2: 0,
+            springAnchorNDC: SIMD2<Float>(0.7, -0.7),  // Bottom-right corner in NDC
             jitterOffset: .zero,
             accumulationFrame: 0,
             temporalReprojectionEnabled: temporalFrameCount > 0 ? 1 : 0,
-            _pad_tile: (0, 0),
             formulaParams: settingsSnapshot.formulaParams,
             currentViewProjMatrix: currentViewProj,
             previousViewProjMatrix: previousViewProjMatrices[viewIndex],

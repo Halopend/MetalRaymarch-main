@@ -13,6 +13,43 @@ extension AppModel {
     static let animationPlayerWindowID = "AnimationPlayerWindow"
 }
 
+fileprivate struct SceneTimingSnapshot {
+    let keyframes: [AnimationKeyframe]
+    let cumulativeTimes: [TimeInterval]
+    let totalDuration: TimeInterval
+
+    init(scene: AnimationScene) {
+        self.keyframes = scene.keyframes
+
+        var cumulativeTimes: [TimeInterval] = []
+        cumulativeTimes.reserveCapacity(scene.keyframes.count)
+
+        var accumulated: TimeInterval = 0
+        for keyframe in scene.keyframes {
+            cumulativeTimes.append(accumulated)
+            accumulated += keyframe.duration
+        }
+
+        self.cumulativeTimes = cumulativeTimes
+        self.totalDuration = accumulated
+    }
+
+    func currentTime(for playhead: AnimationPlayhead) -> TimeInterval {
+        guard !keyframes.isEmpty, totalDuration > 0 else { return 0 }
+        let index = min(playhead.currentKeyframeIndex, cumulativeTimes.count - 1)
+        return min(cumulativeTimes[index] + playhead.elapsedInSegment, totalDuration)
+    }
+
+    func progressFraction(for playhead: AnimationPlayhead) -> CGFloat {
+        guard totalDuration > 0 else { return 0 }
+        return CGFloat(min(currentTime(for: playhead) / totalDuration, 1.0))
+    }
+
+    func progressText(for playhead: AnimationPlayhead, formatTime: (TimeInterval) -> String) -> String {
+        "\(formatTime(currentTime(for: playhead))) / \(formatTime(totalDuration))"
+    }
+}
+
 // MARK: - Animation Player Window
 
 /// Utility window for animation playback controls, positioned below the main menu.
@@ -43,6 +80,9 @@ private struct AnimationPlayerContent: View {
     @State private var wasPlayingBeforeScrub = false
     
     var body: some View {
+        let currentScene = animationManager.currentScene
+        let timing = currentScene.map(SceneTimingSnapshot.init(scene:))
+
         VStack(spacing: 10) {
             // ── Scene selector ──
             HStack {
@@ -72,29 +112,29 @@ private struct AnimationPlayerContent: View {
                 
                 Spacer()
                 
-                if let scene = animationManager.currentScene {
-                    Text(progressText(for: scene))
+                if let timing {
+                    Text(timing.progressText(for: animationManager.uiPlayhead, formatTime: formatTime))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
             
             // ── Timeline ──
-            if let scene = animationManager.currentScene {
+            if let currentScene, let timing {
                 KeyframeTimelineView(
-                    scene: scene,
+                    timing: timing,
                     playhead: animationManager.uiPlayhead,
                     onEditKeyframe: { keyframe in editingKeyframe = keyframe },
                     onJumpToKeyframe: { index in animationManager.jumpToKeyframe(index) },
                     onJumpToTime: { time in animationManager.jumpToTime(time) },
                     onAddKeyframe: {
-                        animationManager.addKeyframeToScene(scene.id, duration: 2.0)
+                        animationManager.addKeyframeToScene(currentScene.id, duration: 2.0)
                     },
                     onDeleteKeyframe: { index in
-                        animationManager.removeKeyframe(at: index, from: scene.id)
+                        animationManager.removeKeyframe(at: index, from: currentScene.id)
                     },
                     onOverwriteKeyframe: { index in
-                        animationManager.overwriteKeyframe(at: index, in: scene.id)
+                        animationManager.overwriteKeyframe(at: index, in: currentScene.id)
                     },
                     onScrubBegin: {
                         wasPlayingBeforeScrub = animationManager.isPlaying
@@ -193,23 +233,6 @@ private struct AnimationPlayerContent: View {
                 onCancel: { editingKeyframe = nil }
             )
         }
-    }
-    
-    private func progressText(for scene: AnimationScene) -> String {
-        let current = currentTime(for: scene)
-        let total = scene.totalDuration
-        return "\(formatTime(current)) / \(formatTime(total))"
-    }
-    
-    private func currentTime(for scene: AnimationScene) -> TimeInterval {
-        var time: TimeInterval = 0
-        for i in 0..<animationManager.uiPlayhead.currentKeyframeIndex {
-            if i < scene.keyframes.count {
-                time += scene.keyframes[i].duration
-            }
-        }
-        time += animationManager.uiPlayhead.elapsedInSegment
-        return time
     }
     
     private func formatTime(_ time: TimeInterval) -> String {
@@ -1516,21 +1539,24 @@ struct AnimationPlaybackControls: View {
     @State private var wasPlayingBeforeScrub = false
     
     var body: some View {
+        let currentScene = animationManager.currentScene
+        let timing = currentScene.map(SceneTimingSnapshot.init(scene:))
+
         VStack(spacing: 8) {
-            if let scene = animationManager.currentScene {
+            if let currentScene, let timing {
                 // Scene name and progress
                 HStack {
-                    Text(scene.name)
+                    Text(currentScene.name)
                         .font(.caption.bold())
                     Spacer()
-                    Text(progressText)
+                    Text(timing.progressText(for: animationManager.uiPlayhead, formatTime: formatTime))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 
                 // ── Keyframe Timeline ──
                 KeyframeTimelineView(
-                    scene: scene,
+                    timing: timing,
                     playhead: animationManager.uiPlayhead,
                     onEditKeyframe: { keyframe in
                         editingKeyframe = keyframe
@@ -1542,13 +1568,13 @@ struct AnimationPlaybackControls: View {
                         animationManager.jumpToTime(time)
                     },
                     onAddKeyframe: {
-                        animationManager.addKeyframeToScene(scene.id, duration: 2.0)
+                        animationManager.addKeyframeToScene(currentScene.id, duration: 2.0)
                     },
                     onDeleteKeyframe: { index in
-                        animationManager.removeKeyframe(at: index, from: scene.id)
+                        animationManager.removeKeyframe(at: index, from: currentScene.id)
                     },
                     onOverwriteKeyframe: { index in
-                        animationManager.overwriteKeyframe(at: index, in: scene.id)
+                        animationManager.overwriteKeyframe(at: index, in: currentScene.id)
                     },
                     onScrubBegin: {
                         wasPlayingBeforeScrub = animationManager.isPlaying
@@ -1653,26 +1679,6 @@ struct AnimationPlaybackControls: View {
         }
     }
     
-    private var progressText: String {
-        guard let scene = animationManager.currentScene else { return "" }
-        let current = currentTime
-        let total = scene.totalDuration
-        return "\(formatTime(current)) / \(formatTime(total))"
-    }
-    
-    private var currentTime: TimeInterval {
-        guard let scene = animationManager.currentScene else { return 0 }
-        
-        var time: TimeInterval = 0
-        for i in 0..<animationManager.uiPlayhead.currentKeyframeIndex {
-            if i < scene.keyframes.count {
-                time += scene.keyframes[i].duration
-            }
-        }
-        time += animationManager.uiPlayhead.elapsedInSegment
-        return time
-    }
-    
     private func formatTime(_ time: TimeInterval) -> String {
         let seconds = Int(time) % 60
         let tenths = Int((time - Double(Int(time))) * 10)
@@ -1686,7 +1692,7 @@ struct AnimationPlaybackControls: View {
 /// Supports: drag-to-scrub (auto-pauses during drag, resumes after), tap to jump,
 /// double-tap to edit keyframe, context menu for keyframe actions.
 struct KeyframeTimelineView: View {
-    let scene: AnimationScene
+    let timing: SceneTimingSnapshot
     let playhead: AnimationPlayhead
     let onEditKeyframe: (AnimationKeyframe) -> Void
     let onJumpToKeyframe: (Int) -> Void
@@ -1698,32 +1704,13 @@ struct KeyframeTimelineView: View {
     var onScrubEnd: (() -> Void)? = nil
     
     @State private var isScrubbing = false
-    
-    /// Cumulative time at the start of each keyframe segment
-    private var cumulativeTimes: [TimeInterval] {
-        var times: [TimeInterval] = []
-        var t: TimeInterval = 0
-        for kf in scene.keyframes {
-            times.append(t)
-            t += kf.duration
-        }
-        return times
-    }
-    
-    private var totalDuration: TimeInterval {
-        scene.totalDuration
-    }
+    @State private var lastScrubbedTime: TimeInterval?
+
+    private let scrubUpdateThreshold: TimeInterval = 0.01
     
     /// Current playhead position as fraction 0…1
     private var playheadFraction: CGFloat {
-        guard totalDuration > 0 else { return 0 }
-        var time: TimeInterval = 0
-        let idx = playhead.currentKeyframeIndex
-        for i in 0..<min(idx, scene.keyframes.count) {
-            time += scene.keyframes[i].duration
-        }
-        time += playhead.elapsedInSegment
-        return CGFloat(min(time / totalDuration, 1.0))
+        timing.progressFraction(for: playhead)
     }
     
     var body: some View {
@@ -1743,16 +1730,23 @@ struct KeyframeTimelineView: View {
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
-                                guard totalDuration > 0 else { return }
+                                guard timing.totalDuration > 0 else { return }
                                 if !isScrubbing {
                                     isScrubbing = true
                                     onScrubBegin?()
                                 }
                                 let fraction = max(0, min(value.location.x / w, 1.0))
-                                onJumpToTime?(totalDuration * Double(fraction))
+                                let targetTime = timing.totalDuration * Double(fraction)
+                                if let lastScrubbedTime,
+                                   abs(targetTime - lastScrubbedTime) < scrubUpdateThreshold {
+                                    return
+                                }
+                                lastScrubbedTime = targetTime
+                                onJumpToTime?(targetTime)
                             }
                             .onEnded { _ in
                                 isScrubbing = false
+                                lastScrubbedTime = nil
                                 onScrubEnd?()
                             }
                     )
@@ -1779,8 +1773,8 @@ struct KeyframeTimelineView: View {
                     .animation(.easeInOut(duration: 0.15), value: isScrubbing)
                 
                 // ── Keyframe markers + labels ──
-                ForEach(Array(scene.keyframes.enumerated()), id: \.element.id) { index, keyframe in
-                    let fraction = totalDuration > 0 ? CGFloat(cumulativeTimes[index] / totalDuration) : CGFloat(index) / CGFloat(max(scene.keyframes.count - 1, 1))
+                ForEach(Array(timing.keyframes.enumerated()), id: \.element.id) { index, keyframe in
+                    let fraction = timing.totalDuration > 0 ? CGFloat(timing.cumulativeTimes[index] / timing.totalDuration) : CGFloat(index) / CGFloat(max(timing.keyframes.count - 1, 1))
                     let isActive = index == playhead.currentKeyframeIndex
                     let x = w * fraction
                     
@@ -1830,8 +1824,8 @@ struct KeyframeTimelineView: View {
                 }
                 
                 // ── Add keyframe button at end of track ──
-                if let onAddKeyframe, !scene.keyframes.isEmpty {
-                    let endFraction: CGFloat = totalDuration > 0 ? 1.0 : 1.0
+                if let onAddKeyframe, !timing.keyframes.isEmpty {
+                    let endFraction: CGFloat = timing.totalDuration > 0 ? 1.0 : 1.0
                     Button {
                         onAddKeyframe()
                     } label: {
@@ -1844,15 +1838,15 @@ struct KeyframeTimelineView: View {
                 }
                 
                 // ── Duration labels between markers ──
-                if scene.keyframes.count >= 2 {
-                    ForEach(1..<scene.keyframes.count, id: \.self) { index in
-                        let prevFrac = totalDuration > 0 ? CGFloat(cumulativeTimes[index - 1] / totalDuration) : CGFloat(index - 1) / CGFloat(max(scene.keyframes.count - 1, 1))
-                        let curFrac = totalDuration > 0 ? CGFloat(cumulativeTimes[index] / totalDuration) : CGFloat(index) / CGFloat(max(scene.keyframes.count - 1, 1))
+                if timing.keyframes.count >= 2 {
+                    ForEach(1..<timing.keyframes.count, id: \.self) { index in
+                        let prevFrac = timing.totalDuration > 0 ? CGFloat(timing.cumulativeTimes[index - 1] / timing.totalDuration) : CGFloat(index - 1) / CGFloat(max(timing.keyframes.count - 1, 1))
+                        let curFrac = timing.totalDuration > 0 ? CGFloat(timing.cumulativeTimes[index] / timing.totalDuration) : CGFloat(index) / CGFloat(max(timing.keyframes.count - 1, 1))
                         let midX = w * (prevFrac + curFrac) / 2
                         let segWidth = w * (curFrac - prevFrac)
                         
                         if segWidth > 30 {
-                            Text(formatSegmentDuration(scene.keyframes[index].duration))
+                            Text(formatSegmentDuration(timing.keyframes[index].duration))
                                 .font(.system(size: 8))
                                 .foregroundStyle(.tertiary)
                                 .offset(x: midX - 12, y: trackY + 6)
