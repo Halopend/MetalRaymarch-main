@@ -8,6 +8,9 @@
 import Foundation
 
 enum GestureDefaults {
+    // MARK: - Navigation mode
+    static let useSpringBlob = false
+
     // MARK: - Sensitivity & smoothing
     static let gestureSensitivity: Float = 5.0
     static let useRelativeGestures = false

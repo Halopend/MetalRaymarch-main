@@ -33,6 +33,10 @@ struct StoredFractalDefaults: Codable {
 @MainActor
 enum FractalDefaultsStore {
 
+    /// Keep the decoded defaults map in memory so fractal selection does not
+    /// pay JSON decode and UserDefaults I/O on the main thread every time.
+    private static var cachedStoredDefaultsMap: [String: StoredFractalDefaults]?
+
     // MARK: - FormulaParams Serialization
 
     static func serializeFormulaParams(_ formulaParams: FormulaParams) -> Data {
@@ -55,12 +59,23 @@ enum FractalDefaultsStore {
     // MARK: - Defaults Map I/O
 
     static func loadStoredDefaultsMap() -> [String: StoredFractalDefaults] {
-        guard let data = UserDefaults.standard.data(forKey: customFractalDefaultsKey) else { return [:] }
-        return (try? JSONDecoder().decode([String: StoredFractalDefaults].self, from: data)) ?? [:]
+        if let cachedStoredDefaultsMap {
+            return cachedStoredDefaultsMap
+        }
+
+        guard let data = UserDefaults.standard.data(forKey: customFractalDefaultsKey) else {
+            cachedStoredDefaultsMap = [:]
+            return [:]
+        }
+
+        let decoded = (try? JSONDecoder().decode([String: StoredFractalDefaults].self, from: data)) ?? [:]
+        cachedStoredDefaultsMap = decoded
+        return decoded
     }
 
     static func saveStoredDefaultsMap(_ defaultsMap: [String: StoredFractalDefaults]) {
         guard let data = try? JSONEncoder().encode(defaultsMap) else { return }
+        cachedStoredDefaultsMap = defaultsMap
         UserDefaults.standard.set(data, forKey: customFractalDefaultsKey)
     }
 

@@ -48,6 +48,7 @@
 FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams fp, int iterations) {
     switch (fractalType) {
         case FractalTypeMandelbulb:
+        case FractalTypeMandelbulbJulia:
             return DE_Mandelbulb_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeMenger:
             return DE_Menger_Dist(pos, fp, fp.rotMatrix1, iterations);
@@ -84,6 +85,7 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
                                       thread OrbitData& orbit) {
     switch (fractalType) {
         case FractalTypeMandelbulb:
+        case FractalTypeMandelbulbJulia:
             return DE_Mandelbulb(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeMenger:
             return DE_Menger(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);

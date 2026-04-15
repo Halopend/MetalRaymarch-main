@@ -69,6 +69,7 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMenger            = 2,
     FractalTypeSierpinski        = 3,
     FractalTypeDodecahedron      = 4,
+    FractalTypeMandelbulbJulia   = 5,
     FractalTypeQuaternionJulia   = 6,
     FractalTypeSphereSponge      = 10,
     FractalTypeOctahedron        = 11,
@@ -230,6 +231,15 @@ typedef struct
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
     
+    // === SPRING BLOB NAVIGATION WIDGET ===
+    float springDisplacementX;        // Spring displacement X (NDC-ish space)
+    float springDisplacementY;        // Spring displacement Y
+    float springDisplacementZ;        // Spring displacement Z
+    float springStretch;              // 0 = rest, 1 = fully stretched
+    vector_float2 springAnchorNDC;    // Screen-space anchor position (NDC: -1 to 1)
+    int springVisible;                // 0 = hidden, 1 = visible
+    float springRestRadius;           // Blob rest radius in NDC units
+    
     vector_float2 jitterOffset; // Sub-pixel jitter in pixels (±0.5 range)
     vector_float2 _pad_uniforms; // Align to 16 bytes
     
@@ -283,17 +293,19 @@ typedef struct
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
     float blendFactor;           // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
     // === SPRING BLOB NAVIGATION WIDGET ===
+    // Packed as scalars to avoid float3 alignment issues between Swift and Metal
+    float springDisplacementX;        // Spring displacement X (NDC-ish space)
+    float springDisplacementY;        // Spring displacement Y
+    float springDisplacementZ;        // Spring displacement Z
     float springStretch;              // 0 = rest, 1 = fully stretched
+    vector_float2 springAnchorNDC;    // Screen-space anchor position (NDC: -1 to 1)
     int springVisible;                // 0 = hidden, 1 = visible
     float springRestRadius;           // Blob rest radius in NDC units
-    float _pad_spring;                // Align springDisplacement to 16 bytes
-    vector_float3 springDisplacement; // XYZ displacement of spring from rest (in NDC-ish space)
-    float _pad_spring2;               // float3 occupies 16 bytes in simd
-    vector_float2 springAnchorNDC;    // Screen-space anchor position (NDC: -1 to 1)
     // === GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA ===
     vector_float2 jitterOffset;  // Sub-pixel jitter in pixels (±0.5 range)
     int accumulationFrame;       // Frame count since last parameter change (0 = first frame)
     int temporalReprojectionEnabled;         // 0 = off (first frame / parameter change), 1 = on
+    float _pad_tile[2];          // Align to 16 bytes
     
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     

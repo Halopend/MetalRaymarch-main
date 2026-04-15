@@ -12,6 +12,9 @@ struct GestureConfig: Codable, Equatable, Sendable {
     // 9-slot gesture binding dictionary (hand × finger)
     var gestureBindings: [String: GestureActionBinding] = GestureDefaults.defaultBindings
 
+    // Navigation mode
+    var useSpringBlob: Bool = GestureDefaults.useSpringBlob
+
     // Sensitivity & smoothing
     var gestureSensitivity: Float = GestureDefaults.gestureSensitivity
     var useRelativeGestures: Bool = GestureDefaults.useRelativeGestures

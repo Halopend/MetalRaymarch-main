@@ -52,6 +52,13 @@ struct FractalPreset: Codable, Identifiable {
     var resolutionScale: Float?
     var tileSize: Int?
     
+    // Orientation & detail zoom
+    var worldRotationX: Float?
+    var worldRotationY: Float?
+    var worldRotationZ: Float?
+    var worldRotationW: Float?
+    var detailScale: Float?
+    
     // Safety bubble
     var safetyBubbleEnabled: Bool?
     var safetyBubbleRadius: Float?
@@ -85,6 +92,7 @@ struct FractalPreset: Codable, Identifiable {
         case fractalType, colorScheme, colorSchemeSaturation, colorSchemeContrast, colorSchemeGamma
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
+        case worldRotationX, worldRotationY, worldRotationZ, worldRotationW, detailScale
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
@@ -155,6 +163,11 @@ struct FractalPreset: Codable, Identifiable {
         formulaParamValues = try container.decodeIfPresent([Float].self, forKey: .formulaParamValues)
         resolutionScale = try container.decodeIfPresent(Float.self, forKey: .resolutionScale)
         tileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)
+        worldRotationX = try container.decodeIfPresent(Float.self, forKey: .worldRotationX)
+        worldRotationY = try container.decodeIfPresent(Float.self, forKey: .worldRotationY)
+        worldRotationZ = try container.decodeIfPresent(Float.self, forKey: .worldRotationZ)
+        worldRotationW = try container.decodeIfPresent(Float.self, forKey: .worldRotationW)
+        detailScale = try container.decodeIfPresent(Float.self, forKey: .detailScale)
         safetyBubbleEnabled = try container.decodeIfPresent(Bool.self, forKey: .safetyBubbleEnabled)
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         safetyBubbleShape = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
@@ -211,6 +224,11 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(formulaParamValues, forKey: .formulaParamValues)
         try container.encodeIfPresent(resolutionScale, forKey: .resolutionScale)
         try container.encodeIfPresent(tileSize, forKey: .tileSize)
+        try container.encodeIfPresent(worldRotationX, forKey: .worldRotationX)
+        try container.encodeIfPresent(worldRotationY, forKey: .worldRotationY)
+        try container.encodeIfPresent(worldRotationZ, forKey: .worldRotationZ)
+        try container.encodeIfPresent(worldRotationW, forKey: .worldRotationW)
+        try container.encodeIfPresent(detailScale, forKey: .detailScale)
         try container.encodeIfPresent(safetyBubbleEnabled, forKey: .safetyBubbleEnabled)
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
         try container.encodeIfPresent(safetyBubbleShape, forKey: .safetyBubbleShape)
@@ -318,6 +336,13 @@ struct FractalPreset: Codable, Identifiable {
         preset.sphereRadius = geo.sphereRadius
         preset.position = geo.position
         preset.scale = geo.scale
+        // Capture orientation and detail zoom
+        let rot = geo.worldRotation
+        preset.worldRotationX = rot.imag.x
+        preset.worldRotationY = rot.imag.y
+        preset.worldRotationZ = rot.imag.z
+        preset.worldRotationW = rot.real
+        preset.detailScale = geo.detailScale
         // Capture formula params as [Float] for Codable
         var vals = [Float](repeating: 0, count: 16)
         for i in 0..<16 { vals[i] = FormulaCatalog.getParam(geo.formulaParams, index: i) }
@@ -418,12 +443,20 @@ struct FractalPreset: Codable, Identifiable {
             position: position
         )
         
-        // Reset detail transform to identity when loading a preset
-        let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
-        settings.worldRotation = identity
-        settings.targetWorldRotation = identity
-        settings.detailScale = 1.0
-        settings.targetDetailScale = 1.0
+        // Restore orientation and detail zoom (fall back to identity for older presets)
+        if let rx = worldRotationX, let ry = worldRotationY,
+           let rz = worldRotationZ, let rw = worldRotationW {
+            let q = simd_quatf(ix: rx, iy: ry, iz: rz, r: rw)
+            settings.worldRotation = q
+            settings.targetWorldRotation = q
+        } else {
+            let identity = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            settings.worldRotation = identity
+            settings.targetWorldRotation = identity
+        }
+        let ds = detailScale ?? 1.0
+        settings.detailScale = ds
+        settings.targetDetailScale = ds
         
         if includePerformance {
             if let resolutionScale = resolutionScale {

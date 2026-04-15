@@ -77,6 +77,11 @@ protocol FractalTypeDescriptor: Sendable {
     /// parameter triplet groups (e.g. "Mins", "Maxs").  Resolved from the
     /// formula catalog when the fractal type is switched.
     var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] { get }
+
+    /// Per-type default gesture bindings mapping single-hand slots to scalar
+    /// formula parameters (e.g. "Power", "PolarRotation").  Resolved from the
+    /// formula catalog when the fractal type is switched.
+    var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] { get }
 }
 
 // MARK: - Shared constants
@@ -108,6 +113,7 @@ extension FractalTypeDescriptor {
     var defaultViewState: FractalViewDefaults { FractalViewDefaults() }
     var defaultShapeParams: FractalShapeDefaults { FractalShapeDefaults() }
     var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] { [] }
+    var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] { [] }
 }
 
 // MARK: - Registry
@@ -119,6 +125,7 @@ enum FractalTypeRegistry {
         MengerDescriptor(),
         SierpinskiDescriptor(),
         DodecahedronDescriptor(),
+        MandelbulbJuliaDescriptor(),
         QuaternionJuliaDescriptor(),
         SphereSpongeDescriptor(),
         OctahedronDescriptor(),
@@ -197,6 +204,12 @@ private struct MandelbulbDescriptor: FractalTypeDescriptor {
             safetyBubbleEnabled: false
         )
     }
+    var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
+        [
+            (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
+            (GestureSlot(hand: .left, finger: .index), "Power"),
+        ]
+    }
 }
 
 private struct MengerDescriptor: FractalTypeDescriptor {
@@ -250,6 +263,52 @@ private struct DodecahedronDescriptor: FractalTypeDescriptor {
     }
 }
 
+private struct MandelbulbJuliaDescriptor: FractalTypeDescriptor {
+    let rawValue: Int32 = 5
+    let displayName = "Mandelbulb Julia"
+    let icon = "globe.badge.chevron.backward"
+    let category = "Power / Quaternion"
+    let codableString = "mandelbulbJulia"
+    let isSelectableInUI = true
+    let supportedCoreGestureActions = standardCoreGestureActions
+    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
+    func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        fp.params.0 = 8.0   // Power
+        fp.params.1 = 4.0   // Bailout
+        fp.params.2 = 1.0   // DerivBias
+        fp.params.8 = 1.0   // Julia enabled
+        fp.params.9 = 0.2   // JuliaC.x
+        fp.params.10 = -0.15 // JuliaC.y
+        fp.params.11 = 0.35  // JuliaC.z
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+    var grabScaleClamp: ClosedRange<Float> { 0.0005...2000.0 }
+    var defaultViewState: FractalViewDefaults {
+        let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+        let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
+        let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
+        return FractalViewDefaults(
+            position: SIMD3<Float>(0.1, 0.1, -0.9),
+            rotation: simd_normalize(qz * qy * qx),
+            detailScale: 0.25,
+            safetyBubbleEnabled: false
+        )
+    }
+    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
+        [
+            (GestureSlot(hand: .right, finger: .middle), "JuliaC"),
+        ]
+    }
+    var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] {
+        [
+            (GestureSlot(hand: .left, finger: .middle), "PolarRotation"),
+            (GestureSlot(hand: .left, finger: .index), "Power"),
+        ]
+    }
+}
+
 private struct QuaternionJuliaDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 6
     let displayName = "Quaternion Julia"
@@ -265,13 +324,18 @@ private struct QuaternionJuliaDescriptor: FractalTypeDescriptor {
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }
+    var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] {
+        [
+            (GestureSlot(hand: .right, finger: .middle), "C"),
+        ]
+    }
 }
 
 private struct SphereSpongeDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 10
     let displayName = "Sphere Sponge"
     let icon = "circle.grid.3x3"
-    let category = "Julia Box"
+    let category = "Hybrid Folds"
     let codableString = "sphereSponge"
     let isSelectableInUI = true
     let supportedCoreGestureActions = standardCoreGestureActions
@@ -322,7 +386,7 @@ private struct TheliPseudoKleinianDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 15
     let displayName = "Theli Pseudo Kleinian"
     let icon = "cube"
-    let category = "Julia Box"
+    let category = "Hybrid Folds"
     let codableString = "theliPseudoKleinian"
     let isSelectableInUI = false
     let supportedCoreGestureActions = standardCoreGestureActions
@@ -344,7 +408,7 @@ private struct KleinianDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 17
     let displayName = "Kleinian"
     let icon = "wand.and.stars"
-    let category = "Julia Box"
+    let category = "Hybrid Folds"
     let codableString = "kleinian"
     let isSelectableInUI = true
     let supportedCoreGestureActions = standardCoreGestureActions
@@ -370,7 +434,7 @@ private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 20
     let displayName = "Box Sphere Folder"
     let icon = "cube.transparent"
-    let category = "Julia Box"
+    let category = "Hybrid Folds"
     let codableString = "boxSphereFolder"
     let isSelectableInUI = true
     let supportedCoreGestureActions = standardCoreGestureActions

@@ -172,6 +172,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _leftHandedMode: Bool = UserDefaults.standard.bool(forKey: "leftHandedMode")
 
     // === SPRING BLOB NAVIGATION ===
+    private var _useSpringBlob: Bool = loadGestureBool("useSpringBlob", default: GestureDefaults.useSpringBlob)
     // Spring physics state — driven by translate gesture, ticked in Renderer
     private var _springDisplacement: SIMD3<Float> = .zero  // Current displacement from rest
     private var _springVelocity: SIMD3<Float> = .zero      // Current velocity
@@ -663,6 +664,34 @@ final class RenderSettings: @unchecked Sendable {
                         _gestureBindings[bothKey] = .core(.none)
                     }
                 }
+
+                // Apply per-type default scalar bindings (e.g. Mandelbulb Power, PolarRotation).
+                let scalarDefaults = desc.defaultScalarBindings
+                if !scalarDefaults.isEmpty,
+                   let catDesc = FormulaCatalog.shared.descriptor(for: newValue) {
+                    let paramLookup = Dictionary(uniqueKeysWithValues: catDesc.params.map { ($0.name, $0) })
+                    for (slot, paramName) in scalarDefaults {
+                        let key = slot.persistenceKey
+                        let current = _gestureBindings[key] ?? .core(.none)
+                        guard case .core(.none) = current else { continue }
+                        guard let param = paramLookup[paramName], !(param.isBool ?? false) else { continue }
+                        let nodeID = ParameterTargetID.formula(fractalType: newValue, formulaIndex: param.index, name: param.name)
+                        let binding = GestureBindableParameter(
+                            fractalType: newValue,
+                            parameterNodeID: nodeID,
+                            formulaIndex: param.index,
+                            display: GestureDisplayMetadata(
+                                title: param.name,
+                                subtitle: catDesc.name,
+                                icon: "slider.horizontal.3"
+                            )
+                        )
+                        _gestureBindings[key] = .parameter(binding)
+                        // Mutual exclusion: clear the both-hand slot for this finger.
+                        let bothKey = GestureSlot(hand: .both, finger: slot.finger).persistenceKey
+                        _gestureBindings[bothKey] = .core(.none)
+                    }
+                }
             }
         }
     }
@@ -1005,6 +1034,11 @@ final class RenderSettings: @unchecked Sendable {
     }
 
     // MARK: - Spring Blob State
+
+    var useSpringBlob: Bool {
+        get { withLock { _useSpringBlob } }
+        set { withLock { _useSpringBlob = newValue } }
+    }
 
     var springDisplacement: SIMD3<Float> {
         get { withLock { _springDisplacement } }
@@ -1604,7 +1638,7 @@ final class RenderSettings: @unchecked Sendable {
             var fp = _formulaParams
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
                 switch _fractalType {
-                case .mandelbulb:
+                case .mandelbulb, .mandelbulbJulia:
                     // params[4] = PolarRotation — add accumulated anim offset to user's static value
                     let base = FormulaCatalog.getParam(fp, index: 4)
                     FormulaCatalog.setParam(&fp, index: 4, value: base + _polarRotationAccum)

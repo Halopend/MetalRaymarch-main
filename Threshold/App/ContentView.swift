@@ -314,6 +314,7 @@ struct ContentView: View {
         }
     }
     
+    @ViewBuilder
     private var fractalSpaceContent: some View {
         let rotationEuler = eulerAngles(from: cache.liveWorldRotation)
 
@@ -1165,6 +1166,8 @@ struct ContentView: View {
                         Label("Core Behavior", systemImage: "slider.horizontal.3")
                             .font(.subheadline.weight(.semibold))
 
+                    Toggle("Spring Blob Navigation", isOn: $cache.gesture.useSpringBlob)
+                        .onChange(of: cache.gesture.useSpringBlob) { _, v in cache.push(\.useSpringBlob, value: v) }
                     Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
                         .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
                     Toggle("Extended Range", isOn: $cache.gesture.extendedGestureRange)

@@ -252,7 +252,16 @@ final class UISettingsCache {
     
     func applyGradientPreset(_ preset: GradientPreset) {
         settings?.applyGradientPreset(preset)
+        // Preserve user mapping settings when switching presets
+        let savedMode = color.gradientState.gradient.mappingMode
+        let savedRepeat = color.gradientState.gradient.repeatCount
+        let savedOffset = color.gradientState.gradient.offset
+        let savedSmoothing = color.gradientState.gradient.smoothing
         color.gradientState.gradient = preset.makeGradient()
+        color.gradientState.gradient.mappingMode = savedMode
+        color.gradientState.gradient.repeatCount = savedRepeat
+        color.gradientState.gradient.offset = savedOffset
+        color.gradientState.gradient.smoothing = savedSmoothing
         color.gradientState.gradientPreset = preset
         let pp = preset.postProcessing
         color.colorSchemeSaturation = pp.saturation

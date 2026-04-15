@@ -13,14 +13,16 @@ extension Renderer {
         smoothedScale = smoothedScale + (settingsSnapshot.scale - smoothedScale) * smoothFactor
 
         // === SPRING BLOB PHYSICS ===
-        // Tick the spring each frame. When released, the spring fling drives position.
-        let springDelta = appModel.renderSettings.tickSpring(dt: cachedDeltaTime)
-        if simd_length_squared(springDelta) > 1e-8 {
-            let settings = appModel.renderSettings
-            if settings.isAnimationPlaying {
-                settings.manualOffsetPosition = settings.manualOffsetPosition + springDelta
-            } else {
-                settings.targetPosition = settings.targetPosition + springDelta
+        // Tick the spring each frame (only when spring blob mode is enabled).
+        if appModel.renderSettings.useSpringBlob {
+            let springDelta = appModel.renderSettings.tickSpring(dt: cachedDeltaTime)
+            if simd_length_squared(springDelta) > 1e-8 {
+                let settings = appModel.renderSettings
+                if settings.isAnimationPlaying {
+                    settings.manualOffsetPosition = settings.manualOffsetPosition + springDelta
+                } else {
+                    settings.targetPosition = settings.targetPosition + springDelta
+                }
             }
         }
 
@@ -144,6 +146,13 @@ extension Renderer {
                             lightingSoftness: settingsSnapshot.lightingSoftness,
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
+                            springDisplacementX: settingsSnapshot.springDisplacement.x,
+                            springDisplacementY: settingsSnapshot.springDisplacement.y,
+                            springDisplacementZ: settingsSnapshot.springDisplacement.z,
+                            springStretch: simd_length(settingsSnapshot.springDisplacement),
+                            springAnchorNDC: SIMD2<Float>(0.7, -0.7),
+                            springVisible: (settingsSnapshot.springActive || simd_length(settingsSnapshot.springDisplacement) > 0.001) ? 1 : 0,
+                            springRestRadius: 0.06,
                             jitterOffset: .zero,
                             _pad_uniforms: [0, 0],
                             formulaParams: settingsSnapshot.formulaParams,

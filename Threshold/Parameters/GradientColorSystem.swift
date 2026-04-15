@@ -392,9 +392,18 @@ struct GradientState: Codable, Equatable {
         self.gradientPreset = preset
     }
     
-    /// Apply a preset, replacing the current gradient
+    /// Apply a preset, replacing the gradient stops/name but preserving
+    /// user-chosen mapping settings (mappingMode, repeatCount, offset, smoothing).
     mutating func applyPreset(_ preset: GradientPreset) {
+        let savedMode = gradient.mappingMode
+        let savedRepeat = gradient.repeatCount
+        let savedOffset = gradient.offset
+        let savedSmoothing = gradient.smoothing
         gradient = preset.makeGradient()
+        gradient.mappingMode = savedMode
+        gradient.repeatCount = savedRepeat
+        gradient.offset = savedOffset
+        gradient.smoothing = savedSmoothing
         gradientPreset = preset
     }
     

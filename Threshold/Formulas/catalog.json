@@ -113,6 +113,80 @@
       ]
     },
     {
+      "id": "mandelbulbJulia",
+      "name": "Mandelbulb Julia",
+      "fractalType": 5,
+      "category": "Power / Quaternion",
+      "description": "Julia-mode Mandelbulb with fixed C constant for symmetric bulb forms.",
+      "params": [
+        {
+          "index": 0,
+          "name": "Power",
+          "default": 8.0,
+          "min": 2.0,
+          "max": 32.0,
+          "step": 0.5
+        },
+        {
+          "index": 1,
+          "name": "Bailout",
+          "default": 4.0,
+          "min": 1.0,
+          "max": 64.0,
+          "step": 1.0
+        },
+        {
+          "index": 2,
+          "name": "DerivBias",
+          "default": 1.0,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.1
+        },
+        {
+          "index": 4,
+          "name": "PolarRotation",
+          "default": 0,
+          "min": -3.14,
+          "max": 3.14,
+          "step": 0.01
+        },
+        {
+          "index": 8,
+          "name": "Julia",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "isBool": true
+        },
+        {
+          "index": 9,
+          "name": "JuliaC.x",
+          "default": 0.2,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 10,
+          "name": "JuliaC.y",
+          "default": -0.15,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 11,
+          "name": "JuliaC.z",
+          "default": 0.35,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        }
+      ]
+    },
+    {
       "id": "menger",
       "name": "Menger Sponge",
       "fractalType": 2,
@@ -280,7 +354,7 @@
       "id": "sphereSponge",
       "name": "Sphere Sponge",
       "fractalType": 10,
-      "category": "Julia Box",
+      "category": "Hybrid Folds",
       "description": "Sphere Sponge — recursive sphere inversions.",
       "params": [
         {
@@ -396,7 +470,7 @@
       "id": "theliPseudoKleinian",
       "name": "Theli Pseudo Kleinian",
       "fractalType": 15,
-      "category": "Julia Box",
+      "category": "Hybrid Folds",
       "description": "Scale-1 Julia-box fold combined with a Menger-style base shape.",
       "params": [
         {
@@ -533,7 +607,7 @@
       "id": "kleinian",
       "name": "Kleinian",
       "fractalType": 17,
-      "category": "Julia Box",
+      "category": "Hybrid Folds",
       "description": "Knighty's Pseudo Kleinian — box fold + sphere inversion with cylindrical cross-section.",
       "params": [
         {
@@ -606,7 +680,7 @@
       "id": "boxSphereFolder",
       "name": "Box Sphere Folder",
       "fractalType": 20,
-      "category": "Julia Box",
+      "category": "Hybrid Folds",
       "description": "Abs-fold + sphere inversion with tunable clamp range and scale — compact IFS variant.",
       "params": [
         {

@@ -301,27 +301,15 @@ enum FractalBrowserCatalog {
                     ],
                     externalReferenceURL: "https://en.wikipedia.org/wiki/Mandelbulb"
                 ),
-                FractalTypeBrowserInfo(type: .quaternionJulia, subtitle: "4D Julia slice rendered in 3D", historicalInfo: "Quaternion Julia sets adapt complex dynamics into four dimensions and are often sampled as 3D slices.", variants: [])
-            ]
-        ),
-        FractalFamilyInfo(
-            id: "ifs",
-            name: "Kaleidoscopic IFS",
-            summary: "Iterated fold-and-scale systems with polyhedral symmetry.",
-            historicalInfo: "IFS families trace back to Barnsley-style affine systems, later expanded by kaleidoscopic fold techniques in demoscene and raymarch work.",
-            types: [
-                FractalTypeBrowserInfo(type: .menger, subtitle: "Recursive cubic void lattice", historicalInfo: "The Menger sponge is a classic 3D extension of Cantor-like recursive removal.", variants: []),
-                FractalTypeBrowserInfo(type: .sierpinski, subtitle: "Tetrahedral recursive simplex", historicalInfo: "Sierpinski constructions are among the earliest textbook self-similar fractals.", variants: []),
-                FractalTypeBrowserInfo(type: .dodecahedron, subtitle: "Golden-ratio fold symmetries", historicalInfo: "Polyhedral IFS variants leverage Platonic and Archimedean symmetry groups.", variants: []),
-                FractalTypeBrowserInfo(type: .octahedron, subtitle: "Octahedral abs-fold variant", historicalInfo: "Octahedral fold sets are efficient and common in shader-based fractal rendering.", variants: []),
-                FractalTypeBrowserInfo(type: .mengerSphere, subtitle: "Menger + optional spherification", historicalInfo: "Hybrid systems blending cubic and spherical operators became popular in modern real-time renderers.", variants: [])
+                FractalTypeBrowserInfo(type: .quaternionJulia, subtitle: "4D Julia slice rendered in 3D", historicalInfo: "Quaternion Julia sets adapt complex dynamics into four dimensions and are often sampled as 3D slices.", variants: []),
+                FractalTypeBrowserInfo(type: .mandelbulbJulia, subtitle: "Julia-mode Mandelbulb with constant C offset", historicalInfo: "The Julia variant fixes a constant C and iterates from each spatial point, producing symmetric bulb forms.", variants: [])
             ]
         ),
         FractalFamilyInfo(
             id: "julia",
-            name: "Julia Box",
-            summary: "Conditional folds and Julia constants for structured hybrids.",
-            historicalInfo: "Julia-box style distance estimators emerged from practical experimentation in shader communities.",
+            name: "Hybrid Folds",
+            summary: "Conditional folds and inversions for structured hybrids.",
+            historicalInfo: "Hybrid fold distance estimators emerged from practical experimentation combining box folds, sphere inversions, and Kleinian-group techniques in shader communities.",
             types: [
                 FractalTypeBrowserInfo(type: .sphereSponge, subtitle: "Recursive sphere inversion sponge", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: [])
             ]
@@ -341,6 +329,19 @@ enum FractalBrowserCatalog {
                     variants: [],
                     externalReferenceURL: "https://en.wikipedia.org/wiki/Buddhabrot"
                 )
+            ]
+        ),
+        FractalFamilyInfo(
+            id: "ifs",
+            name: "Kaleidoscopic IFS",
+            summary: "Iterated fold-and-scale systems with polyhedral symmetry.",
+            historicalInfo: "IFS families trace back to Barnsley-style affine systems, later expanded by kaleidoscopic fold techniques in demoscene and raymarch work.",
+            types: [
+                FractalTypeBrowserInfo(type: .menger, subtitle: "Recursive cubic void lattice", historicalInfo: "The Menger sponge is a classic 3D extension of Cantor-like recursive removal.", variants: []),
+                FractalTypeBrowserInfo(type: .sierpinski, subtitle: "Tetrahedral recursive simplex", historicalInfo: "Sierpinski constructions are among the earliest textbook self-similar fractals.", variants: []),
+                FractalTypeBrowserInfo(type: .dodecahedron, subtitle: "Golden-ratio fold symmetries", historicalInfo: "Polyhedral IFS variants leverage Platonic and Archimedean symmetry groups.", variants: []),
+                FractalTypeBrowserInfo(type: .octahedron, subtitle: "Octahedral abs-fold variant", historicalInfo: "Octahedral fold sets are efficient and common in shader-based fractal rendering.", variants: []),
+                FractalTypeBrowserInfo(type: .mengerSphere, subtitle: "Menger + optional spherification", historicalInfo: "Hybrid systems blending cubic and spherical operators became popular in modern real-time renderers.", variants: [])
             ]
         )
     ]
@@ -487,8 +488,56 @@ struct FractalBrowserWindow: View {
                     .fill(.ultraThinMaterial)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if let equation = primaryEquation(for: info) {
+                Text(equation)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(8)
+            }
+        }
         .onTapGesture {
             selectedTypeID = info.id
+        }
+    }
+
+    private func primaryEquation(for info: FractalTypeBrowserInfo) -> String? {
+        guard let type = info.type else { return nil }
+
+        switch type {
+        case .mandelbox:
+            return "p_{n+1} = scale * boxFold(sphereFold(p_n)) + c"
+        case .mandelbulb:
+            return "z_{n+1} = z_n^p + c"
+        case .mandelbulbJulia:
+            return "z_{n+1} = z_n^p + c_{julia}"
+        case .menger:
+            return "p_{n+1} = scale * fold_menger(p_n) + c"
+        case .sierpinski:
+            return "p_{n+1} = scale * fold_sierpinski(p_n) + c"
+        case .dodecahedron:
+            return "p_{n+1} = scale * fold_dodecahedron(p_n) + c"
+        case .quaternionJulia:
+            return "q_{n+1} = q_n^2 + c"
+        case .sphereSponge:
+            return "p_{n+1} = scale * sphereFold(p_n) + c"
+        case .octahedron:
+            return "p_{n+1} = scale * fold_octahedral(p_n) + c"
+        case .mengerSphere:
+            return "p_{n+1} = scale * blend_menger_sphere(p_n) + c"
+        case .theliPseudoKleinian:
+            return "p_{n+1} = fold(p_n) + c"
+        case .kleinian:
+            return "z_{n+1} = fold(z_n) + c"
+        case .boxSphereFolder:
+            return "p_{n+1} = fold_box_sphere(p_n) + c"
+        case .kaleidoIFS:
+            return "p_{n+1} = fold_kaleido(p_n) + c"
         }
     }
 

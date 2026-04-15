@@ -14,6 +14,7 @@ enum FractalModelType: Int32, CaseIterable {
     case menger            = 2
     case sierpinski        = 3
     case dodecahedron      = 4
+    case mandelbulbJulia   = 5
     case quaternionJulia   = 6
     case sphereSponge      = 10
     case octahedron        = 11

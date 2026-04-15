@@ -928,14 +928,16 @@ final class GestureController {
         // ── Handle by binding type ──────────────────────────────────────
         switch binding {
         case .core(.translate):
-            // Position XYZ pinch-drag — drives spring blob for momentum-based navigation
+            // Position XYZ pinch-drag
             if active && !state.isActive {
                 state.isActive = true
                 state.accumulatedPosition = settings.effectiveTargetPosition
                 singleHandDragEngine.state.accumulatedPosition = settings.effectiveTargetPosition
                 state.prevPos = hand.pinchPosition(digit: digit)
                 state.prevPalm = hand.palmPosition
-                settings.springActive = true
+                if settings.useSpringBlob {
+                    settings.springActive = true
+                }
             }
             if active && state.isActive {
                 var currentPos = hand.palmPosition
@@ -958,10 +960,19 @@ final class GestureController {
                 let zoomCompensation = simd_clamp(1.0 / pow(max(settings.detailScale, 0.01), 0.3), 0.5, maxZoomCompensation)
                 let inputDelta = scaledDelta * settings.translationSensitivity * zoomCompensation
 
-                // Drive spring displacement (accumulates stretch while held)
-                settings.springDisplacement = settings.springDisplacement + inputDelta
-                // Store velocity for fling on release
-                settings.springVelocity = inputDelta * 90.0  // ~1/90s per hand tracking update
+                if settings.useSpringBlob {
+                    // Drive spring displacement (accumulates stretch while held)
+                    settings.springDisplacement = settings.springDisplacement + inputDelta
+                    // Store velocity for fling on release
+                    settings.springVelocity = inputDelta * 90.0  // ~1/90s per hand tracking update
+                } else {
+                    // Direct mode: apply position immediately
+                    if settings.isAnimationPlaying {
+                        settings.manualOffsetPosition = settings.manualOffsetPosition + inputDelta
+                    } else {
+                        settings.targetPosition = settings.targetPosition + inputDelta
+                    }
+                }
 
                 state.prevPos = currentPos
                 state.prevPalm = currentPos
@@ -969,7 +980,9 @@ final class GestureController {
             }
             if !active && state.isActive {
                 state.isActive = false
-                settings.springActive = false  // Release: spring flings
+                if settings.useSpringBlob {
+                    settings.springActive = false  // Release: spring flings
+                }
             }
 
         case .parameterTriplet(let triplet):

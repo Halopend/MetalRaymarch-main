@@ -49,6 +49,11 @@ struct GestureSettingsView: View {
                     Label("Core Behavior", systemImage: "slider.horizontal.3")
                         .font(.subheadline.weight(.semibold))
 
+                    Toggle("Spring Blob Navigation", isOn: Binding(
+                        get: { cache.gesture.useSpringBlob },
+                        set: { cache.gesture.useSpringBlob = $0; cache.push(\.useSpringBlob, value: $0) }
+                    ))
+
                     Toggle("Relative Gestures", isOn: Binding(
                         get: { cache.gesture.useRelativeGestures },
                         set: { cache.gesture.useRelativeGestures = $0; cache.push(\.useRelativeGestures, value: $0) }

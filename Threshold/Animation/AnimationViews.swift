@@ -1650,7 +1650,7 @@ struct AnimationPlaybackControls: View {
                     .disabled(animationManager.currentScene == nil)
 
                     // Keyframe indicator
-                    Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
+                    Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(currentScene.keyframes.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1692,7 +1692,7 @@ struct AnimationPlaybackControls: View {
 /// Supports: drag-to-scrub (auto-pauses during drag, resumes after), tap to jump,
 /// double-tap to edit keyframe, context menu for keyframe actions.
 struct KeyframeTimelineView: View {
-    let timing: SceneTimingSnapshot
+    fileprivate let timing: SceneTimingSnapshot
     let playhead: AnimationPlayhead
     let onEditKeyframe: (AnimationKeyframe) -> Void
     let onJumpToKeyframe: (Int) -> Void

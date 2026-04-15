@@ -12,14 +12,19 @@ struct FractalGridView: View {
     let gestureController: GestureController?
 
     private let columns = [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 12)]
+    private static let categoryOrder = ["Box Folds", "Power / Quaternion", "Hybrid Folds", "Kaleidoscopic IFS"]
 
     /// Categories in display order, derived once from the selectable descriptors.
     private let categorizedTypes: [(category: String, types: [FractalModelType])]
 
+    /// Cache the category grouping once so entering the tab does not redo the
+    /// descriptor walk every time SwiftUI recreates the view.
+    private static let cachedCategorizedTypes = Self.makeCategorizedTypes()
+
     init(cache: UISettingsCache, gestureController: GestureController?) {
         self.cache = cache
         self.gestureController = gestureController
-        self.categorizedTypes = Self.makeCategorizedTypes()
+        self.categorizedTypes = Self.cachedCategorizedTypes
     }
 
     private static func makeCategorizedTypes() -> [(category: String, types: [FractalModelType])] {
@@ -31,7 +36,9 @@ struct FractalGridView: View {
             if seen[category] == nil { order.append(category) }
             seen[category, default: []].append(type)
         }
-        return order.map { category in (category: category, types: seen[category] ?? []) }
+        let preferredOrder = categoryOrder.filter { seen[$0] != nil }
+        let remainingOrder = order.filter { !categoryOrder.contains($0) }
+        return (preferredOrder + remainingOrder).map { category in (category: category, types: seen[category] ?? []) }
     }
 
     var body: some View {
