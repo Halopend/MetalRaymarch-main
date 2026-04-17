@@ -27,10 +27,10 @@ final class RenderSettings: @unchecked Sendable {
         return UserDefaults.standard.bool(forKey: key)
     }
     
-    /// Load a persisted Float, returning `fallback` when the stored value is 0 (i.e. unset).
+    /// Load a persisted Float, returning `fallback` when the key has never been written.
     private static func loadFloat(_ key: String, default fallback: Float) -> Float {
-        let v = UserDefaults.standard.float(forKey: key)
-        return v > 0 ? v : fallback
+        guard UserDefaults.standard.object(forKey: key) != nil else { return fallback }
+        return UserDefaults.standard.float(forKey: key)
     }
 
     private static func loadGestureBool(_ key: String, default fallback: Bool) -> Bool {
@@ -202,7 +202,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeGamma: Float = 0.75             // Gamma override (lower = brighter, 1.0 = linear)
     private var _colorSchemeVibrance: Float = 1.0           // Vibrance boost (0-1)
     private var _colorSchemeCurve: Float = 0.0              // Midtone curve adjustment (-1 to 1)
-    private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.5 to 0.5)
+    private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.05 to 0.05)
     private var _colorSchemeHighlights: Float = 0.0         // Highlight boost/reduction (-0.5 to 1.0)
     private var _lightingSoftness: Float = 0.35              // 0 = sharp vibrance-driven, 1 = classic soft lighting
     

@@ -57,6 +57,8 @@ class FractalShareSession {
     private var messenger: GroupSessionMessenger?
     private var subscriptions = Set<AnyCancellable>()
     @ObservationIgnored private var tasks = Set<Task<Void, Never>>()
+    /// Session monitor task is stored separately so `stopSharing()` never cancels it.
+    @ObservationIgnored private var sessionMonitorTask: Task<Void, Never>?
     
     private weak var renderSettings: RenderSettings?
     
@@ -73,10 +75,8 @@ class FractalShareSession {
     }
     
     deinit {
-        // Tasks will be cancelled when the set is deallocated
-        for task in tasks {
-            task.cancel()
-        }
+        for task in tasks { task.cancel() }
+        sessionMonitorTask?.cancel()
     }
     
     // MARK: - Public Methods
@@ -124,14 +124,16 @@ class FractalShareSession {
         participantCount = 0
     }
     
-    /// Configure session handling (call once at app startup)
+    /// Configure session handling (call once at app startup).
+    /// Stores the monitor task separately so `stopSharing()` never cancels
+    /// the outer `sessions()` loop — otherwise only one SharePlay session
+    /// per app launch would be possible.
     func configureGroupSessions() {
-        let task = Task {
+        sessionMonitorTask = Task {
             for await session in FractalShareActivity.sessions() {
                 await handleNewSession(session)
             }
         }
-        tasks.insert(task)
     }
     
     /// Send current state to other participants (call from render loop or gesture handler)

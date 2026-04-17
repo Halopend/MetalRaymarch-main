@@ -359,16 +359,21 @@ final class GestureController {
 
             // Runtime conflict guard: skip if any single-hand drag is active for this digit
             guard let finger = FingerDigit(rawValue: digit) else { continue }
-            let leftKey = GestureSlot(hand: .left, finger: finger).persistenceKey
-            let rightKey = GestureSlot(hand: .right, finger: finger).persistenceKey
+            // Check all directional sub-slots (vertical + horizontal) for each hand.
+            let leftActive = GestureDirection.allCases.contains {
+                singleHandState.perSlot[GestureSlot(hand: .left, finger: finger, direction: $0).persistenceKey]?.isActive == true
+            }
+            let rightActive = GestureDirection.allCases.contains {
+                singleHandState.perSlot[GestureSlot(hand: .right, finger: finger, direction: $0).persistenceKey]?.isActive == true
+            }
             if featureFlags.useArbitrationEngine {
                 let decision = arbitrationEngine.decide(
                     GestureArbitrationInput(
                         digit: digit,
                         twoHandCandidate: true,
                         twoHandCurrentlyActive: twoHandStateByDigit[digit]?.isActive == true,
-                        leftSingleActive: singleHandState.perSlot[leftKey]?.isActive == true,
-                        rightSingleActive: singleHandState.perSlot[rightKey]?.isActive == true,
+                        leftSingleActive: leftActive,
+                        rightSingleActive: rightActive,
                         grabActive: grabState.isActive,
                         grabEndCooldown: grabState.endCooldown
                     )
@@ -379,8 +384,7 @@ final class GestureController {
                     }
                     continue
                 }
-            } else if singleHandState.perSlot[leftKey]?.isActive == true ||
-                        singleHandState.perSlot[rightKey]?.isActive == true {
+            } else if leftActive || rightActive {
                 if twoHandStateByDigit[digit]?.isActive == true {
                     twoHandStateByDigit[digit]?.isActive = false
                 }
@@ -445,13 +449,25 @@ final class GestureController {
         
         // ── 2. SINGLE-HAND GESTURES (left + right, independent) ─────────
         for (handMode, handData) in [(GestureHandMode.left, leftHand), (.right, rightHand)] {
+            // Winner-takes-all: find which finger digit (if any) currently owns this hand.
+            // Once locked, all other fingers on this hand are blocked from activating
+            // until the locked finger fully releases. This prevents index/middle cross-fire.
+            let lockedFinger: Int? = (1...3).first { digit in
+                guard let f = FingerDigit(rawValue: digit) else { return false }
+                return GestureDirection.allCases.contains { dir in
+                    let key = GestureSlot(hand: handMode, finger: f, direction: dir).persistenceKey
+                    return singleHandState.perSlot[key]?.isActive == true
+                }
+            }
             for digit in 1...3 {
                 guard let finger = FingerDigit(rawValue: digit) else { continue }
                 // Process both vertical and horizontal sub-slots for each finger
                 for direction in GestureDirection.allCases {
                     let slot = GestureSlot(hand: handMode, finger: finger, direction: direction)
                     let binding = settings.binding(for: slot)
-                    processSingleHandDrag(slot: slot, hand: handData, binding: binding, settings: settings, activeDigit: &activeDigit)
+                    processSingleHandDrag(slot: slot, hand: handData, binding: binding,
+                                         lockedFinger: lockedFinger,
+                                         settings: settings, activeDigit: &activeDigit)
                 }
             }
         }
@@ -861,6 +877,7 @@ final class GestureController {
         slot: GestureSlot,
         hand: HandData,
         binding: GestureActionBinding,
+        lockedFinger: Int?,
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
@@ -904,8 +921,11 @@ final class GestureController {
                 // this digit, the two-hand gesture won't fire (guarded in step 1),
                 // so don't treat this pinch as a two-hand attempt.
                 if let finger = FingerDigit(rawValue: d) {
-                    let otherKey = GestureSlot(hand: otherHandMode, finger: finger).persistenceKey
-                    if singleHandState.perSlot[otherKey]?.isActive == true { continue }
+                    // Check all directional sub-slots (vertical + horizontal).
+                    let otherDragActive = GestureDirection.allCases.contains {
+                        singleHandState.perSlot[GestureSlot(hand: otherHandMode, finger: finger, direction: $0).persistenceKey]?.isActive == true
+                    }
+                    if otherDragActive { continue }
                 }
                 let threshold: Float = (d == 3) ? 0.45 : 0.55
                 if otherHand.pinchStrength(digit: d) >= threshold {
@@ -917,15 +937,29 @@ final class GestureController {
 
         let pinch = hand.pinchStrength(digit: digit)
         var state = singleHandState.perSlot[key] ?? SingleHandDragPerSlotState()
+        // Winner-takes-all: another finger already owns this hand — suppress.
+        let isLockedOut = lockedFinger != nil && lockedFinger != digit
         let active: Bool
         if state.isActive {
-            // Once active, only deactivate when the hand releases the pinch.
+            // Release uses normal threshold — no lead gap needed once active.
             // Don't let the other hand's pinch kill an established gesture —
             // the two-hand guard (step 1) already prevents two-hand from
             // activating while any single-hand drag is active for the same digit.
             active = hand.isTracked && pinch >= releaseThresh
+        } else if isLockedOut {
+            // This hand is locked to a different finger — block activation.
+            active = false
         } else {
+            // Minimum lead gap: activating finger must outpace the strongest other
+            // finger on this hand. Anatomical finger coupling means pinching index
+            // drives middle to ~60–70%; a 0.15 gap requirement prevents them from
+            // both firing when the user intends only one.
+            let minLeadGap: Float = 0.15
+            let otherPinch = (1...3).filter { $0 != digit }
+                .map { hand.pinchStrength(digit: $0) }
+                .max() ?? 0
             active = hand.isTracked && pinch >= activateThresh && !otherAttemptingPinch
+                  && (pinch - otherPinch) >= minLeadGap
         }
 
         // ── Handle by binding type ──────────────────────────────────────
