@@ -112,14 +112,23 @@ struct GestureDisplayMetadata: Codable, Hashable, Sendable {
     let icon: String
 }
 
-struct GestureBindableParameter: Codable, Hashable, Sendable {
+struct GestureBindableParameter: Codable, Sendable, Hashable {
     let fractalType: FractalModelType
     let parameterNodeID: String
     let formulaIndex: Int?
     let display: GestureDisplayMetadata
+
+    // Compare by semantic identity only — display metadata is cosmetic.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.fractalType == rhs.fractalType && lhs.parameterNodeID == rhs.parameterNodeID
+    }
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(fractalType)
+        hasher.combine(parameterNodeID)
+    }
 }
 
-struct GestureBindableTriplet: Codable, Hashable, Sendable {
+struct GestureBindableTriplet: Codable, Sendable, Hashable {
     let fractalType: FractalModelType
     let groupName: String
     let xNodeID: String
@@ -130,6 +139,15 @@ struct GestureBindableTriplet: Codable, Hashable, Sendable {
     let zFormulaIndex: Int
     let range: ClosedRange<Float>
     let display: GestureDisplayMetadata
+
+    // Compare by semantic identity only — display metadata is cosmetic.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.fractalType == rhs.fractalType && lhs.groupName == rhs.groupName
+    }
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(fractalType)
+        hasher.combine(groupName)
+    }
 
     private enum CodingKeys: String, CodingKey {
         case fractalType, groupName

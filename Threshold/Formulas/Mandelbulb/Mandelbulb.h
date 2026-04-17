@@ -89,10 +89,11 @@ FORCE_INLINE float DE_Mandelbulb(float3 pos, FormulaParams fp, float3x3 rot,
     float r = fast::sqrt(r2);
     float safeR = max(r, 1e-6f);  // Prevent log2(~0) → -∞
     float de = dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
-    // Clamp to bailout sphere distance: the DE formula overestimates when few
+    // Clamp step size near bailout sphere: the DE formula overestimates when few
     // iterations run (dr ≈ 1), causing rays to overshoot the fractal from afar.
+    // Use max() to prevent creating a false surface at the bailout boundary.
     if (r > bailout) {
-        de = min(de, r - bailout);
+        de = max(min(de, r - bailout), 0.01f);
     }
     return de;
 }
@@ -137,9 +138,10 @@ FORCE_INLINE float DE_Mandelbulb_Dist(float3 pos, FormulaParams fp, float3x3 rot
     float r = fast::sqrt(r2);
     float safeR = max(r, 1e-6f);  // Prevent log2(~0) → -∞
     float de = dBias * 0.5f * safeR * fast::log2(safeR) / max(dr, kEpsLen) * kLn2;
-    // Clamp to bailout sphere distance: prevents overshooting when few iterations run.
+    // Clamp step size near bailout sphere: prevents overshooting when few iterations run.
+    // Use max() to prevent creating a false surface at the bailout boundary.
     if (r > bailout) {
-        de = min(de, r - bailout);
+        de = max(min(de, r - bailout), 0.01f);
     }
     return de;
 }

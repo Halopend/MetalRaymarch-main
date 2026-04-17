@@ -83,8 +83,8 @@ struct ContentView: View {
             begin: { appModel.beginMenuAdjustment() },
             end: { appModel.endMenuAdjustment() }
         ))
-        .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
+        .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .onHover { hovering in
             // Treat gaze-hover as active UI interaction for robust gesture suppression.
             appModel.setMenuHovering(hovering)
@@ -1343,6 +1343,23 @@ struct ContentView: View {
                 .padding(10)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
             }
+
+            // Privacy & Analytics section
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Privacy", systemImage: "shield.lefthalf.filled").font(.headline)
+                    Spacer()
+                }
+                Toggle("Send anonymous usage data", isOn: Binding(
+                    get: { UsageAnalytics.shared.analyticsEnabled },
+                    set: { UsageAnalytics.shared.analyticsEnabled = $0 }
+                ))
+                Text("Shares aggregated stats (popular fractals, average FPS, feature usage) to help improve Threshold. No personal information, Apple ID, or location is ever collected.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
         }
     }
     

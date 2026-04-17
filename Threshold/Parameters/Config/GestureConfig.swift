@@ -81,3 +81,47 @@ private extension Float {
         max(range.lowerBound, min(range.upperBound, self))
     }
 }
+
+// MARK: - Gesture Binding Presets
+
+/// A saved snapshot of the 9-slot gesture binding assignments.
+struct GestureBindingPreset: Codable, Identifiable, Sendable {
+    let id: UUID
+    var name: String
+    var createdAt: Date
+    var bindings: [String: GestureActionBinding]
+
+    init(name: String, bindings: [String: GestureActionBinding]) {
+        self.id = UUID()
+        self.name = name
+        self.createdAt = Date()
+        self.bindings = bindings
+    }
+}
+
+/// Persistence for gesture binding presets (UserDefaults-backed).
+enum GestureBindingPresetStore {
+    private static let key = "gestureBindingPresets"
+
+    static func loadAll() -> [GestureBindingPreset] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([GestureBindingPreset].self, from: data)) ?? []
+    }
+
+    static func saveAll(_ presets: [GestureBindingPreset]) {
+        guard let data = try? JSONEncoder().encode(presets) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    static func add(_ preset: GestureBindingPreset) {
+        var all = loadAll()
+        all.append(preset)
+        saveAll(all)
+    }
+
+    static func remove(id: UUID) {
+        var all = loadAll()
+        all.removeAll { $0.id == id }
+        saveAll(all)
+    }
+}

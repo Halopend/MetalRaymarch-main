@@ -18,6 +18,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     var gradientCycleEffect: GradientCycleEffect = GradientCycleEffect()
     var beatFlashEffect: BeatFlashEffect = BeatFlashEffect()
     var polarRotationEffect: PolarRotationEffect = PolarRotationEffect()
+    var juliaDriftEffect: JuliaDriftEffect = JuliaDriftEffect()
 
     // MARK: - Preset Application
 

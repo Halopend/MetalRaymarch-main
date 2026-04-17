@@ -19,6 +19,7 @@ struct FormulaParamDescriptor: Codable, Identifiable {
     let max: Float
     let step: Float
     var isBool: Bool?
+    var isHidden: Bool?
     
     var id: String { "\(index)-\(name)" }
 }

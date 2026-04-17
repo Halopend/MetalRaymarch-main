@@ -15,6 +15,9 @@ struct GestureSettingsView: View {
     // ── Disclosure state (expert sections collapsed by default) ──
     @State private var showMenuToggle = false
     @State private var showTwoHandTuning = false
+    @State private var showControlPresets = false
+    @State private var newPresetName = ""
+    @State private var controlPresets: [GestureBindingPreset] = GestureBindingPresetStore.loadAll()
 
     var body: some View {
         VStack(spacing: 8) {
@@ -32,6 +35,68 @@ struct GestureSettingsView: View {
             ))
 
             VStack(alignment: .leading, spacing: 0) {
+                // ── Control Presets (save/restore bindings) ───────────────
+                DisclosureGroup(isExpanded: $showControlPresets) {
+                    VStack(spacing: 8) {
+                        if controlPresets.isEmpty {
+                            Text("No saved presets")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 4)
+                        } else {
+                            ForEach(controlPresets) { preset in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(preset.name).font(.subheadline)
+                                        Text(preset.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                            .font(.caption2).foregroundStyle(.tertiary)
+                                    }
+                                    Spacer()
+                                    Button("Load") {
+                                        for (key, binding) in preset.bindings {
+                                            if let slot = GestureSlot.allSlots.first(where: { $0.persistenceKey == key }) {
+                                                cache.setGestureBinding(binding, for: slot)
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    Button(role: .destructive) {
+                                        GestureBindingPresetStore.remove(id: preset.id)
+                                        controlPresets = GestureBindingPresetStore.loadAll()
+                                    } label: {
+                                        Image(systemName: "trash")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+                        }
+                        HStack {
+                            TextField("Preset name", text: $newPresetName)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Save Current") {
+                                let name = newPresetName.trimmingCharacters(in: .whitespaces)
+                                guard !name.isEmpty else { return }
+                                let preset = GestureBindingPreset(name: name, bindings: cache.gesture.gestureBindings)
+                                GestureBindingPresetStore.add(preset)
+                                controlPresets = GestureBindingPresetStore.loadAll()
+                                newPresetName = ""
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(newPresetName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    Label("Control Presets", systemImage: "tray.2")
+                        .font(.subheadline.weight(.semibold))
+                }
+
+                Divider().padding(.vertical, 2)
+
                 // ── Hand Assignments (per-hand × per-finger) ──────────────
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Hand Assignments", systemImage: "hand.point.up.braille")

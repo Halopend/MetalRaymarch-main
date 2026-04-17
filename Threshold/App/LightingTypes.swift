@@ -25,6 +25,7 @@ enum EffectTag: String, Codable, CaseIterable {
     case gradientCycle    = "GRC"       // Gradient offset animation — universal
     case polarRotation    = "POL"       // Polar/spherical rotation animation — Mandelbulb, Quaternion Julia
     case beatFlash        = "BTF"       // Music-driven edge flash — universal (requires audio)
+    case juliaDrift       = "JLD"       // Animated Julia C drift — Mandelbulb Julia only
 
     var displayName: String {
         switch self {
@@ -36,6 +37,7 @@ enum EffectTag: String, Codable, CaseIterable {
         case .gradientCycle: return "Gradient Cycle"
         case .polarRotation: return "Polar Rotation"
         case .beatFlash:     return "Beat Flash"
+        case .juliaDrift:    return "Julia Drift"
         }
     }
 }
@@ -330,6 +332,36 @@ enum PolarRotationDirection: String, Codable, CaseIterable, Equatable {
         case .clockwise:        return "CW"
         case .counterclockwise: return "CCW"
         }
+    }
+}
+
+/// Julia C drift effect — slowly orbits the Julia C vector (params 9-11) around
+/// the diagonal axis (1,1,1)/√3, causing the fractal shape to morph continuously.
+/// Only meaningful for mandelbulbJulia.
+struct JuliaDriftEffect: LightingEffect {
+    var enabled: Bool = false
+    var speed: Float = 0.1          // Orbit speed (0–1)
+
+    var primaryValue: Float {
+        get { speed }
+        set { speed = newValue }
+    }
+    static let primaryLabel = "Speed"
+
+    static var off: JuliaDriftEffect {
+        JuliaDriftEffect(enabled: false, speed: 0.0)
+    }
+
+    static var slow: JuliaDriftEffect {
+        JuliaDriftEffect(enabled: true, speed: 0.05)
+    }
+
+    static var medium: JuliaDriftEffect {
+        JuliaDriftEffect(enabled: true, speed: 0.1)
+    }
+
+    static var fast: JuliaDriftEffect {
+        JuliaDriftEffect(enabled: true, speed: 0.25)
     }
 }
 

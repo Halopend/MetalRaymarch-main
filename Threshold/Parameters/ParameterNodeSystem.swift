@@ -557,6 +557,7 @@ final class ParameterNodeRegistry: Sendable {
         var floatNodeByFormulaIndex: [Int: FloatParameterNode] = [:]
 
         for param in descriptor.params {
+            guard !(param.isHidden ?? false) else { continue }
             assert(
                 seenFormulaIndices.insert(param.index).inserted,
                 "Duplicate formula parameter index \(param.index) for fractal type \(type.rawValue)"

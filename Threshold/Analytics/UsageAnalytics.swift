@@ -194,8 +194,8 @@ final class UsageAnalytics {
     }
     
     private init() {
-        // Default to enabled for TestFlight, user can opt out
-        self.analyticsEnabled = UserDefaults.standard.object(forKey: "AnalyticsEnabled") as? Bool ?? true
+        // Default to disabled — user must explicitly opt in
+        self.analyticsEnabled = UserDefaults.standard.object(forKey: "AnalyticsEnabled") as? Bool ?? false
         
         // Try to upload any pending snapshots from previous sessions
         Task {

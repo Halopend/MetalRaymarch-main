@@ -591,9 +591,10 @@ FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float 
         return MapContinuous(pos, params, foldingLimit, fractionalIterations);  // bubble applied inside
     }
     // Formula DEs do not support Mandelbox-style fractional interpolation yet.
-    // For Mandelbulb, rounding up keeps the coarse pass conservative and avoids
-    // underestimating surface complexity near the front shell.
-    int loopCount = max(type == FractalTypeMandelbulb
+    // For Mandelbulb/MandelbulbJulia, rounding up keeps the coarse pass
+    // conservative and avoids underestimating surface complexity near the front shell.
+    bool isMB = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
+    int loopCount = max(isMB
                         ? int(ceil(fractionalIterations))
                         : int(fractionalIterations), 1);
     float d = FractalDE_Dispatch(pos, type, fp, loopCount);

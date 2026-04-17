@@ -82,6 +82,9 @@ protocol FractalTypeDescriptor: Sendable {
     /// formula parameters (e.g. "Power", "PolarRotation").  Resolved from the
     /// formula catalog when the fractal type is switched.
     var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] { get }
+
+    /// Color scheme applied when switching to this fractal type (nil = keep current).
+    var defaultColorScheme: ColorScheme? { get }
 }
 
 // MARK: - Shared constants
@@ -114,6 +117,7 @@ extension FractalTypeDescriptor {
     var defaultShapeParams: FractalShapeDefaults { FractalShapeDefaults() }
     var defaultTripletBindings: [(slot: GestureSlot, groupName: String)] { [] }
     var defaultScalarBindings: [(slot: GestureSlot, paramName: String)] { [] }
+    var defaultColorScheme: ColorScheme? { nil }
 }
 
 // MARK: - Registry
@@ -169,6 +173,7 @@ private struct MandelboxDescriptor: FractalTypeDescriptor {
         [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale, .translate]
     }
     var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
+    var defaultColorScheme: ColorScheme? { .rainbow }
     func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
@@ -271,7 +276,7 @@ private struct MandelbulbJuliaDescriptor: FractalTypeDescriptor {
     let codableString = "mandelbulbJulia"
     let isSelectableInUI = true
     let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation]) }
+    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags.union([.polarRotation, .juliaDrift]) }
     func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 8.0   // Power

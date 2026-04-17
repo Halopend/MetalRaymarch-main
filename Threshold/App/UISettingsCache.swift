@@ -362,6 +362,10 @@ final class UISettingsCache {
         push(\.beatFlashEffect, value: lighting.beatFlashEffect)
     }
 
+    func commitJuliaDriftEffect() {
+        push(\.juliaDriftEffect, value: lighting.juliaDriftEffect)
+    }
+
     func commitColorSchemeSaturation() {
         guard let settings else { return }
         if settings.isAnimationPlaying {

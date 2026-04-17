@@ -219,6 +219,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _polarRotationEffect: PolarRotationEffect = .off
     private var _beatFlashEffect: BeatFlashEffect = .off
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
+    private var _juliaDriftEffect: JuliaDriftEffect = .off
+    private var _juliaDriftAccum: Float = 0.0                 // Accumulated Julia C drift angle (radians)
     
     // === GEOMETRY STABILITY STATE ===
     // Tracks whether geometry parameters have settled for optimization
@@ -562,6 +564,14 @@ final class RenderSettings: @unchecked Sendable {
                 }
                 _syncAnimationBaseFormulaParamsFromCurrent_locked()
                 _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)
+
+                // Apply per-type default color scheme if specified.
+                if let scheme = desc.defaultColorScheme {
+                    _targetColorScheme = scheme
+                    _colorSchemeTransitionProgress = 0.0
+                    syncGradientPresetForColorSchemeLocked(scheme)
+                }
+
                 // Rebind any gesture fingers assigned to core actions unsupported by
                 // the new fractal type (e.g. fractalScale on non-Mandelbox), and
                 // clean cross-type .parameter() bindings that belong to a different
@@ -1469,6 +1479,18 @@ final class RenderSettings: @unchecked Sendable {
             persistLighting()
         }
     }
+
+    /// Julia C drift effect (orbits Julia C vector for Mandelbulb Julia)
+    var juliaDriftEffect: JuliaDriftEffect {
+        get { withLock { _juliaDriftEffect } }
+        set {
+            withLock {
+                _juliaDriftEffect = newValue
+                _lightingPreset = .custom
+            }
+            persistLighting()
+        }
+    }
     
     // === GEOMETRY STABILITY STATE (read-only) ===
     
@@ -1522,6 +1544,11 @@ final class RenderSettings: @unchecked Sendable {
                 // Apply rotation based on configured speed and direction
                 let effectSpeed = _polarRotationEffect.speed * _polarRotationEffect.direction.sign
                 _polarRotationAccum += deltaTime * effectSpeed
+            }
+
+            // Accumulate Julia C drift angle when enabled and fractal supports it
+            if _juliaDriftEffect.enabled && _fractalType.supports(.juliaDrift) {
+                _juliaDriftAccum += deltaTime * _juliaDriftEffect.speed
             }
             
             // Handle ongoing transition
@@ -1653,6 +1680,29 @@ final class RenderSettings: @unchecked Sendable {
                 default:
                     break
                 }
+            }
+
+            // Apply Julia C drift — orbit Julia C vector around diagonal axis (1,1,1)/√3
+            // using Rodrigues rotation so all three components evolve smoothly.
+            if _juliaDriftEffect.enabled && _fractalType.supports(.juliaDrift) {
+                let cx = FormulaCatalog.getParam(fp, index: 9)
+                let cy = FormulaCatalog.getParam(fp, index: 10)
+                let cz = FormulaCatalog.getParam(fp, index: 11)
+                let theta = _juliaDriftAccum
+                let cosT = cos(theta)
+                let sinT = sin(theta)
+                // k = (1,1,1)/√3 — rotation axis
+                let inv3: Float = 1.0 / 3.0
+                let kDotV = (cx + cy + cz) * inv3  // (k·v) / √3 * √3 = (k·v)
+                let oneMinusCos = 1.0 - cosT
+                let invSqrt3: Float = 1.0 / sqrt(3.0)
+                // k × v = (ky*vz - kz*vy, kz*vx - kx*vz, kx*vy - ky*vx) where kx=ky=kz=1/√3
+                let crossX = (cz - cy) * invSqrt3
+                let crossY = (cx - cz) * invSqrt3
+                let crossZ = (cy - cx) * invSqrt3
+                FormulaCatalog.setParam(&fp, index: 9,  value: cx * cosT + crossX * sinT + invSqrt3 * kDotV * oneMinusCos)
+                FormulaCatalog.setParam(&fp, index: 10, value: cy * cosT + crossY * sinT + invSqrt3 * kDotV * oneMinusCos)
+                FormulaCatalog.setParam(&fp, index: 11, value: cz * cosT + crossZ * sinT + invSqrt3 * kDotV * oneMinusCos)
             }
 
             return RenderSettingsSnapshot(
@@ -2723,6 +2773,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.gradientCycleEffect = _gradientCycleEffect
                 c.beatFlashEffect = _beatFlashEffect
                 c.polarRotationEffect = _polarRotationEffect
+                c.juliaDriftEffect = _juliaDriftEffect
                 return c
             }
         }
@@ -2737,6 +2788,7 @@ final class RenderSettings: @unchecked Sendable {
                 _gradientCycleEffect = newValue.gradientCycleEffect
                 _beatFlashEffect = newValue.beatFlashEffect
                 _polarRotationEffect = newValue.polarRotationEffect
+                _juliaDriftEffect = newValue.juliaDriftEffect
             }
         }
     }

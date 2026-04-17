@@ -182,6 +182,20 @@ struct EffectsDynamicView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+
+            // ── Julia C Drift (mandelbulbJulia only) ──
+            if cache.fractalType.supports(.juliaDrift) {
+                VStack(spacing: 4) {
+                    EffectSliderRow(icon: "atom", label: "Julia Drift",
+                        value: Binding(get: { cache.lighting.juliaDriftEffect.speed }, set: { cache.lighting.juliaDriftEffect.speed = $0 }),
+                        range: 0...0.5,
+                        enabled: Binding(get: { cache.lighting.juliaDriftEffect.enabled }, set: { cache.lighting.juliaDriftEffect.enabled = $0 }),
+                        onChanged: { cache.commitJuliaDriftEffect() })
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
     }
 }
