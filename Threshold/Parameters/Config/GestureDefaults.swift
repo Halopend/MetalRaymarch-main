@@ -63,12 +63,21 @@ enum GestureDefaults {
 
     // MARK: - Gesture bindings defaults
     static let defaultBindings: [String: GestureActionBinding] = [
-        GestureSlot(hand: .right, finger: .index).persistenceKey: .core(.translate),
-        GestureSlot(hand: .right, finger: .middle).persistenceKey: .core(.none),
-        GestureSlot(hand: .right, finger: .ring).persistenceKey: .core(.none),
-        GestureSlot(hand: .left, finger: .index).persistenceKey: .core(.none),
-        GestureSlot(hand: .left, finger: .middle).persistenceKey: .core(.none),
-        GestureSlot(hand: .left, finger: .ring).persistenceKey: .core(.none),
+        // Single-hand vertical (legacy keys — backward compatible)
+        GestureSlot(hand: .right, finger: .index, direction: .vertical).persistenceKey: .core(.translate),
+        GestureSlot(hand: .right, finger: .middle, direction: .vertical).persistenceKey: .core(.none),
+        GestureSlot(hand: .right, finger: .ring, direction: .vertical).persistenceKey: .core(.none),
+        GestureSlot(hand: .left, finger: .index, direction: .vertical).persistenceKey: .core(.none),
+        GestureSlot(hand: .left, finger: .middle, direction: .vertical).persistenceKey: .core(.none),
+        GestureSlot(hand: .left, finger: .ring, direction: .vertical).persistenceKey: .core(.none),
+        // Single-hand horizontal (new directional slots)
+        GestureSlot(hand: .right, finger: .index, direction: .horizontal).persistenceKey: .core(.none),
+        GestureSlot(hand: .right, finger: .middle, direction: .horizontal).persistenceKey: .core(.none),
+        GestureSlot(hand: .right, finger: .ring, direction: .horizontal).persistenceKey: .core(.none),
+        GestureSlot(hand: .left, finger: .index, direction: .horizontal).persistenceKey: .core(.none),
+        GestureSlot(hand: .left, finger: .middle, direction: .horizontal).persistenceKey: .core(.none),
+        GestureSlot(hand: .left, finger: .ring, direction: .horizontal).persistenceKey: .core(.none),
+        // Both-hand (no direction — these use pull-apart geometry)
         GestureSlot(hand: .both, finger: .index).persistenceKey: .core(.grab),
         GestureSlot(hand: .both, finger: .middle).persistenceKey: .core(.minDistance),
         GestureSlot(hand: .both, finger: .ring).persistenceKey: .core(.fractalScale),

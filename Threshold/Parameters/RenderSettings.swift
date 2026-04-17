@@ -138,7 +138,7 @@ final class RenderSettings: @unchecked Sendable {
         return MenuToggleGestureMode(rawValue: Int32(raw)) ?? GestureDefaults.menuToggleGestureMode
     }()
 
-    // ── Per-hand × per-finger gesture binding slots (9 total) ──────────────
+    // ── Per-hand × per-finger × direction gesture binding slots ──────────
     private var _gestureBindings: [String: GestureActionBinding] = {
         var bindings: [String: GestureActionBinding] = [:]
         let defaults = GestureDefaults.defaultBindings
@@ -553,9 +553,21 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _fractalType } }
         set {
             withLock {
+                let oldValue = _fractalType
                 _fractalType = newValue
                 // Single descriptor lookup — reused for params and gesture validation.
                 let desc = FractalTypeRegistry.descriptor(for: newValue)
+
+                // ── Per-fractal gesture binding save / restore ───────────
+                // Save current gesture bindings under the old fractal type.
+                if oldValue != newValue {
+                    PerFractalGestureStore.save(_gestureBindings, for: oldValue)
+                }
+                // Try to restore saved bindings for the new fractal type.
+                if let saved = PerFractalGestureStore.load(for: newValue) {
+                    _gestureBindings = saved
+                }
+
                 // Auto-set default formula params when switching types
                 if FormulaCatalog.shared.descriptor(for: newValue) != nil {
                     _formulaParams = FormulaCatalog.shared.buildParams(for: newValue)
@@ -860,22 +872,34 @@ final class RenderSettings: @unchecked Sendable {
             // ── Mutual exclusion: single-hand vs two-hand ──────────────
             if case .core(.none) = validated { /* clearing — no conflict to resolve */ } else {
                 if slot.hand == .left || slot.hand == .right {
+                    // Check if the other hand also has a binding for this finger;
+                    // if so, clear the both-hand slot.
                     let otherHand: GestureHandMode = (slot.hand == .left) ? .right : .left
-                    let otherKey = GestureSlot(hand: otherHand, finger: slot.finger).persistenceKey
-                    if let otherBinding = _gestureBindings[otherKey],
-                       !(otherBinding == .core(.none)) {
+                    let hasOtherBinding = GestureDirection.allCases.contains { dir in
+                        let otherKey = GestureSlot(hand: otherHand, finger: slot.finger, direction: dir).persistenceKey
+                        if let b = _gestureBindings[otherKey], b != .core(.none) { return true }
+                        return false
+                    }
+                    if hasOtherBinding {
                         let bothKey = GestureSlot(hand: .both, finger: slot.finger).persistenceKey
                         _gestureBindings[bothKey] = .core(.none)
                     }
                 } else if slot.hand == .both {
-                    let leftKey = GestureSlot(hand: .left, finger: slot.finger).persistenceKey
-                    let rightKey = GestureSlot(hand: .right, finger: slot.finger).persistenceKey
-                    _gestureBindings[leftKey] = .core(.none)
-                    _gestureBindings[rightKey] = .core(.none)
+                    // Clear all single-hand directional sub-slots for this finger
+                    for dir in GestureDirection.allCases {
+                        let leftKey = GestureSlot(hand: .left, finger: slot.finger, direction: dir).persistenceKey
+                        let rightKey = GestureSlot(hand: .right, finger: slot.finger, direction: dir).persistenceKey
+                        _gestureBindings[leftKey] = .core(.none)
+                        _gestureBindings[rightKey] = .core(.none)
+                    }
                 }
             }
         }
         persistGesture()
+        // Also save bindings under the current fractal type for per-fractal restore.
+        withLock {
+            PerFractalGestureStore.save(_gestureBindings, for: _fractalType)
+        }
     }
 
     /// Validates that a binding is appropriate for the given hand mode.

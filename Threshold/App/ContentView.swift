@@ -124,6 +124,7 @@ struct ContentView: View {
             }
         }
         .padding(30)
+        .frame(minWidth: 320, minHeight: 180)
     }
     
     // MARK: - Immersive Layout (Sidebar + Content)

@@ -9,7 +9,7 @@
 import Foundation
 
 struct GestureConfig: Codable, Equatable, Sendable {
-    // 9-slot gesture binding dictionary (hand × finger)
+    // 15-slot gesture binding dictionary (hand × finger × direction)
     var gestureBindings: [String: GestureActionBinding] = GestureDefaults.defaultBindings
 
     // Navigation mode

@@ -305,22 +305,46 @@ struct GestureSettingsView: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
 
-            ForEach(FingerDigit.allCases, id: \.self) { finger in
-                let slot = GestureSlot(hand: mode, finger: finger)
-                slotPicker(slot: slot, handMode: mode)
+            if mode == .both {
+                // Both-hand: no direction — one slot per finger
+                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                    let slot = GestureSlot(hand: mode, finger: finger)
+                    slotPicker(slot: slot, handMode: mode, directionLabel: nil)
+                }
+            } else {
+                // Single-hand: V + H sub-slots per finger
+                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(finger.displayName)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                        let vSlot = GestureSlot(hand: mode, finger: finger, direction: .vertical)
+                        slotPicker(slot: vSlot, handMode: mode, directionLabel: "↕")
+                        let hSlot = GestureSlot(hand: mode, finger: finger, direction: .horizontal)
+                        slotPicker(slot: hSlot, handMode: mode, directionLabel: "↔")
+                    }
+                }
             }
         }
     }
 
     @ViewBuilder
-    private func slotPicker(slot: GestureSlot, handMode: GestureHandMode) -> some View {
+    private func slotPicker(slot: GestureSlot, handMode: GestureHandMode, directionLabel: String?) -> some View {
         let bindings = GestureActionBinding.availableBindings(for: cache.fractalType, handMode: handMode)
         let currentBinding = Binding<GestureActionBinding>(
             get: { cache.gestureBinding(for: slot) },
             set: { cache.setGestureBinding($0, for: slot) }
         )
         HStack {
-            Label(slot.finger.displayName, systemImage: slot.finger.icon).font(.subheadline)
+            if let dir = directionLabel {
+                Text(dir)
+                    .font(.caption2)
+                    .frame(width: 16)
+                    .foregroundStyle(.secondary)
+            }
+            if handMode == .both {
+                Label(slot.finger.displayName, systemImage: slot.finger.icon).font(.subheadline)
+            }
             Spacer()
             Picker(slot.finger.displayName, selection: currentBinding) {
                 ForEach(bindings, id: \.self) { binding in

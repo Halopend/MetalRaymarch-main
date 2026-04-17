@@ -1,5 +1,32 @@
 import Foundation
 
+/// Axis constraint for single-hand scalar drag gestures.
+enum GestureDirection: String, CaseIterable, Codable, Hashable, Sendable {
+    case vertical    // Y-axis finger movement (up/down) — default
+    case horizontal  // X-axis finger movement (left/right)
+
+    var displayName: String {
+        switch self {
+        case .vertical:   return "Vertical"
+        case .horizontal: return "Horizontal"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .vertical:   return "arrow.up.arrow.down"
+        case .horizontal: return "arrow.left.arrow.right"
+        }
+    }
+
+    var suffix: String {
+        switch self {
+        case .vertical:   return "V"
+        case .horizontal: return "H"
+        }
+    }
+}
+
 enum FingerGestureAction: Int32, CaseIterable, Codable, Hashable {
     case none         = 0
     case grab         = 1
@@ -85,13 +112,46 @@ enum FingerDigit: Int, CaseIterable, Codable, Hashable, Sendable {
 struct GestureSlot: Hashable, Codable, Sendable {
     let hand: GestureHandMode
     let finger: FingerDigit
+    /// Direction constraint for single-hand scalar bindings.
+    /// `.vertical` (default) = Y-axis drag, `.horizontal` = X-axis drag.
+    /// Both-hand slots ignore this (always nil).
+    var direction: GestureDirection?
 
-    /// UserDefaults persistence key, e.g. "leftIndexBinding"
+    /// UserDefaults persistence key, e.g. "leftIndexBinding" or "leftIndexBindingH"
     var persistenceKey: String {
+        let base = "\(hand.rawValue)\(finger.displayName)Binding"
+        guard let dir = direction, dir == .horizontal else { return base }
+        return base + "H"
+    }
+
+    /// Legacy key (no direction suffix) for backward-compatible loading.
+    var legacyPersistenceKey: String {
         "\(hand.rawValue)\(finger.displayName)Binding"
     }
 
+    init(hand: GestureHandMode, finger: FingerDigit, direction: GestureDirection? = nil) {
+        self.hand = hand
+        self.finger = finger
+        self.direction = (hand == .both) ? nil : direction
+    }
+
     static let allSlots: [GestureSlot] = {
+        var slots: [GestureSlot] = []
+        for hand in GestureHandMode.allCases {
+            for finger in FingerDigit.allCases {
+                if hand == .both {
+                    slots.append(GestureSlot(hand: hand, finger: finger))
+                } else {
+                    slots.append(GestureSlot(hand: hand, finger: finger, direction: .vertical))
+                    slots.append(GestureSlot(hand: hand, finger: finger, direction: .horizontal))
+                }
+            }
+        }
+        return slots
+    }()
+
+    /// Slots for the old 9-slot layout (backward compatible — no direction, or vertical only).
+    static let legacySlots: [GestureSlot] = {
         var slots: [GestureSlot] = []
         for hand in GestureHandMode.allCases {
             for finger in FingerDigit.allCases {
@@ -102,7 +162,13 @@ struct GestureSlot: Hashable, Codable, Sendable {
     }()
 
     static func slots(for hand: GestureHandMode) -> [GestureSlot] {
-        FingerDigit.allCases.map { GestureSlot(hand: hand, finger: $0) }
+        if hand == .both {
+            return FingerDigit.allCases.map { GestureSlot(hand: hand, finger: $0) }
+        }
+        return FingerDigit.allCases.flatMap { finger in
+            [GestureSlot(hand: hand, finger: finger, direction: .vertical),
+             GestureSlot(hand: hand, finger: finger, direction: .horizontal)]
+        }
     }
 }
 

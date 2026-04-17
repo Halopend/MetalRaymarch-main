@@ -447,9 +447,12 @@ final class GestureController {
         for (handMode, handData) in [(GestureHandMode.left, leftHand), (.right, rightHand)] {
             for digit in 1...3 {
                 guard let finger = FingerDigit(rawValue: digit) else { continue }
-                let slot = GestureSlot(hand: handMode, finger: finger)
-                let binding = settings.binding(for: slot)
-                processSingleHandDrag(slot: slot, hand: handData, binding: binding, settings: settings, activeDigit: &activeDigit)
+                // Process both vertical and horizontal sub-slots for each finger
+                for direction in GestureDirection.allCases {
+                    let slot = GestureSlot(hand: handMode, finger: finger, direction: direction)
+                    let binding = settings.binding(for: slot)
+                    processSingleHandDrag(slot: slot, hand: handData, binding: binding, settings: settings, activeDigit: &activeDigit)
+                }
             }
         }
 
@@ -1045,7 +1048,13 @@ final class GestureController {
             }
             if active && state.isActive {
                 let currentPos = hand.pinchPosition(digit: digit)
-                let verticalDelta = currentPos.y - state.prevPos.y
+                // Use horizontal (X) or vertical (Y) delta based on slot direction
+                let axisDelta: Float
+                if slot.direction == .horizontal {
+                    axisDelta = currentPos.x - state.prevPos.x
+                } else {
+                    axisDelta = currentPos.y - state.prevPos.y
+                }
                 let sensitivity = settings.gestureSensitivity
                 let rangeSpan = node.range.upperBound - node.range.lowerBound
                 let maxStep: Float = 0.15
@@ -1053,7 +1062,7 @@ final class GestureController {
                 // Zoom compensation: dampen sensitivity when zoomed in.
                 let zoomScale = max(settings.detailScale, 0.01)
                 let zoomComp: Float = zoomScale > 1.001 ? pow(zoomScale, -0.5) : 1.0
-                let scaledDelta = simd_clamp(verticalDelta * sensitivity * zoomComp * rangeSpan, -maxStep * rangeSpan, maxStep * rangeSpan)
+                let scaledDelta = simd_clamp(axisDelta * sensitivity * zoomComp * rangeSpan, -maxStep * rangeSpan, maxStep * rangeSpan)
                 state.startValue = simd_clamp(state.startValue + scaledDelta, node.range.lowerBound, node.range.upperBound)
 
                 let op = ParameterOperation(
