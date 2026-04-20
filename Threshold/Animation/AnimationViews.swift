@@ -595,6 +595,9 @@ struct SceneRowView: View {
                     if scene.isLooping {
                         Image(systemName: "repeat")
                     }
+                    if scene.playbackMode != .forward {
+                        Image(systemName: scene.playbackMode.icon)
+                    }
                     if scene.attachedSong != nil {
                         Image(systemName: "music.note")
                             .foregroundStyle(.pink)
@@ -771,6 +774,17 @@ struct SceneEditorView: View {
             TextField("Name", text: $scene.name)
                 .textFieldStyle(.roundedBorder)
             Toggle("Loop Animation", isOn: $scene.isLooping)
+            HStack {
+                Text("Playback")
+                Spacer()
+                Picker("Playback", selection: $scene.playbackMode) {
+                    ForEach(AnimationPlaybackMode.allCases, id: \.self) { mode in
+                        Label(mode.displayName, systemImage: mode.icon).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 160)
+            }
             HStack {
                 Text("Total Duration")
                 Spacer()

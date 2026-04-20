@@ -235,6 +235,9 @@ final class GestureController {
         
         // Palm position (use wrist or middle metacarpal)
         data.palmPosition = jointPosition(.middleFingerMetacarpal)
+
+        // Wrist position
+        data.wristPosition = jointPosition(.wrist)
         
         // Palm center (average of metacarpals for more accurate palm detection)
         // OPTIMIZATION: Use SIMD addition with single multiply instead of 4 multiplies
@@ -243,6 +246,14 @@ final class GestureController {
         let ringMeta = jointPosition(.ringFingerMetacarpal)
         let pinkyMeta = jointPosition(.littleFingerMetacarpal)
         data.palmCenter = (indexMeta + middleMeta + ringMeta + pinkyMeta) * 0.25
+
+        // Palm normal: cross product of two vectors spanning the palm surface.
+        // Uses index metacarpal → pinky metacarpal and wrist → middle metacarpal to define the plane.
+        let palmEdge1 = pinkyMeta - indexMeta
+        let palmEdge2 = middleMeta - data.wristPosition
+        let rawNormal = simd_cross(palmEdge1, palmEdge2)
+        let normalLen = simd_length(rawNormal)
+        data.palmNormal = normalLen > 1e-6 ? rawNormal / normalLen : .zero
         
         // Calculate pinch values based on distance between thumb and each finger
         // Ring finger has shorter reach to thumb anatomically, so use tighter range
@@ -276,6 +287,12 @@ final class GestureController {
             return min(rightHand.middleFingerTouchingPalm(), rightHand.ringFingerTouchingPalm())
         case .fist:
             return rightHand.fistStrength()
+        case .wristTap:
+            let leftTapsRight = rightHand.wristTapStrength(otherHand: leftHand)
+            let rightTapsLeft = leftHand.wristTapStrength(otherHand: rightHand)
+            return max(leftTapsRight, rightTapsLeft)
+        case .thumbToIndexPalmUp:
+            return rightHand.thumbToIndexPalmUpStrength()
         }
     }
 
@@ -285,11 +302,15 @@ final class GestureController {
 
         switch mode {
         case .middleToPalm:
-            return (activate: baseActivate + 0.02, release: baseRelease + 0.02)
+            return (activate: baseActivate + 0.02, release: baseRelease - 0.05)
         case .middleAndRingToPalm:
             return (activate: baseActivate, release: baseRelease)
         case .fist:
-            return (activate: min(0.96, baseActivate + 0.18), release: min(0.92, baseRelease + 0.15))
+            return (activate: min(0.90, baseActivate + 0.08), release: min(0.85, baseRelease + 0.05))
+        case .wristTap:
+            return (activate: min(0.90, baseActivate + 0.10), release: min(0.85, baseRelease + 0.10))
+        case .thumbToIndexPalmUp:
+            return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
         }
     }
 
@@ -303,13 +324,23 @@ final class GestureController {
             return
         }
 
-        guard rightHand.isTracked else {
-            menuToggleEngine.state.isActive = false
-            menuToggleEngine.state.holdTimer = 0
-            return
+        let mode = settings.menuToggleGestureMode
+
+        // Wrist tap requires both hands; other modes require right hand only
+        if mode.requiresBothHands {
+            guard leftHand.isTracked, rightHand.isTracked else {
+                menuToggleEngine.state.isActive = false
+                menuToggleEngine.state.holdTimer = 0
+                return
+            }
+        } else {
+            guard rightHand.isTracked else {
+                menuToggleEngine.state.isActive = false
+                menuToggleEngine.state.holdTimer = 0
+                return
+            }
         }
 
-        let mode = settings.menuToggleGestureMode
         let strength = menuToggleStrength(for: mode)
         let thresholds = menuToggleThresholds(for: mode, settings: settings)
 

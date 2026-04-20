@@ -95,12 +95,20 @@ final class AnimationManager {
         didSet {
             // Reset playhead when scene changes
             if currentScene?.id != oldValue?.id {
+                let wasPlaying = playhead.state == .playing
                 playhead.reset()
                 playhead.sceneID = currentScene?.id
                 uiPlayhead = playhead
                 
                 // Precompile pipelines for all keyframes in this scene
                 precompilePipelinesForCurrentScene()
+                
+                // If playback was active, re-start on the new scene so
+                // fractal type, gradient, safety-bubble, and other scene-level
+                // settings are applied (they are only set inside play()).
+                if wasPlaying && currentScene != nil {
+                    play()
+                }
             }
         }
     }
@@ -474,7 +482,20 @@ final class AnimationManager {
         // Signal render loop to tick animation updates every frame.
         // Renderer gates animationManager.update(...) behind this flag.
         renderSettings?.isAnimationPlaying = true
-        
+
+        // Initialise playhead direction for the current scene's playback mode.
+        let mode = currentScene?.playbackMode ?? .forward
+        switch mode {
+        case .forward, .pingPong:
+            playhead.isGoingForward = true
+        case .reverse:
+            // Start at the last segment so the first tick runs N-1 → N-2.
+            let kfCount = currentScene?.keyframes.count ?? 2
+            playhead.currentKeyframeIndex = kfCount - 1
+            playhead.elapsedInSegment = 0
+            playhead.isGoingForward = false
+        }
+
         playhead.state = .playing
         uiPlayhead = playhead
         uiThrottleCounter = 0
@@ -629,65 +650,116 @@ final class AnimationManager {
               scene.keyframes.count >= 2 else { return }
         let keyframes = scene.keyframes
         let keyframeCount = keyframes.count
-        
+        let mode = scene.playbackMode
+
         // Advance time
         playhead.elapsedInSegment += deltaTime * playbackSpeed
-        
-        // Get current and next keyframe indices
+
+        // Resolve the current segment (from → to) based on playback mode.
+        // `fromIndex` is the keyframe we started the segment at.
+        // `toIndex`   is the keyframe we are interpolating toward.
         var fromIndex = playhead.currentKeyframeIndex
-        var toIndex = fromIndex + 1
-        
-        // Handle end of scene
-        if toIndex >= keyframeCount {
-            if scene.isLooping {
-                toIndex = 0  // Wrap to first keyframe
-            } else {
-                stop()
-                return
-            }
-        }
-        
-        var fromKeyframe = keyframes[fromIndex]
-        var toKeyframe = keyframes[toIndex]
-        var actualDuration = segmentDuration(for: keyframes, toIndex: toIndex)
-        
-        // Check if current segment is complete - advance and carry over excess time
-        while playhead.elapsedInSegment >= actualDuration {
-            // Carry over excess time to next segment
-            playhead.elapsedInSegment -= actualDuration
-            
-            // Move to next segment
-            playhead.currentKeyframeIndex = toIndex
-            fromIndex = toIndex
+        var toIndex: Int
+        var goingForward = mode == .forward ? true : (mode == .reverse ? false : playhead.isGoingForward)
+
+        if goingForward {
             toIndex = fromIndex + 1
-            
-            // Handle wrap
             if toIndex >= keyframeCount {
-                if scene.isLooping {
-                    toIndex = 0
-                } else {
-                    stop()
-                    return
+                switch mode {
+                case .forward:
+                    if scene.isLooping { toIndex = 0 } else { stop(); return }
+                case .pingPong:
+                    // Bounce: reverse direction, go back one step
+                    playhead.isGoingForward = false
+                    goingForward = false
+                    toIndex = fromIndex - 1
+                    if toIndex < 0 { stop(); return }  // only 2 KF edge case
+                case .reverse:
+                    break  // unreachable
                 }
             }
-            
-            // Update keyframes for new segment
-            fromKeyframe = keyframes[fromIndex]
-            toKeyframe = keyframes[toIndex]
-            actualDuration = segmentDuration(for: keyframes, toIndex: toIndex)
+        } else {
+            toIndex = fromIndex - 1
+            if toIndex < 0 {
+                switch mode {
+                case .reverse:
+                    if scene.isLooping {
+                        toIndex = keyframeCount - 1
+                    } else { stop(); return }
+                case .pingPong:
+                    // Bounce: forward again
+                    playhead.isGoingForward = true
+                    goingForward = true
+                    toIndex = fromIndex + 1
+                    if toIndex >= keyframeCount { stop(); return }
+                case .forward:
+                    break  // unreachable
+                }
+            }
         }
-        
+
+        // The segment duration is keyed to the destination keyframe (same as forward mode).
+        // For reverse segments we use the from-index's duration so timing is symmetric.
+        var fromKeyframe = keyframes[fromIndex]
+        var toKeyframe   = keyframes[toIndex]
+        // Use the later keyframe's duration for the segment regardless of direction.
+        let durationIndex = max(fromIndex, toIndex)
+        var actualDuration = segmentDuration(for: keyframes, toIndex: durationIndex)
+
+        // Check if current segment is complete — advance and carry over excess time
+        while playhead.elapsedInSegment >= actualDuration {
+            playhead.elapsedInSegment -= actualDuration
+            playhead.currentKeyframeIndex = toIndex
+            fromIndex = toIndex
+
+            if goingForward {
+                toIndex = fromIndex + 1
+                if toIndex >= keyframeCount {
+                    switch mode {
+                    case .forward:
+                        if scene.isLooping { toIndex = 0 } else { stop(); return }
+                    case .pingPong:
+                        playhead.isGoingForward = false
+                        goingForward = false
+                        toIndex = fromIndex - 1
+                        if toIndex < 0 { stop(); return }
+                    case .reverse:
+                        break
+                    }
+                }
+            } else {
+                toIndex = fromIndex - 1
+                if toIndex < 0 {
+                    switch mode {
+                    case .reverse:
+                        if scene.isLooping { toIndex = keyframeCount - 1 } else { stop(); return }
+                    case .pingPong:
+                        playhead.isGoingForward = true
+                        goingForward = true
+                        toIndex = fromIndex + 1
+                        if toIndex >= keyframeCount { stop(); return }
+                    case .forward:
+                        break
+                    }
+                }
+            }
+
+            fromKeyframe  = keyframes[fromIndex]
+            toKeyframe    = keyframes[toIndex]
+            let durIdx    = max(fromIndex, toIndex)
+            actualDuration = segmentDuration(for: keyframes, toIndex: durIdx)
+        }
+
         // Calculate progress through current segment (0 to 1)
         let rawProgress = Float(playhead.elapsedInSegment / actualDuration)
-        
+
         // Interpolate using the appropriate method
         let interpolated: AnimationKeyframe
-        
+
         // Determine effective easing: per-keyframe overrides global
         let effectiveEasing = toKeyframe.easingType
-        
+
         if effectiveEasing.usesSplineInterpolation || (easingFunction.usesSplineInterpolation && effectiveEasing == .bezier) {
-            // Use Catmull-Rom spline for smooth continuous motion through keyframes
             interpolated = CatmullRomSpline.interpolateKeyframes(
                 keyframes,
                 fromIndex: fromIndex,
@@ -696,17 +768,15 @@ final class AnimationManager {
                 isLooping: scene.isLooping
             )
         } else if effectiveEasing.usesBezierHandles {
-            // Per-keyframe cubic Bezier easing
             let easedProgress = CubicBezier.evaluate(rawProgress, handle: toKeyframe.bezierHandle)
             interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
         } else {
-            // Standard easing interpolation (slows to stop at each keyframe)
             let easedProgress = effectiveEasing.apply(rawProgress)
             interpolated = fromKeyframe.interpolated(to: toKeyframe, t: easedProgress)
         }
-        
+
         applyKeyframe(interpolated)
-        
+
         // Throttle UI playhead updates to ~15Hz to avoid per-frame SwiftUI invalidation
         uiThrottleCounter += 1
         if uiThrottleCounter >= Self.uiThrottleInterval {

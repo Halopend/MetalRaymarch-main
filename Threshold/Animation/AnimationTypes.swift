@@ -669,6 +669,9 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     var name: String
     var keyframes: [AnimationKeyframe]
     var isLooping: Bool
+    /// Playback direction/mode for this scene — forward, reverse, or ping-pong.
+    /// Defaults to `.forward` for backward compatibility with existing saved scenes.
+    var playbackMode: AnimationPlaybackMode
     var createdAt: Date
     var modifiedAt: Date
     
@@ -717,6 +720,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.name = name
         self.keyframes = []
         self.isLooping = true
+        self.playbackMode = .forward
         self.createdAt = Date()
         self.modifiedAt = Date()
     }
@@ -727,6 +731,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.name = name
         self.keyframes = []
         self.isLooping = true
+        self.playbackMode = .forward
         self.createdAt = Date()
         self.modifiedAt = Date()
     }
@@ -737,9 +742,42 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         self.name = name
         self.keyframes = [initialKeyframe]
         self.isLooping = true
+        self.playbackMode = .forward
         self.createdAt = Date()
         self.modifiedAt = Date()
         self.fractalType = fractalType
+    }
+
+    // Custom Codable for backward compatibility: old saved scenes without
+    // "playbackMode" default to .forward so they decode without error.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id             = try c.decode(UUID.self, forKey: .id)
+        name           = try c.decode(String.self, forKey: .name)
+        keyframes      = try c.decode([AnimationKeyframe].self, forKey: .keyframes)
+        isLooping      = try c.decode(Bool.self, forKey: .isLooping)
+        playbackMode   = (try? c.decode(AnimationPlaybackMode.self, forKey: .playbackMode)) ?? .forward
+        createdAt      = try c.decode(Date.self, forKey: .createdAt)
+        modifiedAt     = try c.decode(Date.self, forKey: .modifiedAt)
+        fractalType    = try c.decodeIfPresent(FractalModelType.self, forKey: .fractalType)
+        gradientPreset = try c.decodeIfPresent(GradientPreset.self, forKey: .gradientPreset)
+        colorMappingMode = try c.decodeIfPresent(ColorMappingMode.self, forKey: .colorMappingMode)
+        gradientRepeat   = try c.decodeIfPresent(Float.self, forKey: .gradientRepeat)
+        gradientOffset   = try c.decodeIfPresent(Float.self, forKey: .gradientOffset)
+        gradientSmoothing = try c.decodeIfPresent(Float.self, forKey: .gradientSmoothing)
+        colorSchemeSaturation = try c.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation)
+        colorSchemeContrast   = try c.decodeIfPresent(Float.self, forKey: .colorSchemeContrast)
+        colorSchemeGamma      = try c.decodeIfPresent(Float.self, forKey: .colorSchemeGamma)
+        colorSchemeVibrance   = try c.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance)
+        colorSchemeCurve      = try c.decodeIfPresent(Float.self, forKey: .colorSchemeCurve)
+        colorSchemeShadows    = try c.decodeIfPresent(Float.self, forKey: .colorSchemeShadows)
+        colorSchemeHighlights = try c.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights)
+        lightingSoftness      = try c.decodeIfPresent(Float.self, forKey: .lightingSoftness)
+        safetyBubbleEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .safetyBubbleEnabled)
+        safetyBubbleRadius    = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
+        safetyBubbleShape     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
+        safetyBubbleBlend     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
+        attachedSong          = try c.decodeIfPresent(SongAttachment.self, forKey: .attachedSong)
     }
     
     /// Add a keyframe from current settings
@@ -779,12 +817,38 @@ enum AnimationPlaybackState: Equatable {
     case paused
 }
 
+/// Direction/mode for scene playback. Saved per-scene.
+enum AnimationPlaybackMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case forward   // default: KF 0 → 1 → 2 → … → N → 0 (loop)
+    case reverse   // KF N → N-1 → … → 0 → N (loop)
+    case pingPong  // KF 0 → N → 0 → N … (bounces at each end)
+
+    var displayName: String {
+        switch self {
+        case .forward:  return "Forward"
+        case .reverse:  return "Reverse"
+        case .pingPong: return "Ping-Pong"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .forward:  return "play.fill"
+        case .reverse:  return "backward.fill"
+        case .pingPong: return "arrow.left.arrow.right"
+        }
+    }
+}
+
 /// Represents the current position in an animation
 struct AnimationPlayhead {
     var sceneID: UUID?
     var currentKeyframeIndex: Int = 0
     var elapsedInSegment: TimeInterval = 0  // Time elapsed in current segment
     var state: AnimationPlaybackState = .stopped
+    /// Ping-pong direction: true = moving toward higher indices, false = moving toward lower.
+    /// Also used for .reverse init (starts false) and .forward (always true, ignored).
+    var isGoingForward: Bool = true
     
     /// Progress through current segment (0...1)
     func segmentProgress(segmentDuration: TimeInterval) -> Float {

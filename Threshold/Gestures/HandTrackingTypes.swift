@@ -21,6 +21,8 @@ struct HandData {
     var pinkyTip: SIMD3<Float> = .zero
     var palmPosition: SIMD3<Float> = .zero
     var palmCenter: SIMD3<Float> = .zero  // Center of palm for gesture detection
+    var wristPosition: SIMD3<Float> = .zero  // Wrist joint position
+    var palmNormal: SIMD3<Float> = .zero  // Normal vector pointing outward from palm face
     
     // Pinch values (0-1, 1 = fully pinched)
     var indexPinch: Float = 0
@@ -70,15 +72,17 @@ struct HandData {
             return simd_clamp(normalized, 0, 1)
         }
         
+        // Exclude thumb — it wraps outside the other fingers in a fist,
+        // placing thumbTip farther from palmCenter. VisionOS hand tracking also
+        // loses precision on the thumb when other fingers are occluded.
         let strengths = [
             fingerStrength(indexDist),
             fingerStrength(middleDist),
             fingerStrength(ringDist),
-            fingerStrength(pinkyDist),
-            fingerStrength(thumbDist)
+            fingerStrength(pinkyDist)
         ]
         
-        // Return minimum strength (all fingers must be curled for a fist)
+        // Return minimum strength (all four fingers must be curled for a fist)
         return strengths.min() ?? 0
     }
     
@@ -110,6 +114,48 @@ struct HandData {
 
         let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
         return simd_clamp(normalized, 0, 1)
+    }
+
+    /// Check if the opposite hand's fingertips are near this hand's wrist (wrist tap detection).
+    /// Returns 0-1 strength based on proximity of the other hand's index fingertip to this hand's wrist.
+    func wristTapStrength(otherHand: HandData) -> Float {
+        guard isTracked, otherHand.isTracked,
+              simd_length_squared(wristPosition) > 1e-6,
+              simd_length_squared(otherHand.indexTip) > 1e-6 else { return 0 }
+
+        let distance = simd_length(otherHand.indexTip - wristPosition)
+
+        // Wrist tap thresholds (in meters)
+        let touchDist: Float = 0.04   // 4cm = tapping
+        let awayDist: Float = 0.12    // 12cm = clearly away
+
+        let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
+        return simd_clamp(normalized, 0, 1)
+    }
+
+    /// Check if thumb and index finger are pinched with palm facing upward.
+    /// Returns 0-1 strength combining thumb-index proximity and palm-up orientation.
+    func thumbToIndexPalmUpStrength() -> Float {
+        guard isTracked,
+              simd_length_squared(thumbTip) > 1e-6,
+              simd_length_squared(indexTip) > 1e-6,
+              simd_length_squared(palmNormal) > 1e-6 else { return 0 }
+
+        // Thumb-to-index pinch distance
+        let pinchDist = simd_length(thumbTip - indexTip)
+        let touchDist: Float = 0.025  // 2.5cm = pinched
+        let awayDist: Float = 0.07    // 7cm = apart
+        let pinchStrength = simd_clamp(1.0 - ((pinchDist - touchDist) / (awayDist - touchDist)), 0, 1)
+
+        // Palm-up check: palm normal should point upward (positive Y in world space)
+        // palmNormal.y > 0 means palm faces up; we want a smooth falloff
+        let upwardness = simd_clamp(palmNormal.y, 0, 1)  // 0 = sideways/down, 1 = fully up
+        let palmUpThreshold: Float = 0.3  // Require at least ~17° above horizontal
+        let palmUpStrength = simd_clamp((upwardness - palmUpThreshold) / (1.0 - palmUpThreshold), 0, 1)
+
+        // Both conditions must be met — use min instead of multiply so a
+        // good pinch with reasonable palm orientation still produces usable strength
+        return min(pinchStrength, palmUpStrength)
     }
     
     static var zero: HandData { HandData() }

@@ -3,6 +3,9 @@ import Foundation
 @MainActor
 final class MenuToggleGestureEngine {
     var state = MenuToggleGestureState()
+    #if DEBUG
+    private var debugFrameCounter: Int = 0
+    #endif
 
     func reset() {
         state = MenuToggleGestureState()
@@ -19,14 +22,33 @@ final class MenuToggleGestureEngine {
             return []
         }
 
-        guard context.rightHand.isTracked else {
-            state.isActive = false
-            state.holdTimer = 0
-            return []
+        let mode = settings.menuToggleGestureMode
+
+        // Wrist tap requires both hands; other modes require right hand only
+        if mode.requiresBothHands {
+            guard context.leftHand.isTracked, context.rightHand.isTracked else {
+                state.isActive = false
+                state.holdTimer = 0
+                return []
+            }
+        } else {
+            guard context.rightHand.isTracked else {
+                state.isActive = false
+                state.holdTimer = 0
+                return []
+            }
         }
 
-        let strength = menuToggleStrength(for: settings.menuToggleGestureMode, hand: context.rightHand)
-        let thresholds = menuToggleThresholds(for: settings.menuToggleGestureMode, settings: settings)
+        let strength = menuToggleStrength(for: mode, context: context)
+        let thresholds = menuToggleThresholds(for: mode, settings: settings)
+
+        #if DEBUG
+        debugFrameCounter += 1
+        if debugFrameCounter >= 90, strength > 0.1 {
+            debugFrameCounter = 0
+            print("🎛️ MenuToggle[\(mode.displayName)] str=\(String(format: "%.2f", strength)) act=\(String(format: "%.2f", thresholds.activate)) rel=\(String(format: "%.2f", thresholds.release)) active=\(state.isActive) hold=\(String(format: "%.2f", state.holdTimer)) cd=\(String(format: "%.2f", state.cooldown))")
+        }
+        #endif
 
         let shouldBeActive: Bool = state.isActive
             ? (strength >= thresholds.release)
@@ -50,14 +72,21 @@ final class MenuToggleGestureEngine {
         return []
     }
 
-    private func menuToggleStrength(for mode: MenuToggleGestureMode, hand: HandData) -> Float {
+    private func menuToggleStrength(for mode: MenuToggleGestureMode, context: GestureContext) -> Float {
         switch mode {
         case .middleToPalm:
-            return hand.middleFingerTouchingPalm()
+            return context.rightHand.middleFingerTouchingPalm()
         case .middleAndRingToPalm:
-            return min(hand.middleFingerTouchingPalm(), hand.ringFingerTouchingPalm())
+            return min(context.rightHand.middleFingerTouchingPalm(), context.rightHand.ringFingerTouchingPalm())
         case .fist:
-            return hand.fistStrength()
+            return context.rightHand.fistStrength()
+        case .wristTap:
+            // Use whichever wrist is being tapped by the other hand (max of both directions)
+            let leftTapsRight = context.rightHand.wristTapStrength(otherHand: context.leftHand)
+            let rightTapsLeft = context.leftHand.wristTapStrength(otherHand: context.rightHand)
+            return max(leftTapsRight, rightTapsLeft)
+        case .thumbToIndexPalmUp:
+            return context.rightHand.thumbToIndexPalmUpStrength()
         }
     }
 
@@ -67,11 +96,20 @@ final class MenuToggleGestureEngine {
 
         switch mode {
         case .middleToPalm:
-            return (activate: baseActivate + 0.02, release: baseRelease + 0.02)
+            // Lower release threshold so the finger must fully extend before re-arming.
+            // The middle finger naturally rests near the palm, so a higher release
+            // threshold causes isActive to get stuck.
+            return (activate: baseActivate + 0.02, release: baseRelease - 0.05)
         case .middleAndRingToPalm:
             return (activate: baseActivate, release: baseRelease)
         case .fist:
-            return (activate: min(0.96, baseActivate + 0.18), release: min(0.92, baseRelease + 0.15))
+            return (activate: min(0.90, baseActivate + 0.08), release: min(0.85, baseRelease + 0.05))
+        case .wristTap:
+            // Wrist tap needs a higher threshold to avoid accidental triggers
+            return (activate: min(0.90, baseActivate + 0.10), release: min(0.85, baseRelease + 0.10))
+        case .thumbToIndexPalmUp:
+            // Combined pinch + orientation, moderate thresholds
+            return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
         }
     }
 }

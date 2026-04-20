@@ -151,6 +151,7 @@ struct MetalProjectTestApp: App {
         }
         .immersionStyle(selection: .constant(.full), in: .full)
         .upperLimbVisibility(.visible)
+        .persistentSystemOverlays(.hidden)
         .onChange(of: appModel.immersiveSpaceState) { oldValue, newValue in
             // When exiting immersive mode, ensure window is visible and populated
             if oldValue == .open && (newValue == .closed || newValue == .inTransition) {
