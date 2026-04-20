@@ -619,6 +619,9 @@ struct MusicTabContent: View {
                 }
             ))
 
+            Toggle("Show Music Shortcuts on Parameters", isOn: $cache.display.showMusicShortcuts)
+                .onChange(of: cache.display.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
+
             if cache.audioReactive.fractalAudioReactiveEnabled {
                 // Genre presets (Fractal Forge–inspired)
                 VStack(alignment: .leading, spacing: 4) {

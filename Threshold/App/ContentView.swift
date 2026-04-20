@@ -15,31 +15,31 @@ import RealityKit
 // ═══════════════════════════════════════════════════════════════════════════════
 
 enum SidebarTab: String, CaseIterable {
-    case formulas = "Formulas"
     case fractal = "Fractal"
     case animate = "Animate"
     case coloring = "Coloring"
     case effects = "Effects"
     case music = "Music"
+    case gestures = "Gestures"
     case settings = "Settings"
     
     var icon: String {
         switch self {
-        case .formulas: return "square.grid.2x2.fill"
         case .fractal:  return "cube.fill"
         case .animate:  return "film.stack"
         case .coloring: return "paintpalette.fill"
         case .effects:  return "wand.and.stars"
         case .music:    return "music.note"
+        case .gestures: return "hand.draw"
         case .settings: return "gearshape.fill"
         }
     }
 }
 
-enum FractalSubTab: String, CaseIterable { case shape = "Shape", space = "Space", quality = "Quality" }
+enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", quality = "Quality" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
-enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", advanced = "Advanced" }
+enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - ContentView
@@ -192,12 +192,12 @@ struct ContentView: View {
                 BuddhabrotControlsView()
             } else {
                 switch selectedTab {
-                case .formulas: FractalGridView(cache: cache, gestureController: appModel.gestureController)
                 case .fractal:  fractalTabContent
                 case .animate:  animateTabContent
                 case .coloring: coloringTabContent
                 case .effects:  effectsTabContent
                 case .music:    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings)
+                case .gestures: gesturesTabContent
                 case .settings: settingsTabContent
                 }
             }
@@ -270,6 +270,7 @@ struct ContentView: View {
                 ScrollViewReader { scrollProxy in
                     VStack(spacing: 12) {
                         switch fractalSubTab {
+                        case .browse:  FractalGridView(cache: cache, gestureController: appModel.gestureController)
                         case .shape:   fractalShapeContent
                         case .space:   fractalSpaceContent
                         case .quality: fractalQualityContent
@@ -289,7 +290,7 @@ struct ContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    selectedTab = .formulas
+                    fractalSubTab = .browse
                 } label: {
                     Label("Change", systemImage: "square.grid.2x2")
                 }
@@ -477,6 +478,25 @@ struct ContentView: View {
                     .tint(QualityPreset.detect(fractalIterations: cache.quality.baseFractalIterations, raySteps: cache.quality.baseMaxRaySteps) == preset ? .blue : .secondary)
                 }
             }
+            
+            // ── Fine-Grained Quality Controls ──
+            VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
+                    Slider(value: Binding(
+                        get: { Float(cache.quality.baseFractalIterations) },
+                        set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
+                    ), in: 4...32, step: 1)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
+                    Slider(value: Binding(
+                        get: { Float(cache.quality.baseMaxRaySteps) },
+                        set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
+                    ), in: 32...1024, step: 16)
+                }
+            }
+            
             Divider()
             Toggle("Dynamic Render Quality", isOn: $cache.quality.dynamicRenderQualityEnabled)
                 .onChange(of: cache.quality.dynamicRenderQualityEnabled) { _, v in cache.push(\.dynamicRenderQualityEnabled, value: v) }
@@ -493,6 +513,18 @@ struct ContentView: View {
                     Text("\(Int(cache.quality.dynamicRenderQualityMax * 100))%").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
                 }
             }
+            
+            Divider()
+            Toggle("Recreate Legacy Compute Cache Bug", isOn: Binding(
+                get: { cache.quality.recreateLegacyComputeCacheBug },
+                set: {
+                    cache.quality.recreateLegacyComputeCacheBug = $0
+                    cache.push(\.recreateLegacyComputeCacheBug, value: $0)
+                }
+            ))
+            Text("Caps pipeline iterations at 6 while uniforms keep the slider value, recreating the original distance-estimator mismatch artifact.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
     
@@ -724,13 +756,21 @@ struct ContentView: View {
             }
             
             // ── Saved Custom Gradients ──
-            if !cache.gradientLibrary.savedCustomGradients.isEmpty {
-                HStack {
-                    Text("Saved").font(.subheadline).foregroundColor(.secondary)
-                    Spacer()
+            HStack {
+                Text("Saved").font(.subheadline).foregroundColor(.secondary)
+                Spacer()
+                if !cache.gradientLibrary.savedCustomGradients.isEmpty {
                     Text("\(cache.gradientLibrary.savedCustomGradients.count)").font(.caption2).foregroundStyle(.tertiary)
                 }
-                .padding(.top, 4)
+            }
+            .padding(.top, 4)
+            if cache.gradientLibrary.savedCustomGradients.isEmpty {
+                Text("Edit a gradient and tap Save to build your library.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            } else {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                     ForEach(Array(cache.gradientLibrary.savedCustomGradients.enumerated()), id: \.element.id) { index, saved in
                         let isActive = cache.color.gradientState.gradientPreset == nil && cache.color.gradientState.gradient.id == saved.id
@@ -1083,6 +1123,222 @@ struct ContentView: View {
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
+    // MARK: - Gestures Tab
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    private var gesturesTabContent: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 12) {
+                VStack(spacing: 8) {
+                    HStack {
+                        Label("Gesture Controls", systemImage: "hand.draw").font(.headline)
+                        Spacer()
+                    }
+
+                    HandTrackingStatusView(state: appModel.handTrackingState)
+                        .padding(.vertical, 2)
+
+                    Toggle("Enable Hand Gesture Controls", isOn: Binding(
+                        get: { appModel.handTrackingEnabled },
+                        set: { appModel.handTrackingEnabled = $0 }
+                    ))
+
+                    // ── Hand Assignments (per-hand × per-finger) ──────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Hand Assignments", systemImage: "hand.point.up.braille")
+                            .font(.subheadline.weight(.semibold))
+
+                        ForEach(GestureHandMode.allCases, id: \.self) { mode in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(mode.displayName, systemImage: mode.icon)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 4)
+                                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                                    let slot = GestureSlot(hand: mode, finger: finger)
+                                    gestureSlotPicker(slot: slot, handMode: mode)
+                                }
+                            }
+                        }
+                    }
+
+                    Divider().padding(.vertical, 2)
+
+                    Group {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Core Behavior", systemImage: "slider.horizontal.3")
+                                .font(.subheadline.weight(.semibold))
+
+                        Toggle("Spring Blob Navigation", isOn: $cache.gesture.useSpringBlob)
+                            .onChange(of: cache.gesture.useSpringBlob) { _, v in cache.push(\.useSpringBlob, value: v) }
+                        Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
+                            .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
+                        Toggle("Extended Range", isOn: $cache.gesture.extendedGestureRange)
+                            .onChange(of: cache.gesture.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+                        Toggle("Rotation Auto-Snap", isOn: $cache.gesture.rotationAutoSnap)
+                            .onChange(of: cache.gesture.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
+                        if cache.gesture.rotationAutoSnap {
+                            EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Breakaway Angle (°)",
+                                value: $cache.gesture.rotationBreakawayDegrees, range: 0...45,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.rotationBreakawayDegrees, value: cache.gesture.rotationBreakawayDegrees) },
+                                showToggle: false)
+                            Text("Rotation stays locked until your hands rotate past this angle, then engages smoothly.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+
+                        EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Global Sensitivity",
+                            value: $cache.gesture.gestureSensitivity, range: 1...10,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.gestureSensitivity, value: cache.gesture.gestureSensitivity) },
+                            showToggle: false)
+
+                        EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",
+                            value: $cache.gesture.translationSensitivity, range: 0.2...3.0,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.translationSensitivity, value: cache.gesture.translationSensitivity) },
+                            showToggle: false)
+
+                        if cache.gesture.rotationAutoSnap {
+                            EffectSliderRow(icon: "rotate.3d", label: "Snap Window (°)",
+                                value: $cache.gesture.rotationSnapWindowDegrees, range: 2...30,
+                                enabled: .constant(true),
+                                onChanged: { cache.push(\.rotationSnapWindowDegrees, value: cache.gesture.rotationSnapWindowDegrees) },
+                                showToggle: false)
+                        }
+                        }
+
+                        Divider().padding(.vertical, 2)
+
+                        // ── Menu Toggle (compact) ──
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Menu Toggle Gesture", isOn: $cache.gesture.menuToggleGestureEnabled)
+                                .onChange(of: cache.gesture.menuToggleGestureEnabled) { _, v in
+                                    cache.push(\.menuToggleGestureEnabled, value: v)
+                                }
+
+                            if cache.gesture.menuToggleGestureEnabled {
+                                HStack {
+                                    Label("Gesture", systemImage: cache.gesture.menuToggleGestureMode.icon)
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Picker("", selection: $cache.gesture.menuToggleGestureMode) {
+                                        ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
+                                            Text(mode.displayName).tag(mode)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .frame(maxWidth: 180)
+                                    .onChange(of: cache.gesture.menuToggleGestureMode) { _, v in
+                                        cache.push(\.menuToggleGestureMode, value: v)
+                                    }
+                                }
+                            }
+                        }
+
+                        Divider().padding(.vertical, 2)
+
+                        // ── Gesture Lab (collapsed by default) ──
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Menu Toggle Tuning", systemImage: "menucard")
+                                    .font(.caption.weight(.semibold))
+
+                                EffectSliderRow(icon: "hand.tap", label: "Hold Time",
+                                    value: $cache.gesture.menuToggleHoldDuration, range: 0.05...0.6,
+                                    enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                    onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.gesture.menuToggleHoldDuration) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "timer", label: "Cooldown",
+                                    value: $cache.gesture.menuToggleCooldown, range: 0.1...2.5,
+                                    enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                    onChanged: { cache.push(\.menuToggleCooldown, value: cache.gesture.menuToggleCooldown) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "bolt.horizontal", label: "Activate",
+                                    value: $cache.gesture.menuToggleActivateThreshold, range: 0.2...0.95,
+                                    enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                    onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.gesture.menuToggleActivateThreshold) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "arrow.down.to.line", label: "Release",
+                                    value: $cache.gesture.menuToggleReleaseThreshold, range: 0.1...0.9,
+                                    enabled: .constant(cache.gesture.menuToggleGestureEnabled),
+                                    onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.gesture.menuToggleReleaseThreshold) },
+                                    showToggle: false)
+
+                                Divider()
+
+                                Label("Two-Hand Pinch Tuning", systemImage: "hands.sparkles")
+                                    .font(.caption.weight(.semibold))
+
+                                EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Distance",
+                                    value: $cache.gesture.gestureMinHandDistance, range: 0.02...0.25,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gesture.gestureMinHandDistance) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "arrow.left.and.right", label: "Max Distance",
+                                    value: $cache.gesture.gestureMaxHandDistance, range: 0.2...1.2,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gesture.gestureMaxHandDistance) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "hand.draw", label: "Pinch Activate",
+                                    value: $cache.gesture.twoHandPinchActivateThreshold, range: 0.2...0.98,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.gesture.twoHandPinchActivateThreshold) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "hand.raised", label: "Pinch Release",
+                                    value: $cache.gesture.twoHandPinchReleaseThreshold, range: 0.1...0.95,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.gesture.twoHandPinchReleaseThreshold) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "hand.point.up.left", label: "Ring Activate",
+                                    value: $cache.gesture.ringPinchActivateThreshold, range: 0.1...0.95,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.gesture.ringPinchActivateThreshold) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "hand.point.up.braille", label: "Ring Release",
+                                    value: $cache.gesture.ringPinchReleaseThreshold, range: 0.05...0.9,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.gesture.ringPinchReleaseThreshold) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "play.circle", label: "Start Guard",
+                                    value: $cache.gesture.gestureMaxStartHandDistance, range: 0.08...1.0,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gesture.gestureMaxStartHandDistance) },
+                                    showToggle: false)
+
+                                EffectSliderRow(icon: "checkmark.circle", label: "Active Guard",
+                                    value: $cache.gesture.gestureMaxActiveHandDistance, range: 0.1...1.5,
+                                    enabled: .constant(true),
+                                    onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gesture.gestureMaxActiveHandDistance) },
+                                    showToggle: false)
+                            }
+                        } label: {
+                            Label("Gesture Lab", systemImage: "wrench.and.screwdriver")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(!appModel.handTrackingEnabled)
+                    .opacity(appModel.handTrackingEnabled ? 1.0 : 0.6)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+        }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Settings Tab
     // ═══════════════════════════════════════════════════════════════════════════
     
@@ -1099,7 +1355,7 @@ struct ContentView: View {
                     switch settingsSubTab {
                     case .general:     settingsGeneralContent
                     case .exportShare: settingsExportContent
-                    case .advanced:    settingsAdvancedContent
+                    case .devTools:    settingsAdvancedContent
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -1109,229 +1365,6 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
-            // Display section
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Display", systemImage: "eye").font(.headline)
-                    Spacer()
-                }
-                Toggle("Show Music Shortcuts", isOn: $cache.display.showMusicShortcuts)
-                    .onChange(of: cache.display.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
-                if cache.display.showMusicShortcuts {
-                    Text("Shows music reactivity controls in the parameter sensitivity panel.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
-
-            // Gesture section
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Gesture Controls", systemImage: "hand.draw").font(.headline)
-                    Spacer()
-                }
-
-                HandTrackingStatusView(state: appModel.handTrackingState)
-                    .padding(.vertical, 2)
-
-                Toggle("Enable Hand Gesture Controls", isOn: Binding(
-                    get: { appModel.handTrackingEnabled },
-                    set: { appModel.handTrackingEnabled = $0 }
-                ))
-
-                // ── Hand Assignments (per-hand × per-finger) ──────────────
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Hand Assignments", systemImage: "hand.point.up.braille")
-                        .font(.subheadline.weight(.semibold))
-
-                    ForEach(GestureHandMode.allCases, id: \.self) { mode in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label(mode.displayName, systemImage: mode.icon)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 4)
-                            ForEach(FingerDigit.allCases, id: \.self) { finger in
-                                let slot = GestureSlot(hand: mode, finger: finger)
-                                gestureSlotPicker(slot: slot, handMode: mode)
-                            }
-                        }
-                    }
-                }
-
-                Divider().padding(.vertical, 2)
-
-                Group {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Core Behavior", systemImage: "slider.horizontal.3")
-                            .font(.subheadline.weight(.semibold))
-
-                    Toggle("Spring Blob Navigation", isOn: $cache.gesture.useSpringBlob)
-                        .onChange(of: cache.gesture.useSpringBlob) { _, v in cache.push(\.useSpringBlob, value: v) }
-                    Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
-                        .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
-                    Toggle("Extended Range", isOn: $cache.gesture.extendedGestureRange)
-                        .onChange(of: cache.gesture.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
-                    Toggle("Rotation Auto-Snap", isOn: $cache.gesture.rotationAutoSnap)
-                        .onChange(of: cache.gesture.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
-                    if cache.gesture.rotationAutoSnap {
-                        EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Breakaway Angle (°)",
-                            value: $cache.gesture.rotationBreakawayDegrees, range: 0...45,
-                            enabled: .constant(true),
-                            onChanged: { cache.push(\.rotationBreakawayDegrees, value: cache.gesture.rotationBreakawayDegrees) },
-                            showToggle: false)
-                        Text("Rotation stays locked until your hands rotate past this angle, then engages smoothly.")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    EffectSliderRow(icon: "gauge.with.dots.needle.50percent", label: "Global Sensitivity",
-                        value: $cache.gesture.gestureSensitivity, range: 1...10,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.gestureSensitivity, value: cache.gesture.gestureSensitivity) },
-                        showToggle: false)
-
-                    EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",
-                        value: $cache.gesture.translationSensitivity, range: 0.2...3.0,
-                        enabled: .constant(true),
-                        onChanged: { cache.push(\.translationSensitivity, value: cache.gesture.translationSensitivity) },
-                        showToggle: false)
-
-                    if cache.gesture.rotationAutoSnap {
-                        EffectSliderRow(icon: "rotate.3d", label: "Snap Window (°)",
-                            value: $cache.gesture.rotationSnapWindowDegrees, range: 2...30,
-                            enabled: .constant(true),
-                            onChanged: { cache.push(\.rotationSnapWindowDegrees, value: cache.gesture.rotationSnapWindowDegrees) },
-                            showToggle: false)
-                    }
-                    }
-
-                    Divider().padding(.vertical, 2)
-
-                    // ── Menu Toggle (compact) ──
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Menu Toggle Gesture", isOn: $cache.gesture.menuToggleGestureEnabled)
-                            .onChange(of: cache.gesture.menuToggleGestureEnabled) { _, v in
-                                cache.push(\.menuToggleGestureEnabled, value: v)
-                            }
-
-                        if cache.gesture.menuToggleGestureEnabled {
-                            HStack {
-                                Label("Gesture", systemImage: cache.gesture.menuToggleGestureMode.icon)
-                                    .font(.subheadline)
-                                Spacer()
-                                Picker("", selection: $cache.gesture.menuToggleGestureMode) {
-                                    ForEach(MenuToggleGestureMode.allCases, id: \.self) { mode in
-                                        Text(mode.displayName).tag(mode)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .frame(maxWidth: 180)
-                                .onChange(of: cache.gesture.menuToggleGestureMode) { _, v in
-                                    cache.push(\.menuToggleGestureMode, value: v)
-                                }
-                            }
-                        }
-                    }
-
-                    Divider().padding(.vertical, 2)
-
-                    // ── Gesture Lab (collapsed by default) ──
-                    DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("Menu Toggle Tuning", systemImage: "menucard")
-                                .font(.caption.weight(.semibold))
-
-                            EffectSliderRow(icon: "hand.tap", label: "Hold Time",
-                                value: $cache.gesture.menuToggleHoldDuration, range: 0.05...0.6,
-                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleHoldDuration, value: cache.gesture.menuToggleHoldDuration) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "timer", label: "Cooldown",
-                                value: $cache.gesture.menuToggleCooldown, range: 0.1...2.5,
-                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleCooldown, value: cache.gesture.menuToggleCooldown) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "bolt.horizontal", label: "Activate",
-                                value: $cache.gesture.menuToggleActivateThreshold, range: 0.2...0.95,
-                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleActivateThreshold, value: cache.gesture.menuToggleActivateThreshold) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "arrow.down.to.line", label: "Release",
-                                value: $cache.gesture.menuToggleReleaseThreshold, range: 0.1...0.9,
-                                enabled: .constant(cache.gesture.menuToggleGestureEnabled),
-                                onChanged: { cache.push(\.menuToggleReleaseThreshold, value: cache.gesture.menuToggleReleaseThreshold) },
-                                showToggle: false)
-
-                            Divider()
-
-                            Label("Two-Hand Pinch Tuning", systemImage: "hands.sparkles")
-                                .font(.caption.weight(.semibold))
-
-                            EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Distance",
-                                value: $cache.gesture.gestureMinHandDistance, range: 0.02...0.25,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMinHandDistance, value: cache.gesture.gestureMinHandDistance) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "arrow.left.and.right", label: "Max Distance",
-                                value: $cache.gesture.gestureMaxHandDistance, range: 0.2...1.2,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMaxHandDistance, value: cache.gesture.gestureMaxHandDistance) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "hand.draw", label: "Pinch Activate",
-                                value: $cache.gesture.twoHandPinchActivateThreshold, range: 0.2...0.98,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.twoHandPinchActivateThreshold, value: cache.gesture.twoHandPinchActivateThreshold) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "hand.raised", label: "Pinch Release",
-                                value: $cache.gesture.twoHandPinchReleaseThreshold, range: 0.1...0.95,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.twoHandPinchReleaseThreshold, value: cache.gesture.twoHandPinchReleaseThreshold) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "hand.point.up.left", label: "Ring Activate",
-                                value: $cache.gesture.ringPinchActivateThreshold, range: 0.1...0.95,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.ringPinchActivateThreshold, value: cache.gesture.ringPinchActivateThreshold) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "hand.point.up.braille", label: "Ring Release",
-                                value: $cache.gesture.ringPinchReleaseThreshold, range: 0.05...0.9,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.ringPinchReleaseThreshold, value: cache.gesture.ringPinchReleaseThreshold) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "play.circle", label: "Start Guard",
-                                value: $cache.gesture.gestureMaxStartHandDistance, range: 0.08...1.0,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMaxStartHandDistance, value: cache.gesture.gestureMaxStartHandDistance) },
-                                showToggle: false)
-
-                            EffectSliderRow(icon: "checkmark.circle", label: "Active Guard",
-                                value: $cache.gesture.gestureMaxActiveHandDistance, range: 0.1...1.5,
-                                enabled: .constant(true),
-                                onChanged: { cache.push(\.gestureMaxActiveHandDistance, value: cache.gesture.gestureMaxActiveHandDistance) },
-                                showToggle: false)
-                        }
-                    } label: {
-                        Label("Gesture Lab", systemImage: "wrench.and.screwdriver")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .disabled(!appModel.handTrackingEnabled)
-                .opacity(appModel.handTrackingEnabled ? 1.0 : 0.6)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
-
             // SharePlay section
             if let shareSession = appModel.shareSession {
                 VStack(spacing: 8) {
@@ -1545,49 +1578,6 @@ struct ContentView: View {
     private var settingsAdvancedContent: some View {
         @Bindable var appModel = appModel
         return VStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack { Image(systemName: "slider.horizontal.3").foregroundStyle(themeColor); Text("Quality Constraints").font(.headline) }
-                VStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
-                        Slider(value: Binding(
-                            get: { Float(cache.quality.baseFractalIterations) },
-                            set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
-                        ), in: 4...32, step: 1)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
-                        Slider(value: Binding(
-                            get: { Float(cache.quality.baseMaxRaySteps) },
-                            set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
-                        ), in: 32...1024, step: 16)
-                    }
-                    Divider()
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
-                        Slider(value: $cache.quality.dynamicRenderQualityMin, in: 0.1...0.8, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMin, value: cache.quality.dynamicRenderQualityMin) }
-                        })
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
-                        Slider(value: $cache.quality.dynamicRenderQualityMax, in: 0.8...1.0, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) }
-                        })
-                    }
-                    Toggle("Recreate Legacy Compute Cache Bug", isOn: Binding(
-                        get: { cache.quality.recreateLegacyComputeCacheBug },
-                        set: {
-                            cache.quality.recreateLegacyComputeCacheBug = $0
-                            cache.push(\.recreateLegacyComputeCacheBug, value: $0)
-                        }
-                    ))
-                    Text("Caps pipeline iterations at 6 while uniforms keep the slider value, recreating the original distance-estimator mismatch artifact.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-            
             VStack(alignment: .leading, spacing: 8) {
                 HStack { Image(systemName: "gauge.with.dots.needle.67percent").foregroundStyle(themeColor); Text("Pipeline Profiler").font(.headline) }
                 HStack {

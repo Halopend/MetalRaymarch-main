@@ -305,11 +305,11 @@ private struct ParameterNodeRow: View {
                 } label: {
                     Image(systemName: sensitivityIsCustom ? "gauge.with.dots.needle.67percent" : "gauge.with.dots.needle.50percent")
                         .font(.caption)
-                        .foregroundStyle(sensitivityIsCustom ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
+                        .foregroundStyle(sensitivityIsCustom ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary.opacity(0.6)))
                         .frame(width: 20)
                 }
                 .buttonStyle(.borderless)
-                .help("Adjust gesture sensitivity")
+                .help(sensitivityIsCustom ? "Sensitivity: \(String(format: "%.1fx", sensitivityValue))" : "Adjust gesture sensitivity")
             }
         }
     }
