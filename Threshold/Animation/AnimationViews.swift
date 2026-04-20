@@ -609,7 +609,7 @@ struct SceneRowView: View {
             
             Spacer()
             
-            HStack(spacing: 8) {
+            HStack(spacing: 16) {
                 // Reset edited default back to original
                 if let onResetDefault {
                     Button { onResetDefault() } label: {
@@ -624,6 +624,7 @@ struct SceneRowView: View {
                         Image(systemName: "play.fill")
                     }
                     .buttonStyle(.bordered)
+                    .tint(.green)
                     .disabled(scene.keyframes.count < 2)
                 }
                 if let onEdit {
@@ -697,6 +698,7 @@ struct SceneEditorView: View {
     @State private var showSceneSettings = false
     @State private var showSongPicker = false
     @State private var hasPersistedScene = false
+    @State private var showCapturedFlash = false
     
     var body: some View {
         if isInline {
@@ -718,7 +720,10 @@ struct SceneEditorView: View {
                         .foregroundStyle(.secondary)
                         .font(.title3)
                 }
-                Text(scene.name).font(.headline).lineLimit(1)
+                TextField("Scene Name", text: $scene.name)
+                    .font(.headline)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1)
                 Spacer()
                 Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
                     withAnimation {
@@ -729,7 +734,7 @@ struct SceneEditorView: View {
                 Button {
                     showSceneSettings.toggle()
                 } label: {
-                    Label("Settings", systemImage: "gearshape")
+                    Image(systemName: "gearshape")
                         .font(.subheadline)
                 }
                 .popover(isPresented: $showSceneSettings, arrowEdge: .top) {
@@ -738,18 +743,37 @@ struct SceneEditorView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             
-            Divider()
-            
-            // Compact default duration row
-            HStack(spacing: 8) {
+            // Loop + playback mode + duration row
+            HStack(spacing: 16) {
+                Toggle(isOn: $scene.isLooping) {
+                    Label("Loop", systemImage: "repeat")
+                        .font(.caption)
+                }
+                .toggleStyle(.button)
+                .buttonStyle(.bordered)
+                .tint(scene.isLooping ? .blue : .secondary)
+                
+                Picker(selection: $scene.playbackMode) {
+                    ForEach(AnimationPlaybackMode.allCases, id: \.self) { mode in
+                        Label(mode.displayName, systemImage: mode.icon).tag(mode)
+                    }
+                } label: {
+                    Image(systemName: scene.playbackMode.icon)
+                        .font(.caption)
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 130)
+                
+                Spacer()
+                
                 Image(systemName: "timer")
                     .font(.caption)
-                    .frame(width: 16)
-                Text("New KF")
-                    .font(.subheadline)
-                    .frame(width: 56, alignment: .leading)
-                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+                Text("Default Duration")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
+                    .frame(maxWidth: 120)
                 Text("\(String(format: "%.1f", defaultDuration))s")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -1013,8 +1037,23 @@ struct SceneEditorView: View {
                 HStack {
                     Text("Keyframes")
                     Spacer()
+                    if showCapturedFlash {
+                        Text("Captured!")
+                            .font(.caption.bold())
+                            .foregroundStyle(.green)
+                            .transition(.opacity)
+                    }
                     Button {
                         addKeyframe()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showCapturedFlash = true
+                        }
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.2))
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                showCapturedFlash = false
+                            }
+                        }
                     } label: {
                         Label("Capture", systemImage: "plus.circle.fill")
                             .font(.caption)
@@ -1218,35 +1257,35 @@ struct KeyframeRowView: View {
                     )
             }
             
-            // Restore — apply keyframe to current render
+            // Preview — apply keyframe to current render
             Button { onJump() } label: {
-                Image(systemName: "arrow.uturn.backward")
+                Image(systemName: "eye")
             }
-            .buttonStyle(.plain)
-            .help("Restore — apply this keyframe's values")
+            .buttonStyle(.bordered)
+            .help("Preview — apply this keyframe's values")
             
-            // Replace — overwrite keyframe with current settings
-            Button { onOverwrite() } label: {
-                Image(systemName: "arrow.down.circle")
-            }
-            .buttonStyle(.plain)
-            .help("Replace with current settings")
-            
-            // Duplicate
-            if let onDuplicate {
-                Button { onDuplicate() } label: {
-                    Image(systemName: "plus.square.on.square")
-                }
-                .buttonStyle(.plain)
-                .help("Duplicate keyframe")
-            }
-            
-            // Edit
+            // Edit easing / details
             Button { onEdit() } label: {
                 Image(systemName: "slider.horizontal.3")
             }
-            .buttonStyle(.plain)
-            .help("Edit keyframe")
+            .buttonStyle(.bordered)
+            .help("Edit keyframe details")
+            
+            // More actions
+            Menu {
+                Button { onOverwrite() } label: {
+                    Label("Replace with Current", systemImage: "arrow.down.circle")
+                }
+                if let onDuplicate {
+                    Button { onDuplicate() } label: {
+                        Label("Duplicate", systemImage: "plus.square.on.square")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .buttonStyle(.bordered)
+            .help("More actions")
         }
         .contentShape(Rectangle())
     }
@@ -1262,13 +1301,30 @@ struct KeyframeEditorView: View {
     var body: some View {
         NavigationStack {
             HStack(spacing: 0) {
-                // ── LEFT COLUMN: Read-only parameter summary ──
+                // ── LEFT COLUMN: Editable core + read-only parameter summary ──
                 ScrollView {
                     VStack(spacing: 12) {
-                        // ── Core ──
+                        // ── Core (editable) ──
                         summarySection("Core") {
-                            summaryRow("Name", text: keyframe.name)
-                            summaryRow("Duration", text: String(format: "%.1fs", keyframe.duration))
+                            HStack {
+                                Text("Name").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                TextField("Keyframe Name", text: $keyframe.name)
+                                    .font(.caption)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 160)
+                            }
+                            .frame(height: 28)
+                            HStack {
+                                Text("Duration").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Slider(value: $keyframe.duration, in: 0.0...30.0, step: 0.1)
+                                    .frame(maxWidth: 100)
+                                Text(String(format: "%.1fs", keyframe.duration))
+                                    .font(.caption.monospacedDigit())
+                                    .frame(width: 40, alignment: .trailing)
+                            }
+                            .frame(height: 28)
                             summaryRow("Easing", text: keyframe.easingType.displayName)
                         }
                         
