@@ -104,8 +104,6 @@ final class UISettingsCache {
         settings?.gradientColorMap = gradient
     }
     
-    var currentRenderQuality: Float = 0.7  // Live stat, not in config struct
-    
     // === LIVE STATS (synced from render settings periodically) ===
     // These eliminate direct appModel.renderSettings reads from SwiftUI views,
     // preventing lock contention on the main thread during body evaluation.
@@ -144,7 +142,6 @@ final class UISettingsCache {
         // Skip syncing when app is backgrounded or immersive space is closed — no live stats to update
         guard let appModel = _appModel, appModel.isAppActive,
               appModel.immersiveSpaceState == .open else { return }
-        currentRenderQuality = settings.currentRenderQuality
         liveFractalIterations = settings.fractalIterations
         liveMaxRaySteps = settings.maxRaySteps
         liveFractalScale = settings.fractalScale
@@ -187,8 +184,6 @@ final class UISettingsCache {
         let newSphere = settings.targetSphereRadius
         if targetSphereRadius != newSphere { targetSphereRadius = newSphere }
 
-        // ── Live stat ──
-        currentRenderQuality = settings.currentRenderQuality
     }
     
     @inline(__always)

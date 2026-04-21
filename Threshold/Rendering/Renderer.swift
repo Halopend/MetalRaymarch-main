@@ -49,7 +49,6 @@ actor Renderer {
     var lastComputeRS: Int = -1
     var lastComputePower: Int32?
     var lastSelectedComputePipeline: MTLComputePipelineState?
-    var lastComputeLegacyBugMode: Bool = false
 
     // === UI UPDATE COORDINATION ===
     /// Coordinates UI updates without blocking MainActor during heavy rendering
@@ -144,11 +143,6 @@ actor Renderer {
     var hasLoggedMetalFXFallback = false
 #endif
 
-    // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-    // Adjusts LayerRenderer.renderQuality based on FPS performance
-    var dynamicRenderQualityManager: Any?  // Type-erased for @available
-    var hasLoggedDynamicQualityStatus = false
-    
     // === RESIDENCY SET (visionOS 2.0+) ===
     // Pre-validates GPU resource residency to reduce per-frame validation overhead
     var residencySet: MTLResidencySet?
@@ -406,11 +400,6 @@ actor Renderer {
             await self.setupScreenshotCapture()
             guard !Task.isCancelled else { return }
 
-            // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-            // Initialize dynamic quality manager if available on this OS version
-            await self.setupDynamicRenderQuality()
-            guard !Task.isCancelled else { return }
-
             // === RESIDENCY SET ===
             // Pre-validate resource residency for reduced per-frame overhead
             await self.setupResidencySet()
@@ -657,9 +646,6 @@ actor Renderer {
                 print("[FPS] \(String(format: "%.1f", updatedFPS)) fps | frame time: \(String(format: "%.2f", deltaTime * 1000))ms")
             }
             
-            // === DYNAMIC RENDER QUALITY UPDATE ===
-            // Adjust LayerRenderer.renderQuality based on FPS performance
-            updateDynamicRenderQuality(fps: updatedFPS, deltaTime: deltaTime)
         }
         lastPresentationTime = presentationTime
 
@@ -997,20 +983,13 @@ actor Renderer {
         let currentIterations = settingsSnapshot.fractalIterations
         let currentRaySteps = settingsSnapshot.maxRaySteps
         
-        // Legacy bug mode: cap pipeline FC_FRACTAL_ITERATIONS at 6 while CPU
-        // uniforms keep the slider value, recreating the distance-estimator
-        // mismatch from the original "Accidental Sphere Projection".
-        let pipelineIterations = settingsSnapshot.recreateLegacyComputeCacheBug
-            ? min(currentIterations, 6)
-            : currentIterations
-        
         // Detect neon mode from colorSchemeParams.neonIntensity
         let isNeonMode = settingsSnapshot.colorSchemeParams.neonIntensity > 0
         
         // Use specialized pipeline with fixed iteration count
         // This enables Map() loop auto-unrolling via function constants
         let selectedPipeline = selectPipeline(
-            forIterations: pipelineIterations,
+            forIterations: currentIterations,
             raySteps: currentRaySteps,
             useQuadShared: useQuadShared,
             neonMode: isNeonMode

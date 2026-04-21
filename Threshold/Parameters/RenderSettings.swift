@@ -88,8 +88,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalScale: Float = 2.8
     private var _fractalIterations: Int = 9         // Mid quality default
     private var _maxRaySteps: Int = 64              // Mid quality default
-    private var _baseFractalIterations: Int = 9     // User-set base (before dynamic quality adjustment)
-    private var _baseMaxRaySteps: Int = 64          // User-set base (before dynamic quality adjustment)
+    private var _baseFractalIterations: Int = 9     // User-set base
+    private var _baseMaxRaySteps: Int = 64          // User-set base
     private var _colorMix: Float = 0.5
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
@@ -117,7 +117,6 @@ final class RenderSettings: @unchecked Sendable {
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
-    private var _recreateLegacyComputeCacheBug: Bool = false  // Intentionally allow nearest-pipeline mismatch for legacy look
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -238,14 +237,6 @@ final class RenderSettings: @unchecked Sendable {
     // Replaces hardcoded palettes with user-editable gradient stops.
     private var _gradientState: GradientState = GradientState()
     
-    // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-    // Automatically adjusts LayerRenderer.renderQuality based on FPS performance
-    private var _dynamicRenderQualityEnabled: Bool = true   // Enable dynamic quality adjustment
-    private var _dynamicRenderQualityTarget: Float = 0.7    // Target quality when stable (0.5-1.0)
-    private var _dynamicRenderQualityMin: Float = 0.5       // Minimum quality floor (0.4-0.8)
-    private var _dynamicRenderQualityMax: Float = 1.0       // Maximum quality ceiling (0.8-1.0)
-    private var _currentRenderQuality: Float = 0.7          // Current quality level (read-only from manager)
-    
     // === GESTURE TARGET VALUES ===
     // These are set by gestures asynchronously. Renderer interpolates from current to target each frame.
     // This decouples gesture detection (30Hz async) from render smoothing (90Hz sync).
@@ -341,19 +332,19 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _fractalScale = newValue } }
     }
     
-    /// Current effective fractal iterations (may be adjusted by dynamic quality)
+    /// Current effective fractal iterations
     var fractalIterations: Int {
         get { withLock { _fractalIterations } }
         set { withLock { _fractalIterations = newValue } }
     }
     
-    /// Current effective ray steps (may be adjusted by dynamic quality)
+    /// Current effective ray steps
     var maxRaySteps: Int {
         get { withLock { _maxRaySteps } }
         set { withLock { _maxRaySteps = newValue } }
     }
     
-    /// Base fractal iterations set by user (before dynamic quality adjustment)
+    /// Base fractal iterations set by user
     var baseFractalIterations: Int {
         get { withLock { _baseFractalIterations } }
         set { 
@@ -364,7 +355,7 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    /// Base ray steps set by user (before dynamic quality adjustment)
+    /// Base ray steps set by user
     var baseMaxRaySteps: Int {
         get { withLock { _baseMaxRaySteps } }
         set { 
@@ -744,12 +735,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _debugHierarchical = newValue } }
     }
 
-    /// Intentionally reenables legacy nearest-pipeline fallback to reproduce historical artifacts.
-    var recreateLegacyComputeCacheBug: Bool {
-        get { withLock { _recreateLegacyComputeCacheBug } }
-        set { withLock { _recreateLegacyComputeCacheBug = newValue } }
-    }
-    
     /// Flash intensity for limit feedback (0-1). Set to 1.0 to trigger flash, decays automatically.
     var limitFlash: Float {
         get { withLock { _limitFlash } }
@@ -1525,38 +1510,6 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _isGeometryGestureActive = newValue } }
     }
     
-    // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-    
-    /// Enable dynamic render quality adjustment based on FPS
-    var dynamicRenderQualityEnabled: Bool {
-        get { withLock { _dynamicRenderQualityEnabled } }
-        set { withLock { _dynamicRenderQualityEnabled = newValue } }
-    }
-    
-    /// Target render quality when stable (0.5-1.0)
-    var dynamicRenderQualityTarget: Float {
-        get { withLock { _dynamicRenderQualityTarget } }
-        set { withLock { _dynamicRenderQualityTarget = max(0.5, min(1.0, newValue)) } }
-    }
-    
-    /// Minimum render quality floor (0.4-0.8)
-    var dynamicRenderQualityMin: Float {
-        get { withLock { _dynamicRenderQualityMin } }
-        set { withLock { _dynamicRenderQualityMin = max(0.4, min(0.8, newValue)) } }
-    }
-    
-    /// Maximum render quality ceiling (0.8-1.0)
-    var dynamicRenderQualityMax: Float {
-        get { withLock { _dynamicRenderQualityMax } }
-        set { withLock { _dynamicRenderQualityMax = max(0.8, min(1.0, newValue)) } }
-    }
-    
-    /// Current render quality level (read-only, updated by DynamicRenderQualityManager)
-    var currentRenderQuality: Float {
-        get { withLock { _currentRenderQuality } }
-        set { withLock { _currentRenderQuality = newValue } }
-    }
-    
     /// Update color scheme transitions and animation time. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
         withLock {
@@ -1769,7 +1722,6 @@ final class RenderSettings: @unchecked Sendable {
                 geometryState: _geometryState,
                 isGeometryGestureActive: _isGeometryGestureActive,
                 stepMultiplier: _stepMultiplier,
-                recreateLegacyComputeCacheBug: _recreateLegacyComputeCacheBug,
                 springDisplacement: _springDisplacement,
                 springActive: _springActive,
                 leftHandedMode: _leftHandedMode
@@ -2710,12 +2662,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.baseMaxRaySteps = _baseMaxRaySteps
                 c.resolutionScale = _resolutionScale
                 c.tileSize = _tileSize
-                c.dynamicRenderQualityEnabled = _dynamicRenderQualityEnabled
-                c.dynamicRenderQualityTarget = _dynamicRenderQualityTarget
-                c.dynamicRenderQualityMin = _dynamicRenderQualityMin
-                c.dynamicRenderQualityMax = _dynamicRenderQualityMax
                 c.debugHierarchical = _debugHierarchical
-                c.recreateLegacyComputeCacheBug = _recreateLegacyComputeCacheBug
                 return c
             }
         }
@@ -2727,12 +2674,7 @@ final class RenderSettings: @unchecked Sendable {
                 _maxRaySteps = newValue.baseMaxRaySteps
                 _resolutionScale = newValue.resolutionScale
                 _tileSize = newValue.tileSize
-                _dynamicRenderQualityEnabled = newValue.dynamicRenderQualityEnabled
-                _dynamicRenderQualityTarget = newValue.dynamicRenderQualityTarget
-                _dynamicRenderQualityMin = newValue.dynamicRenderQualityMin
-                _dynamicRenderQualityMax = newValue.dynamicRenderQualityMax
                 _debugHierarchical = newValue.debugHierarchical
-                _recreateLegacyComputeCacheBug = newValue.recreateLegacyComputeCacheBug
             }
         }
     }

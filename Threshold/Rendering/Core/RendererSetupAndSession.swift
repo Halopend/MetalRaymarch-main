@@ -52,30 +52,6 @@ extension Renderer {
         }
     }
 
-    /// Setup dynamic render quality management (visionOS 26+)
-    func setupDynamicRenderQuality() {
-        if #available(visionOS 26.0, *) {
-            let settings = appModel.renderSettings
-            let manager = DynamicRenderQualityManager(defaultQuality: settings.dynamicRenderQualityTarget)
-            manager.minQuality = settings.dynamicRenderQualityMin
-            manager.maxQuality = settings.dynamicRenderQualityMax
-            manager.isEnabled = settings.dynamicRenderQualityEnabled
-            manager.debugLogging = false
-            dynamicRenderQualityManager = manager
-
-            if layerRenderer.configuration.isFoveationEnabled {
-                if RENDERER_DEBUG {
-                    print("✓ Dynamic render quality manager initialized (visionOS 26+)")
-                    print("  Target: \(settings.dynamicRenderQualityTarget), Range: \(settings.dynamicRenderQualityMin)-\(settings.dynamicRenderQualityMax)")
-                }
-            } else {
-                if RENDERER_DEBUG { print("ℹ️ Dynamic render quality: Foveation not enabled (quality adjustment disabled)") }
-            }
-        } else {
-            if RENDERER_DEBUG { print("ℹ️ Dynamic render quality: Requires visionOS 26+") }
-        }
-    }
-
     func startARSession() async {
         guard WorldTrackingProvider.isSupported else {
             print("⚠️ World tracking is not supported on this device – hand gestures unavailable")

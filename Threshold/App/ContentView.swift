@@ -352,17 +352,20 @@ struct ContentView: View {
                     
                     Divider()
                     
+                    Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Label("Blend mode can be resource intensive at high values.", systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
                     EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
                         value: Binding<Float>(
-                            get: { UISettingsCache.blendValueToSlider(cache.safetyBubble.strength) },
-                            set: { cache.safetyBubble.strength = UISettingsCache.blendSliderToValue($0) }
+                            get: { 1.0 - UISettingsCache.blendValueToSlider(cache.safetyBubble.strength) },
+                            set: { cache.safetyBubble.strength = UISettingsCache.blendSliderToValue(1.0 - $0) }
                         ), range: 0.0...1.0,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.safetyBubbleBlend, value: cache.safetyBubble.strength) },
                         showToggle: false)
-                    Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
             }
             .padding(10)
@@ -493,45 +496,14 @@ struct ContentView: View {
                     Slider(value: Binding(
                         get: { Float(cache.quality.baseMaxRaySteps) },
                         set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
-                    ), in: 32...1024, step: 16)
+                    ), in: 32...200, step: 8)
                 }
             }
             
             Divider()
-            Toggle("Dynamic Render Quality", isOn: $cache.quality.dynamicRenderQualityEnabled)
-                .onChange(of: cache.quality.dynamicRenderQualityEnabled) { _, v in cache.push(\.dynamicRenderQualityEnabled, value: v) }
-            if cache.quality.dynamicRenderQualityEnabled {
-                qualityIndicator
-                HStack {
-                    Text("Min Quality:").font(.caption)
-                    Slider(value: $cache.quality.dynamicRenderQualityMin, in: 0.4...0.8, onEditingChanged: { e in if !e { cache.push(\.dynamicRenderQualityMin, value: cache.quality.dynamicRenderQualityMin) } })
-                    Text("\(Int(cache.quality.dynamicRenderQualityMin * 100))%").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
-                }
-                HStack {
-                    Text("Max Quality:").font(.caption)
-                    Slider(value: $cache.quality.dynamicRenderQualityMax, in: 0.8...1.0, onEditingChanged: { e in if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) } })
-                    Text("\(Int(cache.quality.dynamicRenderQualityMax * 100))%").font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
-                }
-            }
-            
-            Divider()
-            Toggle("Recreate Legacy Compute Cache Bug", isOn: Binding(
-                get: { cache.quality.recreateLegacyComputeCacheBug },
-                set: {
-                    cache.quality.recreateLegacyComputeCacheBug = $0
-                    cache.push(\.recreateLegacyComputeCacheBug, value: $0)
-                }
-            ))
-            Text("Caps pipeline iterations at 6 while uniforms keep the slider value, recreating the original distance-estimator mismatch artifact.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
         }
     }
     
-    private func qualityColor(_ quality: Float) -> Color {
-        if quality >= 0.8 { return .green } else if quality >= 0.6 { return .yellow } else { return .orange }
-    }
-
     private func setDetailScale(_ value: Float) {
         let clamped = max(0.05, min(20.0, value))
         appModel.renderSettings.detailScale = clamped
@@ -601,22 +573,6 @@ struct ContentView: View {
         }
     }
 
-    private var qualityIndicator: some View {
-        HStack {
-            Text("Current Quality:").font(.caption); Spacer()
-            Text("\(Int(cache.currentRenderQuality * 100))%").font(.caption.monospacedDigit()).foregroundStyle(qualityColor(cache.currentRenderQuality))
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2).fill(Color.gray.opacity(0.3))
-                    .frame(width: 60, height: 8)
-                RoundedRectangle(cornerRadius: 2).fill(qualityColor(cache.currentRenderQuality))
-                    .frame(width: 60 * CGFloat(cache.currentRenderQuality), height: 8)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Render quality")
-        .accessibilityValue("\(Int(cache.currentRenderQuality * 100)) percent")
-    }
-    
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Animate Tab
     // ═══════════════════════════════════════════════════════════════════════════

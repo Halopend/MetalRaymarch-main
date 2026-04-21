@@ -476,22 +476,15 @@ extension Renderer {
             return nil
         }()
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
-        let recreateLegacyBug = appModel.renderSettings.recreateLegacyComputeCacheBug
 
         // Fast-path: parameters unchanged since last call
-        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower && recreateLegacyBug == lastComputeLegacyBugMode,
+        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower,
            let cached = lastSelectedComputePipeline {
             recordPipelineTelemetry(computeHit: true)
             return cached
         }
 
-        // Legacy bug mode: bake a FIXED iteration count (6) into the pipeline's
-        // FC_FRACTAL_ITERATIONS even though absScalePow and runtime uniforms use the
-        // slider's actual value. This recreates the original "Accidental Sphere
-        // Projection" — the shader loop count mismatches the CPU's precomputed
-        // distance estimator constants, producing visual artifacts.
-        let effectiveFI = recreateLegacyBug ? min(fractalIterations, 6) : fractalIterations
-        let exactKey = "FT\(fractalType.rawValue)_FI\(effectiveFI)_RS\(maxRaySteps)\(powerKey)"
+        let exactKey = "FT\(fractalType.rawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
 
         // 1. Exact match — FC values match precomputed absScalePow
         if let pipeline = computePipelineCache[exactKey] {
@@ -504,12 +497,11 @@ extension Renderer {
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
             lastComputePower = mbPowerInt
-            lastComputeLegacyBugMode = recreateLegacyBug
             lastSelectedComputePipeline = pipeline
             return pipeline
         }
 
-        let sharedKey = "FI\(effectiveFI)_RS\(maxRaySteps)\(powerKey)"
+        let sharedKey = "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
         if let pipeline = computePipelineCache[sharedKey] {
             recordPipelineTelemetry(computeHit: true)
             if RENDERER_DEBUG && lastComputePipelineKey != sharedKey {
@@ -520,33 +512,29 @@ extension Renderer {
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
             lastComputePower = mbPowerInt
-            lastComputeLegacyBugMode = recreateLegacyBug
             lastSelectedComputePipeline = pipeline
             return pipeline
         }
 
         // 3. Build on-demand for this exact configuration
-        //    When legacy bug is ON, effectiveFI is capped at 6 — the resulting
-        //    pipeline loops fewer times than the CPU's absScalePow expects.
         let library = cachedDefaultLibrary ?? device.makeDefaultLibrary()
         if cachedDefaultLibrary == nil { cachedDefaultLibrary = library }
         if let library = library {
             let ft = Int32(fractalType.rawValue)
-            let fi = Int32(effectiveFI)
-            let si = Int32(max(effectiveFI - 2, 2))
+            let fi = Int32(fractalIterations)
+            let si = Int32(max(fractalIterations - 2, 2))
             let rs = Int32(maxRaySteps)
             if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
                                                             fractalType: ft, fractalIterations: fi, shadowIterations: si, maxRaySteps: rs,
                                                             mandelbulbPower: mbPowerInt) {
                 computePipelineCache[exactKey] = pipeline
                 recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey)
-                if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)\(recreateLegacyBug ? " (legacy bug: FI capped to \(effectiveFI))" : "")") }
+                if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
                 lastComputePipelineKey = exactKey
                 lastComputeFT = fractalType.rawValue
                 lastComputeFI = fractalIterations
                 lastComputeRS = maxRaySteps
                 lastComputePower = mbPowerInt
-                lastComputeLegacyBugMode = recreateLegacyBug
                 lastSelectedComputePipeline = pipeline
                 return pipeline
             }
@@ -564,7 +552,6 @@ extension Renderer {
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
         lastComputePower = mbPowerInt
-        lastComputeLegacyBugMode = recreateLegacyBug
         lastSelectedComputePipeline = fallback
         return fallback
     }

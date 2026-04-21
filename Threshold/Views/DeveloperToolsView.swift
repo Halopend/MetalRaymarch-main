@@ -43,37 +43,8 @@ struct DeveloperToolsView: View {
                         Slider(value: Binding(
                             get: { Float(cache.quality.baseMaxRaySteps) },
                             set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
-                        ), in: 32...1024, step: 16)
+                        ), in: 32...200, step: 8)
                     }
-                    Divider()
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Floor (Min)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMin * 100)).fontWeight(.bold) }
-                        Slider(value: Binding(
-                            get: { cache.quality.dynamicRenderQualityMin },
-                            set: { cache.quality.dynamicRenderQualityMin = $0 }
-                        ), in: 0.1...0.8, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMin, value: cache.quality.dynamicRenderQualityMin) }
-                        })
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack { Text("Quality Ceiling (Max)"); Spacer(); Text(String(format: "%.0f%%", cache.quality.dynamicRenderQualityMax * 100)).fontWeight(.bold) }
-                        Slider(value: Binding(
-                            get: { cache.quality.dynamicRenderQualityMax },
-                            set: { cache.quality.dynamicRenderQualityMax = $0 }
-                        ), in: 0.8...1.0, step: 0.05, onEditingChanged: { e in
-                            if !e { cache.push(\.dynamicRenderQualityMax, value: cache.quality.dynamicRenderQualityMax) }
-                        })
-                    }
-                    Toggle("Recreate Legacy Compute Cache Bug", isOn: Binding(
-                        get: { cache.quality.recreateLegacyComputeCacheBug },
-                        set: {
-                            cache.quality.recreateLegacyComputeCacheBug = $0
-                            cache.push(\.recreateLegacyComputeCacheBug, value: $0)
-                        }
-                    ))
-                    Text("Uses nearest cached compute pipeline even when FI/RS mismatch, reproducing the old artifact look.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 

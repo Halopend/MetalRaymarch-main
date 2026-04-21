@@ -41,8 +41,6 @@
 //       * presetsSaved (Int64)
 //       * favoritePresets (List of Strings)
 //       * avgFPS (Double)
-//       * dynamicQualityEnabled (Int64)
-//       * avgRenderQuality (Double)
 //       * deviceModel (String)
 //       * osVersion (String)
 //       * appVersion (String)
@@ -120,8 +118,6 @@ struct UsageSnapshot: Codable {
     
     // Performance context
     var avgFPS: Float
-    var dynamicQualityEnabled: Bool
-    var avgRenderQuality: Float
     
     // Device info (anonymous)
     var deviceModel: String  // e.g., "RealityDevice14,1"
@@ -155,7 +151,6 @@ final class UsageAnalytics {
     private var glowIntensityAccum: Float = 0
     private var safetyBubbleRadiusAccum: Float = 0
     private var fpsAccum: Float = 0
-    private var renderQualityAccum: Float = 0
     private var sampleCount: Int = 0
     
     // Feature flags
@@ -235,7 +230,7 @@ final class UsageAnalytics {
         return String(data: data, encoding: .utf8)
     }
 
-    private func buildSnapshot(dynamicQualityEnabled: Bool) -> UsageSnapshot {
+    private func buildSnapshot() -> UsageSnapshot {
         let duration = totalSessionTime
         let durationF = Float(max(duration, 1.0))
 
@@ -272,8 +267,6 @@ final class UsageAnalytics {
             presetsSaved: presetsSaved,
             favoritePresetNames: topFavoritePresets(),
             avgFPS: fpsAccum / durationF,
-            dynamicQualityEnabled: dynamicQualityEnabled,
-            avgRenderQuality: renderQualityAccum / durationF,
             deviceModel: currentDeviceModel(),
             osVersion: UIDevice.current.systemVersion,
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
@@ -319,7 +312,6 @@ final class UsageAnalytics {
         bloomStrengthAccum += lit.bloomEffect.strength * dtf
         fogIntensityAccum += lit.fogEffect.intensity * dtf
         fpsAccum += Float(fps) * dtf
-        renderQualityAccum += settings.currentRenderQuality * dtf
         sampleCount += 1
         
         // Accumulate fractal type distribution
@@ -458,7 +450,7 @@ final class UsageAnalytics {
     // MARK: - Snapshot Creation
     
     private func createSnapshot(settings: RenderSettings) -> UsageSnapshot {
-        buildSnapshot(dynamicQualityEnabled: settings.dynamicRenderQualityEnabled)
+        buildSnapshot()
     }
     
     // MARK: - CloudKit Upload
@@ -477,7 +469,7 @@ final class UsageAnalytics {
     
     /// Create snapshot with current accumulated data
     private func createMinimalSnapshot() -> UsageSnapshot {
-        buildSnapshot(dynamicQualityEnabled: true)
+        buildSnapshot()
     }
     
     private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
@@ -535,8 +527,6 @@ final class UsageAnalytics {
         
         // Performance
         record["avgFPS"] = snapshot.avgFPS as NSNumber
-        record["dynamicQualityEnabled"] = snapshot.dynamicQualityEnabled ? 1 : 0
-        record["avgRenderQuality"] = snapshot.avgRenderQuality as NSNumber
         
         // Device (anonymous)
         record["deviceModel"] = snapshot.deviceModel
