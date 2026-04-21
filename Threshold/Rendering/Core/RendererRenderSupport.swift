@@ -126,6 +126,33 @@ extension Renderer {
         let fps = frameTimeSeconds > 0 ? (1.0 / frameTimeSeconds) : 0
         print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms bg=\(backgroundCpuText)ms dq=\(dynamicQualityText)ms hand=\(handTrackingText)ms settings=\(settingsUpdateText)ms snap=\(snapshotText)ms game=\(gameStateText)ms encode=\(renderEncodeText)ms tasks=\(frameBreakdown.mainActorDispatchCount) path=\(pathText) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)")
     }
+
+    /// Returns true when the fragment render path should render at low-res into
+    /// MetalFX's input texture and spatially upscale to the drawable.
+    ///
+    /// On visionOS MetalFX provides **spatial** upscaling only (temporal is
+    /// unsupported), so this path only applies to the fragment render path.
+    /// The compute/Buddhabrot paths are deliberately excluded for now — they can
+    /// be routed through MetalFX in a future phase once depth ownership and
+    /// tile-shared history semantics are designed.
+    ///
+    /// Minimum scale is clamped to 0.5 by `RenderSettings.resolutionScale`.
+    func isMetalFXActive(for settingsSnapshot: RenderSettingsSnapshot, framePath: RenderFramePath) -> Bool {
+        #if canImport(MetalFX)
+        switch framePath {
+        case .adaptiveCompute:
+            return false
+        case .fragment:
+            break
+        }
+        // Treat anything within 0.1% of native as "disabled" to avoid pointless
+        // rebuilds at 0.999 due to float rounding.
+        return settingsSnapshot.resolutionScale < 0.999
+        #else
+        _ = (settingsSnapshot, framePath)
+        return false
+        #endif
+    }
 }
 
 #if canImport(MetalFX)
@@ -225,29 +252,44 @@ extension Renderer {
         }
 
         if let depthTexture = metalFX.depthTexture {
-            for eye in 0..<drawable.views.count {
-                let destinationTexture: MTLTexture
-                let destinationSlice: Int
+            // Only copy depth when MetalFX depth matches the drawable depth
+            // resolution. MTLFXSpatialScaler does NOT upscale depth, so when
+            // resolutionScale < 1.0 our depth texture is smaller than the
+            // drawable depth. A straight blit would leave the rest of the
+            // drawable depth undefined, which causes visible late-reprojection
+            // artifacts in the visionOS compositor. Skipping the depth copy in
+            // that case is preferable — the compositor falls back to its own
+            // late-latched pose for reprojection.
+            let depthDestSample = drawable.depthTextures.first
+            let sizeMatches = depthDestSample.map {
+                $0.width == depthTexture.width && $0.height == depthTexture.height
+            } ?? false
 
-                if drawable.depthTextures.count > eye {
-                    destinationTexture = drawable.depthTextures[eye]
-                    destinationSlice = 0
-                } else {
-                    destinationTexture = drawable.depthTextures[0]
-                    destinationSlice = eye
+            if sizeMatches {
+                for eye in 0..<drawable.views.count {
+                    let destinationTexture: MTLTexture
+                    let destinationSlice: Int
+
+                    if drawable.depthTextures.count > eye {
+                        destinationTexture = drawable.depthTextures[eye]
+                        destinationSlice = 0
+                    } else {
+                        destinationTexture = drawable.depthTextures[0]
+                        destinationSlice = eye
+                    }
+
+                    blitEncoder.copy(
+                        from: depthTexture,
+                        sourceSlice: eye,
+                        sourceLevel: 0,
+                        sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                        sourceSize: MTLSize(width: depthTexture.width, height: depthTexture.height, depth: 1),
+                        to: destinationTexture,
+                        destinationSlice: destinationSlice,
+                        destinationLevel: 0,
+                        destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+                    )
                 }
-
-                blitEncoder.copy(
-                    from: depthTexture,
-                    sourceSlice: eye,
-                    sourceLevel: 0,
-                    sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                    sourceSize: MTLSize(width: depthTexture.width, height: depthTexture.height, depth: 1),
-                    to: destinationTexture,
-                    destinationSlice: destinationSlice,
-                    destinationLevel: 0,
-                    destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
-                )
             }
         }
 
@@ -299,6 +341,12 @@ extension Renderer {
             return nil
         }
 
+        let resolutionChanged =
+            lastMetalFXInputSize.x != inputWidth ||
+            lastMetalFXInputSize.y != inputHeight ||
+            lastMetalFXOutputSize.x != outputWidth ||
+            lastMetalFXOutputSize.y != outputHeight
+
         lastMetalFXInputSize = SIMD2(inputWidth, inputHeight)
         lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
 
@@ -307,6 +355,20 @@ extension Renderer {
         }
 
         guard let manager = metalFXManager else { return nil }
+
+        // Register the (possibly new) MetalFX textures with the residency set
+        // so the compositor can skip per-frame residency validation. Only needed
+        // when textures were actually recreated (on first init or resize).
+        if resolutionChanged {
+            var newTextures: [MTLTexture] = []
+            if let t = manager.inputTexture  { newTextures.append(t) }
+            if let t = manager.depthTexture  { newTextures.append(t) }
+            if let t = manager.outputTexture { newTextures.append(t) }
+            if !newTextures.isEmpty {
+                updateResidencySetForComputeTextures(newTextures)
+            }
+        }
+
         return (manager, inputWidth, inputHeight)
     }
 }

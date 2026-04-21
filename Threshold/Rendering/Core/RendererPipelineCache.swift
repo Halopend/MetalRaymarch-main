@@ -1,3 +1,4 @@
+@preconcurrency import CompositorServices
 import Metal
 
 extension Renderer {
@@ -248,10 +249,16 @@ extension Renderer {
             }
             result = pipeline
         }
-        // 2. Attempt on-demand build for exact FT/power/neon config (prevents
-        // Mandelbulb power switching from silently falling back to non-power keys).
+        // 2. Cache miss: kick off a background build for the exact config and
+        //    serve this frame from the best available fallback below. Prior
+        //    revisions compiled the specialized pipeline **synchronously** here,
+        //    which could stall the render actor for 50–500 ms the first time a
+        //    new preset / fractal type / slider value was seen. Metal pipeline
+        //    compilation is thread-safe; we build off-actor and hop back to the
+        //    Renderer actor to insert into `pipelineCache` so next frame hits.
         else {
-            var exactBuiltPipeline: MTLRenderPipelineState?
+            recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
+
             let colorIters = appModel.renderSettings.colorIterations
             let exactConfig = FunctionConstantConfig(
                 fractalIterations: Int32(iterations),
@@ -265,69 +272,49 @@ extension Renderer {
                 colorIterations: Int32(colorIters),
                 mandelbulbPower: mandelbulbPower
             )
-            if let built = try? Renderer.buildSpecializedPipeline(
-                device: device,
-                layerRenderer: layerRenderer,
-                rasterSampleCount: rasterSampleCount,
-                mtlVertexDescriptor: mtlVertexDescriptor,
+            enqueueBackgroundPipelineBuild(
+                cacheKey: cacheKey,
                 config: exactConfig,
-                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
-            ) {
-                pipelineCache[cacheKey] = built
-                exactBuiltPipeline = built
-                if RENDERER_DEBUG && lastLoggedPipelineKey != cacheKey {
-                    print("🔧 [Pipeline] Built exact on-demand pipeline: \(cacheKey)")
-                    lastLoggedPipelineKey = cacheKey
-                }
-            }
+                useQuadShared: useQuadShared
+            )
 
-            if let pipeline = exactBuiltPipeline {
-                recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
+            // 3. Try FT-specific neon=off quality-preset fallback.
+            let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+            if let pipeline = pipelineCache[fallbackKey] {
+                if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
+                    print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: \(cacheKey))")
+                    lastLoggedPipelineKey = fallbackKey
+                }
                 result = pipeline
             }
-            // 3. Try fallback to neon=off variant (quality preset)
             else {
-                let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
-                if let pipeline = pipelineCache[fallbackKey] {
-                    recordPipelineTelemetry(renderHit: true)
-                    if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
-                        print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: N=\(neonMode ? 1 : 0))")
-                        lastLoggedPipelineKey = fallbackKey
+                // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
+                let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                if let pipeline = pipelineCache[sharedExactKey] {
+                    if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
+                        print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
+                        lastLoggedPipelineKey = sharedExactKey
                     }
                     result = pipeline
                 }
+                // 5. Try shared neon=off quality key
                 else {
-                    // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
-                    let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
-                    if let pipeline = pipelineCache[sharedExactKey] {
-                        recordPipelineTelemetry(renderHit: true)
-                        if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
-                            print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
-                            lastLoggedPipelineKey = sharedExactKey
+                    let sharedFallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                    if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
+                        if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
+                            print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
+                            lastLoggedPipelineKey = sharedFallbackKey
                         }
                         result = pipeline
                     }
-                    // 5. Try shared neon=off quality key
+                    // 6. Ultimate fallback to generic pipeline
                     else {
-                        let sharedFallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
-                        if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
-                            recordPipelineTelemetry(renderHit: true)
-                            if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
-                                print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
-                                lastLoggedPipelineKey = sharedFallbackKey
-                            }
-                            result = pipeline
+                        if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
+                            print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
+                            lastLoggedPipelineKey = "fallback"
                         }
-                        // 6. Ultimate fallback to generic pipeline
-                        else {
-                            recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
-                            if RENDERER_DEBUG && lastLoggedPipelineKey != "fallback" {
-                                print("⚠️ [Pipeline] Using FALLBACK generic pipeline (no cache hit for FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps))")
-                                lastLoggedPipelineKey = "fallback"
-                            }
-                            isSpecialized = false
-                            result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
-                        }
+                        isSpecialized = false
+                        result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
                     }
                 }
             }
@@ -516,29 +503,20 @@ extension Renderer {
             return pipeline
         }
 
-        // 3. Build on-demand for this exact configuration
-        let library = cachedDefaultLibrary ?? device.makeDefaultLibrary()
-        if cachedDefaultLibrary == nil { cachedDefaultLibrary = library }
-        if let library = library {
-            let ft = Int32(fractalType.rawValue)
-            let fi = Int32(fractalIterations)
-            let si = Int32(max(fractalIterations - 2, 2))
-            let rs = Int32(maxRaySteps)
-            if let pipeline = Renderer.buildComputePipeline(device: device, library: library, kernelName: "adaptiveHierarchical8x8",
-                                                            fractalType: ft, fractalIterations: fi, shadowIterations: si, maxRaySteps: rs,
-                                                            mandelbulbPower: mbPowerInt) {
-                computePipelineCache[exactKey] = pipeline
-                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey)
-                if RENDERER_DEBUG { print("🔧 [ComputeCache] Built on-demand: \(exactKey)") }
-                lastComputePipelineKey = exactKey
-                lastComputeFT = fractalType.rawValue
-                lastComputeFI = fractalIterations
-                lastComputeRS = maxRaySteps
-                lastComputePower = mbPowerInt
-                lastSelectedComputePipeline = pipeline
-                return pipeline
-            }
-        }
+        // 3. Kick off a background build for this exact configuration and serve
+        //    the frame from the generic fallback below. Previously this branch
+        //    called `buildComputePipeline` synchronously, which can block the
+        //    render actor when the user picks a new fractal type or iteration
+        //    count. Metal compute-pipeline construction is thread-safe, so we
+        //    hop off the actor to build and back on to insert.
+        enqueueBackgroundComputePipelineBuild(
+            cacheKey: exactKey,
+            fractalType: Int32(fractalType.rawValue),
+            fractalIterations: Int32(fractalIterations),
+            shadowIterations: Int32(max(fractalIterations - 2, 2)),
+            maxRaySteps: Int32(maxRaySteps),
+            mandelbulbPower: mbPowerInt
+        )
 
         // 4. Ultimate fallback — generic pipeline with NO function constants.
         //    Shader reads iterations from uniforms at runtime, matching absScalePow.
@@ -559,6 +537,129 @@ extension Renderer {
     /// Returns the number of pipelines currently in the unified cache.
     var pipelineCacheCount: Int {
         return pipelineCache.count
+    }
+
+    // MARK: - Background Pipeline Builds
+
+    /// Inserts a built render pipeline into the cache. Callable from the
+    /// Renderer actor only; the background-build helper hops back here once
+    /// compilation finishes.
+    func insertBuiltRenderPipeline(_ pipeline: MTLRenderPipelineState, forKey key: String) {
+        pipelineCache[key] = pipeline
+        pendingPipelineBuildKeys.remove(key)
+        // Nudge the fast-path so the next frame picks the specialized pipeline
+        // immediately instead of remembering the previous fallback.
+        lastSelectedPipeline = nil
+        if RENDERER_DEBUG { print("✅ [Pipeline] Async-built and cached: \(key)") }
+    }
+
+    /// Marks a background build as failed so the pending set doesn't leak.
+    func markPipelineBuildFailed(forKey key: String) {
+        pendingPipelineBuildKeys.remove(key)
+    }
+
+    /// Inserts a built compute pipeline into the cache and clears its pending marker.
+    func insertBuiltComputePipeline(_ pipeline: MTLComputePipelineState, forKey key: String) {
+        computePipelineCache[key] = pipeline
+        pendingComputePipelineBuildKeys.remove(key)
+        lastSelectedComputePipeline = nil
+        if RENDERER_DEBUG { print("✅ [Compute] Async-built and cached: \(key)") }
+    }
+
+    func markComputePipelineBuildFailed(forKey key: String) {
+        pendingComputePipelineBuildKeys.remove(key)
+    }
+
+    /// Enqueues a detached task to build a specialized render pipeline off-actor,
+    /// then hops back to insert it into `pipelineCache`. Duplicate requests for a
+    /// key already in flight are silently dropped. Runs at low priority so it
+    /// never preempts the render loop.
+    fileprivate func enqueueBackgroundPipelineBuild(
+        cacheKey: String,
+        config: FunctionConstantConfig,
+        useQuadShared: Bool
+    ) {
+        if pendingPipelineBuildKeys.contains(cacheKey) { return }
+        pendingPipelineBuildKeys.insert(cacheKey)
+
+        // Capture only Sendable values / references we know are Metal-thread-safe.
+        // MTLVertexDescriptor and LayerRenderer are not marked Sendable by the SDK,
+        // but Metal pipeline construction is thread-safe and we never mutate these
+        // descriptors after renderer init — so we escape via nonisolated(unsafe).
+        let device = self.device
+        nonisolated(unsafe) let layerRenderer = self.layerRenderer
+        let rasterSampleCount = self.rasterSampleCount
+        nonisolated(unsafe) let vertexDescriptor = self.mtlVertexDescriptor
+        let fragmentName = useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                let pipeline = try Renderer.buildSpecializedPipeline(
+                    device: device,
+                    layerRenderer: layerRenderer,
+                    rasterSampleCount: rasterSampleCount,
+                    mtlVertexDescriptor: vertexDescriptor,
+                    config: config,
+                    fragmentFunctionName: fragmentName
+                )
+                await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
+            } catch {
+                if RENDERER_DEBUG {
+                    print("❌ [Pipeline] Background build failed for \(cacheKey): \(error)")
+                }
+                await self?.markPipelineBuildFailed(forKey: cacheKey)
+            }
+        }
+    }
+
+    /// Compute-path counterpart to `enqueueBackgroundPipelineBuild`. Builds the
+    /// specialized adaptive 8x8 compute kernel off-actor and inserts into
+    /// `computePipelineCache` on completion.
+    fileprivate func enqueueBackgroundComputePipelineBuild(
+        cacheKey: String,
+        fractalType: Int32,
+        fractalIterations: Int32,
+        shadowIterations: Int32,
+        maxRaySteps: Int32,
+        mandelbulbPower: Int32?
+    ) {
+        if pendingComputePipelineBuildKeys.contains(cacheKey) { return }
+        pendingComputePipelineBuildKeys.insert(cacheKey)
+
+        let device = self.device
+        // Resolve (or create & cache) the default library on the actor so
+        // makeDefaultLibrary() isn't called concurrently by multiple tasks.
+        let library: MTLLibrary?
+        if let cached = cachedDefaultLibrary {
+            library = cached
+        } else if let fresh = device.makeDefaultLibrary() {
+            cachedDefaultLibrary = fresh
+            library = fresh
+        } else {
+            library = nil
+        }
+
+        guard let metalLibrary = library else {
+            pendingComputePipelineBuildKeys.remove(cacheKey)
+            return
+        }
+
+        Task.detached(priority: .utility) { [weak self] in
+            if let pipeline = Renderer.buildComputePipeline(
+                device: device,
+                library: metalLibrary,
+                kernelName: "adaptiveHierarchical8x8",
+                fractalType: fractalType,
+                fractalIterations: fractalIterations,
+                shadowIterations: shadowIterations,
+                maxRaySteps: maxRaySteps,
+                mandelbulbPower: mandelbulbPower
+            ) {
+                await self?.insertBuiltComputePipeline(pipeline, forKey: cacheKey)
+            } else {
+                await self?.markComputePipelineBuildFailed(forKey: cacheKey)
+            }
+        }
     }
 
 }

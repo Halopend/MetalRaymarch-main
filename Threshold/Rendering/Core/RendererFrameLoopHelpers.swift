@@ -56,19 +56,28 @@ extension Renderer {
         if #available(visionOS 2.0, *) {
             let leftAnchor = anchors.leftHand
             let rightAnchor = anchors.rightHand
-            if isHandTrackingDispatchInFlight {
-                pendingHandTrackingDelta += gestureUpdateDelta
-                return
+
+            // Atomically decide whether to start a new dispatch or just accumulate
+            // onto an in-flight one. Returns the delta to use if we're starting;
+            // nil means a dispatch is already running and we only accumulated.
+            let accumulatedDelta: Float? = handTrackingDispatchState.withLock { state in
+                if state.inFlight {
+                    state.pendingDelta += gestureUpdateDelta
+                    return nil
+                }
+                let combined = gestureUpdateDelta + state.pendingDelta
+                state.pendingDelta = 0
+                state.inFlight = true
+                return combined
             }
 
-            isHandTrackingDispatchInFlight = true
-            let accumulatedDelta = gestureUpdateDelta + pendingHandTrackingDelta
-            pendingHandTrackingDelta = 0
+            guard let delta = accumulatedDelta else { return }
 
             Task { @MainActor in
                 defer {
                     // Call directly — finishHandTrackingDispatch is nonisolated
-                    // so it doesn't need to hop back to the Renderer actor.
+                    // and grabs its own Mutex lock; no need to hop back to the
+                    // Renderer actor (which is stuck in a synchronous render loop).
                     self.finishHandTrackingDispatch()
                 }
 
@@ -93,7 +102,7 @@ extension Renderer {
 
                 // Only update UI-facing tracking state at ~15Hz to reduce @Observable invalidation
                 // Checking gestureUpdateDelta here: if accumulated time > 66ms, update UI state
-                if accumulatedDelta > 0.066 {
+                if delta > 0.066 {
                     let isLeftTracked = leftAnchor?.isTracked ?? false
                     let isRightTracked = rightAnchor?.isTracked ?? false
                     if self.appModel.leftHandTracked != isLeftTracked {
@@ -127,13 +136,15 @@ extension Renderer {
                 self.appModel.gestureController?.updateHands(
                     leftAnchor: leftAnchor,
                     rightAnchor: rightAnchor,
-                    deltaTime: accumulatedDelta
+                    deltaTime: delta
                 )
             }
         }
     }
 
     nonisolated func finishHandTrackingDispatch() {
-        isHandTrackingDispatchInFlight = false
+        handTrackingDispatchState.withLock { state in
+            state.inFlight = false
+        }
     }
 }

@@ -41,6 +41,42 @@ enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping 
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
 
+enum RendererModeOption: String, CaseIterable {
+    case fragment = "Fragment"
+    case quadShared = "Quad Shared"
+    case adaptiveCompute = "Adaptive Compute"
+
+    var tileSize: Int {
+        switch self {
+        case .fragment: return 0
+        case .quadShared: return 2
+        case .adaptiveCompute: return 8
+        }
+    }
+
+    static func from(tileSize: Int) -> RendererModeOption {
+        switch tileSize {
+        case 8:
+            return .adaptiveCompute
+        case 2:
+            return .quadShared
+        default:
+            return .fragment
+        }
+    }
+
+    var helperText: String {
+        switch self {
+        case .fragment:
+            return "Default path with full shading. Supports MetalFX spatial upscaling."
+        case .quadShared:
+            return "Fragment path with quad-shared traversal. Supports MetalFX spatial upscaling."
+        case .adaptiveCompute:
+            return "8x8 adaptive compute path. Best for raw performance; MetalFX is disabled in this mode."
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - ContentView
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -461,15 +497,17 @@ struct ContentView: View {
     
     private var fractalQualityContent: some View {
         VStack(spacing: 12) {
-            Text("Compute alloted").font(.headline)
+            Text("Render Budget").font(.headline)
             HStack(spacing: 8) {
                 ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
                     Button {
                         let values = preset.values(for: cache.fractalType)
                         cache.quality.baseFractalIterations = values.fractalIterations
                         cache.quality.baseMaxRaySteps = values.raySteps
+                        cache.quality.resolutionScale = preset.resolutionScale
                         cache.push(\.baseFractalIterations, value: values.fractalIterations)
                         cache.push(\.baseMaxRaySteps, value: values.raySteps)
+                        cache.push(\.resolutionScale, value: preset.resolutionScale)
                         appModel.preparePipeline(iterations: values.fractalIterations, raySteps: values.raySteps)
                     } label: {
                         VStack(spacing: 2) {
@@ -486,6 +524,86 @@ struct ContentView: View {
                     ) == preset ? .blue : .secondary)
                 }
             }
+
+            // ── Renderer Mode ──
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Renderer Mode")
+                    Spacer()
+                    Text(RendererModeOption.from(tileSize: cache.quality.tileSize).rawValue)
+                        .fontWeight(.bold)
+                }
+
+                Picker("Renderer Mode", selection: Binding(
+                    get: { RendererModeOption.from(tileSize: cache.quality.tileSize) },
+                    set: { newMode in
+                        guard cache.quality.tileSize != newMode.tileSize else { return }
+                        cache.quality.tileSize = newMode.tileSize
+                        cache.push(\.tileSize, value: newMode.tileSize)
+                        appModel.preparePipeline(
+                            iterations: cache.quality.baseFractalIterations,
+                            raySteps: cache.quality.baseMaxRaySteps
+                        )
+                    }
+                )) {
+                    ForEach(RendererModeOption.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(RendererModeOption.from(tileSize: cache.quality.tileSize).helperText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            // ── Upscaling ──
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Resolution Scale")
+                    Spacer()
+                    Text("\(Int(cache.quality.resolutionScale * 100))%")
+                        .fontWeight(.bold)
+                        .monospacedDigit()
+                }
+
+                Slider(value: Binding(
+                    get: { cache.quality.resolutionScale },
+                    set: { newValue in
+                        let snapped = (newValue * 20).rounded() / 20
+                        cache.quality.resolutionScale = snapped
+                        cache.push(\.resolutionScale, value: snapped)
+                    }
+                ), in: 0.5...1.0, step: 0.05)
+                .disabled(cache.quality.tileSize == 8)
+
+                HStack(spacing: 8) {
+                    ForEach([
+                        ("Native", Float(1.0)),
+                        ("Balanced", Float(0.85)),
+                        ("Performance", Float(0.75)),
+                        ("Aggressive", Float(0.67))
+                    ], id: \.0) { label, scale in
+                        Button(label) {
+                            cache.quality.resolutionScale = scale
+                            cache.push(\.resolutionScale, value: scale)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(abs(cache.quality.resolutionScale - scale) < 0.01 ? .blue : .secondary)
+                        .disabled(cache.quality.tileSize == 8)
+                    }
+                }
+
+                if cache.quality.tileSize == 8 {
+                    Text("Upscaling is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("MetalFX on visionOS is spatial-only. 75% to 85% is the usual quality/performance sweet spot.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
             
             // ── Fine-Grained Quality Controls ──
             VStack(spacing: 12) {
@@ -494,14 +612,26 @@ struct ContentView: View {
                     Slider(value: Binding(
                         get: { Float(cache.quality.baseFractalIterations) },
                         set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
-                    ), in: 4...32, step: 1)
+                    ), in: 4...32, step: 1, onEditingChanged: { isEditing in
+                        guard !isEditing else { return }
+                        appModel.preparePipeline(
+                            iterations: cache.quality.baseFractalIterations,
+                            raySteps: cache.quality.baseMaxRaySteps
+                        )
+                    })
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
                     Slider(value: Binding(
                         get: { Float(cache.quality.baseMaxRaySteps) },
                         set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
-                    ), in: 32...200, step: 8)
+                    ), in: 32...200, step: 8, onEditingChanged: { isEditing in
+                        guard !isEditing else { return }
+                        appModel.preparePipeline(
+                            iterations: cache.quality.baseFractalIterations,
+                            raySteps: cache.quality.baseMaxRaySteps
+                        )
+                    })
                 }
             }
             

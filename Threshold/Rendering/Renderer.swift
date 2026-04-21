@@ -11,6 +11,7 @@ import MetalKit
 import simd
 import ARKit
 import QuartzCore
+import Synchronization
 
 // Debug logging toggle - set to false for release builds
 let RENDERER_DEBUG = false
@@ -35,7 +36,14 @@ actor Renderer {
     
     /// Unified pipeline cache - all specialized pipelines keyed by function constant signature
     var pipelineCache: [String: MTLRenderPipelineState] = [:]
-    
+
+    /// Cache keys currently being built asynchronously by `enqueueBackgroundPipelineBuild`.
+    /// Used to suppress duplicate background builds while a cache miss is being served
+    /// by a quality-preset fallback on-frame. Actor-isolated — only touched from the
+    /// Renderer actor.
+    var pendingPipelineBuildKeys: Set<String> = []
+    var pendingComputePipelineBuildKeys: Set<String> = []
+
     /// Compute pipeline cache - specialized compute kernels keyed by "FI{n}_RS{n}"
     /// Mirrors the render pipeline cache but for the adaptive hierarchical compute path.
     /// Each entry has Map()/Shadow loops fully unrolled for that iteration count.
@@ -154,13 +162,17 @@ actor Renderer {
     var smoothedFPS: Double = 0
     private var lastFPSUpdateTime: TimeInterval = 0
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
-    // IMPORTANT: These must be nonisolated(unsafe) because finishHandTrackingDispatch()
-    // needs to reset the flag from a non-actor-isolated Task. The render loop is a
-    // synchronous `while true` that never yields the actor, so an actor-isolated
-    // finishHandTrackingDispatch() can never execute — the flag stays stuck at `true`
-    // and all gesture updates are permanently dropped after the first frame.
-    nonisolated(unsafe) var isHandTrackingDispatchInFlight: Bool = false
-    nonisolated(unsafe) var pendingHandTrackingDelta: Float = 0
+    // Hand-tracking dispatch coordination between the render loop (Renderer actor)
+    // and the per-frame @MainActor Task that processes gestures. A single Mutex
+    // replaces the previous pair of `nonisolated(unsafe)` flags: the render loop
+    // is synchronous, but `finishHandTrackingDispatch()` runs off-actor from a
+    // Task continuation, so we need real synchronization on the state they share
+    // (in-flight flag + accumulated delta).
+    struct HandTrackingDispatchState {
+        var inFlight: Bool = false
+        var pendingDelta: Float = 0
+    }
+    let handTrackingDispatchState = Mutex(HandTrackingDispatchState())
     var hasLoggedHandTrackingNil: Bool = false          // One-shot guard for nil provider log
     var lastHandTrackingStateLogTime: TimeInterval = 0  // Throttle non-running state logs
     var cachedDeltaTime: Float = 1.0 / 90.0  // Cached for use in updateGameState
@@ -175,6 +187,20 @@ actor Renderer {
     private var musicReactiveDecayByTarget: [MusicReactiveTarget: Float] = [:]
     private var musicReactiveDriftByTarget: [MusicReactiveTarget: Float] = [:]
     private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
+
+    // Cached slot-gain lookup for music-reactive triplet gains. Rebuilt only
+    // when the active fractal type or triplet-gain dictionary changes — the
+    // per-frame hot path previously recomputed this from scratch (allocating a
+    // fresh dictionary, querying ParameterNodeRegistry, scanning floatFormulaParams)
+    // every frame while audio reactivity was on.
+    private var cachedMusicReactiveFractalType: FractalModelType?
+    private var cachedMusicReactiveTripletGains: [String: Float] = [:]
+    private var cachedSlotGainLookup: [Int: Float] = [:]
+
+    // Reusable audio-operation buffer. Rebuilt per-frame via
+    // `removeAll(keepingCapacity: true)` so the backing storage survives and we
+    // avoid reallocating on every frame when audio reactivity is active.
+    private var audioOperationsBuffer: [ParameterOperation] = []
 
     private var parameterOperationFrameIndex: UInt64 = 0
     // Lifetime is bounded to init/deinit; the task body still hops back onto the actor.
@@ -747,26 +773,36 @@ actor Renderer {
 
                 let dt = cachedDeltaTime
 
-                var audioOperations: [ParameterOperation] = []
+                // Reuse the buffer's backing storage across frames.
+                audioOperationsBuffer.removeAll(keepingCapacity: true)
 
                 let activeFractalType = settings.fractalType
                 let mappings = settings.musicReactiveMappings
 
-                // Build triplet gain lookup: formulaParamSlot → gain multiplier
+                // Build (or reuse) the cached triplet gain lookup:
+                // formulaParamSlot → gain multiplier. Only rebuilt when the active
+                // fractal type or the triplet-gain dictionary actually changes.
                 let tripletGains = settings.tripletMusicGains
-                var slotGainLookup: [Int: Float] = [:]
-                if !tripletGains.isEmpty {
-                    let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: activeFractalType)
-                    let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
-                    for triplet in triplets {
-                        guard let gain = tripletGains[triplet.groupName], gain != 1.0 else { continue }
-                        for formulaIndex in [triplet.xFormulaIndex, triplet.yFormulaIndex, triplet.zFormulaIndex] {
-                            if let slot = floatParams.firstIndex(where: { $0.index == formulaIndex }) {
-                                slotGainLookup[slot] = gain
+                if cachedMusicReactiveFractalType != activeFractalType ||
+                   cachedMusicReactiveTripletGains != tripletGains {
+                    cachedMusicReactiveFractalType = activeFractalType
+                    cachedMusicReactiveTripletGains = tripletGains
+                    cachedSlotGainLookup.removeAll(keepingCapacity: true)
+
+                    if !tripletGains.isEmpty {
+                        let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: activeFractalType)
+                        let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
+                        for triplet in triplets {
+                            guard let gain = tripletGains[triplet.groupName], gain != 1.0 else { continue }
+                            for formulaIndex in [triplet.xFormulaIndex, triplet.yFormulaIndex, triplet.zFormulaIndex] {
+                                if let slot = floatParams.firstIndex(where: { $0.index == formulaIndex }) {
+                                    cachedSlotGainLookup[slot] = gain
+                                }
                             }
                         }
                     }
                 }
+                let slotGainLookup = cachedSlotGainLookup
 
                 for mapping in mappings where mapping.isEnabled {
                     // ── 1. Select audio source level (0-1) ──
@@ -850,7 +886,7 @@ actor Renderer {
                         finalOffset = offset
                     }
 
-                    audioOperations.append(
+                    audioOperationsBuffer.append(
                         ParameterOperation(
                             targetID: targetID,
                             source: .audio,
@@ -865,8 +901,8 @@ actor Renderer {
                     )
                 }
 
-                if !audioOperations.isEmpty {
-                    appModel.parameterPipeline.dispatchAudio(audioOperations, settings: settings)
+                if !audioOperationsBuffer.isEmpty {
+                    appModel.parameterPipeline.dispatchAudio(audioOperationsBuffer, settings: settings)
                     parameterOperationFrameIndex &+= 1
                 }
                 
@@ -949,10 +985,55 @@ actor Renderer {
         } else {
             useAdaptiveCompute = false
         }
-        
-        // Fall back to fragment-based rendering
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // FRAGMENT RENDER PATH (with optional MetalFX spatial upscale)
+        //
+        // When resolutionScale < 1.0 AND MetalFX is available, render the fragment
+        // pass into MetalFX's private low-res input texture, then spatially
+        // upscale into the drawable. MetalFX on visionOS supports spatial
+        // upscaling only (temporal is unsupported), so this is the only MetalFX
+        // codepath we need. Adaptive-compute and Buddhabrot paths intentionally
+        // skip MetalFX — they either have their own quality controls (compute
+        // tile cascade) or don't benefit from spatial upscaling of a volume
+        // integration result (Buddhabrot).
+        // ═══════════════════════════════════════════════════════════════════════
+        let rasterizationRateMap = drawable.rasterizationRateMaps.first
+        let metalFXActive = isMetalFXActive(for: settingsSnapshot, framePath: framePath)
+
         let renderPassDescriptor = MTLRenderPassDescriptor()
+
+        #if canImport(MetalFX)
+        // Configure MetalFX (if active). If configuration fails, `metalFX` is nil
+        // and we fall back to direct rendering into the drawable.
+        var metalFXBundle: (manager: MetalFXManager, inputWidth: Int, inputHeight: Int)?
+        if metalFXActive {
+            if let updated = updateMetalFXManager(
+                drawable: drawable,
+                settingsSnapshot: settingsSnapshot,
+                rasterizationRateMap: rasterizationRateMap
+            ) {
+                metalFXBundle = (updated.0, updated.1, updated.2)
+            }
+        } else {
+            // resolutionScale is at native: release any previously-created upscaler
+            // so we don't hold its textures while unused.
+            metalFXManager = nil
+        }
+
+        if let bundle = metalFXBundle {
+            configureMetalFXRenderTargets(
+                renderPassDescriptor: renderPassDescriptor,
+                metalFX: bundle.manager,
+                drawable: drawable,
+                rasterizationRateMap: rasterizationRateMap
+            )
+        } else {
+            configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+        }
+        #else
         configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+        #endif
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
@@ -1003,7 +1084,22 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        let viewports: [MTLViewport] = drawable.views.map { $0.textureMap.viewport }
+        // Viewports: drawable-native when rendering direct, scaled when rendering
+        // into MetalFX's low-res input texture.
+        let viewports: [MTLViewport]
+        #if canImport(MetalFX)
+        if let bundle = metalFXBundle {
+            viewports = scaledViewports(
+                for: drawable,
+                targetWidth: bundle.inputWidth,
+                targetHeight: bundle.inputHeight
+            )
+        } else {
+            viewports = drawable.views.map { $0.textureMap.viewport }
+        }
+        #else
+        viewports = drawable.views.map { $0.textureMap.viewport }
+        #endif
         renderEncoder.setViewports(viewports)
 
         if drawable.views.count > 1 {
@@ -1031,7 +1127,40 @@ actor Renderer {
 
         renderEncoder.popDebugGroup()
 
+        // If MetalFX is active, signal the fence after the fragment stage so the
+        // spatial scaler waits for our writes into the input/depth textures
+        // before it reads them. Metal's automatic hazard tracking would handle
+        // this for tracked private textures in the same command buffer, but the
+        // explicit fence makes the dependency unambiguous across devices/OS
+        // versions and matches how MTLFXSpatialScaler is documented to be used.
+        #if canImport(MetalFX)
+        if metalFXBundle != nil, let fence = metalFXFence {
+            renderEncoder.updateFence(fence, after: .fragment)
+        }
+        #endif
+
         renderEncoder.endEncoding()
+
+        // Spatial upscale + blit to drawable when MetalFX is active.
+        #if canImport(MetalFX)
+        if let bundle = metalFXBundle {
+            do {
+                try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
+                blitMetalFXOutputToDrawable(
+                    commandBuffer: commandBuffer,
+                    metalFX: bundle.manager,
+                    drawable: drawable
+                )
+            } catch {
+                if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
+                    print("⚠️ MetalFX spatial upscale failed: \(error). Falling back to direct rendering next frame.")
+                    hasLoggedMetalFXFallback = true
+                }
+                // Dropping the manager forces the next frame to go direct.
+                metalFXManager = nil
+            }
+        }
+        #endif
         
         let cpuEncodeMs = (CACurrentMediaTime() - cpuEncodeStart) * 1000.0
         let frameTimeSeconds = Double(cachedDeltaTime)

@@ -27,6 +27,15 @@ enum QualityPreset: String, CaseIterable {
         }
     }
 
+    var resolutionScale: Float {
+        switch self {
+        case .low: return 0.67
+        case .medium: return 0.75
+        case .high: return 0.85
+        case .ultra: return 1.0
+        }
+    }
+
     var displayName: String { rawValue }
 
     var icon: String {
