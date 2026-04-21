@@ -66,14 +66,9 @@ struct RenderSettingsSnapshot {
 }
 
 extension RenderSettingsSnapshot {
-    /// Route explicit performance tile modes through the hierarchical compute path.
+    /// Route only explicit 8x8 mode through the hierarchical compute path.
     var prefersAdaptiveComputePath: Bool {
-        switch tileSize {
-        case 8, 4:
-            return true
-        default:
-            return false
-        }
+        tileSize == 8
     }
 
     /// Disabled until the bound is calibrated against real scene extents.

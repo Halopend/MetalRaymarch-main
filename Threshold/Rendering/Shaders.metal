@@ -1736,17 +1736,19 @@ kernel void adaptiveHierarchical8x8(
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     
-    // Unproject to view space (direction). This works for symmetric frustums
-    // but is known to be inexact for visionOS's asymmetric per-eye projections
-    // — that correctness pass is tracked separately. For now, the adaptive
-    // compute path is explicitly disabled from MetalFX and from being the
-    // default; correctness work continues in a follow-up.
-    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);
-    float4 viewPos = uniforms.invProjMatrix * clipPos;
-    float3 viewDir = normalize(viewPos.xyz);
-    float3 rd = normalize((uniforms.invViewMatrix * float4(viewDir, 0.0)).xyz);
-    
     float3 cameraPos = uniforms.cameraPos;
+
+    // Match the fragment path exactly for visionOS's asymmetric per-eye frusta.
+    // Treat the inverse-projected clip position as a point, divide by w, then
+    // transform that point back into model space before building the ray.
+    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);
+    float4 viewPoint4 = uniforms.invProjMatrix * clipPos;
+    float viewPointW = abs(viewPoint4.w) > 1e-6f
+        ? viewPoint4.w
+        : (viewPoint4.w >= 0.0f ? 1e-6f : -1e-6f);
+    float3 viewPoint = viewPoint4.xyz / viewPointW;
+    float3 modelPoint = (uniforms.invViewMatrix * float4(viewPoint, 1.0)).xyz;
+    float3 rd = normalize(modelPoint - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
     int maxSteps = uniforms.maxRaySteps;
@@ -2702,22 +2704,32 @@ struct DepthOutput {
 // While nearest preserves exact depth discontinuities, bilinear provides
 // smoother depth gradients that ASW can interpolate more accurately.
 fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[stage_in]],
-                                                 depth2d_array<float> sourceTexture [[texture(0)]]) {
+                                                 depth2d_array<float> sourceTexture [[texture(0)]],
+                                                 constant FormatConversionParams& params [[buffer(0)]]) {
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
     DepthOutput out;
-    out.depth = sourceTexture.sample(textureSampler, in.texCoord, in.eyeIndex);
+    float2 uv = in.texCoord;
+    if (params.aspectCorrection != 1.0) {
+        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
+    }
+    out.depth = sourceTexture.sample(textureSampler, uv, in.eyeIndex);
     return out;
 }
 
 // Non-stereo depth upscale for backward compatibility
 fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
-                                          depth2d<float> sourceTexture [[texture(0)]]) {
+                                          depth2d<float> sourceTexture [[texture(0)]],
+                                          constant FormatConversionParams& params [[buffer(0)]]) {
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
                                       address::clamp_to_edge);
     
     DepthOutput out;
-    out.depth = sourceTexture.sample(textureSampler, in.texCoord);
+    float2 uv = in.texCoord;
+    if (params.aspectCorrection != 1.0) {
+        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
+    }
+    out.depth = sourceTexture.sample(textureSampler, uv);
     return out;
 }

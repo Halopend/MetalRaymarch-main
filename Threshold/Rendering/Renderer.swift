@@ -111,8 +111,8 @@ actor Renderer {
     private var temporalColorSize: SIMD2<Int> = .zero
     
     // Cached view amplification mappings — avoids per-frame array allocation
-    private var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []
-    private var cachedViewMappingsCount: Int = 0
+    var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []
+    var cachedViewMappingsCount: Int = 0
     
     // Screenshot capture
     var screenshotTexture: MTLTexture?
@@ -150,6 +150,10 @@ actor Renderer {
     var lastMetalFXOutputSize: SIMD2<Int> = .zero
     var hasLoggedMetalFXFallback = false
     var hasLoggedMetalFXLayout = false
+    var hasLoggedMetalFXResolve = false
+    var hasLoggedMetalFXBlitSizeMismatch = false
+    var metalFXColorResolvePipeline: MTLRenderPipelineState?
+    var metalFXDepthResolvePipeline: MTLRenderPipelineState?
 #endif
 
     // === RESIDENCY SET (visionOS 2.0+) ===
@@ -161,6 +165,10 @@ actor Renderer {
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
     var smoothedFPS: Double = 0
+
+    // One-shot log guard for visionOS 26+ queryDrawables() candidate sizes.
+    var hasLoggedDrawableQualityOptions: Bool = false
+
     private var lastFPSUpdateTime: TimeInterval = 0
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
     // Hand-tracking dispatch coordination between the render loop (Renderer actor)
@@ -288,6 +296,35 @@ actor Renderer {
             if RENDERER_DEBUG { print("⚠️ Quad-shared pipeline failed: \(error)") }
             quadSharedPipelineState = nil
         }
+
+        #if canImport(MetalFX)
+        do {
+            let postProcessVertexDescriptor = MTLVertexDescriptor()
+            metalFXColorResolvePipeline = try Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: postProcessVertexDescriptor,
+                depthFormat: .invalid,
+                vertexFunctionName: "formatConversionVertexStereo",
+                fragmentFunctionName: "formatConversionFragmentStereo"
+            )
+            metalFXDepthResolvePipeline = try Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: postProcessVertexDescriptor,
+                colorFormat: .invalid,
+                vertexFunctionName: "formatConversionVertexStereo",
+                fragmentFunctionName: "depthUpscaleFragmentStereo"
+            )
+            if RENDERER_DEBUG { print("✓ MetalFX resolve pipelines ready (color=bgra8Unorm_srgb/depth=invalid, depth=invalid/depth=depth32Float)") }
+        } catch {
+            if RENDERER_DEBUG { print("⚠️ MetalFX resolve pipeline failed: \(error)") }
+            metalFXColorResolvePipeline = nil
+            metalFXDepthResolvePipeline = nil
+        }
+        #endif
         
         // === BUILD SPECIALIZED PIPELINES FOR QUALITY PRESETS ===
         // Key optimization: Map() inner loop (50-100+ calls per pixel) can be fully unrolled
@@ -570,9 +607,13 @@ actor Renderer {
     func renderFrame() {
         /// Per frame updates hare
 
-        let cpuEncodeStart = CACurrentMediaTime()
+        var frameBreakdown = FramePhaseBreakdown()
 
-        guard let frame = layerRenderer.queryNextFrame() else { return }
+        guard let frame = layerRenderer.queryNextFrame() else {
+            // Avoid busy-spinning if the compositor hasn't produced a frame yet.
+            Thread.sleep(forTimeInterval: 0.001)
+            return
+        }
 
         frame.startUpdate()
 
@@ -581,7 +622,9 @@ actor Renderer {
         frame.endUpdate()
 
         guard let timing = frame.predictTiming() else { return }
+        let clockWaitStart = CACurrentMediaTime()
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
+        frameBreakdown.clockWaitMs = (CACurrentMediaTime() - clockWaitStart) * 1000.0
 
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             if RENDERER_DEBUG { print("⚠️ Failed to create command buffer; skipping frame") }
@@ -600,29 +643,26 @@ actor Renderer {
         let drawable: LayerRenderer.Drawable
         if #available(visionOS 26.0, *) {
             let drawables = frame.queryDrawables()
-            guard let firstDrawable = drawables.first else { return }
-            drawable = firstDrawable
+            guard let selectedDrawable = selectDrawable(from: drawables) else { return }
+            drawable = selectedDrawable
         } else {
             guard let legacyDrawable = frame.queryDrawable() else { return }
             drawable = legacyDrawable
-        }
-
-        // Begin submission once we have a drawable — every path from here MUST
-        // call drawable.encodePresent() before endSubmission() fires.
-        frame.startSubmission()
-        defer {
-            frame.endSubmission()
         }
 
         // Wait for a buffer to become available. With maxBuffersInFlight=2,
         // this allows CPU/GPU pipelining while preventing frame accumulation.
         // The 2-buffer setup prevents the 45fps vsync lock that occurred with 1 buffer.
         // Timeout at 100ms (~10 FPS floor) to detect GPU stalls instead of hanging forever.
+        let inFlightWaitStart = CACurrentMediaTime()
         let waitResult = inFlightSemaphore.wait(timeout: .now() + .milliseconds(100))
+        frameBreakdown.inFlightWaitMs = (CACurrentMediaTime() - inFlightWaitStart) * 1000.0
         if waitResult == .timedOut {
             // GPU is severely behind — present an empty frame to satisfy CompositorServices,
             // then skip rendering to avoid accumulating latency.
             if RENDERER_DEBUG { print("⚠️ GPU stall detected: inFlightSemaphore timed out (100ms)") }
+            frame.startSubmission()
+            defer { frame.endSubmission() }
             drawable.encodePresent(commandBuffer: commandBuffer)
             commandBuffer.commit()
             return
@@ -634,6 +674,9 @@ actor Renderer {
                 inFlightSemaphore.signal()
             }
         }
+
+        // CPU work timing excludes the explicit clock wait + in-flight wait.
+        let cpuEncodeStart = CACurrentMediaTime()
 
         let presentationTime = drawable.frameTiming.presentationTime
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: presentationTime).timeInterval
@@ -683,19 +726,24 @@ actor Renderer {
 
         self.updateDynamicBufferState()
         // Update hand tracking and process gestures
+        let handTrackingStart = CACurrentMediaTime()
         self.updateHandTracking(atTime: time)
+        frameBreakdown.handTrackingMs = (CACurrentMediaTime() - handTrackingStart) * 1000.0
 
         // Update scene animation playback on MainActor
         // Batched with audio frame updates into a single MainActor dispatch to reduce overhead
         let animDelta = TimeInterval(cachedDeltaTime)
         
+        let settingsUpdateStart = CACurrentMediaTime()
         settings.interpolateToTargets(deltaTime: cachedDeltaTime)
         settings.updateLimitFlash(deltaTime: cachedDeltaTime)
         settings.updateColorSchemeTransition(deltaTime: cachedDeltaTime)
+        frameBreakdown.settingsUpdateMs = (CACurrentMediaTime() - settingsUpdateStart) * 1000.0
         
         // === AUDIO PIPELINE ===
         // Auto-detect active sources: use mic FFT, Spotify beat sync, and/or
         // Apple Music BPM-based synthesis — blend whatever is available.
+        let backgroundCpuStart = CACurrentMediaTime()
         let isAudioMode = settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled
         let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
         let shouldUpdateAnimation = settings.isAnimationPlaying
@@ -927,9 +975,22 @@ actor Renderer {
             musicReactiveDriftByTarget.removeAll()
             musicLFOPhaseByTarget.removeAll()
         }
+        frameBreakdown.backgroundCpuMs = (CACurrentMediaTime() - backgroundCpuStart) * 1000.0
+
+        let snapshotStart = CACurrentMediaTime()
         let settingsSnapshot = settings.snapshot()
+        frameBreakdown.snapshotMs = (CACurrentMediaTime() - snapshotStart) * 1000.0
         
+        let updateGameStateStart = CACurrentMediaTime()
         self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+        frameBreakdown.updateGameStateMs = (CACurrentMediaTime() - updateGameStateStart) * 1000.0
+
+        // Begin submission only once CPU updates are complete.
+        // Every path from here MUST call drawable.encodePresent() before endSubmission() fires.
+        frame.startSubmission()
+        defer { frame.endSubmission() }
+
+        let renderEncodeStart = CACurrentMediaTime()
 
         // ═══════════════════════════════════════════════════════════════════════
         // BUDDHABROT VOLUME RENDER PATH
@@ -1163,9 +1224,15 @@ actor Renderer {
         }
         #endif
         
+        frameBreakdown.renderPathEncodeMs = (CACurrentMediaTime() - renderEncodeStart) * 1000.0
+
         let cpuEncodeMs = (CACurrentMediaTime() - cpuEncodeStart) * 1000.0
         let frameTimeSeconds = Double(cachedDeltaTime)
         let logTime = time
+        let viewCount = drawable.views.count
+        let drawableWidth = drawable.colorTextures[0].width
+        let drawableHeight = drawable.colorTextures[0].height
+        let frameBreakdownSnapshot = frameBreakdown
         commandBuffer.addCompletedHandler { [weak self] cb in
             let gpuMs: Double?
             if cb.gpuEndTime > cb.gpuStartTime {
@@ -1180,9 +1247,12 @@ actor Renderer {
                     frameTimeSeconds: frameTimeSeconds,
                     cpuEncodeMs: cpuEncodeMs,
                     gpuMs: gpuMs,
+                    frameBreakdown: frameBreakdownSnapshot,
                     settingsSnapshot: settingsSnapshot,
                     useAdaptiveCompute: useAdaptiveCompute,
-                    viewCount: drawable.views.count
+                    viewCount: viewCount,
+                    drawableWidth: drawableWidth,
+                    drawableHeight: drawableHeight
                 )
             }
         }
@@ -1495,13 +1565,17 @@ actor Renderer {
                 destinationTexture = drawable.colorTextures[0]
                 destinationSlice = eye
             }
+
+            // Safety: Metal validation asserts if we copy outside destination.
+            let copyWidth = min(sourceTexture.width, destinationTexture.width)
+            let copyHeight = min(sourceTexture.height, destinationTexture.height)
             
             blitEncoder.copy(
                 from: sourceTexture,
                 sourceSlice: eye,
                 sourceLevel: 0,
                 sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                sourceSize: MTLSize(width: sourceTexture.width, height: sourceTexture.height, depth: 1),
+                sourceSize: MTLSize(width: copyWidth, height: copyHeight, depth: 1),
                 to: destinationTexture,
                 destinationSlice: destinationSlice,
                 destinationLevel: 0,

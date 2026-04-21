@@ -1294,7 +1294,12 @@ final class RenderSettings: @unchecked Sendable {
     var gradientColorMap: GradientColorMap {
         get { withLock { _gradientState.gradient } }
         set {
-            withLock { _gradientState.gradient = newValue; _gradientState.markAsCustom() }
+            withLock {
+                var sorted = newValue
+                sorted.sortStops()
+                _gradientState.gradient = sorted
+                _gradientState.markAsCustom()
+            }
             persistColor()
         }
     }
@@ -1363,7 +1368,11 @@ final class RenderSettings: @unchecked Sendable {
     var gradientState: GradientState {
         get { withLock { _gradientState } }
         set {
-            withLock { _gradientState = newValue }
+            withLock {
+                var sorted = newValue
+                sorted.gradient.sortStops()
+                _gradientState = sorted
+            }
             persistColor()
         }
     }
@@ -1585,14 +1594,36 @@ final class RenderSettings: @unchecked Sendable {
         let glowSharpness = previousNeon.glowSharpness + (currentNeon.glowSharpness - previousNeon.glowSharpness) * t
         let satPower = previousNeon.satPower + (currentNeon.satPower - previousNeon.satPower) * t
         
-        // === Build gradient stop data for shader ===
+        // === Build gradient stop data for shader (no per-frame allocations) ===
         let gradState = _gradientState
-        let (gradStops, gradCount) = gradState.gradient.toShaderStops()
+        let stops = gradState.gradient.stops
+        let gradCount = min(stops.count, 8)
+
+        @inline(__always)
+        func pack(_ stop: GradientStop) -> SIMD4<Float> {
+            SIMD4<Float>(stop.color.x, stop.color.y, stop.color.z, stop.position)
+        }
+
+        var s0 = SIMD4<Float>(0, 0, 0, 0)
+        var s1 = SIMD4<Float>(0, 0, 0, 0)
+        var s2 = SIMD4<Float>(0, 0, 0, 0)
+        var s3 = SIMD4<Float>(0, 0, 0, 0)
+        var s4 = SIMD4<Float>(0, 0, 0, 0)
+        var s5 = SIMD4<Float>(0, 0, 0, 0)
+        var s6 = SIMD4<Float>(0, 0, 0, 0)
+        var s7 = SIMD4<Float>(0, 0, 0, 0)
+
+        if gradCount > 0 { s0 = pack(stops[0]) }
+        if gradCount > 1 { s1 = pack(stops[1]) }
+        if gradCount > 2 { s2 = pack(stops[2]) }
+        if gradCount > 3 { s3 = pack(stops[3]) }
+        if gradCount > 4 { s4 = pack(stops[4]) }
+        if gradCount > 5 { s5 = pack(stops[5]) }
+        if gradCount > 6 { s6 = pack(stops[6]) }
+        if gradCount > 7 { s7 = pack(stops[7]) }
+
         // C array becomes a tuple in Swift — fill all 8 slots
-        let gs = (
-            gradStops[0], gradStops[1], gradStops[2], gradStops[3],
-            gradStops[4], gradStops[5], gradStops[6], gradStops[7]
-        )
+        let gs = (s0, s1, s2, s3, s4, s5, s6, s7)
         
         return ColorSchemeParams(
             saturation: _colorSchemeSaturation,

@@ -211,21 +211,13 @@ final class MetalFXManager {
         descriptor.colorTextureFormat = configuration.colorFormat
         descriptor.outputTextureFormat = configuration.colorFormat
 
-        // The drawable format is bgra8Unorm_srgb. When MetalFX reads from
-        // an sRGB texture the GPU sampler hardware linearizes values before
-        // the scaler sees them — so from the scaler's perspective the input
-        // is LINEAR-encoded. `.perceptual` would incorrectly tell the scaler
-        // the values are still gamma-encoded, producing washed-out or
-        // over-saturated results that manifest as visibly wrong per-eye
-        // imagery. Use `.linear` for sRGB-format drawables; fall back to
-        // `.perceptual` only if `.linear` is rejected on this device/OS.
+        // MetalFX rejects non-perceptual processing whenever either side uses
+        // an sRGB pixel format. The compositor drawable is bgra8Unorm_srgb, so
+        // the scaler must stay in perceptual mode unless the whole MetalFX path
+        // is moved to a linear intermediate format.
         for _ in scalers.count..<viewCount {
-            descriptor.colorProcessingMode = .linear
-            var scaler = descriptor.makeSpatialScaler(device: device)
-            if scaler == nil {
-                descriptor.colorProcessingMode = .perceptual
-                scaler = descriptor.makeSpatialScaler(device: device)
-            }
+            descriptor.colorProcessingMode = .perceptual
+            let scaler = descriptor.makeSpatialScaler(device: device)
             guard let scaler else { throw Error.scalerCreationFailed }
             scaler.inputContentWidth = configuration.inputWidth
             scaler.inputContentHeight = configuration.inputHeight

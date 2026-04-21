@@ -26,22 +26,17 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
         // But definitely need renderTarget
         // configuration.textureUsage = [.renderTarget, .shaderRead]
         
-        // === DYNAMIC RENDER QUALITY (WWDC25 Session 294) ===
-        // Set max render quality to allow dynamic adjustment between scenes.
-        // Higher quality = larger textures, more detail but more GPU work.
-        // Lower quality = smaller textures, less detail but faster rendering.
-        // For raymarching fractals, we want the flexibility to drop quality when
-        // scene complexity is high (dense fractals) and increase when viewing simpler areas.
-        //
-        // maxRenderQuality sets the upper bound; we dynamically adjust via
-        // layerRenderer.renderQuality at runtime based on FPS.
+        // === RENDER QUALITY RANGE (visionOS 26+) ===
+        // Setting maxRenderQuality allows CompositorServices to provide multiple drawable
+        // candidates at different texture sizes. This app intentionally does NOT do
+        // runtime render-quality scaling; we pick a fixed/default candidate.
         if #available(visionOS 26.0, *) {
             if configuration.isFoveationEnabled {
                 // Allow quality range from default (~0.6) up to 1.0
                 // Complex fractal scenes may render at lower quality for performance
                 // Simpler views or menus can use higher quality
                 configuration.maxRenderQuality = LayerRenderer.RenderQuality(1.0)
-                print("✓ Dynamic render quality enabled: maxRenderQuality = 1.0")
+                print("✓ Render quality range enabled: maxRenderQuality = 1.0")
             }
         }
     }

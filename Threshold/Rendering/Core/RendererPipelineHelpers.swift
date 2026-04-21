@@ -7,6 +7,7 @@ extension Renderer {
                                               rasterSampleCount: Int,
                                               mtlVertexDescriptor: MTLVertexDescriptor,
                                               colorFormat: MTLPixelFormat? = nil,
+                                              depthFormat: MTLPixelFormat? = nil,
                                               vertexFunctionName: String = "vertexShader",
                                               fragmentFunctionName: String = "fragmentShader",
                                               usesVertexAmplification: Bool = true,
@@ -41,7 +42,7 @@ extension Renderer {
         pipelineDescriptor.rasterSampleCount = rasterSampleCount
 
         pipelineDescriptor.colorAttachments[0].pixelFormat = colorFormat ?? layerRenderer.configuration.colorFormat
-        pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
+        pipelineDescriptor.depthAttachmentPixelFormat = depthFormat ?? layerRenderer.configuration.depthFormat
 
         pipelineDescriptor.maxVertexAmplificationCount = usesVertexAmplification ? layerRenderer.properties.viewCount : 1
 

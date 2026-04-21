@@ -60,7 +60,6 @@ struct HandData {
         let middleDist = simd_length(middleTip - palmCenter)
         let ringDist = simd_length(ringTip - palmCenter)
         let pinkyDist = simd_length(pinkyTip - palmCenter)
-        let thumbDist = simd_length(thumbTip - palmCenter)
         
         // Fist threshold distances (in meters)
         let closedDist: Float = 0.03  // 3cm = fully closed

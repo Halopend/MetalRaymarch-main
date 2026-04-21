@@ -93,6 +93,8 @@ struct ContentView: View {
     @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
+
+    @State private var showResolutionBudgetFineTune = false
     
     // Developer state
     @State private var isProfilerRunning = false
@@ -497,7 +499,44 @@ struct ContentView: View {
     
     private var fractalQualityContent: some View {
         VStack(spacing: 12) {
-            Text("Render Budget").font(.headline)
+            // ── Renderer Mode ──
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Renderer Mode")
+                    Spacer()
+                    Text(RendererModeOption.from(tileSize: cache.quality.tileSize).rawValue)
+                        .fontWeight(.bold)
+                }
+
+                Picker("Renderer Mode", selection: Binding(
+                    get: { RendererModeOption.from(tileSize: cache.quality.tileSize) },
+                    set: { newMode in
+                        guard cache.quality.tileSize != newMode.tileSize else { return }
+                        cache.quality.tileSize = newMode.tileSize
+                        cache.push(\.tileSize, value: newMode.tileSize)
+
+                        // Default to full resolution when switching render modes.
+                        showResolutionBudgetFineTune = false
+                        cache.quality.resolutionScale = 1.0
+                        cache.push(\.resolutionScale, value: 1.0)
+                        appModel.preparePipeline(
+                            iterations: cache.quality.baseFractalIterations,
+                            raySteps: cache.quality.baseMaxRaySteps
+                        )
+                    }
+                )) {
+                    ForEach(RendererModeOption.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(RendererModeOption.from(tileSize: cache.quality.tileSize).helperText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Iteration Budget").font(.headline)
             HStack(spacing: 8) {
                 ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
                     Button {
@@ -525,68 +564,45 @@ struct ContentView: View {
                 }
             }
 
-            // ── Renderer Mode ──
+            // ── Resolution Budget ──
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Renderer Mode")
-                    Spacer()
-                    Text(RendererModeOption.from(tileSize: cache.quality.tileSize).rawValue)
-                        .fontWeight(.bold)
-                }
-
-                Picker("Renderer Mode", selection: Binding(
-                    get: { RendererModeOption.from(tileSize: cache.quality.tileSize) },
-                    set: { newMode in
-                        guard cache.quality.tileSize != newMode.tileSize else { return }
-                        cache.quality.tileSize = newMode.tileSize
-                        cache.push(\.tileSize, value: newMode.tileSize)
-                        appModel.preparePipeline(
-                            iterations: cache.quality.baseFractalIterations,
-                            raySteps: cache.quality.baseMaxRaySteps
-                        )
-                    }
-                )) {
-                    ForEach(RendererModeOption.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text(RendererModeOption.from(tileSize: cache.quality.tileSize).helperText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            // ── Upscaling ──
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Resolution Scale")
+                    Text("Resolution Budget")
                     Spacer()
                     Text("\(Int(cache.quality.resolutionScale * 100))%")
                         .fontWeight(.bold)
                         .monospacedDigit()
-                }
 
-                Slider(value: Binding(
-                    get: { cache.quality.resolutionScale },
-                    set: { newValue in
-                        let snapped = (newValue * 20).rounded() / 20
-                        cache.quality.resolutionScale = snapped
-                        cache.push(\.resolutionScale, value: snapped)
+                    Button {
+                        showResolutionBudgetFineTune.toggle()
+                    } label: {
+                        Label(
+                            showResolutionBudgetFineTune ? "Hide" : "Fine Tune",
+                            systemImage: showResolutionBudgetFineTune ? "chevron.up" : "chevron.down"
+                        )
+                        .font(.caption2)
                     }
-                ), in: 0.5...1.0, step: 0.05)
-                .disabled(cache.quality.tileSize == 8)
+                    .buttonStyle(.bordered)
+                    .disabled(cache.quality.tileSize == 8)
+                }
 
                 HStack(spacing: 8) {
                     ForEach([
-                        ("Native", Float(1.0)),
-                        ("Balanced", Float(0.85)),
+                        ("Aggressive", Float(0.67)),
                         ("Performance", Float(0.75)),
-                        ("Aggressive", Float(0.67))
+                        ("Balanced", Float(0.85)),
+                        ("Full", Float(1.0))
                     ], id: \.0) { label, scale in
-                        Button(label) {
+                        Button {
                             cache.quality.resolutionScale = scale
                             cache.push(\.resolutionScale, value: scale)
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text(label).font(.caption2)
+                                Text("\(Int(scale * 100))%").font(.caption.monospacedDigit())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
                         }
                         .buttonStyle(.bordered)
                         .tint(abs(cache.quality.resolutionScale - scale) < 0.01 ? .blue : .secondary)
@@ -594,8 +610,26 @@ struct ContentView: View {
                     }
                 }
 
+                if showResolutionBudgetFineTune {
+                    Slider(value: Binding(
+                        get: { cache.quality.resolutionScale },
+                        set: { newValue in
+                            let snapped = (newValue * 100).rounded() / 100
+                            cache.quality.resolutionScale = snapped
+                            cache.push(\.resolutionScale, value: snapped)
+                        }
+                    ), in: 0.5...1.0, step: 0.01)
+                    .disabled(cache.quality.tileSize == 8)
+                }
+
+                if cache.quality.tileSize != 8 && cache.quality.resolutionScale < 0.999 {
+                    Label("Beta: output may look distorted at lower Resolution Budgets.", systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
                 if cache.quality.tileSize == 8 {
-                    Text("Upscaling is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling.")
+                    Text("Resolution Budget is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
