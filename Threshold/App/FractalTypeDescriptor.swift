@@ -299,8 +299,6 @@ private struct QuaternionJuliaDescriptor: FractalTypeDescriptor {
 }
 
 private struct OctahedronDescriptor: FractalTypeDescriptor {
-
-private struct OctahedronDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 11
     let displayName = "Octahedron"
     let icon = "diamond"

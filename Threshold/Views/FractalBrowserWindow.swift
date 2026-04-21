@@ -311,7 +311,9 @@ enum FractalBrowserCatalog {
             summary: "Conditional folds and inversions for structured hybrids.",
             historicalInfo: "Hybrid fold distance estimators emerged from practical experimentation combining box folds, sphere inversions, and Kleinian-group techniques in shader communities.",
             types: [
-                FractalTypeBrowserInfo(type: .sphereSponge, subtitle: "Recursive sphere inversion sponge", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: [])
+                FractalTypeBrowserInfo(type: .boxSphereFolder, subtitle: "Recursive box/sphere inversion hybrid", historicalInfo: "Sphere inversion techniques connect classical geometry and modern DE fractal workflows.", variants: []),
+                FractalTypeBrowserInfo(type: .theliPseudoKleinian, subtitle: "Fold-based pseudo-Kleinian hybrid", historicalInfo: "Pseudo-Kleinian formulas combine conditional folds and offsets for rich cavity structures.", variants: []),
+                FractalTypeBrowserInfo(type: .kleinian, subtitle: "Classical Kleinian group fold dynamics", historicalInfo: "Kleinian-style systems in raymarched fractals derive from Möbius-transform inspired fold operations.", variants: [])
             ]
         ),
         FractalFamilyInfo(
@@ -338,8 +340,6 @@ enum FractalBrowserCatalog {
             historicalInfo: "IFS families trace back to Barnsley-style affine systems, later expanded by kaleidoscopic fold techniques in demoscene and raymarch work.",
             types: [
                 FractalTypeBrowserInfo(type: .menger, subtitle: "Recursive cubic void lattice", historicalInfo: "The Menger sponge is a classic 3D extension of Cantor-like recursive removal.", variants: []),
-                FractalTypeBrowserInfo(type: .sierpinski, subtitle: "Tetrahedral recursive simplex", historicalInfo: "Sierpinski constructions are among the earliest textbook self-similar fractals.", variants: []),
-                FractalTypeBrowserInfo(type: .dodecahedron, subtitle: "Golden-ratio fold symmetries", historicalInfo: "Polyhedral IFS variants leverage Platonic and Archimedean symmetry groups.", variants: []),
                 FractalTypeBrowserInfo(type: .octahedron, subtitle: "Octahedral abs-fold variant", historicalInfo: "Octahedral fold sets are efficient and common in shader-based fractal rendering.", variants: []),
                 FractalTypeBrowserInfo(type: .mengerSphere, subtitle: "Menger + optional spherification", historicalInfo: "Hybrid systems blending cubic and spherical operators became popular in modern real-time renderers.", variants: [])
             ]
@@ -518,14 +518,8 @@ struct FractalBrowserWindow: View {
             return "z_{n+1} = z_n^p + c_{julia}"
         case .menger:
             return "p_{n+1} = scale * fold_menger(p_n) + c"
-        case .sierpinski:
-            return "p_{n+1} = scale * fold_sierpinski(p_n) + c"
-        case .dodecahedron:
-            return "p_{n+1} = scale * fold_dodecahedron(p_n) + c"
         case .quaternionJulia:
             return "q_{n+1} = q_n^2 + c"
-        case .sphereSponge:
-            return "p_{n+1} = scale * sphereFold(p_n) + c"
         case .octahedron:
             return "p_{n+1} = scale * fold_octahedral(p_n) + c"
         case .mengerSphere:
@@ -536,8 +530,6 @@ struct FractalBrowserWindow: View {
             return "z_{n+1} = fold(z_n) + c"
         case .boxSphereFolder:
             return "p_{n+1} = fold_box_sphere(p_n) + c"
-        case .kaleidoIFS:
-            return "p_{n+1} = fold_kaleido(p_n) + c"
         }
     }
 
