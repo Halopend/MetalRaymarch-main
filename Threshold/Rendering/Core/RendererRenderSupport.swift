@@ -162,7 +162,7 @@ extension Renderer {
         let outputHeight = max(1, drawable.colorTextures[0].height)
         let scaleX = Double(targetWidth) / Double(outputWidth)
         let scaleY = Double(targetHeight) / Double(outputHeight)
-        return drawable.views.map { view in
+        let result: [MTLViewport] = drawable.views.map { view in
             let vp = view.textureMap.viewport
             return MTLViewport(
                 originX: vp.originX * scaleX,
@@ -173,6 +173,24 @@ extension Renderer {
                 zfar: vp.zfar
             )
         }
+        if RENDERER_DEBUG && !hasLoggedMetalFXLayout {
+            hasLoggedMetalFXLayout = true
+            let layoutName: String = {
+                switch layerRenderer.configuration.layout {
+                case .layered:   return "layered"
+                case .dedicated: return "dedicated"
+                case .shared:    return "shared"
+                @unknown default: return "unknown"
+                }
+            }()
+            print("🔍 MetalFX layout=\(layoutName) drawable.colorTextures.count=\(drawable.colorTextures.count) views=\(drawable.views.count) drawableEye=\(outputWidth)x\(outputHeight) input=\(targetWidth)x\(targetHeight) scale=(\(scaleX), \(scaleY))")
+            for (i, vp) in drawable.views.enumerated() {
+                let src = vp.textureMap.viewport
+                let dst = result[i]
+                print("   view[\(i)] drawableVP=(\(src.originX),\(src.originY),\(src.width)x\(src.height)) scaledVP=(\(dst.originX),\(dst.originY),\(dst.width)x\(dst.height))")
+            }
+        }
+        return result
     }
 
     func configureMetalFXRenderTargets(

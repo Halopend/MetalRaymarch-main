@@ -1736,23 +1736,17 @@ kernel void adaptiveHierarchical8x8(
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     
-    // Camera position in model space (same as fragment shader)
+    // Unproject to view space (direction). This works for symmetric frustums
+    // but is known to be inexact for visionOS's asymmetric per-eye projections
+    // — that correctness pass is tracked separately. For now, the adaptive
+    // compute path is explicitly disabled from MetalFX and from being the
+    // default; correctness work continues in a follow-up.
+    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);
+    float4 viewPos = uniforms.invProjMatrix * clipPos;
+    float3 viewDir = normalize(viewPos.xyz);
+    float3 rd = normalize((uniforms.invViewMatrix * float4(viewDir, 0.0)).xyz);
+    
     float3 cameraPos = uniforms.cameraPos;
-
-    // Reconstruct ray direction to match the fragment path EXACTLY:
-    //   fragment:  rd = normalize(modelPos_vertex - cameraPos_model)
-    // We reconstruct modelPos for this pixel from clip → view → model.
-    // CRITICAL: visionOS per-eye projections are asymmetric (off-center frustum).
-    // We MUST treat invProj*clipPos as a POINT and divide by w, NOT as a direction
-    // with w=0 — otherwise the asymmetric shift is mishandled and the effective
-    // FOV appears doubled/skewed.
-    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);  // any z on the clip frustum works
-    float4 viewPoint4 = uniforms.invProjMatrix * clipPos;
-    float3 viewPoint = viewPoint4.xyz / viewPoint4.w;
-    // invViewMatrix here is actually inverse(modelView) — carries the inverse
-    // rigid-body transform from view space to model space. Use w=1 (point xform).
-    float3 modelPoint = (uniforms.invViewMatrix * float4(viewPoint, 1.0)).xyz;
-    float3 rd = normalize(modelPoint - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
     int maxSteps = uniforms.maxRaySteps;

@@ -149,6 +149,7 @@ actor Renderer {
     var lastMetalFXInputSize: SIMD2<Int> = .zero
     var lastMetalFXOutputSize: SIMD2<Int> = .zero
     var hasLoggedMetalFXFallback = false
+    var hasLoggedMetalFXLayout = false
 #endif
 
     // === RESIDENCY SET (visionOS 2.0+) ===
