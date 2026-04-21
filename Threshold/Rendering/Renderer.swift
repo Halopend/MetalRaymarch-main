@@ -1239,13 +1239,24 @@ actor Renderer {
         let effectiveScale = smoothedScale * settingsSnapshot.detailScale
         let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(effectiveScale, 0.001)
         let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
+
+        // Match fragment path projection mapping by using the actual per-eye
+        // viewport (origin + size), not the full texture dimensions.
+        let viewport = drawable.views[viewIndex].textureMap.viewport
+        let viewportOriginX = max(0, Int(viewport.originX.rounded(.down)))
+        let viewportOriginY = max(0, Int(viewport.originY.rounded(.down)))
+        let maxViewportWidth = max(1, outputTexture.width - viewportOriginX)
+        let maxViewportHeight = max(1, outputTexture.height - viewportOriginY)
+        let viewportWidth = min(max(1, Int(viewport.width.rounded(.up))), maxViewportWidth)
+        let viewportHeight = min(max(1, Int(viewport.height.rounded(.up))), maxViewportHeight)
         
         var tileUniforms = TileUniforms(
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
             cameraPos: cameraPos,
             time: frameTime,
-            resolution: SIMD2<Float>(Float(outputTexture.width), Float(outputTexture.height)),
+            resolution: SIMD2<Float>(Float(viewportWidth), Float(viewportHeight)),
+            viewportOrigin: SIMD2<Float>(Float(viewportOriginX), Float(viewportOriginY)),
             minDistance: settingsSnapshot.minDistance,
             fractalScale: settingsSnapshot.fractalScale,
             sphereRadius: settingsSnapshot.sphereRadius,
@@ -1321,8 +1332,8 @@ actor Renderer {
         let tileSize = 8
         let threadgroupSize = MTLSize(width: tileSize, height: tileSize, depth: 1)
         let threadgroupsPerGrid = MTLSize(
-            width: (outputTexture.width + tileSize - 1) / tileSize,
-            height: (outputTexture.height + tileSize - 1) / tileSize,
+            width: (viewportWidth + tileSize - 1) / tileSize,
+            height: (viewportHeight + tileSize - 1) / tileSize,
             depth: 1
         )
         

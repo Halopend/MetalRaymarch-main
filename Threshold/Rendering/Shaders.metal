@@ -1708,11 +1708,15 @@ kernel void adaptiveHierarchical8x8(
     texture2d_array<float, access::write> curColorTexture [[texture(4)]]
 ) {
     const uint ADAPTIVE_TILE_SIZE = 8;
-    uint2 pixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
+    uint2 viewportPixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
+    uint2 viewportSize = uint2(uniforms.resolution);
     
-    if (pixelCoord.x >= uint(uniforms.resolution.x) || pixelCoord.y >= uint(uniforms.resolution.y)) {
+    if (viewportPixelCoord.x >= viewportSize.x || viewportPixelCoord.y >= viewportSize.y) {
         return;
     }
+
+    uint2 viewportOrigin = uint2(uniforms.viewportOrigin);
+    uint2 pixelCoord = viewportOrigin + viewportPixelCoord;
     
     // Compute ray direction in MODEL SPACE (matching fragment shader exactly)
     // Fragment shader does: rd = normalize(in.modelPos - cameraPos)
@@ -1724,33 +1728,31 @@ kernel void adaptiveHierarchical8x8(
     // 3. Transform through inverse model-view to get model-space point
     // 4. Compute direction from camera to that point (both in model space)
     
-    float2 pixelCenter = float2(pixelCoord) + 0.5;
+    float2 pixelCenter = float2(viewportPixelCoord) + 0.5;
     
     // === GMT-FRACTALS PATTERN: Halton Sub-Pixel Jitter for Temporal AA ===
-    // When geometry is stable (blendFactor < 1.0), apply sub-pixel jitter from
-    // a pre-computed Halton(2,3) sequence. At 90Hz, the display integrates ~3 frames
-    // via persistence, giving free temporal supersampling without accumulation buffers.
-    // jitterOffset is ±0.5 pixels, computed on CPU from Halton sequence.
     pixelCenter += uniforms.jitterOffset;
     
     float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     
-    // Unproject to view space - use z = -1 (view-space convention: -Z is forward)
-    // This matches how the vertex shader projects positions and ensures consistency
-    // with wide FOV projections
-    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);  // Near plane in clip space
-    float4 viewPos = uniforms.invProjMatrix * clipPos;
-    // For perspective projection, we need the direction, not normalized position
-    // viewPos.w will be 1 after inverse projection of a point at z=0
-    float3 viewDir = normalize(viewPos.xyz);
-    
-    // Transform direction to model space (inverse model-view matrix)
-    // Use w=0 for direction transformation (no translation)
-    float3 rd = normalize((uniforms.invViewMatrix * float4(viewDir, 0.0)).xyz);
-    
     // Camera position in model space (same as fragment shader)
     float3 cameraPos = uniforms.cameraPos;
+
+    // Reconstruct ray direction to match the fragment path EXACTLY:
+    //   fragment:  rd = normalize(modelPos_vertex - cameraPos_model)
+    // We reconstruct modelPos for this pixel from clip → view → model.
+    // CRITICAL: visionOS per-eye projections are asymmetric (off-center frustum).
+    // We MUST treat invProj*clipPos as a POINT and divide by w, NOT as a direction
+    // with w=0 — otherwise the asymmetric shift is mishandled and the effective
+    // FOV appears doubled/skewed.
+    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);  // any z on the clip frustum works
+    float4 viewPoint4 = uniforms.invProjMatrix * clipPos;
+    float3 viewPoint = viewPoint4.xyz / viewPoint4.w;
+    // invViewMatrix here is actually inverse(modelView) — carries the inverse
+    // rigid-body transform from view space to model space. Use w=1 (point xform).
+    float3 modelPoint = (uniforms.invViewMatrix * float4(viewPoint, 1.0)).xyz;
+    float3 rd = normalize(modelPoint - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
     int maxSteps = uniforms.maxRaySteps;
@@ -1807,7 +1809,8 @@ kernel void adaptiveHierarchical8x8(
         if (prevUV.x >= 0.0 && prevUV.x <= 1.0 && prevUV.y >= 0.0 && prevUV.y <= 1.0) {
             // Sample previous depth at the reprojected location
             uint2 prevPixel = uint2(prevUV * uniforms.resolution);
-            prevPixel = clamp(prevPixel, uint2(0), uint2(uniforms.resolution) - 1);
+            prevPixel = clamp(prevPixel, uint2(0), viewportSize - 1);
+            prevPixel += viewportOrigin;
             float prevDepth = prevDepthTexture.read(prevPixel, uniforms.eyeIndex).x;
             historyUV = prevUV;
             historyPixel = prevPixel;
@@ -1825,7 +1828,8 @@ kernel void adaptiveHierarchical8x8(
                 
                 if (betterUV.x >= 0.0 && betterUV.x <= 1.0 && betterUV.y >= 0.0 && betterUV.y <= 1.0) {
                     uint2 betterPixel = uint2(betterUV * uniforms.resolution);
-                    betterPixel = clamp(betterPixel, uint2(0), uint2(uniforms.resolution) - 1);
+                    betterPixel = clamp(betterPixel, uint2(0), viewportSize - 1);
+                    betterPixel += viewportOrigin;
                     float refinedDepth = prevDepthTexture.read(betterPixel, uniforms.eyeIndex).x;
                     historyUV = betterUV;
                     historyPixel = betterPixel;
@@ -1997,7 +2001,8 @@ kernel void adaptiveHierarchical8x8(
                 // TRUE motion-vector reprojection coordinate for history sampling.
                 historyUV = prevHitUV;
                 historyPixel = uint2(prevHitUV * uniforms.resolution);
-                historyPixel = clamp(historyPixel, uint2(0), uint2(uniforms.resolution) - 1);
+                historyPixel = clamp(historyPixel, uint2(0), viewportSize - 1);
+                historyPixel += viewportOrigin;
 
                 float prevHitDepth = prevDepthTexture.read(historyPixel, uniforms.eyeIndex).x;
                 if (prevHitDepth > 0.0 && prevHitDepth < kRayMissThreshold) {

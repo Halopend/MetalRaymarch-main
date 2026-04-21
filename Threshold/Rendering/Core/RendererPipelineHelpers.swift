@@ -23,6 +23,14 @@ extension Renderer {
         // Always provide function constants (empty if nil) for fragment shaders that use them.
         let fragmentFunction: MTLFunction?
         let constants = functionConstants ?? MTLFunctionConstantValues()
+        if fragmentFunctionName == "fragmentShaderQuadShared" {
+            // FC_SHARE_SHADOWS (index 10) is declared in shader code but not part
+            // of FunctionConstantIndex because it is quad-shared-path-specific.
+            // Forcing it on here makes the quad-shared mode materially faster
+            // instead of depending on runtime lighting softness heuristics.
+            var shareShadows = true
+            constants.setConstantValue(&shareShadows, type: .bool, index: 10)
+        }
         fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()

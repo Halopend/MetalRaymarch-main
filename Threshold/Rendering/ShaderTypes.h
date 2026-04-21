@@ -262,7 +262,8 @@ typedef struct
     matrix_float4x4 invProjMatrix;
     vector_float3 cameraPos;
     float time;
-    vector_float2 resolution;
+    vector_float2 resolution;      // Per-eye viewport size in pixels
+    vector_float2 viewportOrigin;  // Per-eye viewport origin in texture pixels
     float minDistance;
     float fractalScale;
     float sphereRadius;

@@ -308,6 +308,16 @@ extension Renderer {
         var inputWidth = max(1, Int(Float(outputWidth) * settingsSnapshot.resolutionScale))
         var inputHeight = max(1, Int(Float(outputHeight) * settingsSnapshot.resolutionScale))
 
+        // NOTE: We intentionally do NOT clamp inputWidth/inputHeight up to the
+        // foveation rasterization rate map's physical size here. On visionOS the
+        // physical size is typically close to the full drawable, so clamping
+        // would silently override the user's resolutionScale (making the
+        // Resolution Scale slider a no-op). When the requested input size is
+        // smaller than the physical size, `configureMetalFXRenderTargets` will
+        // omit the rate map for this pass — we lose gaze-tracked foveation for
+        // this frame but the scaler still produces a correctly scaled input.
+        _ = rasterizationRateMap
+        #if false
         if layerRenderer.configuration.isFoveationEnabled, let map = rasterizationRateMap {
             let physical = map.physicalSize(layer: 0)
             if physical.width > 0 && physical.height > 0 {
@@ -315,6 +325,7 @@ extension Renderer {
                 inputHeight = max(inputHeight, physical.height)
             }
         }
+        #endif
 
         let config = MetalFXManager.Configuration(
             inputWidth: inputWidth,

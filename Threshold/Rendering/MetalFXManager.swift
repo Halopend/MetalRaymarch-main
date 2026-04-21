@@ -210,18 +210,18 @@ final class MetalFXManager {
         descriptor.outputHeight = configuration.outputHeight
         descriptor.colorTextureFormat = configuration.colorFormat
         descriptor.outputTextureFormat = configuration.colorFormat
-        
-        // Use perceptual mode for better edge detection on complex fractal detail.
-        // Perceptual mode analyzes edges in a way that matches human perception,
-        // which can produce sharper results on organic/mathematical patterns.
-        // Linear mode is technically correct for rgba16Float but perceptual often looks better.
-        descriptor.colorProcessingMode = .perceptual
 
         // These do NOT change per frame – set once
         for _ in scalers.count..<viewCount {
-            guard let scaler = descriptor.makeSpatialScaler(device: device) else {
-                throw Error.scalerCreationFailed
+            // Prefer perceptual mode for fractal edge detail, but fall back to
+            // linear mode if the device/format combination rejects perceptual.
+            descriptor.colorProcessingMode = .perceptual
+            var scaler = descriptor.makeSpatialScaler(device: device)
+            if scaler == nil {
+                descriptor.colorProcessingMode = .linear
+                scaler = descriptor.makeSpatialScaler(device: device)
             }
+            guard let scaler else { throw Error.scalerCreationFailed }
             scaler.inputContentWidth = configuration.inputWidth
             scaler.inputContentHeight = configuration.inputHeight
             scalers.append(scaler)
