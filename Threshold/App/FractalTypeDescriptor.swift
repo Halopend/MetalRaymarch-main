@@ -257,7 +257,7 @@ private struct MandelbulbJuliaDescriptor: FractalTypeDescriptor {
         let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
         let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
         return FractalViewDefaults(
-            position: SIMD3<Float>(0.1, 0.1, -0.9),
+            position: SIMD3<Float>(0.1, 0.1, -1.45),
             rotation: simd_normalize(qz * qy * qx),
             detailScale: 0.25,
             safetyBubbleEnabled: false
@@ -295,6 +295,17 @@ private struct QuaternionJuliaDescriptor: FractalTypeDescriptor {
         [
             (GestureSlot(hand: .right, finger: .middle), "C"),
         ]
+    }
+    var defaultViewState: FractalViewDefaults {
+        let qx = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+        let qy = simd_quatf(angle: 75.0 * .pi / 180.0, axis: SIMD3<Float>(0, 1, 0))
+        let qz = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))
+        return FractalViewDefaults(
+            position: SIMD3<Float>(0.1, 0.1, -1.45),
+            rotation: simd_normalize(qz * qy * qx),
+            detailScale: 0.25,
+            safetyBubbleEnabled: false
+        )
     }
 }
 

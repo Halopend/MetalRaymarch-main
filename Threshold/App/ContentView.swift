@@ -465,11 +465,12 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
                     Button {
-                        cache.quality.baseFractalIterations = preset.fractalIterations
-                        cache.quality.baseMaxRaySteps = preset.raySteps
-                        cache.push(\.baseFractalIterations, value: preset.fractalIterations)
-                        cache.push(\.baseMaxRaySteps, value: preset.raySteps)
-                        appModel.preparePipeline(iterations: preset.fractalIterations, raySteps: preset.raySteps)
+                        let values = preset.values(for: cache.fractalType)
+                        cache.quality.baseFractalIterations = values.fractalIterations
+                        cache.quality.baseMaxRaySteps = values.raySteps
+                        cache.push(\.baseFractalIterations, value: values.fractalIterations)
+                        cache.push(\.baseMaxRaySteps, value: values.raySteps)
+                        appModel.preparePipeline(iterations: values.fractalIterations, raySteps: values.raySteps)
                     } label: {
                         VStack(spacing: 2) {
                             Image(systemName: preset.icon).font(.caption)
@@ -478,7 +479,11 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 6)
                     }
                     .buttonStyle(.bordered)
-                    .tint(QualityPreset.detect(fractalIterations: cache.quality.baseFractalIterations, raySteps: cache.quality.baseMaxRaySteps) == preset ? .blue : .secondary)
+                    .tint(QualityPreset.detect(
+                        fractalIterations: cache.quality.baseFractalIterations,
+                        raySteps: cache.quality.baseMaxRaySteps,
+                        fractalType: cache.fractalType
+                    ) == preset ? .blue : .secondary)
                 }
             }
             

@@ -38,10 +38,29 @@ enum QualityPreset: String, CaseIterable {
         }
     }
 
+    func values(for fractalType: FractalModelType) -> (fractalIterations: Int, raySteps: Int) {
+        switch fractalType {
+        case .mandelbulb, .mandelbulbJulia:
+            switch self {
+            case .low:
+                return (4, 32)
+            case .medium:
+                return (6, 48)
+            case .high:
+                return (8, 56)
+            case .ultra:
+                return (10, 60)
+            }
+        default:
+            return (fractalIterations, raySteps)
+        }
+    }
+
     /// Try to detect preset from current settings
-    static func detect(fractalIterations: Int, raySteps: Int) -> QualityPreset? {
+    static func detect(fractalIterations: Int, raySteps: Int, fractalType: FractalModelType? = nil) -> QualityPreset? {
         for preset in allCases {
-            if preset.fractalIterations == fractalIterations && preset.raySteps == raySteps {
+            let values = fractalType.map { preset.values(for: $0) } ?? (preset.fractalIterations, preset.raySteps)
+            if values.0 == fractalIterations && values.1 == raySteps {
                 return preset
             }
         }

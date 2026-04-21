@@ -48,7 +48,8 @@ final class UIUpdateCoordinator: Sendable {
                 let settings = appModel.renderSettings
                 let qualityPreset = QualityPreset.detect(
                     fractalIterations: settings.fractalIterations,
-                    raySteps: settings.maxRaySteps
+                    raySteps: settings.maxRaySteps,
+                    fractalType: settings.fractalType
                 )?.rawValue ?? "custom"
 
                 UsageAnalytics.shared.sample(
