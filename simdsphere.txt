@@ -1,4 +1,0 @@
-In SIMD sphere tracing, if all lanes compute SDF and step by SIMD_MIN, why is it faster?
-Because the memory access and texture cache for the Map() function (which has lots of instructions, maybe noise or textures) is coherent if rays are at exactly the same physical position!
-In fractals, Map() is purely mathematical. Coherence means register alignment.
-But in fractals with high divergence, Map() has NO memory access.
