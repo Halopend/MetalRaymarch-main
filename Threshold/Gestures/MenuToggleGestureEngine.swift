@@ -96,10 +96,9 @@ final class MenuToggleGestureEngine {
 
         switch mode {
         case .middleToPalm:
+            // No offset — the default threshold is already tuned for middle-to-palm.
             // Lower release threshold so the finger must fully extend before re-arming.
-            // The middle finger naturally rests near the palm, so a higher release
-            // threshold causes isActive to get stuck.
-            return (activate: baseActivate + 0.02, release: baseRelease - 0.05)
+            return (activate: baseActivate, release: baseRelease - 0.05)
         case .middleAndRingToPalm:
             return (activate: baseActivate, release: baseRelease)
         case .fist:

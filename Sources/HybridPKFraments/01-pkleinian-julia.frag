@@ -1,5 +1,15 @@
 #infoTheli-at's Pseudo Kleinian hybrid with 4D Quaternion Julia
 
+/*
+ * Third-Party Formula Attribution
+ *
+ * Upstream attribution: Theli-at (Pseudo Kleinian + 4D Quaternion Julia hybrid).
+ *
+ * Licensing status in this repository:
+ * - Imported source snippet did not include explicit license text.
+ * - Treat as third-party attributed source until upstream license is verified.
+ */
+
 //#define USE_IQ_CLOUDS
 #define KN_VOLUMETRIC
 #define USE_EIFFIE_SHADOW

@@ -1,5 +1,15 @@
 #info Pseudo Kleinian hybrid with Gnarl3D 
 
+/*
+ * Third-Party Formula Attribution
+ *
+ * Upstream attribution: Pseudo Kleinian + Gnarl3D hybrid (community Fragmentarium source).
+ *
+ * Licensing status in this repository:
+ * - Imported source snippet did not include explicit license text.
+ * - Treat as third-party attributed source until upstream license is verified.
+ */
+
 //#define USE_IQ_CLOUDS
 #define KN_VOLUMETRIC
 #define USE_EIFFIE_SHADOW

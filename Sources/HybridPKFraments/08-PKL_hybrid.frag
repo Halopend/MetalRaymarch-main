@@ -3,6 +3,16 @@
 #define USE_EIFFIE_SHADOW
 #define MULTI_SAMPLE_AO
 
+/*
+ * Third-Party Formula Attribution
+ *
+ * Upstream attribution: Knighty (see fractalforums link below in this file).
+ *
+ * Licensing status in this repository:
+ * - Imported source snippet did not include explicit license text.
+ * - Treat as third-party attributed source until upstream license is verified.
+ */
+
 #include "MathUtils.frag"
 //#include "DE-Kn2cr10.frag"
 #include "DE-Kn2cr11.frag"

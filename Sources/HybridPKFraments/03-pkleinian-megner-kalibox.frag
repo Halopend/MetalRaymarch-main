@@ -1,5 +1,23 @@
 #info Pseudo Kleinian hybrid with Kalibox 
 
+/*
+ * Third-Party Formula Attribution
+ *
+ * This fragment includes a Kalibox variant attributed to Kali, in the
+ * Apollonian-style fractal lineage commonly shared in Fragmentarium/shadertoy
+ * communities.
+ *
+ * Licensing status in this repository:
+ * - The upstream snippet imported into this file did not include explicit
+ *   license text.
+ * - Until the original license is verified, treat this section as
+ *   third-party attributed source with unknown license terms.
+ *
+ * Action item:
+ * - Replace this notice with the exact upstream license identifier/text and
+ *   source URL once verified from the original Kali publication.
+ */
+
 #define providesInit
 //#define USE_IQ_CLOUDS
 #define KN_VOLUMETRIC

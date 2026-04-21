@@ -240,7 +240,7 @@ private struct SierpinskiDescriptor: FractalTypeDescriptor {
     let icon = "triangle"
     let category = "Kaleidoscopic IFS"
     let codableString = "sierpinski"
-    let isSelectableInUI = true
+    let isSelectableInUI = false
     let supportedCoreGestureActions = standardCoreGestureActions
     var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
     func defaultFormulaParams() -> FormulaParams {
@@ -257,7 +257,7 @@ private struct DodecahedronDescriptor: FractalTypeDescriptor {
     let icon = "pentagon"
     let category = "Kaleidoscopic IFS"
     let codableString = "dodecahedron"
-    let isSelectableInUI = true
+    let isSelectableInUI = false
     let supportedCoreGestureActions = standardCoreGestureActions
     var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
     func defaultFormulaParams() -> FormulaParams {
@@ -342,7 +342,7 @@ private struct SphereSpongeDescriptor: FractalTypeDescriptor {
     let icon = "circle.grid.3x3"
     let category = "Hybrid Folds"
     let codableString = "sphereSponge"
-    let isSelectableInUI = true
+    let isSelectableInUI = false
     let supportedCoreGestureActions = standardCoreGestureActions
     var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
     func defaultFormulaParams() -> FormulaParams {
@@ -393,7 +393,7 @@ private struct TheliPseudoKleinianDescriptor: FractalTypeDescriptor {
     let icon = "cube"
     let category = "Hybrid Folds"
     let codableString = "theliPseudoKleinian"
-    let isSelectableInUI = false
+    let isSelectableInUI = true
     let supportedCoreGestureActions = standardCoreGestureActions
     var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
     func defaultFormulaParams() -> FormulaParams {
@@ -465,7 +465,7 @@ private struct KaleidoIFSDescriptor: FractalTypeDescriptor {
     let icon = "sparkles"
     let category = "Kaleidoscopic IFS"
     let codableString = "kaleidoIFS"
-    let isSelectableInUI = true
+    let isSelectableInUI = false
     let supportedCoreGestureActions = standardCoreGestureActions
     var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
     func defaultFormulaParams() -> FormulaParams {

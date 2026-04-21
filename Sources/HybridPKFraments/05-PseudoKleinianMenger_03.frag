@@ -1,6 +1,17 @@
 #info Pseudo Kleinian hybrid with rotated Menger and more uniforms!
 //Menger is here \Examples\Knighty Collection\Fold_and_cut_polyhedra_examples\menger_iterated_20.frag
 
+/*
+ * Third-Party Formula Attribution
+ *
+ * Upstream attribution: Pseudo Kleinian + rotated Menger hybrid, with Menger
+ * variant reference from Knighty Collection examples.
+ *
+ * Licensing status in this repository:
+ * - Imported source snippet did not include explicit license text.
+ * - Treat as third-party attributed source until upstream license is verified.
+ */
+
 #define providesInit
 #define USE_IQ_CLOUDS
 #define KN_VOLUMETRIC

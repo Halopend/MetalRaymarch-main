@@ -2,13 +2,12 @@
 //  Kleinian.h
 //  Threshold
 //
-//  Distance estimator for knighty's Pseudo Kleinian fractal.
+//  Distance estimator based on Knighty's Pseudo Kleinian fractal.
 //  Box fold + sphere inversion with a cylindrical cross-section DE.
 //
 //  params[0-2]=Mins.xyz, [3]=SphFold, [4-6]=Maxs.xyz, [7]=CrossR,
 //  params[8]=ColorOfs, [9]=ColorScale
 //
-//  Ported from Shadertoy (knighty / Music by Trisomie21 "Kleinian")
 //
 //  Optimizations:
 //    • float4 packing: p.xyz = position, p.w = accumulated scale
