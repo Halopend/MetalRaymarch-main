@@ -127,17 +127,13 @@ enum FractalTypeRegistry {
         MandelboxDescriptor(),
         MandelbulbDescriptor(),
         MengerDescriptor(),
-        SierpinskiDescriptor(),
-        DodecahedronDescriptor(),
         MandelbulbJuliaDescriptor(),
         QuaternionJuliaDescriptor(),
-        SphereSpongeDescriptor(),
         OctahedronDescriptor(),
         MengerSphereDescriptor(),
         TheliPseudoKleinianDescriptor(),
         KleinianDescriptor(),
         BoxSphereFolderDescriptor(),
-        KaleidoIFSDescriptor(),
     ]
 
     private static let descriptors: [Int32: any FractalTypeDescriptor] = {
@@ -234,40 +230,6 @@ private struct MengerDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct SierpinskiDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 3
-    let displayName = "Sierpinski"
-    let icon = "triangle"
-    let category = "Kaleidoscopic IFS"
-    let codableString = "sierpinski"
-    let isSelectableInUI = false
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 2.0; fp.params.1 = 1.0; fp.params.2 = 1.0; fp.params.3 = 1.0
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-}
-
-private struct DodecahedronDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 4
-    let displayName = "Dodecahedron"
-    let icon = "pentagon"
-    let category = "Kaleidoscopic IFS"
-    let codableString = "dodecahedron"
-    let isSelectableInUI = false
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 2.0; fp.params.1 = 1.618; fp.params.2 = 2.0
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-}
-
 private struct MandelbulbJuliaDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 5
     let displayName = "Mandelbulb Julia"
@@ -336,22 +298,7 @@ private struct QuaternionJuliaDescriptor: FractalTypeDescriptor {
     }
 }
 
-private struct SphereSpongeDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 10
-    let displayName = "Sphere Sponge"
-    let icon = "circle.grid.3x3"
-    let category = "Hybrid Folds"
-    let codableString = "sphereSponge"
-    let isSelectableInUI = false
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 2.0; fp.params.1 = 3.0
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-}
+private struct OctahedronDescriptor: FractalTypeDescriptor {
 
 private struct OctahedronDescriptor: FractalTypeDescriptor {
     let rawValue: Int32 = 11
@@ -456,32 +403,6 @@ private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
         fp.params.7 = 1.2   // ShapeR
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
-    }
-}
-
-private struct KaleidoIFSDescriptor: FractalTypeDescriptor {
-    let rawValue: Int32 = 21
-    let displayName = "Kaleido IFS"
-    let icon = "sparkles"
-    let category = "Kaleidoscopic IFS"
-    let codableString = "kaleidoIFS"
-    let isSelectableInUI = false
-    let supportedCoreGestureActions = standardCoreGestureActions
-    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
-    func defaultFormulaParams() -> FormulaParams {
-        var fp = Self.baseFormulaParams()
-        fp.params.0 = 2.0    // Scale
-        fp.params.1 = 1.0    // Offset
-        fp.params.2 = 0.5    // NormalW
-        FormulaCatalog.normalizeRotationFlags(&fp)
-        return fp
-    }
-    var defaultViewState: FractalViewDefaults {
-        FractalViewDefaults(
-            position: SIMD3<Float>(0.0, 0.0, 0.0),
-            detailScale: 0.8,
-            safetyBubbleEnabled: false
-        )
     }
 }
 

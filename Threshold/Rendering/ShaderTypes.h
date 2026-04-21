@@ -67,17 +67,13 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeMandelbox         = 0,
     FractalTypeMandelbulb        = 1,
     FractalTypeMenger            = 2,
-    FractalTypeSierpinski        = 3,
-    FractalTypeDodecahedron      = 4,
     FractalTypeMandelbulbJulia   = 5,
     FractalTypeQuaternionJulia   = 6,
-    FractalTypeSphereSponge      = 10,
     FractalTypeOctahedron        = 11,
     FractalTypeMengerSphere        = 14,
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
     FractalTypeBoxSphereFolder         = 20,
-    FractalTypeKaleidoIFS              = 21,
 };
 
 // === FORMULA PARAMETERS ===

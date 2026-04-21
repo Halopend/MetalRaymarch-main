@@ -12,17 +12,13 @@ enum FractalModelType: Int32, CaseIterable {
     case mandelbox         = 0
     case mandelbulb        = 1
     case menger            = 2
-    case sierpinski        = 3
-    case dodecahedron      = 4
     case mandelbulbJulia   = 5
     case quaternionJulia   = 6
-    case sphereSponge      = 10
     case octahedron        = 11
     case mengerSphere      = 14
     case theliPseudoKleinian = 15
     case kleinian              = 17
     case boxSphereFolder         = 20
-    case kaleidoIFS              = 21
     
     /// Descriptor from the registry — all metadata is defined there.
     var descriptor: FractalTypeDescriptor { FractalTypeRegistry.descriptor(for: self) }
