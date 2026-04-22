@@ -721,6 +721,9 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// Optional song that auto-plays when this scene starts
     var attachedSong: SongAttachment?
 
+    /// Optional playback speed override applied when starting this scene from the beginning.
+    var playbackSpeedOverride: Double?
+
     /// Pre-end damping controls for attached-song scenes.
     /// `songFadeOutOffset`: hold a near-stopped state this many seconds before the end.
     /// `songFadeOutDuration`: ramp down shape-stream velocity before reaching the offset window.
@@ -796,6 +799,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         safetyBubbleShape     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
         safetyBubbleBlend     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
         attachedSong          = try c.decodeIfPresent(SongAttachment.self, forKey: .attachedSong)
+        playbackSpeedOverride = try c.decodeIfPresent(Double.self, forKey: .playbackSpeedOverride)
         songFadeOutDuration   = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutDuration)
         songFadeOutOffset     = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutOffset)
     }

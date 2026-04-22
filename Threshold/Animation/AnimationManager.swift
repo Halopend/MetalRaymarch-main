@@ -402,6 +402,9 @@ final class AnimationManager {
             print("⚠️ Scene needs at least 2 keyframes to play")
             return
         }
+
+        let isStartingFromBeginning = playhead.state == .stopped ||
+            (playhead.currentKeyframeIndex == 0 && playhead.elapsedInSegment <= 0.0001)
         
         // Restore the fractal type the scene was authored for.
         // This MUST happen before pipeline precompilation, because pipelines
@@ -421,6 +424,11 @@ final class AnimationManager {
         if let settings = renderSettings, let scene = currentScene {
             // Clear lingering user/gesture offsets so playback starts from clean scene values.
             settings.clearAnimationManualOffsets()
+
+            if isStartingFromBeginning,
+               let speedOverride = scene.playbackSpeedOverride {
+                playbackSpeed = max(0.1, min(4.0, speedOverride))
+            }
 
             if let enabled = scene.safetyBubbleEnabled {
                 settings.safetyBubbleEnabled = enabled

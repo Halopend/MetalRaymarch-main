@@ -75,23 +75,31 @@ struct AnimationPlayerWindowView: View {
 
 /// Inner content for the player window — shows scene selector, playback controls, and timeline.
 private struct AnimationPlayerContent: View {
+    private enum PanelMode: String, CaseIterable {
+        case animation = "Animation"
+        case music = "Music"
+    }
+
+    @Environment(AppModel.self) private var appModel
     @Bindable var animationManager: AnimationManager
     @State private var editingKeyframe: AnimationKeyframe?
     @State private var wasPlayingBeforeScrub = false
-    
+    @State private var panelMode: PanelMode = .animation
+    @State private var isScrubbingMusic = false
+    @State private var musicScrubFraction: Float = 0
+
     var body: some View {
         let currentScene = animationManager.currentScene
         let timing = currentScene.map(SceneTimingSnapshot.init(scene:))
-        let musicScenes = animationManager.scenes.filter { $0.attachedSong != nil }
-        let silentScenes = animationManager.scenes.filter { $0.attachedSong == nil }
+        let audioVisualScenes = animationManager.scenes.filter { $0.attachedSong != nil }
+        let visualScenes = animationManager.scenes.filter { $0.attachedSong == nil }
 
         VStack(spacing: 10) {
-            // ── Scene selector ──
             HStack {
                 Menu {
-                    if !musicScenes.isEmpty {
-                        Section("Music") {
-                            ForEach(musicScenes) { scene in
+                    if !audioVisualScenes.isEmpty {
+                        Section("Accompanied") {
+                            ForEach(audioVisualScenes) { scene in
                                 Button {
                                     animationManager.currentScene = scene
                                 } label: {
@@ -106,9 +114,9 @@ private struct AnimationPlayerContent: View {
                         }
                     }
 
-                    if !silentScenes.isEmpty {
-                        Section("Silent") {
-                            ForEach(silentScenes) { scene in
+                    if !visualScenes.isEmpty {
+                        Section("Solo") {
+                            ForEach(visualScenes) { scene in
                                 Button {
                                     animationManager.currentScene = scene
                                 } label: {
@@ -132,114 +140,126 @@ private struct AnimationPlayerContent: View {
                     }
                     .font(.subheadline)
                 }
-                
+
                 Spacer()
-                
-                if let timing {
+
+                Picker("Panel", selection: $panelMode) {
+                    ForEach(PanelMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+
+                if let timing, panelMode == .animation {
                     Text(timing.progressText(for: animationManager.uiPlayhead, formatTime: formatTime))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
-            
-            // ── Timeline ──
-            if let currentScene, let timing {
-                KeyframeTimelineView(
-                    timing: timing,
-                    playhead: animationManager.uiPlayhead,
-                    onEditKeyframe: { keyframe in editingKeyframe = keyframe },
-                    onJumpToKeyframe: { index in animationManager.jumpToKeyframe(index) },
-                    onJumpToTime: { time in animationManager.jumpToTime(time) },
-                    onAddKeyframe: {
-                        animationManager.addKeyframeToScene(currentScene.id, duration: 2.0)
-                    },
-                    onDeleteKeyframe: { index in
-                        animationManager.removeKeyframe(at: index, from: currentScene.id)
-                    },
-                    onOverwriteKeyframe: { index in
-                        animationManager.overwriteKeyframe(at: index, in: currentScene.id)
-                    },
-                    onScrubBegin: {
-                        wasPlayingBeforeScrub = animationManager.isPlaying
-                        if animationManager.isPlaying { animationManager.pause() }
-                    },
-                    onScrubEnd: {
-                        if wasPlayingBeforeScrub { animationManager.play() }
+
+            if panelMode == .animation {
+                if let currentScene, let timing {
+                    KeyframeTimelineView(
+                        timing: timing,
+                        playhead: animationManager.uiPlayhead,
+                        onEditKeyframe: { keyframe in editingKeyframe = keyframe },
+                        onJumpToKeyframe: { index in animationManager.jumpToKeyframe(index) },
+                        onJumpToTime: { time in animationManager.jumpToTime(time) },
+                        onAddKeyframe: {
+                            animationManager.addKeyframeToScene(currentScene.id, duration: 2.0)
+                        },
+                        onDeleteKeyframe: { index in
+                            animationManager.removeKeyframe(at: index, from: currentScene.id)
+                        },
+                        onOverwriteKeyframe: { index in
+                            animationManager.overwriteKeyframe(at: index, in: currentScene.id)
+                        },
+                        onScrubBegin: {
+                            wasPlayingBeforeScrub = animationManager.isPlaying
+                            if animationManager.isPlaying { animationManager.pause() }
+                        },
+                        onScrubEnd: {
+                            if wasPlayingBeforeScrub { animationManager.play() }
+                        }
+                    )
+                    .frame(height: 44)
+                }
+
+                HStack(spacing: 12) {
+                    Button {
+                        if animationManager.isPlaying { animationManager.stop() }
+                        else { animationManager.jumpToKeyframe(0) }
+                    } label: {
+                        Image(systemName: "backward.end.fill")
                     }
-                )
-                .frame(height: 44)
-            }
-            
-            // ── Transport controls ──
-            HStack(spacing: 12) {
-                // Skip to start
-                Button {
-                    if animationManager.isPlaying { animationManager.stop() }
-                    else { animationManager.jumpToKeyframe(0) }
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                }
-                .disabled(animationManager.currentScene == nil)
-                
-                // Play/Pause
-                Button {
-                    animationManager.togglePlayPause()
-                } label: {
-                    Image(systemName: animationManager.isPlaying ? "pause.fill" : "play.fill")
-                }
-                .font(.title2)
-                
-                // Speed
-                Menu {
-                    Button("0.5x") { animationManager.playbackSpeed = 0.5 }
-                    Button("1x") { animationManager.playbackSpeed = 1.0 }
-                    Button("2x") { animationManager.playbackSpeed = 2.0 }
-                    Button("4x") { animationManager.playbackSpeed = 4.0 }
-                } label: {
-                    Text("\(String(format: "%.1f", animationManager.playbackSpeed))x")
-                        .font(.caption)
-                }
-                
-                // Easing
-                Menu {
-                    ForEach(EasingFunction.allCases, id: \.self) { easing in
-                        Button {
-                            animationManager.easingFunction = easing
-                        } label: {
-                            HStack {
-                                Text(easing.displayName)
-                                if animationManager.easingFunction == easing {
-                                    Image(systemName: "checkmark")
+                    .disabled(animationManager.currentScene == nil)
+
+                    Button {
+                        animationManager.togglePlayPause()
+                    } label: {
+                        Image(systemName: animationManager.isPlaying ? "pause.fill" : "play.fill")
+                    }
+                    .font(.title2)
+
+                    Menu {
+                        Button("0.5x") { animationManager.playbackSpeed = 0.5 }
+                        Button("1x") { animationManager.playbackSpeed = 1.0 }
+                        Button("2x") { animationManager.playbackSpeed = 2.0 }
+                        Button("4x") { animationManager.playbackSpeed = 4.0 }
+                    } label: {
+                        Text("\(String(format: "%.1f", animationManager.playbackSpeed))x")
+                            .font(.caption)
+                    }
+
+                    Menu {
+                        ForEach(EasingFunction.allCases, id: \.self) { easing in
+                            Button {
+                                animationManager.easingFunction = easing
+                            } label: {
+                                HStack {
+                                    Text(easing.displayName)
+                                    if animationManager.easingFunction == easing {
+                                        Image(systemName: "checkmark")
+                                    }
                                 }
                             }
                         }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: animationManager.easingFunction == .smooth ? "waveform.path" : "curve.bezier")
+                            Text(animationManager.easingFunction.displayName)
+                                .font(.caption)
+                        }
                     }
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: animationManager.easingFunction == .smooth ? "waveform.path" : "curve.bezier")
-                        Text(animationManager.easingFunction.displayName)
+
+                    Spacer()
+
+                    Button {
+                        animationManager.disablePlaybackOverrides()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                    }
+                    .help("Reset to scene values")
+                    .disabled(animationManager.currentScene == nil)
+
+                    if let scene = animationManager.currentScene {
+                        Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
                             .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                
-                Spacer()
-                
-                // Reset overrides (compact icon)
-                Button {
-                    animationManager.disablePlaybackOverrides()
-                } label: {
-                    Image(systemName: "arrow.uturn.backward.circle")
-                }
-                .help("Reset to scene values")
-                .disabled(animationManager.currentScene == nil)
-                
-                // Keyframe indicator
-                if let scene = animationManager.currentScene {
-                    Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            } else {
+                musicScrubberSection
             }
+        }
+        .onChange(of: panelMode) { _, newMode in
+            if newMode == .music {
+                musicScrubFraction = appModel.musicService.progressFraction
+            }
+        }
+        .onAppear {
+            musicScrubFraction = appModel.musicService.progressFraction
         }
         .padding()
         .sheet(item: $editingKeyframe) { keyframe in
@@ -257,7 +277,82 @@ private struct AnimationPlayerContent: View {
             )
         }
     }
-    
+
+    private var musicScrubberSection: some View {
+        let music = appModel.musicService
+
+        return VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: music.sourceIcon)
+                    .font(.caption)
+                    .foregroundStyle(music.accentColor)
+
+                if let track = music.nowPlayingUnified {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                        Text(track.artist)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text("No song playing")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button { music.previous() } label: {
+                    Image(systemName: "backward.fill")
+                }
+                .buttonStyle(.plain)
+
+                Button { music.togglePlayPause() } label: {
+                    Image(systemName: music.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+
+                Button { music.next() } label: {
+                    Image(systemName: "forward.fill")
+                }
+                .buttonStyle(.plain)
+            }
+
+            TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                VStack(spacing: 6) {
+                    Slider(
+                        value: Binding(
+                            get: { Double(isScrubbingMusic ? musicScrubFraction : music.progressFraction) },
+                            set: { musicScrubFraction = Float($0) }
+                        ),
+                        in: 0...1,
+                        onEditingChanged: { editing in
+                            isScrubbingMusic = editing
+                            if !editing {
+                                music.seek(fraction: musicScrubFraction)
+                            }
+                        }
+                    )
+                    .disabled(music.nowPlayingUnified == nil)
+
+                    HStack {
+                        Text(music.currentTimeString)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(music.totalTimeString)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
     private func formatTime(_ time: TimeInterval) -> String {
         let seconds = Int(time) % 60
         let tenths = Int((time - Double(Int(time))) * 10)
@@ -270,7 +365,7 @@ private struct AnimationPlayerContent: View {
 /// Utility window for scene management and editing.
 struct AnimationEditorWindowView: View {
     @Environment(AppModel.self) private var appModel
-    
+
     var body: some View {
         Group {
             if let animationManager = appModel.animationManager {
@@ -414,7 +509,7 @@ struct SceneListView: View {
                 )
             } else {
                 if !scenesWithSongs.isEmpty {
-                    Section("Music") {
+                    Section("Accompanied") {
                         ForEach(scenesWithSongs) { scene in
                             sceneListRow(scene)
                         }
@@ -422,7 +517,7 @@ struct SceneListView: View {
                 }
 
                 if !silentScenes.isEmpty {
-                    Section("Silent") {
+                    Section("Solo") {
                         ForEach(silentScenes) { scene in
                             sceneListRow(scene)
                         }
@@ -852,6 +947,31 @@ struct SceneEditorView: View {
                 }
                 .pickerStyle(.menu)
                 .frame(maxWidth: 160)
+            }
+            Toggle("Use Scene Playback Speed", isOn: Binding(
+                get: { scene.playbackSpeedOverride != nil },
+                set: { enabled in
+                    if enabled {
+                        scene.playbackSpeedOverride = scene.playbackSpeedOverride ?? 1.0
+                    } else {
+                        scene.playbackSpeedOverride = nil
+                    }
+                }
+            ))
+
+            if scene.playbackSpeedOverride != nil {
+                HStack {
+                    Text("Speed")
+                    Spacer()
+                    Slider(value: Binding(
+                        get: { scene.playbackSpeedOverride ?? 1.0 },
+                        set: { scene.playbackSpeedOverride = $0 }
+                    ), in: 0.1...4.0, step: 0.05)
+                    .frame(maxWidth: 150)
+                    Text(String(format: "%.2fx", scene.playbackSpeedOverride ?? 1.0))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 48, alignment: .trailing)
+                }
             }
             HStack {
                 Text("Total Duration")

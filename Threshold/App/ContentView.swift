@@ -16,7 +16,7 @@ import RealityKit
 
 enum SidebarTab: String, CaseIterable {
     case fractal = "Fractal"
-    case animate = "Animate"
+    case animate = "Video"
     case coloring = "Coloring"
     case effects = "Effects"
     case music = "Music"
@@ -37,10 +37,25 @@ enum SidebarTab: String, CaseIterable {
 }
 
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", quality = "Quality" }
-enum AnimateSceneSubTab: String, CaseIterable { case withSound = "With Sound", withoutSound = "Without Sound" }
+enum AnimateSceneSubTab: String, CaseIterable { case accompanied = "Accompanied", solo = "Solo" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
+
+private enum SaveDestinationOption: String, CaseIterable {
+    case preset = "Preset"
+    case reset = "Reset"
+}
+
+private enum SavePresetNameMode: String, CaseIterable {
+    case auto = "Auto"
+    case manual = "Manual"
+}
+
+private enum PresetNameEntryMethod: String, CaseIterable {
+    case text = "Text"
+    case voice = "Voice"
+}
 
 enum RendererModeOption: String, CaseIterable {
     case fragment = "Fragment"
@@ -105,16 +120,18 @@ struct ContentView: View {
     @State private var cache = UISettingsCache()
     @State private var selectedTab: SidebarTab = .fractal
     @State private var fractalSubTab: FractalSubTab = .shape
-    @State private var animateSceneSubTab: AnimateSceneSubTab = .withSound
+    @State private var animateSceneSubTab: AnimateSceneSubTab = .accompanied
     @State private var animateEditButtonsVisible = false
     @State private var coloringSubTab: ColoringSubTab = .gradient
     @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
     @State private var isAnimationPlayerWindowVisible = false
+    @State private var showSaveDestinationSheet = false
 
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
+    @AppStorage("presetNameEntryMethod.v1") private var presetNameEntryMethodRaw: String = PresetNameEntryMethod.text.rawValue
 
     private var qualityGoalPreference: QualityGoalPreference {
         let selected = QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
@@ -134,6 +151,11 @@ struct ContentView: View {
 
     private var effectiveDirectBudgetLabel: String {
         effectiveDirectBudgetPreference == .framerate ? "Framerate Budget" : "Detail Budget"
+    }
+
+    private var presetNameEntryMethod: PresetNameEntryMethod {
+        get { PresetNameEntryMethod(rawValue: presetNameEntryMethodRaw) ?? .text }
+        nonmutating set { presetNameEntryMethodRaw = newValue.rawValue }
     }
     
     // Developer state
@@ -172,6 +194,32 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
+        .sheet(isPresented: $showSaveDestinationSheet) {
+            SaveDestinationSheet(
+                entryMethod: presetNameEntryMethod,
+                onSave: { destination, nameMode, manualName in
+                    switch destination {
+                    case .reset:
+                        saveCurrentAsResetDefaults()
+                    case .preset:
+                        let chosenName: String?
+                        if nameMode == .manual {
+                            let trimmed = manualName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            chosenName = trimmed.isEmpty ? nil : trimmed
+                        } else {
+                            chosenName = nil
+                        }
+                        saveCurrentAsPreset(named: chosenName)
+                    }
+                    showSaveDestinationSheet = false
+                },
+                onCancel: {
+                    showSaveDestinationSheet = false
+                }
+            )
+            .presentationDetents([.height(320)])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private func toggleAnimationPlayerWindow() {
@@ -195,6 +243,15 @@ struct ContentView: View {
     private func saveCurrentAsResetDefaults() {
         guard appModel.gestureController?.saveCurrentAsFractalDefaults() == true else { return }
         cache.loadFromSettings()
+    }
+
+    private func saveCurrentAsPreset(named providedName: String? = nil) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let autoName = "Quick Save \(formatter.string(from: Date()))"
+        let presetName = providedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = (presetName?.isEmpty == false) ? presetName! : autoName
+        appModel.presetManager.savePreset(name: finalName, settings: appModel.renderSettings)
     }
     
     // MARK: - Pre-Immersive Layout
@@ -341,7 +398,9 @@ struct ContentView: View {
 
                 HoldToSaveResetButton(
                     onTapReset: resetCurrentFractalSettings,
-                    onHoldSave: saveCurrentAsResetDefaults
+                    onHoldReady: {
+                        showSaveDestinationSheet = true
+                    }
                 )
             }
 
@@ -921,10 +980,10 @@ struct ContentView: View {
                             description: Text("Open Scene Editor to create animation scenes"))
                     } else if filteredScenes.isEmpty {
                         ContentUnavailableView(
-                            animateSceneSubTab == .withSound ? "No Sound Scenes" : "No Silent Scenes",
-                            systemImage: animateSceneSubTab == .withSound ? "music.note" : "speaker.slash",
+                            animateSceneSubTab == .accompanied ? "No Accompanied Scenes" : "No Solo Scenes",
+                            systemImage: animateSceneSubTab == .accompanied ? "music.note" : "speaker.slash",
                             description: Text(
-                                animateSceneSubTab == .withSound
+                                animateSceneSubTab == .accompanied
                                 ? "Attach songs to scenes to see them here."
                                 : "Scenes without attached songs will appear here."
                             )
@@ -957,9 +1016,9 @@ struct ContentView: View {
 
     private func animateFilteredScenes(from scenes: [AnimationScene]) -> [AnimationScene] {
         switch animateSceneSubTab {
-        case .withSound:
+        case .accompanied:
             return scenes.filter { $0.attachedSong != nil }
-        case .withoutSound:
+        case .solo:
             return scenes.filter { $0.attachedSong == nil }
         }
     }
@@ -1638,6 +1697,36 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Preset Name Entry", systemImage: "keyboard")
+                        .font(.headline)
+                    Spacer()
+                }
+
+                Picker("Entry Method", selection: Binding(
+                    get: { presetNameEntryMethod },
+                    set: { presetNameEntryMethod = $0 }
+                )) {
+                    ForEach(PresetNameEntryMethod.allCases, id: \.self) { method in
+                        Text(method.rawValue).tag(method)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Used when Save destination is Preset and Name mode is Manual.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                if presetNameEntryMethod == .voice {
+                    Text("Voice mode uses system dictation in the manual name field.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+
             // SharePlay section
             if let shareSession = appModel.shareSession {
                 VStack(spacing: 8) {
@@ -1922,12 +2011,11 @@ struct ContentView: View {
 
 private struct HoldToSaveResetButton: View {
     let onTapReset: () -> Void
-    let onHoldSave: () -> Void
+    let onHoldReady: () -> Void
 
     @State private var isPressing = false
     @State private var holdProgress: CGFloat = 0
     @State private var holdTask: Task<Void, Never>?
-    @State private var justSaved = false
     @State private var holdCompleted = false
 
     private let holdArmDelay: TimeInterval = 1.2
@@ -1937,18 +2025,14 @@ private struct HoldToSaveResetButton: View {
         holdArmDelay + holdDuration
     }
 
-    private var countdownValue: Int {
-        max(1, Int(ceil((1.0 - holdProgress) * holdDuration)))
-    }
-
     var body: some View {
         ZStack {
             Capsule()
-                .fill(justSaved ? Color.green.opacity(0.16) : Color.orange.opacity(0.12))
+                .fill(Color.orange.opacity(0.12))
 
             GeometryReader { geo in
                 Capsule()
-                    .fill((justSaved ? Color.green : Color.orange).opacity(0.28))
+                    .fill(Color.orange.opacity(0.28))
                     .frame(width: max(0, geo.size.width * holdProgress))
             }
             .clipShape(Capsule())
@@ -1960,16 +2044,16 @@ private struct HoldToSaveResetButton: View {
                         .frame(width: 18, height: 18)
                     Circle()
                         .trim(from: 0, to: holdProgress)
-                        .stroke(justSaved ? Color.green : Color.orange,
+                        .stroke(Color.orange,
                                 style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .frame(width: 18, height: 18)
 
-                    Image(systemName: justSaved ? "checkmark" : "arrow.counterclockwise")
+                    Image(systemName: isPressing ? "square.and.arrow.down" : "arrow.counterclockwise")
                         .font(.system(size: 9, weight: .semibold))
                 }
 
-                Text(justSaved ? "Saved Reset" : "Reset")
+                Text(isPressing ? "Save" : "Reset")
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
             }
@@ -1980,13 +2064,13 @@ private struct HoldToSaveResetButton: View {
         .contentShape(Capsule())
         .overlay(
             Capsule()
-                .stroke(justSaved ? Color.green.opacity(0.5) : Color.orange.opacity(0.45), lineWidth: 1)
+                .stroke(Color.orange.opacity(0.45), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.15), value: holdProgress)
-        .animation(.easeInOut(duration: 0.2), value: justSaved)
-        .help("Tap to reset. Long press to save the current settings as this fractal's reset defaults.")
+        .animation(.easeInOut(duration: 0.2), value: isPressing)
+        .help("Tap to reset. Long press to choose where to save the current settings.")
         .onTapGesture {
-            guard !isPressing && !justSaved else { return }
+            guard !isPressing else { return }
             onTapReset()
         }
         .onLongPressGesture(minimumDuration: totalHoldDuration, maximumDistance: 24, pressing: handlePressingChanged) {
@@ -1996,7 +2080,6 @@ private struct HoldToSaveResetButton: View {
 
     private func handlePressingChanged(_ pressing: Bool) {
         if pressing {
-            justSaved = false
             holdCompleted = false
             isPressing = true
             holdTask?.cancel()
@@ -2025,16 +2108,107 @@ private struct HoldToSaveResetButton: View {
         holdTask?.cancel()
         holdTask = nil
         holdProgress = 1
-        onHoldSave()
-        justSaved = true
+        isPressing = false
+        onHoldReady()
 
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_400_000_000)
-            justSaved = false
+            try? await Task.sleep(nanoseconds: 180_000_000)
             holdProgress = 0
             isPressing = false
             holdCompleted = false
         }
+    }
+}
+
+private struct SaveDestinationSheet: View {
+    let entryMethod: PresetNameEntryMethod
+    let onSave: (SaveDestinationOption, SavePresetNameMode, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var destination: SaveDestinationOption = .preset
+    @State private var presetNameMode: SavePresetNameMode = .auto
+    @State private var manualPresetName = ""
+
+    private var canSave: Bool {
+        if destination == .reset { return true }
+        if presetNameMode == .auto { return true }
+        return !manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Save Current Settings")
+                        .font(.headline)
+                    Text("Choose where to save and how to name it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Picker("Destination", selection: $destination) {
+                    ForEach(SaveDestinationOption.allCases, id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 190)
+            }
+
+            if destination == .preset {
+                Divider()
+
+                HStack {
+                    Text("Name")
+                        .font(.subheadline)
+                    Spacer()
+                    Picker("Name Mode", selection: $presetNameMode) {
+                        ForEach(SavePresetNameMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 170)
+                }
+
+                if presetNameMode == .auto {
+                    Text("Auto generates a timestamped preset name.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if entryMethod == .voice {
+                            Label("Voice entry mode enabled. Use dictation to enter the preset name.", systemImage: "mic.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        TextField(entryMethod == .voice ? "Speak or type preset name" : "Preset name", text: $manualPresetName)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Button("Cancel", role: .cancel) {
+                    onCancel()
+                }
+
+                Spacer()
+
+                Button("Save") {
+                    onSave(destination, presetNameMode, manualPresetName)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave)
+            }
+        }
+        .padding(16)
+        .frame(width: 460)
     }
 }
 
