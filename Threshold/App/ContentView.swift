@@ -42,25 +42,6 @@ enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping 
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
 
-private enum PlayerLauncherTarget {
-    case animation
-    case music
-
-    var icon: String {
-        switch self {
-        case .animation: return "play.rectangle"
-        case .music: return "music.note.list"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .animation: return "Anim"
-        case .music: return "Music"
-        }
-    }
-}
-
 enum RendererModeOption: String, CaseIterable {
     case fragment = "Fragment"
     case quadShared = "Quad Shared"
@@ -130,11 +111,10 @@ struct ContentView: View {
     @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
-    @State private var playerLauncherCycleStep = 0
+    @State private var isAnimationPlayerWindowVisible = false
 
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
-    @AppStorage("playerLauncherCycleReversed.v1") private var playerLauncherCycleReversed = false
 
     private var qualityGoalPreference: QualityGoalPreference {
         let selected = QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
@@ -189,48 +169,22 @@ struct ContentView: View {
         }
         .onAppear { cache.startSync(with: appModel.renderSettings, appModel: appModel) }
         .onDisappear { cache.stopSync() }
-        .onChange(of: selectedTab) { _, newValue in
-            if newValue != .animate {
-                resetPlayerLauncherCycle()
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
     }
 
-    private var playerLauncherOrder: [PlayerLauncherTarget] {
-        playerLauncherCycleReversed ? [.music, .animation] : [.animation, .music]
-    }
-
-    private var nextPlayerLauncherTarget: PlayerLauncherTarget {
-        let order = playerLauncherOrder
-        return order[playerLauncherCycleStep % order.count]
-    }
-
-    private func handlePlayerLauncherTap() {
-        let target = nextPlayerLauncherTarget
-
-        switch target {
-        case .animation:
-            guard let animationManager = appModel.animationManager,
-                  !animationManager.scenes.isEmpty else {
-                return
-            }
-            if animationManager.currentScene == nil {
+    private func toggleAnimationPlayerWindow() {
+        if isAnimationPlayerWindowVisible {
+            dismissWindow(id: AppModel.animationPlayerWindowID)
+        } else {
+            if let animationManager = appModel.animationManager,
+               animationManager.currentScene == nil {
                 animationManager.currentScene = animationManager.scenes.first
             }
             openWindow(id: AppModel.animationPlayerWindowID)
-
-        case .music:
-            openWindow(id: AppModel.libraryWindowID)
         }
-
-        playerLauncherCycleStep = (playerLauncherCycleStep + 1) % playerLauncherOrder.count
-    }
-
-    private func resetPlayerLauncherCycle() {
-        playerLauncherCycleStep = 0
+        isAnimationPlayerWindowVisible.toggle()
     }
 
     private func resetCurrentFractalSettings() {
@@ -319,14 +273,14 @@ struct ContentView: View {
             Spacer()
 
             Button {
-                handlePlayerLauncherTap()
+                toggleAnimationPlayerWindow()
             } label: {
                 VStack(spacing: 4) {
-                    Image(systemName: nextPlayerLauncherTarget.icon)
+                    Image(systemName: isAnimationPlayerWindowVisible ? "xmark.rectangle.fill" : "play.rectangle")
                         .font(.system(size: 18))
                     Text("Player")
                         .font(.caption2)
-                    Text(nextPlayerLauncherTarget.shortLabel)
+                    Text(isAnimationPlayerWindowVisible ? "Close" : "Open")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -338,7 +292,7 @@ struct ContentView: View {
                 .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
-            .help("Cycles between Animation Player and Music Library")
+            .help("Open or close Animation Player")
         }
         .padding(.vertical, 8)
         .frame(width: 72)
@@ -368,32 +322,30 @@ struct ContentView: View {
     // MARK: - Bottom Bar
     
     private var bottomBar: some View {
-        HStack(spacing: 10) {
-            ToggleImmersiveSpaceButton()
-            
-            Divider().frame(height: 20)
-            
-            FPSIndicatorView()
+        ZStack {
+            HStack(spacing: 10) {
+                Spacer()
 
-            Spacer()
-            
-            PresetButton(
-                presetManager: appModel.presetManager,
-                settings: appModel.renderSettings,
-                animationManager: appModel.animationManager,
-                captureScreenshot: { await appModel.captureScreenshot() },
-                onLoadPreset: { preset in
-                    Task { await appModel.preparePipelineHandler?(preset) }
-                    preset.apply(to: appModel.renderSettings)
-                    appModel.gestureController?.syncWithSettings()
-                    cache.loadFromSettings()
-                }
-            )
-            
-            HoldToSaveResetButton(
-                onTapReset: resetCurrentFractalSettings,
-                onHoldSave: saveCurrentAsResetDefaults
-            )
+                PresetButton(
+                    presetManager: appModel.presetManager,
+                    settings: appModel.renderSettings,
+                    animationManager: appModel.animationManager,
+                    captureScreenshot: { await appModel.captureScreenshot() },
+                    onLoadPreset: { preset in
+                        Task { await appModel.preparePipelineHandler?(preset) }
+                        preset.apply(to: appModel.renderSettings)
+                        appModel.gestureController?.syncWithSettings()
+                        cache.loadFromSettings()
+                    }
+                )
+
+                HoldToSaveResetButton(
+                    onTapReset: resetCurrentFractalSettings,
+                    onHoldSave: saveCurrentAsResetDefaults
+                )
+            }
+
+            ToggleImmersiveSpaceButton()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -606,6 +558,13 @@ struct ContentView: View {
     
     private var fractalQualityContent: some View {
         VStack(spacing: 12) {
+            HStack {
+                Label("Performance", systemImage: "gauge")
+                    .font(.headline)
+                Spacer()
+                FPSIndicatorView()
+            }
+
             // ── Renderer Mode ──
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -1679,34 +1638,6 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Hybrid Player Launcher", systemImage: "play.rectangle.on.rectangle")
-                        .font(.headline)
-                    Spacer()
-                }
-
-                Toggle("Start Cycle with Music", isOn: Binding(
-                    get: { playerLauncherCycleReversed },
-                    set: { newValue in
-                        playerLauncherCycleReversed = newValue
-                        resetPlayerLauncherCycle()
-                    }
-                ))
-
-                Text(playerLauncherCycleReversed
-                     ? "Cycle order: Music Library, then Animation Player."
-                     : "Cycle order: Animation Player, then Music Library.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Text("Changing tabs away from Animate resets the cycle to the first item.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
-
             // SharePlay section
             if let shareSession = appModel.shareSession {
                 VStack(spacing: 8) {
@@ -1999,7 +1930,12 @@ private struct HoldToSaveResetButton: View {
     @State private var justSaved = false
     @State private var holdCompleted = false
 
+    private let holdArmDelay: TimeInterval = 1.2
     private let holdDuration: TimeInterval = 3.0
+
+    private var totalHoldDuration: TimeInterval {
+        holdArmDelay + holdDuration
+    }
 
     private var countdownValue: Int {
         max(1, Int(ceil((1.0 - holdProgress) * holdDuration)))
@@ -2033,7 +1969,7 @@ private struct HoldToSaveResetButton: View {
                         .font(.system(size: 9, weight: .semibold))
                 }
 
-                Text(justSaved ? "Saved Reset" : (isPressing ? "Hold \(countdownValue)" : "Reset"))
+                Text(justSaved ? "Saved Reset" : "Reset")
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
             }
@@ -2048,12 +1984,12 @@ private struct HoldToSaveResetButton: View {
         )
         .animation(.easeInOut(duration: 0.15), value: holdProgress)
         .animation(.easeInOut(duration: 0.2), value: justSaved)
-        .help("Tap to reset. Hold for 3 seconds to save the current settings as this fractal's reset defaults.")
+        .help("Tap to reset. Long press to save the current settings as this fractal's reset defaults.")
         .onTapGesture {
             guard !isPressing && !justSaved else { return }
             onTapReset()
         }
-        .onLongPressGesture(minimumDuration: holdDuration, maximumDistance: 24, pressing: handlePressingChanged) {
+        .onLongPressGesture(minimumDuration: totalHoldDuration, maximumDistance: 24, pressing: handlePressingChanged) {
             completeHold()
         }
     }
@@ -2068,8 +2004,9 @@ private struct HoldToSaveResetButton: View {
                 let start = Date()
                 while !Task.isCancelled {
                     let elapsed = Date().timeIntervalSince(start)
-                    holdProgress = min(1.0, elapsed / holdDuration)
-                    if elapsed >= holdDuration { break }
+                    let activeHoldElapsed = max(0.0, elapsed - holdArmDelay)
+                    holdProgress = min(1.0, activeHoldElapsed / holdDuration)
+                    if elapsed >= totalHoldDuration { break }
                     try? await Task.sleep(nanoseconds: 33_000_000)
                 }
             }
