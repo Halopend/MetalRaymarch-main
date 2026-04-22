@@ -10,7 +10,7 @@ import Foundation
 
 struct ColorConfig: Codable, Equatable, Sendable {
     // Color scheme / gradient preset
-    var colorScheme: ColorScheme = .nebula
+    var colorScheme: ColorScheme = .classic
     var gradientState: GradientState = GradientState()
 
     // Color grading

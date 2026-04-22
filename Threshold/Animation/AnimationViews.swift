@@ -815,6 +815,19 @@ struct SceneEditorView: View {
                 Text(formatDuration(scene.totalDuration))
                     .foregroundStyle(.secondary)
             }
+
+            HStack {
+                Text("Source Fractal")
+                Spacer()
+                if let fractalType = scene.fractalType {
+                    Label(fractalType.displayName, systemImage: fractalType.icon)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Unspecified")
+                        .foregroundStyle(.secondary)
+                }
+            }
             
             Divider()
             

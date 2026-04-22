@@ -187,8 +187,8 @@ final class RenderSettings: @unchecked Sendable {
     
     // === COLOR SCHEME ===
     // Controls the color palette and post-processing for fractal coloring
-    private var _colorScheme: ColorScheme = .nebula      // Current color scheme
-    private var _targetColorScheme: ColorScheme = .nebula // Target for transitions
+    private var _colorScheme: ColorScheme = .classic      // Current color scheme
+    private var _targetColorScheme: ColorScheme = .classic // Target for transitions
     private var _colorSchemeTransitionProgress: Float = 1.0 // 0 = previous, 1 = current (complete)
     private var _colorSchemeTransitionDuration: Float = 2.0 // Seconds to transition between schemes
     private var _colorSchemeAutoTransition: Bool = false    // Auto-cycle through schemes

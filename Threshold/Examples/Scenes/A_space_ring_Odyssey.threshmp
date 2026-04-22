@@ -5,7 +5,7 @@
   },
   "colorIterations" : 8,
   "colorMix" : 0.5501741,
-  "colorScheme" : "nebula",
+  "colorScheme" : "classic",
   "colorSchemeAutoInterval" : 30,
   "colorSchemeAutoTransition" : false,
   "colorSchemeContrast" : 1.1,

@@ -77,6 +77,21 @@ enum RendererModeOption: String, CaseIterable {
     }
 }
 
+private enum QualityGoalPreference: Int, CaseIterable {
+    case framerate = 0
+    case detail = 1
+    case control = 2
+
+    var displayName: String {
+        switch self {
+        case .framerate: return "Framerate"
+        case .detail: return "Detail"
+        case .control: return "Control"
+        }
+    }
+
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - ContentView
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -94,7 +109,28 @@ struct ContentView: View {
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
 
-    @State private var showResolutionBudgetFineTune = false
+    @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
+    @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
+
+    private var qualityGoalPreference: QualityGoalPreference {
+        let selected = QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
+        // Control is temporarily disabled in UI; fall back to the last direct choice.
+        return selected == .control ? lastDirectBudgetPreference : selected
+    }
+
+    private var lastDirectBudgetPreference: QualityGoalPreference {
+        let candidate = QualityGoalPreference(rawValue: qualityGoalLastDirectPreferenceRaw) ?? .detail
+        return candidate == .framerate ? .framerate : .detail
+    }
+
+    private var effectiveDirectBudgetPreference: QualityGoalPreference {
+        if qualityGoalPreference == .control { return lastDirectBudgetPreference }
+        return qualityGoalPreference == .framerate ? .framerate : .detail
+    }
+
+    private var effectiveDirectBudgetLabel: String {
+        effectiveDirectBudgetPreference == .framerate ? "Framerate Budget" : "Detail Budget"
+    }
     
     // Developer state
     @State private var isProfilerRunning = false
@@ -393,7 +429,7 @@ struct ContentView: View {
                     Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    Label("Blend mode can be resource intensive at high values.", systemImage: "exclamationmark.triangle")
+                    Label("Blend mode cost varies by scene/fractal/zoom — different values can be expensive in different conditions (Mandelbox often runs better with Blend off, but can behave differently when zoomed in).", systemImage: "exclamationmark.triangle")
                         .font(.caption2)
                         .foregroundStyle(.orange)
                     EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
@@ -515,8 +551,7 @@ struct ContentView: View {
                         cache.quality.tileSize = newMode.tileSize
                         cache.push(\.tileSize, value: newMode.tileSize)
 
-                        // Default to full resolution when switching render modes.
-                        showResolutionBudgetFineTune = false
+                        // Default to full detail budget when switching render modes.
                         cache.quality.resolutionScale = 1.0
                         cache.push(\.resolutionScale, value: 1.0)
                         appModel.preparePipeline(
@@ -536,81 +571,167 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Iteration Budget").font(.headline)
-            HStack(spacing: 8) {
-                ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
-                    Button {
-                        let values = preset.values(for: cache.fractalType)
-                        cache.quality.baseFractalIterations = values.fractalIterations
-                        cache.quality.baseMaxRaySteps = values.raySteps
-                        cache.quality.resolutionScale = preset.resolutionScale
-                        cache.push(\.baseFractalIterations, value: values.fractalIterations)
-                        cache.push(\.baseMaxRaySteps, value: values.raySteps)
-                        cache.push(\.resolutionScale, value: preset.resolutionScale)
-                        appModel.preparePipeline(iterations: values.fractalIterations, raySteps: values.raySteps)
-                    } label: {
-                        VStack(spacing: 2) {
-                            Image(systemName: preset.icon).font(.caption)
-                            Text(preset.displayName).font(.caption2)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Target Condition")
+                    Spacer()
+                    Picker("Budget Goal", selection: Binding(
+                        get: { qualityGoalPreference },
+                        set: { newValue in
+                            guard newValue != .control else { return }
+                            qualityGoalPreferenceRaw = newValue.rawValue
+                            if newValue == .framerate || newValue == .detail {
+                                qualityGoalLastDirectPreferenceRaw = newValue.rawValue
+                            }
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 6)
+                    )) {
+                        ForEach(QualityGoalPreference.allCases, id: \.rawValue) { goal in
+                            Text(goal.displayName)
+                                .tag(goal)
+                                .disabled(goal == .control)
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .tint(QualityPreset.detect(
-                        fractalIterations: cache.quality.baseFractalIterations,
-                        raySteps: cache.quality.baseMaxRaySteps,
-                        fractalType: cache.fractalType
-                    ) == preset ? .blue : .secondary)
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 340)
+                }
+                Text("Framerate and Detail optimize preset behavior. Control is currently disabled.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Iteration Budget")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if qualityGoalPreference != .control {
+                HStack(spacing: 8) {
+                    ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
+                        Button {
+                            let values = preset.values(for: cache.fractalType)
+                            cache.quality.baseFractalIterations = values.fractalIterations
+                            cache.quality.baseMaxRaySteps = values.raySteps
+                            cache.push(\.baseFractalIterations, value: values.fractalIterations)
+                            cache.push(\.baseMaxRaySteps, value: values.raySteps)
+                            appModel.preparePipeline(iterations: values.fractalIterations, raySteps: values.raySteps)
+                        } label: {
+                            VStack(spacing: 2) {
+                                Image(systemName: preset.icon).font(.caption)
+                                Text(preset.displayName).font(.caption2)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(QualityPreset.detect(
+                            fractalIterations: cache.quality.baseFractalIterations,
+                            raySteps: cache.quality.baseMaxRaySteps,
+                            fractalType: cache.fractalType
+                        ) == preset ? .blue : .secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
+                        Slider(value: Binding(
+                            get: { Float(cache.quality.baseFractalIterations) },
+                            set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
+                        ), in: 4...32, step: 1, onEditingChanged: { isEditing in
+                            guard !isEditing else { return }
+                            appModel.preparePipeline(
+                                iterations: cache.quality.baseFractalIterations,
+                                raySteps: cache.quality.baseMaxRaySteps
+                            )
+                        })
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
+                        Slider(value: Binding(
+                            get: { Float(cache.quality.baseMaxRaySteps) },
+                            set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
+                        ), in: 32...200, step: 8, onEditingChanged: { isEditing in
+                            guard !isEditing else { return }
+                            appModel.preparePipeline(
+                                iterations: cache.quality.baseFractalIterations,
+                                raySteps: cache.quality.baseMaxRaySteps
+                            )
+                        })
+                    }
                 }
             }
 
-            // ── Resolution Budget ──
+            // ── Detail/Framerate Budget ──
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Resolution Budget")
+                    Text(effectiveDirectBudgetLabel)
                     Spacer()
                     Text("\(Int(cache.quality.resolutionScale * 100))%")
                         .fontWeight(.bold)
                         .monospacedDigit()
-
-                    Button {
-                        showResolutionBudgetFineTune.toggle()
-                    } label: {
-                        Label(
-                            showResolutionBudgetFineTune ? "Hide" : "Fine Tune",
-                            systemImage: showResolutionBudgetFineTune ? "chevron.up" : "chevron.down"
-                        )
-                        .font(.caption2)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(cache.quality.tileSize == 8)
                 }
 
-                HStack(spacing: 8) {
-                    ForEach([
-                        ("Aggressive", Float(0.67)),
-                        ("Performance", Float(0.75)),
-                        ("Balanced", Float(0.85)),
-                        ("Full", Float(1.0))
-                    ], id: \.0) { label, scale in
-                        Button {
-                            cache.quality.resolutionScale = scale
-                            cache.push(\.resolutionScale, value: scale)
-                        } label: {
-                            VStack(spacing: 2) {
-                                Text(label).font(.caption2)
-                                Text("\(Int(scale * 100))%").font(.caption.monospacedDigit())
+                if qualityGoalPreference != .control {
+                    HStack(spacing: 8) {
+                        let presets: [(label: String, scale: Float, icon: String?)] = {
+                            // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full
+                            let items: [(String, Float, String, String)] = [
+                                // Detail mode: use a dashed screen outline + inner grid to convey pixel density.
+                                ("Low", 0.67, "circle.grid.2x2", QualityPreset.low.icon),
+                                ("Medium", 0.75, "circle.grid.3x3", QualityPreset.medium.icon),
+                                ("High", 0.85, "circle.grid.3x3.fill", QualityPreset.high.icon),
+                                ("Full", 1.0, "circle.grid.3x3.circle.fill", QualityPreset.ultra.icon)
+                            ]
+
+                            switch effectiveDirectBudgetPreference {
+                            case .detail:
+                                // Increasing detail left-to-right.
+                                return items.map { (label: $0.0, scale: $0.1, icon: $0.2) }
+                            case .framerate:
+                                // Keep scale/order behavior, but label by framerate budget semantics.
+                                // Left→right should read Low/Medium/High/Full for framerate.
+                                let scalesAndIcons = items.reversed().map { (scale: $0.1, icon: $0.3) }
+                                let framerateLabels = ["Low", "Medium", "High", "Full"]
+                                return zip(framerateLabels, scalesAndIcons).map { pair in
+                                    (label: pair.0, scale: pair.1.scale, icon: pair.1.icon)
+                                }
+                            case .control:
+                                // Unreachable because we normalize control to the last direct preference.
+                                return items.map { (label: $0.0, scale: $0.1, icon: $0.2) }
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
+                        }()
+
+                        ForEach(presets, id: \.label) { preset in
+                            Button {
+                                cache.quality.resolutionScale = preset.scale
+                                cache.push(\.resolutionScale, value: preset.scale)
+                            } label: {
+                                VStack(spacing: 2) {
+                                    if let icon = preset.icon {
+                                        if effectiveDirectBudgetPreference == .framerate {
+                                            Image(systemName: icon).font(.caption)
+                                        } else {
+                                            ZStack {
+                                                Image(systemName: "rectangle.dashed")
+                                                    .font(.caption)
+                                                Image(systemName: icon)
+                                                    .font(.caption2)
+                                            }
+                                        }
+                                    }
+                                    Text(preset.label).font(.caption2)
+                                    Text("\(Int(preset.scale * 100))%").font(.caption.monospacedDigit())
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(abs(cache.quality.resolutionScale - preset.scale) < 0.01 ? .blue : .secondary)
+                            .disabled(cache.quality.tileSize == 8)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(abs(cache.quality.resolutionScale - scale) < 0.01 ? .blue : .secondary)
-                        .disabled(cache.quality.tileSize == 8)
                     }
                 }
 
-                if showResolutionBudgetFineTune {
+                if qualityGoalPreference == .control {
                     Slider(value: Binding(
                         get: { cache.quality.resolutionScale },
                         set: { newValue in
@@ -623,49 +744,24 @@ struct ContentView: View {
                 }
 
                 if cache.quality.tileSize != 8 && cache.quality.resolutionScale < 0.999 {
-                    Label("Beta: output may look distorted at lower Resolution Budgets.", systemImage: "exclamationmark.triangle")
+                    Label(
+                        effectiveDirectBudgetPreference == .framerate
+                        ? "Beta: output may look distorted at aggressive Framerate Budgets."
+                        : "Beta: output may look distorted at lower Detail Budgets.",
+                        systemImage: "exclamationmark.triangle"
+                    )
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
                 if cache.quality.tileSize == 8 {
-                    Text("Resolution Budget is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling.")
+                    Text("\(effectiveDirectBudgetLabel) is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
                     Text("MetalFX on visionOS is spatial-only. 75% to 85% is the usual quality/performance sweet spot.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                }
-            }
-            
-            // ── Fine-Grained Quality Controls ──
-            VStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
-                    Slider(value: Binding(
-                        get: { Float(cache.quality.baseFractalIterations) },
-                        set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
-                    ), in: 4...32, step: 1, onEditingChanged: { isEditing in
-                        guard !isEditing else { return }
-                        appModel.preparePipeline(
-                            iterations: cache.quality.baseFractalIterations,
-                            raySteps: cache.quality.baseMaxRaySteps
-                        )
-                    })
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
-                    Slider(value: Binding(
-                        get: { Float(cache.quality.baseMaxRaySteps) },
-                        set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
-                    ), in: 32...200, step: 8, onEditingChanged: { isEditing in
-                        guard !isEditing else { return }
-                        appModel.preparePipeline(
-                            iterations: cache.quality.baseFractalIterations,
-                            raySteps: cache.quality.baseMaxRaySteps
-                        )
-                    })
                 }
             }
             

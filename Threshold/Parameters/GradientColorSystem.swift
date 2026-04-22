@@ -72,7 +72,7 @@ struct GradientColorMap: Codable, Identifiable, Equatable {
     var offset: Float         // Shifts the gradient start point (0-1)
     var smoothing: Float      // 0 = sharp transitions, 1 = smooth (default 1.0)
     
-    init(name: String, stops: [GradientStop], mappingMode: ColorMappingMode = .orbitTrap,
+    init(name: String, stops: [GradientStop], mappingMode: ColorMappingMode = .blended,
          repeatCount: Float = 1.0, offset: Float = 0.0, smoothing: Float = 1.0) {
         self.id = UUID()
         self.name = name
@@ -383,8 +383,8 @@ struct GradientState: Codable, Equatable {
     }
     
     init() {
-        self.gradient = GradientPreset.nebula.makeGradient()
-        self.gradientPreset = .nebula
+        self.gradient = GradientPreset.classic.makeGradient()
+        self.gradientPreset = .classic
     }
     
     init(preset: GradientPreset) {
