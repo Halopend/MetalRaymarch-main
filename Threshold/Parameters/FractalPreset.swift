@@ -120,13 +120,13 @@ struct FractalPreset: Codable, Identifiable {
 
         self.fractalType = .mandelbox
         self.colorScheme = .classic
-        self.colorSchemeSaturation = 1.5
-        self.colorSchemeContrast = 1.02
-        self.colorSchemeGamma = 0.75
-        self.colorSchemeVibrance = 0.0
+        self.colorSchemeSaturation = 1.7
+        self.colorSchemeContrast = 1.08
+        self.colorSchemeGamma = 0.85
+        self.colorSchemeVibrance = 0.8
         self.colorSchemeCurve = 0.0
-        self.colorSchemeShadows = 0.0
-        self.colorSchemeHighlights = 0.0
+        self.colorSchemeShadows = -0.018
+        self.colorSchemeHighlights = 0.02
         
         self.minDistance = 0.8
         self.fractalScale = 2.8
@@ -149,13 +149,13 @@ struct FractalPreset: Codable, Identifiable {
         scale = try container.decode(Float.self, forKey: .scale)
         fractalType = try container.decodeIfPresent(FractalModelType.self, forKey: .fractalType) ?? .mandelbox
         colorScheme = try container.decodeIfPresent(ColorScheme.self, forKey: .colorScheme) ?? .classic
-        colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 1.5
-        colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.02
-        colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.75
-        colorSchemeVibrance = try container.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance) ?? 0.0
+        colorSchemeSaturation = try container.decodeIfPresent(Float.self, forKey: .colorSchemeSaturation) ?? 1.7
+        colorSchemeContrast = try container.decodeIfPresent(Float.self, forKey: .colorSchemeContrast) ?? 1.08
+        colorSchemeGamma = try container.decodeIfPresent(Float.self, forKey: .colorSchemeGamma) ?? 0.85
+        colorSchemeVibrance = try container.decodeIfPresent(Float.self, forKey: .colorSchemeVibrance) ?? 0.8
         colorSchemeCurve = try container.decodeIfPresent(Float.self, forKey: .colorSchemeCurve) ?? 0.0
-        colorSchemeShadows = try container.decodeIfPresent(Float.self, forKey: .colorSchemeShadows) ?? 0.0
-        colorSchemeHighlights = try container.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights) ?? 0.0
+        colorSchemeShadows = try container.decodeIfPresent(Float.self, forKey: .colorSchemeShadows) ?? -0.018
+        colorSchemeHighlights = try container.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights) ?? 0.02
         minDistance = try container.decode(Float.self, forKey: .minDistance)
         fractalScale = try container.decode(Float.self, forKey: .fractalScale)
         foldingLimit = try container.decode(Float.self, forKey: .foldingLimit)

@@ -196,13 +196,13 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeAutoTimer: Float = 0.0          // Timer for auto-transitions
     private var _colorSchemeCycleIndex: Int = 0             // Tracked index for O(1) cycle advance
     static let colorSchemeCycle: [ColorScheme] = ColorScheme.allCases
-    private var _colorSchemeSaturation: Float = 1.5         // Color saturation override
-    private var _colorSchemeContrast: Float = 1.02          // Contrast override (subtle)
-    private var _colorSchemeGamma: Float = 0.75             // Gamma override (lower = brighter, 1.0 = linear)
-    private var _colorSchemeVibrance: Float = 1.0           // Vibrance boost (0-1)
+    private var _colorSchemeSaturation: Float = 1.7         // Color saturation override
+    private var _colorSchemeContrast: Float = 1.08          // Contrast override (deeper baseline contrast)
+    private var _colorSchemeGamma: Float = 0.85             // Gamma override (lower = brighter, 1.0 = linear)
+    private var _colorSchemeVibrance: Float = 0.8           // Vibrance boost (0-1)
     private var _colorSchemeCurve: Float = 0.0              // Midtone curve adjustment (-1 to 1)
-    private var _colorSchemeShadows: Float = 0.0            // Shadow lift/crush (-0.05 to 0.05)
-    private var _colorSchemeHighlights: Float = 0.0         // Highlight boost/reduction (-0.5 to 1.0)
+    private var _colorSchemeShadows: Float = -0.018         // Shadow lift/crush (-0.05 to 0.05)
+    private var _colorSchemeHighlights: Float = 0.02        // Highlight boost/reduction (-0.5 to 1.0)
     private var _lightingSoftness: Float = 0.35              // 0 = sharp vibrance-driven, 1 = classic soft lighting
     
     // === MODULAR LIGHTING EFFECTS ===

@@ -214,7 +214,7 @@ enum GradientPreset: String, CaseIterable, Codable {
     /// Suggested post-processing for this preset
     var postProcessing: (saturation: Float, contrast: Float, gamma: Float) {
         switch self {
-        case .classic:    return (2.0, 1.15, 0.45)
+        case .classic:    return (2.2, 1.15, 0.78)
         case .ocean:      return (1.8, 1.12, 0.48)
         case .fire:       return (2.2, 1.2, 0.42)
         case .forest:     return (1.8, 1.1, 0.5)

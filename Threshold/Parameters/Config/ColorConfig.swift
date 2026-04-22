@@ -16,13 +16,13 @@ struct ColorConfig: Codable, Equatable, Sendable {
     // Color grading
     var colorMix: Float = 0.5              // 0.0 - 1.0
     var colorIterations: Float = 5.0
-    var colorSchemeSaturation: Float = 1.0 // 0.0 - 3.0
-    var colorSchemeContrast: Float = 1.0   // 0.95 - 1.15
-    var colorSchemeGamma: Float = 0.6      // 0.2 - 1.0
-    var colorSchemeVibrance: Float = 0.0   // 0.0 - 1.0
+    var colorSchemeSaturation: Float = 1.7 // 0.0 - 3.0
+    var colorSchemeContrast: Float = 1.08  // 0.95 - 1.15
+    var colorSchemeGamma: Float = 0.85     // 0.2 - 1.0
+    var colorSchemeVibrance: Float = 0.8   // 0.0 - 1.0
     var colorSchemeCurve: Float = 0.0      // -1.0 - 1.0
-    var colorSchemeShadows: Float = 0.0    // -0.05 - 0.05
-    var colorSchemeHighlights: Float = 0.0 // -0.5 - 1.0
+    var colorSchemeShadows: Float = -0.018 // -0.05 - 0.05
+    var colorSchemeHighlights: Float = 0.02 // -0.5 - 1.0
     var lightingSoftness: Float = 0.5      // 0.0 - 1.0
 
     // Auto-transition
