@@ -209,6 +209,9 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
     var colorSchemeHighlights: Float?
     var lightingSoftness: Float?
     var gradientPreset: GradientPreset?
+
+    // Optional per-keyframe music reactive settings (live audio reaction controls)
+    var musicReactiveConfig: AudioReactiveConfig?
     
     // Formula parameters for non-Mandelbox types (16 float slots)
     var formulaParamValues: [Float]?
@@ -273,6 +276,9 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.gradientOffset = col.gradientState.gradient.offset
         self.gradientSmoothing = col.gradientState.gradient.smoothing
         self.gradientPreset = col.gradientState.gradientPreset
+
+        // Capture audio-reactive controls and mappings for keyframe-level recall.
+        self.musicReactiveConfig = settings.audioReactiveConfig
     }
     
     /// Create with explicit values
@@ -291,6 +297,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
             bloomEffect: BloomEffect? = nil,
             fogEffect: FogEffect? = nil,
             gradientCycleEffect: GradientCycleEffect? = nil,
+            musicReactiveConfig: AudioReactiveConfig? = nil,
          easingType: EasingFunction = .bezier, bezierHandle: BezierHandle = .easeInOut,
          formulaParamValues: [Float]? = nil) {
         self.id = id
@@ -319,6 +326,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.bloomEffect = bloomEffect
         self.fogEffect = fogEffect
         self.gradientCycleEffect = gradientCycleEffect
+        self.musicReactiveConfig = musicReactiveConfig
         self.easingType = easingType
         self.bezierHandle = bezierHandle
         self.formulaParamValues = formulaParamValues
@@ -431,6 +439,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         result.colorSchemeHighlights = lerpOpt(self.colorSchemeHighlights, other.colorSchemeHighlights)
         result.lightingSoftness = lerpOpt(self.lightingSoftness, other.lightingSoftness)
         result.gradientPreset = pickDiscrete(self.gradientPreset, other.gradientPreset)
+        result.musicReactiveConfig = pickDiscrete(self.musicReactiveConfig, other.musicReactiveConfig)
         return result
     }
 
@@ -453,6 +462,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         case colorSchemeVibrance, colorSchemeCurve, colorSchemeShadows, colorSchemeHighlights
         case lightingSoftness
         case gradientPreset = "gradientPreset"
+        case musicReactiveConfig
         case formulaParamValues
         case easingType, bezierHandle
     }
@@ -500,6 +510,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         self.colorSchemeHighlights = try c.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights)
         self.lightingSoftness = try c.decodeIfPresent(Float.self, forKey: .lightingSoftness)
         self.gradientPreset = try c.decodeIfPresent(GradientPreset.self, forKey: .gradientPreset)
+        self.musicReactiveConfig = try c.decodeIfPresent(AudioReactiveConfig.self, forKey: .musicReactiveConfig)
         self.formulaParamValues = try c.decodeIfPresent([Float].self, forKey: .formulaParamValues)
 
         self.easingType = try c.decodeIfPresent(EasingFunction.self, forKey: .easingType) ?? .bezier
@@ -546,6 +557,7 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         try c.encodeIfPresent(colorSchemeHighlights, forKey: .colorSchemeHighlights)
         try c.encodeIfPresent(lightingSoftness, forKey: .lightingSoftness)
         try c.encodeIfPresent(gradientPreset, forKey: .gradientPreset)
+        try c.encodeIfPresent(musicReactiveConfig, forKey: .musicReactiveConfig)
         try c.encodeIfPresent(formulaParamValues, forKey: .formulaParamValues)
         try c.encode(easingType, forKey: .easingType)
         try c.encode(bezierHandle, forKey: .bezierHandle)
@@ -708,6 +720,12 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     
     /// Optional song that auto-plays when this scene starts
     var attachedSong: SongAttachment?
+
+    /// Pre-end damping controls for attached-song scenes.
+    /// `songFadeOutOffset`: hold a near-stopped state this many seconds before the end.
+    /// `songFadeOutDuration`: ramp down shape-stream velocity before reaching the offset window.
+    var songFadeOutDuration: TimeInterval?
+    var songFadeOutOffset: TimeInterval?
     
     /// Total duration of the scene (sum of all keyframe durations)
     var totalDuration: TimeInterval {
@@ -778,6 +796,8 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         safetyBubbleShape     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
         safetyBubbleBlend     = try c.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
         attachedSong          = try c.decodeIfPresent(SongAttachment.self, forKey: .attachedSong)
+        songFadeOutDuration   = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutDuration)
+        songFadeOutOffset     = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutOffset)
     }
     
     /// Add a keyframe from current settings
@@ -1046,7 +1066,8 @@ struct CatmullRomSpline {
             glowEffect: lerpGlow(p1.glowEffect, p2.glowEffect, t: t),
             bloomEffect: lerpBloom(p1.bloomEffect, p2.bloomEffect, t: t),
             fogEffect: lerpFog(p1.fogEffect, p2.fogEffect, t: t),
-            gradientCycleEffect: lerpGradientCycle(p1.gradientCycleEffect, p2.gradientCycleEffect, t: t)
+            gradientCycleEffect: lerpGradientCycle(p1.gradientCycleEffect, p2.gradientCycleEffect, t: t),
+            musicReactiveConfig: t < 0.5 ? p1.musicReactiveConfig : p2.musicReactiveConfig
         )
         
         // Formula parameters: linear interpolation between p1 and p2
@@ -1066,6 +1087,7 @@ struct CatmullRomSpline {
         result.colorSchemeHighlights = lerpOpt(p1.colorSchemeHighlights, p2.colorSchemeHighlights, t: t)
         result.lightingSoftness = lerpOpt(p1.lightingSoftness, p2.lightingSoftness, t: t)
         result.gradientPreset = t < 0.5 ? p1.gradientPreset : p2.gradientPreset
+        result.musicReactiveConfig = t < 0.5 ? p1.musicReactiveConfig : p2.musicReactiveConfig
         return result
     }
     
@@ -1143,7 +1165,8 @@ struct CatmullRomSpline {
             glowEffect: anchor.glowEffect,
             bloomEffect: anchor.bloomEffect,
             fogEffect: anchor.fogEffect,
-            gradientCycleEffect: anchor.gradientCycleEffect
+            gradientCycleEffect: anchor.gradientCycleEffect,
+            musicReactiveConfig: anchor.musicReactiveConfig
         )
         // Carry forward optional properties from the anchor point
         result.formulaParamValues = anchor.formulaParamValues
@@ -1160,6 +1183,7 @@ struct CatmullRomSpline {
         result.colorSchemeHighlights = anchor.colorSchemeHighlights
         result.lightingSoftness = anchor.lightingSoftness
         result.gradientPreset = anchor.gradientPreset
+        result.musicReactiveConfig = anchor.musicReactiveConfig
         return result
     }
 }

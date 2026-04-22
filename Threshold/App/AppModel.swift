@@ -207,6 +207,29 @@ class AppModel {
         animationManager?.playSongHandler = { [weak self] song in
             self?.musicService.play(attachment: song)
         }
+
+        // Stop looping music scenes when the attached track naturally ends,
+        // and clear residual audio-reactive layers/state.
+        appleMusicManager.onPlaybackFinished = { [weak self] in
+            guard let self else { return }
+            let didStopMusicScene = self.animationManager?.stopIfAttachedSongFinished() ?? false
+            guard didStopMusicScene else { return }
+
+            self.parameterPipeline.clearMusicLayers(settings: self.renderSettings)
+            self.renderSettings.audioLevel = 0
+            self.renderSettings.bassLevel = 0
+            self.renderSettings.midLevel = 0
+            self.renderSettings.trebleLevel = 0
+            self.renderSettings.beatIntensity = 0
+        }
+
+        appleMusicManager.onPlaybackProgress = { [weak self] currentTime, duration, isPlaying in
+            self?.animationManager?.updateAttachedSongFade(
+                currentTime: currentTime,
+                duration: duration,
+                isSongPlaying: isPlaying
+            )
+        }
         
         // Initialize SharePlay session
         shareSession = FractalShareSession(renderSettings: renderSettings)

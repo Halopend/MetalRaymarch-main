@@ -133,6 +133,11 @@ final class AnimationManager {
     
     /// Playback speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)
     var playbackSpeed: Double = 1.0
+
+    /// True when current playback should auto-stop once an attached song finishes.
+    @ObservationIgnored private var stopWhenAttachedSongEnds = false
+    @ObservationIgnored private var attachedSongFadeVelocityScale: Double = 1.0
+    private let minimumAttachedSongFadeVelocityScale: Double = 0.05
     
     /// Whether animation is currently playing.
     /// Reads from observed `uiPlayhead` so SwiftUI correctly tracks state changes.
@@ -500,6 +505,9 @@ final class AnimationManager {
         uiPlayhead = playhead
         uiThrottleCounter = 0
         UsageAnalytics.shared.trackAnimationUsed()
+
+        stopWhenAttachedSongEnds = (currentScene?.attachedSong != nil)
+        attachedSongFadeVelocityScale = 1.0
         
         // Auto-play attached song when scene starts
         if let song = currentScene?.attachedSong {
@@ -525,6 +533,7 @@ final class AnimationManager {
     func pause() {
         playhead.state = .paused
         uiPlayhead = playhead
+        attachedSongFadeVelocityScale = 1.0
         renderSettings?.isAnimationPlaying = false
         renderSettings?.commitAnimationOffsetsToTargets()
     }
@@ -534,8 +543,71 @@ final class AnimationManager {
         playhead.state = .stopped
         playhead.reset()
         uiPlayhead = playhead
+        stopWhenAttachedSongEnds = false
+        attachedSongFadeVelocityScale = 1.0
         renderSettings?.isAnimationPlaying = false
         renderSettings?.commitAnimationOffsetsToTargets()
+    }
+
+    /// Stop playback only when we are actively playing a song-attached scene.
+    /// Returns true when a stop was performed.
+    @discardableResult
+    func stopIfAttachedSongFinished() -> Bool {
+        guard playhead.state == .playing,
+              stopWhenAttachedSongEnds,
+              currentScene?.attachedSong != nil else {
+            return false
+        }
+
+        stop()
+        print("🎬 Stopped looping scene because attached song finished")
+        return true
+    }
+
+    /// Adjust the animation's shape-stream velocity based on attached-song tail settings.
+    /// Called from AppModel using live playback progress from the music subsystem.
+    func updateAttachedSongFade(currentTime: TimeInterval,
+                                duration: TimeInterval,
+                                isSongPlaying: Bool) {
+        guard playhead.state == .playing,
+              stopWhenAttachedSongEnds,
+              currentScene?.attachedSong != nil,
+              isSongPlaying,
+              duration > 0 else {
+            attachedSongFadeVelocityScale = 1.0
+            return
+        }
+
+        guard let scene = currentScene else {
+            attachedSongFadeVelocityScale = 1.0
+            return
+        }
+
+        let fadeDuration = max(0.0, scene.songFadeOutDuration ?? 0.0)
+        let fadeOffset = max(0.0, scene.songFadeOutOffset ?? 0.0)
+
+        if fadeDuration <= 0.0 && fadeOffset <= 0.0 {
+            attachedSongFadeVelocityScale = 1.0
+            return
+        }
+
+        let remaining = max(0.0, duration - max(0.0, currentTime))
+        let fadeStartRemaining = fadeOffset + fadeDuration
+
+        if remaining > fadeStartRemaining {
+            attachedSongFadeVelocityScale = 1.0
+            return
+        }
+
+        if remaining <= fadeOffset {
+            attachedSongFadeVelocityScale = minimumAttachedSongFadeVelocityScale
+            return
+        }
+
+        let normalized = (fadeStartRemaining - remaining) / max(0.001, fadeDuration)
+        let clamped = max(0.0, min(1.0, normalized))
+        let eased = clamped * clamped * (3.0 - 2.0 * clamped) // smoothstep
+        attachedSongFadeVelocityScale = 1.0 - (1.0 - minimumAttachedSongFadeVelocityScale) * eased
     }
     
     /// Toggle play/pause
@@ -652,8 +724,9 @@ final class AnimationManager {
         let keyframeCount = keyframes.count
         let mode = scene.playbackMode
 
-        // Advance time
-        playhead.elapsedInSegment += deltaTime * playbackSpeed
+        // Advance time. Attached-song fade can temporarily damp velocity near track end.
+        let effectivePlaybackVelocity = playbackSpeed * attachedSongFadeVelocityScale
+        playhead.elapsedInSegment += deltaTime * effectivePlaybackVelocity
 
         // Resolve the current segment (from → to) based on playback mode.
         // `fromIndex` is the keyframe we started the segment at.
@@ -904,6 +977,11 @@ final class AnimationManager {
         }
         if let soft = keyframe.lightingSoftness {
             settings.lightingSoftness = soft
+        }
+
+        if let musicConfig = keyframe.musicReactiveConfig,
+           settings.audioReactiveConfig != musicConfig {
+            settings.audioReactiveConfig = musicConfig
         }
         
         // Also set TARGETS so they're in sync when animation stops

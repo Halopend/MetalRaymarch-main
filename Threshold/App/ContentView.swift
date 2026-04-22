@@ -37,9 +37,29 @@ enum SidebarTab: String, CaseIterable {
 }
 
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", quality = "Quality" }
+enum AnimateSceneSubTab: String, CaseIterable { case withSound = "With Sound", withoutSound = "Without Sound" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
+
+private enum PlayerLauncherTarget {
+    case animation
+    case music
+
+    var icon: String {
+        switch self {
+        case .animation: return "play.rectangle"
+        case .music: return "music.note.list"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .animation: return "Anim"
+        case .music: return "Music"
+        }
+    }
+}
 
 enum RendererModeOption: String, CaseIterable {
     case fragment = "Fragment"
@@ -104,13 +124,17 @@ struct ContentView: View {
     @State private var cache = UISettingsCache()
     @State private var selectedTab: SidebarTab = .fractal
     @State private var fractalSubTab: FractalSubTab = .shape
+    @State private var animateSceneSubTab: AnimateSceneSubTab = .withSound
+    @State private var animateEditButtonsVisible = false
     @State private var coloringSubTab: ColoringSubTab = .gradient
     @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
+    @State private var playerLauncherCycleStep = 0
 
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
+    @AppStorage("playerLauncherCycleReversed.v1") private var playerLauncherCycleReversed = false
 
     private var qualityGoalPreference: QualityGoalPreference {
         let selected = QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
@@ -165,9 +189,48 @@ struct ContentView: View {
         }
         .onAppear { cache.startSync(with: appModel.renderSettings, appModel: appModel) }
         .onDisappear { cache.stopSync() }
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue != .animate {
+                resetPlayerLauncherCycle()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
+    }
+
+    private var playerLauncherOrder: [PlayerLauncherTarget] {
+        playerLauncherCycleReversed ? [.music, .animation] : [.animation, .music]
+    }
+
+    private var nextPlayerLauncherTarget: PlayerLauncherTarget {
+        let order = playerLauncherOrder
+        return order[playerLauncherCycleStep % order.count]
+    }
+
+    private func handlePlayerLauncherTap() {
+        let target = nextPlayerLauncherTarget
+
+        switch target {
+        case .animation:
+            guard let animationManager = appModel.animationManager,
+                  !animationManager.scenes.isEmpty else {
+                return
+            }
+            if animationManager.currentScene == nil {
+                animationManager.currentScene = animationManager.scenes.first
+            }
+            openWindow(id: AppModel.animationPlayerWindowID)
+
+        case .music:
+            openWindow(id: AppModel.libraryWindowID)
+        }
+
+        playerLauncherCycleStep = (playerLauncherCycleStep + 1) % playerLauncherOrder.count
+    }
+
+    private func resetPlayerLauncherCycle() {
+        playerLauncherCycleStep = 0
     }
 
     private func resetCurrentFractalSettings() {
@@ -252,7 +315,30 @@ struct ContentView: View {
                 .accessibilityLabel(tab.rawValue)
                 .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }
+
             Spacer()
+
+            Button {
+                handlePlayerLauncherTap()
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: nextPlayerLauncherTarget.icon)
+                        .font(.system(size: 18))
+                    Text("Player")
+                        .font(.caption2)
+                    Text(nextPlayerLauncherTarget.shortLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(width: 64, height: 54)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.secondary.opacity(0.12))
+                )
+                .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            .help("Cycles between Animation Player and Music Library")
         }
         .padding(.vertical, 8)
         .frame(width: 72)
@@ -288,21 +374,6 @@ struct ContentView: View {
             Divider().frame(height: 20)
             
             FPSIndicatorView()
-
-            if let animationManager = appModel.animationManager, !animationManager.scenes.isEmpty {
-                Divider().frame(height: 20)
-                Button {
-                    if animationManager.currentScene == nil {
-                        animationManager.currentScene = animationManager.scenes.first
-                    }
-                    openWindow(id: AppModel.animationPlayerWindowID)
-                } label: {
-                    Label("Player", systemImage: "play.rectangle")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
 
             Spacer()
             
@@ -850,30 +921,31 @@ struct ContentView: View {
     }
 
     private var animateToolbar: some View {
-        HStack(spacing: 12) {
-            if let animationManager = appModel.animationManager {
-                Button {
-                    // Auto-select scene if none selected, then open player window
-                    if animationManager.currentScene == nil {
-                        animationManager.currentScene = animationManager.scenes.first
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                if appModel.animationManager != nil {
+                    Spacer()
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            animateEditButtonsVisible.toggle()
+                        }
+                    } label: {
+                        Label(
+                            animateEditButtonsVisible ? "Done Editing" : "Edit Scenes",
+                            systemImage: animateEditButtonsVisible ? "checkmark.circle" : "pencil.and.list.clipboard"
+                        )
                     }
-                    openWindow(id: AppModel.animationPlayerWindowID)
-                } label: {
-                    Label("Open Player", systemImage: "play.rectangle")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(animationManager.scenes.isEmpty)
-
-                Spacer()
-
-                Button {
-                    openAnimationEditor()
-                } label: {
-                    Label("Edit Scenes", systemImage: "pencil.and.list.clipboard")
-                }
-                .buttonStyle(.bordered)
             }
+
+            Picker("Scene Type", selection: $animateSceneSubTab) {
+                ForEach(AnimateSceneSubTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -882,21 +954,33 @@ struct ContentView: View {
     private var animatePlayContent: some View {
         VStack(spacing: 0) {
             if let animationManager = appModel.animationManager {
+                let filteredScenes = animateFilteredScenes(from: animationManager.scenes)
+
                 List {
                     if animationManager.scenes.isEmpty {
                         ContentUnavailableView("No Scenes", systemImage: "film.stack",
                             description: Text("Open Scene Editor to create animation scenes"))
+                    } else if filteredScenes.isEmpty {
+                        ContentUnavailableView(
+                            animateSceneSubTab == .withSound ? "No Sound Scenes" : "No Silent Scenes",
+                            systemImage: animateSceneSubTab == .withSound ? "music.note" : "speaker.slash",
+                            description: Text(
+                                animateSceneSubTab == .withSound
+                                ? "Attach songs to scenes to see them here."
+                                : "Scenes without attached songs will appear here."
+                            )
+                        )
                     } else {
-                        ForEach(animationManager.scenes) { scene in
+                        ForEach(filteredScenes) { scene in
                             SceneRowView(
                                 scene: scene,
                                 isSelected: animationManager.currentScene?.id == scene.id,
                                 isDefault: animationManager.isDefaultScene(scene),
                                 isEdited: animationManager.isEditedDefault(scene),
                                 onSelect: { animationManager.currentScene = scene },
-                                onEdit: {
+                                onEdit: animateEditButtonsVisible ? {
                                     openAnimationEditor(for: scene)
-                                },
+                                } : nil,
                                 onPlay: {
                                     animationManager.currentScene = scene
                                     animationManager.play()
@@ -909,6 +993,15 @@ struct ContentView: View {
                 }
                 .listStyle(.plain)
             }
+        }
+    }
+
+    private func animateFilteredScenes(from scenes: [AnimationScene]) -> [AnimationScene] {
+        switch animateSceneSubTab {
+        case .withSound:
+            return scenes.filter { $0.attachedSong != nil }
+        case .withoutSound:
+            return scenes.filter { $0.attachedSong == nil }
         }
     }
 
@@ -1586,6 +1679,34 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Hybrid Player Launcher", systemImage: "play.rectangle.on.rectangle")
+                        .font(.headline)
+                    Spacer()
+                }
+
+                Toggle("Start Cycle with Music", isOn: Binding(
+                    get: { playerLauncherCycleReversed },
+                    set: { newValue in
+                        playerLauncherCycleReversed = newValue
+                        resetPlayerLauncherCycle()
+                    }
+                ))
+
+                Text(playerLauncherCycleReversed
+                     ? "Cycle order: Music Library, then Animation Player."
+                     : "Cycle order: Animation Player, then Music Library.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Text("Changing tabs away from Animate resets the cycle to the first item.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+
             // SharePlay section
             if let shareSession = appModel.shareSession {
                 VStack(spacing: 8) {

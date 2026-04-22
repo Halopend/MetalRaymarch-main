@@ -82,19 +82,42 @@ private struct AnimationPlayerContent: View {
     var body: some View {
         let currentScene = animationManager.currentScene
         let timing = currentScene.map(SceneTimingSnapshot.init(scene:))
+        let musicScenes = animationManager.scenes.filter { $0.attachedSong != nil }
+        let silentScenes = animationManager.scenes.filter { $0.attachedSong == nil }
 
         VStack(spacing: 10) {
             // ── Scene selector ──
             HStack {
                 Menu {
-                    ForEach(animationManager.scenes) { scene in
-                        Button {
-                            animationManager.currentScene = scene
-                        } label: {
-                            HStack {
-                                Text(scene.name)
-                                if animationManager.currentScene?.id == scene.id {
-                                    Image(systemName: "checkmark")
+                    if !musicScenes.isEmpty {
+                        Section("Music") {
+                            ForEach(musicScenes) { scene in
+                                Button {
+                                    animationManager.currentScene = scene
+                                } label: {
+                                    HStack {
+                                        Text(scene.name)
+                                        if animationManager.currentScene?.id == scene.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !silentScenes.isEmpty {
+                        Section("Silent") {
+                            ForEach(silentScenes) { scene in
+                                Button {
+                                    animationManager.currentScene = scene
+                                } label: {
+                                    HStack {
+                                        Text(scene.name)
+                                        if animationManager.currentScene?.id == scene.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -390,57 +413,18 @@ struct SceneListView: View {
                     description: Text("Create a scene to animate between parameter states")
                 )
             } else {
-                ForEach(animationManager.scenes) { scene in
-                    Group {
-                        if isInline {
-                            // Minimal row for the editor sidebar — name only
-                            HStack {
-                                Text(scene.name)
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                Spacer()
-                                if animationManager.currentScene?.id == scene.id {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(.blue)
-                                        .font(.caption)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                animationManager.currentScene = scene
-                                if let onEditScene { onEditScene(scene) }
-                            }
-                        } else {
-                            SceneRowView(
-                                scene: scene,
-                                isSelected: animationManager.currentScene?.id == scene.id,
-                                isDefault: animationManager.isDefaultScene(scene),
-                                isEdited: animationManager.isEditedDefault(scene),
-                                onSelect: {
-                                    animationManager.currentScene = scene
-                                },
-                                onEdit: isEditing ? nil : {
-                                    if let onEditScene {
-                                        onEditScene(scene)
-                                    } else {
-                                        selectedSceneForEdit = scene
-                                    }
-                                },
-                                onResetDefault: animationManager.isEditedDefault(scene) ? {
-                                    animationManager.resetDefaultScene(scene.id)
-                                } : nil
-                            )
+                if !scenesWithSongs.isEmpty {
+                    Section("Music") {
+                        ForEach(scenesWithSongs) { scene in
+                            sceneListRow(scene)
                         }
                     }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            animationManager.deleteScene(scene)
-                        } label: {
-                            if animationManager.isDefaultScene(scene) {
-                                Label("Hide", systemImage: "eye.slash")
-                            } else {
-                                Label("Delete", systemImage: "trash")
-                            }
+                }
+
+                if !silentScenes.isEmpty {
+                    Section("Silent") {
+                        ForEach(silentScenes) { scene in
+                            sceneListRow(scene)
                         }
                     }
                 }
@@ -504,6 +488,66 @@ struct SceneListView: View {
 
     private var scenesWithSongs: [AnimationScene] {
         animationManager.scenes.filter { $0.attachedSong != nil }
+    }
+
+    private var silentScenes: [AnimationScene] {
+        animationManager.scenes.filter { $0.attachedSong == nil }
+    }
+
+    @ViewBuilder
+    private func sceneListRow(_ scene: AnimationScene) -> some View {
+        Group {
+            if isInline {
+                // Minimal row for the editor sidebar — name only
+                HStack {
+                    Text(scene.name)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Spacer()
+                    if animationManager.currentScene?.id == scene.id {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.blue)
+                            .font(.caption)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    animationManager.currentScene = scene
+                    if let onEditScene { onEditScene(scene) }
+                }
+            } else {
+                SceneRowView(
+                    scene: scene,
+                    isSelected: animationManager.currentScene?.id == scene.id,
+                    isDefault: animationManager.isDefaultScene(scene),
+                    isEdited: animationManager.isEditedDefault(scene),
+                    onSelect: {
+                        animationManager.currentScene = scene
+                    },
+                    onEdit: isEditing ? nil : {
+                        if let onEditScene {
+                            onEditScene(scene)
+                        } else {
+                            selectedSceneForEdit = scene
+                        }
+                    },
+                    onResetDefault: animationManager.isEditedDefault(scene) ? {
+                        animationManager.resetDefaultScene(scene.id)
+                    } : nil
+                )
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                animationManager.deleteScene(scene)
+            } label: {
+                if animationManager.isDefaultScene(scene) {
+                    Label("Hide", systemImage: "eye.slash")
+                } else {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
     }
 
     private func createPlaylistFromScenes(name: String) {
@@ -963,6 +1007,61 @@ struct SceneEditorView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!appModel.musicService.hasAnyConnection)
+
+                if scene.attachedSong != nil {
+                    Divider().padding(.vertical, 2)
+
+                    Toggle("Fade Out Quick Stop", isOn: Binding(
+                        get: {
+                            let fadeDuration = scene.songFadeOutDuration ?? 0
+                            let fadeOffset = scene.songFadeOutOffset ?? 0
+                            return fadeDuration > 0 || fadeOffset > 0
+                        },
+                        set: { enabled in
+                            if enabled {
+                                if (scene.songFadeOutDuration ?? 0) <= 0 {
+                                    scene.songFadeOutDuration = 0.35
+                                }
+                                if scene.songFadeOutOffset == nil {
+                                    scene.songFadeOutOffset = 0.0
+                                }
+                            } else {
+                                scene.songFadeOutDuration = nil
+                                scene.songFadeOutOffset = nil
+                            }
+                        }
+                    ))
+                    .font(.subheadline)
+
+                    let fadeControlsEnabled = (scene.songFadeOutDuration ?? 0) > 0 || (scene.songFadeOutOffset ?? 0) > 0
+                    if fadeControlsEnabled {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Text("Fade Duration").font(.caption)
+                                Slider(value: Binding(
+                                    get: { scene.songFadeOutDuration ?? 0.35 },
+                                    set: { scene.songFadeOutDuration = $0 }
+                                ), in: 0.05...2.0, step: 0.05)
+                                Text(String(format: "%.2fs", scene.songFadeOutDuration ?? 0.35))
+                                    .font(.caption.monospacedDigit())
+                                    .frame(width: 44, alignment: .trailing)
+                            }
+                            HStack {
+                                Text("Fade Offset").font(.caption)
+                                Slider(value: Binding(
+                                    get: { scene.songFadeOutOffset ?? 0.0 },
+                                    set: { scene.songFadeOutOffset = $0 }
+                                ), in: 0.0...3.0, step: 0.05)
+                                Text(String(format: "%.2fs", scene.songFadeOutOffset ?? 0.0))
+                                    .font(.caption.monospacedDigit())
+                                    .frame(width: 44, alignment: .trailing)
+                            }
+                        }
+                        Text("Shape-stream velocity dampens near the song tail. Offset holds a near-stop before the end.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
         }
         .padding(16)
@@ -1073,7 +1172,7 @@ struct SceneEditorView: View {
                     }
                 }
             } footer: {
-                Text("Keyframes capture shape, position, quality, and color scheme. Other effects stay as currently set — save a Preset to remember everything.")
+                Text("Keyframes capture shape, position, quality, color, and music-reactive controls. Save a Preset to persist the full scene outside animation.")
             }
         }
         .listStyle(.plain)
@@ -1138,6 +1237,11 @@ struct SceneEditorView: View {
         // Apply quality settings
         settings.baseFractalIterations = keyframe.baseFractalIterations
         settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
+
+        if let musicConfig = keyframe.musicReactiveConfig,
+           settings.audioReactiveConfig != musicConfig {
+            settings.audioReactiveConfig = musicConfig
+        }
         
         // Ensure pipeline is prepared for these values
         appModel.preparePipeline(iterations: keyframe.baseFractalIterations, raySteps: keyframe.baseMaxRaySteps)
@@ -1161,6 +1265,7 @@ struct SceneEditorView: View {
         var vals = [Float](repeating: 0, count: 16)
         for i in 0..<16 { vals[i] = FormulaCatalog.getParam(fp, index: i) }
         scene.keyframes[index].formulaParamValues = vals
+        scene.keyframes[index].musicReactiveConfig = settings.audioReactiveConfig
     }
     
     private func duplicateKeyframe(at index: Int) {
@@ -1188,6 +1293,7 @@ struct SceneEditorView: View {
             bloomEffect: copy.bloomEffect,
             fogEffect: copy.fogEffect,
             gradientCycleEffect: copy.gradientCycleEffect,
+            musicReactiveConfig: copy.musicReactiveConfig,
             easingType: copy.easingType,
             bezierHandle: copy.bezierHandle,
             formulaParamValues: copy.formulaParamValues
@@ -1404,6 +1510,18 @@ struct KeyframeEditorView: View {
                                 optionalRow("Lighting Softness", float: keyframe.lightingSoftness)
                             }
                         }
+
+                        if hasMusicOverrides {
+                            summarySection("Music Reactive") {
+                                if let musicConfig = keyframe.musicReactiveConfig {
+                                    summaryRow("Enabled", text: musicConfig.fractalAudioReactiveEnabled ? "On" : "Off")
+                                    summaryRow("Amount", value: musicConfig.fractalAudioAmount)
+                                    summaryRow("Beat Punch", value: musicConfig.fractalBeatPunch)
+                                    summaryRow("Mappings", text: "\(musicConfig.musicReactiveMappings.count)")
+                                    summaryRow("Groups", text: "\(musicConfig.tripletMusicGains.count)")
+                                }
+                            }
+                        }
                         
                         // ── Formula Params ──
                         if let vals = keyframe.formulaParamValues, !vals.allSatisfy({ $0 == 0 }) {
@@ -1516,6 +1634,10 @@ struct KeyframeEditorView: View {
         keyframe.colorSchemeVibrance != nil || keyframe.colorSchemeCurve != nil ||
         keyframe.colorSchemeShadows != nil || keyframe.colorSchemeHighlights != nil ||
         keyframe.lightingSoftness != nil
+    }
+
+    private var hasMusicOverrides: Bool {
+        keyframe.musicReactiveConfig != nil
     }
     
     @ViewBuilder

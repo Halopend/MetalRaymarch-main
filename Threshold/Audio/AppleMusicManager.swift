@@ -45,6 +45,12 @@ final class AppleMusicManager {
     private(set) var libraryLoading: Bool = false
     private(set) var libraryErrorMessage: String?
 
+    /// Live playback progress callback: `(currentTime, duration, isPlaying)`.
+    var onPlaybackProgress: ((TimeInterval, TimeInterval, Bool) -> Void)?
+
+    /// Fired when playback naturally reaches the end of a track.
+    var onPlaybackFinished: (() -> Void)?
+
     var isAuthorized: Bool {
         authorizationStatus == .authorized
     }
@@ -284,12 +290,27 @@ final class AppleMusicManager {
     }
 
     func updateFrame() {
+        let wasPlaying = isPlaying
+        let previousPlaybackTime = playbackTimeSeconds
+        let previousDuration = durationSeconds
+
         let state = player.playbackState
-        isPlaying = (state == .playing)
-        isActive = isPlaying
+        let isNowPlaying = (state == .playing)
+        isPlaying = isNowPlaying
+        isActive = isNowPlaying
         updateMetadata()
 
-        guard isPlaying else {
+        if wasPlaying && !isNowPlaying && state == .stopped {
+            let endThreshold = max(0.2, min(1.0, previousDuration * 0.02))
+            let reachedEnd = previousDuration > 1.0 && previousPlaybackTime >= (previousDuration - endThreshold)
+            if reachedEnd {
+                onPlaybackFinished?()
+            }
+        }
+
+        onPlaybackProgress?(playbackTimeSeconds, durationSeconds, isNowPlaying)
+
+        guard isNowPlaying else {
             decayToZero()
             return
         }
