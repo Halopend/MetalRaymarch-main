@@ -16,6 +16,7 @@ struct FractalGridView: View {
     var cache: UISettingsCache
     let gestureController: GestureController?
     let animationManager: AnimationManager?
+    var onEditScene: ((AnimationScene) -> Void)? = nil
     @State private var innerTab: FractalBrowseInnerTab = .formulas
 
     private let columns = [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 12)]
@@ -47,48 +48,54 @@ struct FractalGridView: View {
         let hasScenes = animationManager?.scenes.isEmpty == false
         let selectedTab = hasScenes ? innerTab : .formulas
 
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                if hasScenes {
-                    Picker("Browse", selection: $innerTab) {
-                        ForEach(FractalBrowseInnerTab.allCases, id: \.self) { tab in
-                            Text(tab.rawValue).tag(tab)
-                        }
+        VStack(spacing: 10) {
+            if hasScenes {
+                Picker("Browse", selection: $innerTab) {
+                    ForEach(FractalBrowseInnerTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
                     }
-                    .pickerStyle(.segmented)
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            }
 
-                switch selectedTab {
-                case .formulas:
-                    ForEach(categorizedTypes, id: \.category) { group in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(group.category)
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 4)
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    switch selectedTab {
+                    case .formulas:
+                        ForEach(categorizedTypes, id: \.category) { group in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(group.category)
+                                    .font(.headline)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 4)
 
-                            LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(group.types, id: \.self) { type in
-                                    FractalGridCell(
-                                        type: type,
-                                        isSelected: type == cache.fractalType
-                                    ) {
-                                        cache.fractalType = type
-                                        cache.pushFractalType(type, gestureController: gestureController)
+                                LazyVGrid(columns: columns, spacing: 12) {
+                                    ForEach(group.types, id: \.self) { type in
+                                        FractalGridCell(
+                                            type: type,
+                                            isSelected: type == cache.fractalType
+                                        ) {
+                                            cache.fractalType = type
+                                            cache.pushFractalType(type, gestureController: gestureController)
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                case .scenes:
-                    if let animationManager {
-                        sceneGrid(animationManager)
+                    case .scenes:
+                        if let animationManager {
+                            sceneGrid(animationManager)
+                        }
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
-            .padding(16)
         }
+        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -124,7 +131,8 @@ struct FractalGridView: View {
                         subtitle: scene.fractalType?.displayName ?? "Any fractal",
                         detail: scene.attachedSong?.title ?? "Visual-only scene",
                         systemImage: scene.attachedSong == nil ? "sparkles.rectangle.stack" : "music.note",
-                        isSelected: animationManager.currentScene?.id == scene.id
+                        isSelected: animationManager.currentScene?.id == scene.id,
+                        onEdit: { onEditScene?(scene) }
                     ) {
                         selectScene(scene, using: animationManager)
                     }
@@ -142,7 +150,7 @@ struct FractalGridView: View {
         animationManager.play()
     }
 
-    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
@@ -187,6 +195,11 @@ struct FractalGridView: View {
             )
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.6, maximumDistance: 24)
+                .onEnded { _ in onEdit?() }
+        )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

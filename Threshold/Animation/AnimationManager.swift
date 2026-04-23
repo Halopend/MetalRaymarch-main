@@ -203,6 +203,21 @@ final class AnimationManager {
     /// Set from AppModel — receives the SongAttachment to play.
     var playSongHandler: ((SongAttachment) -> Void)?
     
+    // Add gesture recognizer for ring finger to toggle animation playback
+    func addRingFingerGesture() {
+        let ringFingerGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleRingFingerGesture))
+        ringFingerGesture.minimumPressDuration = 0.5
+        UIApplication.shared.windows.first?.addGestureRecognizer(ringFingerGesture)
+    }
+
+    @objc private func handleRingFingerGesture() {
+        if isPlaying {
+            stop()
+        } else {
+            play()
+        }
+    }
+    
     // ═══════════════════════════════════════════════════════════════════════════
     // FILE STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1291,7 +1306,7 @@ final class AnimationManager {
     private func simplifySamples(_ samples: [(time: TimeInterval, keyframe: AnimationKeyframe)]) -> [(time: TimeInterval, keyframe: AnimationKeyframe)] {
         guard samples.count > 2 else { return samples }
         
-        var result: [(time: TimeInterval, keyframe: AnimationKeyframe)] = [samples[0]]
+        var result: [(time: TimeInterval, keyframe: AnimationKeyframe)] = [samples[0)]
         
         for i in 1..<(samples.count - 1) {
             let prev = result.last!.keyframe

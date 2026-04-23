@@ -35,14 +35,22 @@ struct DeveloperToolsView: View {
                         HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
                             get: { Float(cache.quality.baseFractalIterations) },
-                            set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
+                            set: {
+                                cache.quality.baseFractalIterations = Int($0)
+                                cache.push(\.baseFractalIterations, value: Int($0))
+                                appModel.animationManager?.markIterationBudgetUserOverridden()
+                            }
                         ), in: 4...32, step: 1)
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
                             get: { Float(cache.quality.baseMaxRaySteps) },
-                            set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
+                            set: {
+                                cache.quality.baseMaxRaySteps = Int($0)
+                                cache.push(\.baseMaxRaySteps, value: Int($0))
+                                appModel.animationManager?.markIterationBudgetUserOverridden()
+                            }
                         ), in: 32...200, step: 8)
                     }
                 }

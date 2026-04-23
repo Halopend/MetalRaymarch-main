@@ -1206,8 +1206,9 @@ enum DefaultScenes {
     static let boxSphereFolderID = UUID(uuidString: "00000000-0004-0000-0000-000000000004")!
     static let shadesID = UUID(uuidString: "00000000-000C-0000-0000-00000000000C")!
     
-    /// All default scene IDs for easy lookup
-    static let allIDs: Set<UUID> = [ambientBlurID, blackLightPartyID, boxSphereFolderID, shadesID]
+    /// All default scene IDs for easy lookup.
+    /// Built from the bundled scene files so new defaults don't get dropped.
+    static let allIDs: Set<UUID> = Set(cachedScenes.map(\.id))
     
     /// Check whether a scene ID belongs to a built-in default
     static func isDefault(_ id: UUID) -> Bool {

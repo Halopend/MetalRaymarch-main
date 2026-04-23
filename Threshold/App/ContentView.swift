@@ -418,20 +418,38 @@ struct ContentView: View {
                 ForEach(FractalSubTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
             
-            ScrollView(.vertical, showsIndicators: true) {
-                ScrollViewReader { scrollProxy in
-                    VStack(spacing: 12) {
-                        switch fractalSubTab {
-                        case .browse:  FractalGridView(cache: cache, gestureController: appModel.gestureController, animationManager: appModel.animationManager)
-                        case .shape:   fractalShapeContent
-                        case .space:   fractalSpaceContent
-                        case .quality: fractalQualityContent
-                        }
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .environment(\.scrollProxy, scrollProxy)
+            switch fractalSubTab {
+            case .browse:
+                FractalGridView(
+                    cache: cache,
+                    gestureController: appModel.gestureController,
+                    animationManager: appModel.animationManager,
+                    onEditScene: openAnimationEditor
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            case .shape:
+                ScrollView(.vertical, showsIndicators: true) {
+                    fractalShapeContent
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+
+            case .space:
+                ScrollView(.vertical, showsIndicators: true) {
+                    fractalSpaceContent
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+
+            case .quality:
+                ScrollView(.vertical, showsIndicators: true) {
+                    fractalQualityContent
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                 }
             }
         }
@@ -698,6 +716,7 @@ struct ContentView: View {
                             cache.quality.baseMaxRaySteps = values.raySteps
                             cache.push(\.baseFractalIterations, value: values.fractalIterations)
                             cache.push(\.baseMaxRaySteps, value: values.raySteps)
+                            appModel.animationManager?.markIterationBudgetUserOverridden()
                             appModel.preparePipeline(iterations: values.fractalIterations, raySteps: values.raySteps)
                         } label: {
                             VStack(spacing: 2) {
@@ -721,7 +740,11 @@ struct ContentView: View {
                         HStack { Text("Fractal Iterations"); Spacer(); Text("\(cache.quality.baseFractalIterations)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
                             get: { Float(cache.quality.baseFractalIterations) },
-                            set: { cache.quality.baseFractalIterations = Int($0); cache.push(\.baseFractalIterations, value: Int($0)) }
+                            set: {
+                                cache.quality.baseFractalIterations = Int($0)
+                                cache.push(\.baseFractalIterations, value: Int($0))
+                                appModel.animationManager?.markIterationBudgetUserOverridden()
+                            }
                         ), in: 4...32, step: 1, onEditingChanged: { isEditing in
                             guard !isEditing else { return }
                             appModel.preparePipeline(
@@ -735,7 +758,11 @@ struct ContentView: View {
                         HStack { Text("Max Ray Steps"); Spacer(); Text("\(cache.quality.baseMaxRaySteps)").fontWeight(.bold).monospacedDigit() }
                         Slider(value: Binding(
                             get: { Float(cache.quality.baseMaxRaySteps) },
-                            set: { cache.quality.baseMaxRaySteps = Int($0); cache.push(\.baseMaxRaySteps, value: Int($0)) }
+                            set: {
+                                cache.quality.baseMaxRaySteps = Int($0)
+                                cache.push(\.baseMaxRaySteps, value: Int($0))
+                                appModel.animationManager?.markIterationBudgetUserOverridden()
+                            }
                         ), in: 32...200, step: 8, onEditingChanged: { isEditing in
                             guard !isEditing else { return }
                             appModel.preparePipeline(
