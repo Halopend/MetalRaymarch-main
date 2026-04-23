@@ -409,7 +409,14 @@ struct ContentView: View {
                     cache: cache,
                     gestureController: appModel.gestureController,
                     animationManager: appModel.animationManager,
-                    onEditScene: openAnimationEditor
+                    presetManager: appModel.presetManager,
+                    onEditScene: openAnimationEditor,
+                    onLoadStaticScene: { preset in
+                        Task { await appModel.preparePipelineHandler?(preset) }
+                        appModel.presetManager.loadPreset(preset, into: appModel.renderSettings)
+                        appModel.gestureController?.syncWithSettings()
+                        cache.loadFromSettings()
+                    }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -913,16 +920,55 @@ struct ContentView: View {
         return (qz * qy * qx).normalized
     }
 
+    @ViewBuilder
+    private func gestureHandSection(mode: GestureHandMode) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(mode.displayName, systemImage: mode.icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+
+            if mode == .both {
+                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                    let slot = GestureSlot(hand: mode, finger: finger)
+                    gestureSlotPicker(slot: slot, handMode: mode)
+                }
+            } else {
+                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(finger.displayName)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+
+                        let verticalSlot = GestureSlot(hand: mode, finger: finger, direction: .vertical)
+                        gestureSlotPicker(slot: verticalSlot, handMode: mode, directionLabel: "↕")
+
+                        let horizontalSlot = GestureSlot(hand: mode, finger: finger, direction: .horizontal)
+                        gestureSlotPicker(slot: horizontalSlot, handMode: mode, directionLabel: "↔")
+                    }
+                }
+            }
+        }
+    }
+
     /// Picker row for assigning a gesture binding to a hand+finger slot.
     @ViewBuilder
-    private func gestureSlotPicker(slot: GestureSlot, handMode: GestureHandMode) -> some View {
+    private func gestureSlotPicker(slot: GestureSlot, handMode: GestureHandMode, directionLabel: String? = nil) -> some View {
         let bindings = GestureActionBinding.availableBindings(for: cache.fractalType, handMode: handMode)
         let currentBinding = Binding<GestureActionBinding>(
             get: { cache.gestureBinding(for: slot) },
             set: { cache.setGestureBinding($0, for: slot) }
         )
         HStack {
-            Label(slot.finger.displayName, systemImage: slot.finger.icon).font(.subheadline)
+            if let directionLabel {
+                Text(directionLabel)
+                    .font(.caption2)
+                    .frame(width: 16)
+                    .foregroundStyle(.secondary)
+            }
+            if handMode == .both {
+                Label(slot.finger.displayName, systemImage: slot.finger.icon).font(.subheadline)
+            }
             Spacer()
             Picker(slot.finger.displayName, selection: currentBinding) {
                 ForEach(bindings, id: \.self) { action in
@@ -1106,7 +1152,18 @@ struct ContentView: View {
     
     private var coloringGradientContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Gradient Coloring", systemImage: "paintbrush.fill").font(.headline)
+            HStack {
+                Label("Gradient Coloring", systemImage: "paintbrush.fill")
+                    .font(.headline)
+                Spacer()
+                Text("Current: \(cache.color.gradientState.gradientPreset?.displayName ?? cache.gradientLibrary.savedCustomGradients.first(where: { $0.id == cache.color.gradientState.gradient.id })?.name ?? "Custom")")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.blue)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.blue.opacity(0.12)))
+            }
             GradientPreviewBar(gradient: cache.color.gradientState.gradient)
                 .frame(height: 28).clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(RoundedRectangle(cornerRadius: 6))
@@ -1118,13 +1175,21 @@ struct ContentView: View {
             Text("Presets").font(.subheadline).foregroundColor(.secondary)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
                 ForEach(GradientPreset.allCases, id: \.rawValue) { preset in
+                    let isSelected = cache.color.gradientState.gradientPreset == preset
                     Button { cache.applyGradientPreset(preset) } label: {
-                        VStack(spacing: 2) {
+                        VStack(spacing: 3) {
                             Image(systemName: preset.icon).font(.caption)
                             Text(preset.displayName).font(.caption2).lineLimit(1)
+                            if isSelected {
+                                Label("Selected", systemImage: "checkmark.circle.fill")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.blue)
+                            }
                         }.frame(maxWidth: .infinity).padding(.vertical, 4)
                     }
-                    .buttonStyle(.bordered).tint(cache.color.gradientState.gradientPreset == preset ? .blue : .secondary)
+                    .buttonStyle(.bordered)
+                    .tint(isSelected ? .blue : .secondary)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
             
@@ -1150,16 +1215,22 @@ struct ContentView: View {
                         Button {
                             cache.applySavedGradient(saved)
                         } label: {
-                            VStack(spacing: 2) {
+                            VStack(spacing: 3) {
                                 GradientPreviewBar(gradient: saved)
                                     .frame(height: 10)
                                     .clipShape(RoundedRectangle(cornerRadius: 3))
                                     .allowsHitTesting(false)
                                 Text(saved.name).font(.caption2).lineLimit(1)
+                                if isActive {
+                                    Label("Selected", systemImage: "checkmark.circle.fill")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.blue)
+                                }
                             }.frame(maxWidth: .infinity).padding(.vertical, 4)
                         }
                         .buttonStyle(.bordered)
                         .tint(isActive ? .purple : .indigo)
+                        .accessibilityAddTraits(isActive ? .isSelected : [])
                         .contextMenu {
                             Button {
                                 renamingGradientName = saved.name
@@ -1381,6 +1452,14 @@ struct ContentView: View {
                             }
                         }.padding(.horizontal, 4)
                     }
+                    Text("Current: \(cache.lighting.lightingPreset.displayName)")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.blue)
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.blue.opacity(0.12)))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if cache.lighting.lightingPreset != .custom {
                         Text(cache.lighting.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
                     }
@@ -1846,16 +1925,7 @@ struct ContentView: View {
                             .font(.subheadline.weight(.semibold))
 
                         ForEach(GestureHandMode.allCases, id: \.self) { mode in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label(mode.displayName, systemImage: mode.icon)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.top, 4)
-                                ForEach(FingerDigit.allCases, id: \.self) { finger in
-                                    let slot = GestureSlot(hand: mode, finger: finger)
-                                    gestureSlotPicker(slot: slot, handMode: mode)
-                                }
-                            }
+                            gestureHandSection(mode: mode)
                         }
                     }
 

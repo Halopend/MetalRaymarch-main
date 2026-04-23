@@ -540,8 +540,13 @@ struct PresetCardButton: View {
                 Text(preset.displayName)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(isSelected ? .white : .primary)
+                if isSelected {
+                    Label("Selected", systemImage: "checkmark.circle.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
             }
-            .frame(width: 80, height: 70)
+            .frame(width: 92, height: 86)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(isSelected ? Color.blue : Color.gray.opacity(0.15))

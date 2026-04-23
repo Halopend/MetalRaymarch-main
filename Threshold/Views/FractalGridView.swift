@@ -12,12 +12,21 @@ private enum FractalBrowseInnerTab: String, CaseIterable {
     case scenes = "Scenes"
 }
 
+private enum FractalSceneSelection: Equatable {
+    case none
+    case animation(UUID)
+    case staticPreset(UUID)
+}
+
 struct FractalGridView: View {
     var cache: UISettingsCache
     let gestureController: GestureController?
     let animationManager: AnimationManager?
+    let presetManager: PresetManager?
     var onEditScene: ((AnimationScene) -> Void)? = nil
+    var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
     @State private var innerTab: FractalBrowseInnerTab = .formulas
+    @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
 
     private let columns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
     private let sceneColumns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
@@ -27,6 +36,16 @@ struct FractalGridView: View {
     private let orderedTypes: [FractalModelType] = Self.cachedOrderedTypes
 
     private static let cachedOrderedTypes = Self.makeOrderedTypes()
+
+    private var selectedStaticSceneID: UUID? {
+        get {
+            guard let selectedStaticSceneIDRaw else { return nil }
+            return UUID(uuidString: selectedStaticSceneIDRaw)
+        }
+        set {
+            selectedStaticSceneIDRaw = newValue?.uuidString
+        }
+    }
 
     private static func makeOrderedTypes() -> [FractalModelType] {
         let selectable = FractalModelType.selectableCases
@@ -106,12 +125,19 @@ struct FractalGridView: View {
 
     @ViewBuilder
     private func sceneGrid(_ animationManager: AnimationManager) -> some View {
+        let staticScenePresets = (presetManager?.presets ?? [])
+            .filter { preset in
+                // Skip transient utility entries if they ever leak into the shared preset list.
+                preset.name != "__lastState__"
+            }
+        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Fractal Scenes",
                 systemImage: "film.stack",
-                description: "Choose the active scene for the animation player and editor from a grid while you browse.",
-                current: animationManager.currentScene?.name ?? "None",
+                description: "Browse animated scenes and static scene presets in one grid.",
+                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
                 accentColor: .blue
             )
 
@@ -121,9 +147,10 @@ struct FractalGridView: View {
                     subtitle: "No scene selected",
                     detail: "Animation playback is detached from scenes.",
                     systemImage: "xmark.circle",
-                    isSelected: animationManager.currentScene == nil
+                    isSelected: activeSelection == .none
                 ) {
                     animationManager.currentScene = nil
+                    selectedStaticSceneID = nil
                 }
 
                 ForEach(animationManager.scenes) { scene in
@@ -132,10 +159,23 @@ struct FractalGridView: View {
                         subtitle: scene.fractalType?.displayName ?? "Any fractal",
                         detail: scene.attachedSong?.title ?? "Visual-only scene",
                         systemImage: scene.attachedSong == nil ? "sparkles.rectangle.stack" : "music.note",
-                        isSelected: animationManager.currentScene?.id == scene.id,
+                        isSelected: activeSelection == .animation(scene.id),
                         onEdit: { onEditScene?(scene) }
                     ) {
                         selectScene(scene, using: animationManager)
+                    }
+                }
+
+                ForEach(staticScenePresets) { preset in
+                    sceneCard(
+                        title: preset.name,
+                        subtitle: preset.fractalType.displayName,
+                        detail: staticSceneDetail(for: preset),
+                        systemImage: (preset.musicReactiveMappings?.isEmpty == false) ? "music.note" : "photo",
+                        isSelected: activeSelection == .staticPreset(preset.id),
+                        onEdit: nil
+                    ) {
+                        selectStaticScenePreset(preset, using: animationManager)
                     }
                 }
             }
@@ -144,11 +184,51 @@ struct FractalGridView: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.07)))
     }
 
+    private func currentSceneSelection(using animationManager: AnimationManager, staticScenePresets: [FractalPreset]) -> FractalSceneSelection {
+        if let sceneID = animationManager.currentScene?.id {
+            return .animation(sceneID)
+        }
+
+        guard let staticID = selectedStaticSceneID,
+              staticScenePresets.contains(where: { $0.id == staticID }) else {
+            return .none
+        }
+        return .staticPreset(staticID)
+    }
+
+    private func currentSceneSelectionLabel(selection: FractalSceneSelection, animationManager: AnimationManager, staticScenePresets: [FractalPreset]) -> String {
+        switch selection {
+        case .none:
+            return "None"
+        case .animation(let sceneID):
+            return animationManager.scenes.first(where: { $0.id == sceneID })?.name
+                ?? animationManager.currentScene?.name
+                ?? "Scene"
+        case .staticPreset(let presetID):
+            return staticScenePresets.first(where: { $0.id == presetID })?.name
+                ?? "Static Scene"
+        }
+    }
+
     private func selectScene(_ scene: AnimationScene, using animationManager: AnimationManager) {
+        selectedStaticSceneID = nil
         animationManager.currentScene = scene
 
         guard scene.keyframes.count >= 2 else { return }
         animationManager.play()
+    }
+
+    private func selectStaticScenePreset(_ preset: FractalPreset, using animationManager: AnimationManager) {
+        selectedStaticSceneID = preset.id
+        animationManager.currentScene = nil
+        onLoadStaticScene?(preset)
+    }
+
+    private func staticSceneDetail(for preset: FractalPreset) -> String {
+        if preset.musicReactiveMappings?.isEmpty == false {
+            return "Static music-reactive scene"
+        }
+        return "Static scene preset"
     }
 
     private func browserHeader(title: String, systemImage: String, description: String, current: String, accentColor: Color) -> some View {
