@@ -19,6 +19,7 @@ struct GestureContext {
 
 enum GestureOperation {
     case toggleMenu
+    case toggleAnimationPlayer
     case setActiveGestureIndex(Int)
     case setGeometryGestureActive(Bool)
     case trackGestureUsage

@@ -6,6 +6,7 @@ enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
     case fist = 2
     case wristTap = 3
     case thumbToIndexPalmUp = 4
+    case ringToPalm = 5
 
     var displayName: String {
         switch self {
@@ -14,6 +15,7 @@ enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
         case .fist: return "Fist"
         case .wristTap: return "Wrist Tap"
         case .thumbToIndexPalmUp: return "Thumb-Index (Palm Up)"
+        case .ringToPalm: return "Ring to Palm"
         }
     }
 
@@ -24,6 +26,7 @@ enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
         case .fist: return "hand.closed.fill"
         case .wristTap: return "hand.tap.fill"
         case .thumbToIndexPalmUp: return "hand.thumbsup.fill"
+        case .ringToPalm: return "hand.point.up.fill"
         }
     }
 

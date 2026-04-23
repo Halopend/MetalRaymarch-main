@@ -72,6 +72,13 @@ struct MetalProjectTestApp: App {
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
                     }
+                    // Animation Player window (gesture: right middle finger to palm)
+                    appModel.openAnimationPlayerWindowHandler = {
+                        openWindow(id: AppModel.animationPlayerWindowID)
+                    }
+                    appModel.dismissAnimationPlayerWindowHandler = { [dismissWindow] in
+                        dismissWindow(id: AppModel.animationPlayerWindowID)
+                    }
 
                     if !hasCompletedIntroOnboarding {
                         openWindow(id: AppModel.onboardingWindowID)

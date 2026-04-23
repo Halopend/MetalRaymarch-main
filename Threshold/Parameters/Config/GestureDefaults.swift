@@ -24,11 +24,11 @@ enum GestureDefaults {
 
     // MARK: - Menu toggle gesture
     static let menuToggleGestureEnabled = true
-    static let menuToggleGestureMode: MenuToggleGestureMode = .middleToPalm
-    static let menuToggleHoldDuration: Float = 0.15
-    static let menuToggleCooldown: Float = 0.5
-    static let menuToggleActivateThreshold: Float = 0.5
-    static let menuToggleReleaseThreshold: Float = 0.25
+    static let menuToggleGestureMode: MenuToggleGestureMode = .ringToPalm
+    static let menuToggleHoldDuration: Float = 0.10
+    static let menuToggleCooldown: Float = 0.4
+    static let menuToggleActivateThreshold: Float = 0.55
+    static let menuToggleReleaseThreshold: Float = 0.30
 
     // MARK: - Pinch thresholds
     static let twoHandPinchActivateThreshold: Float = 0.7

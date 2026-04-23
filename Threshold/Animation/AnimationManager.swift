@@ -99,6 +99,11 @@ final class AnimationManager {
                 playhead.reset()
                 playhead.sceneID = currentScene?.id
                 uiPlayhead = playhead
+
+                // A new scene starts with the saved iteration budget restored.
+                // The user's manual override only takes effect after they touch
+                // the slider during this scene's playback.
+                userIterationBudgetOverride = false
                 
                 // Precompile pipelines for all keyframes in this scene
                 precompilePipelinesForCurrentScene()
@@ -111,6 +116,20 @@ final class AnimationManager {
                 }
             }
         }
+    }
+
+    /// When `true`, `applyKeyframe` skips writing the iteration budget
+    /// (`baseFractalIterations` / `baseMaxRaySteps`) so the user's manual slider
+    /// adjustment wins for the rest of this scene's playback. Reset to `false`
+    /// each time the user switches to a different scene, so the scene's saved
+    /// budget is restored on the first run.
+    @ObservationIgnored var userIterationBudgetOverride: Bool = false
+
+    /// Mark the iteration budget as user-overridden so animation playback
+    /// stops clobbering it. Call from any UI control that mutates
+    /// `baseFractalIterations` or `baseMaxRaySteps`.
+    func markIterationBudgetUserOverridden() {
+        userIterationBudgetOverride = true
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -889,8 +908,13 @@ final class AnimationManager {
         settings.foldingLimit = keyframe.foldingLimit
         settings.sphereRadius = keyframe.sphereRadius
         settings.fractalScale = keyframe.fractalScale
-        settings.baseFractalIterations = keyframe.baseFractalIterations
-        settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
+        // Iteration budget: skip when the user has manually overridden it for
+        // this scene. The override is cleared on every scene switch so the
+        // scene's saved budget restores on first run.
+        if !userIterationBudgetOverride {
+            settings.baseFractalIterations = keyframe.baseFractalIterations
+            settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
+        }
         settings.position = keyframe.position
         settings.detailScale = keyframe.detailScale
         settings.targetDetailScale = keyframe.detailScale

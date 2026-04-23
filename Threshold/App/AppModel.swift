@@ -144,6 +144,9 @@ class AppModel {
     // We hide content and glass to simulate window close while preserving position/size
     var isMenuWindowVisible: Bool = true
 
+    // Animation Player window visibility (toggled by gesture / UI button)
+    var isAnimationPlayerWindowVisible: Bool = false
+
     @ObservationIgnored private var isMenuHovering: Bool = false
     @ObservationIgnored private var menuAdjustmentDepth: Int = 0
     
@@ -239,6 +242,10 @@ class AppModel {
             print("📋 onMenuToggle callback fired!")
             self?.toggleMenuWindow()
         }
+        gestureController?.onAnimationPlayerToggle = { [weak self] in
+            print("🎬 onAnimationPlayerToggle callback fired!")
+            self?.toggleAnimationPlayerWindow()
+        }
 
         refreshMenuInteractionState()
         
@@ -267,6 +274,12 @@ class AppModel {
     
     /// Callback to dismiss the menu window (set by App scene)
     var dismissMenuWindowHandler: (() -> Void)?
+
+    /// Callback to open the animation player window (set by App scene)
+    var openAnimationPlayerWindowHandler: (() -> Void)?
+
+    /// Callback to dismiss the animation player window (set by App scene)
+    var dismissAnimationPlayerWindowHandler: (() -> Void)?
     
     /// Toggle menu window visibility — dismisses or opens the window for real
     func toggleMenuWindow() {
@@ -280,6 +293,23 @@ class AppModel {
             print("📋 Menu window opened")
         }
         refreshMenuInteractionState()
+    }
+
+    /// Toggle the Animation Player window visibility (gesture- or UI-driven).
+    func toggleAnimationPlayerWindow() {
+        if isAnimationPlayerWindowVisible {
+            isAnimationPlayerWindowVisible = false
+            dismissAnimationPlayerWindowHandler?()
+            print("🎬 Animation Player window dismissed")
+        } else {
+            // If no scene is selected, default to the first scene so the player has content.
+            if let manager = animationManager, manager.currentScene == nil {
+                manager.currentScene = manager.scenes.first
+            }
+            isAnimationPlayerWindowVisible = true
+            openAnimationPlayerWindowHandler?()
+            print("🎬 Animation Player window opened")
+        }
     }
     
     /// Ensure window content is visible - call when exiting immersive mode or on app launch

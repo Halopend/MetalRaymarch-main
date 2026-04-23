@@ -39,7 +39,7 @@ enum SidebarTab: String, CaseIterable {
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", quality = "Quality" }
 enum AnimateSceneSubTab: String, CaseIterable { case accompanied = "Accompanied", solo = "Solo" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
-enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static" }
+enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static", audio = "Audio" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
 
 private enum SaveDestinationOption: String, CaseIterable {
@@ -126,7 +126,6 @@ struct ContentView: View {
     @State private var effectsSubTab: EffectsSubTab = .dynamic
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
-    @State private var isAnimationPlayerWindowVisible = false
     @State private var showSaveDestinationSheet = false
 
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
@@ -150,7 +149,15 @@ struct ContentView: View {
     }
 
     private var effectiveDirectBudgetLabel: String {
-        effectiveDirectBudgetPreference == .framerate ? "Framerate Budget" : "Detail Budget"
+        effectiveDirectBudgetPreference == .framerate ? "Trade Resolution for Framerate" : "Detail Budget"
+    }
+
+    private var effectiveDirectBudgetUnavailableText: String {
+        if effectiveDirectBudgetPreference == .framerate {
+            return "Trading resolution for framerate is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling."
+        }
+
+        return "\(effectiveDirectBudgetLabel) is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling."
     }
 
     private var presetNameEntryMethod: PresetNameEntryMethod {
@@ -223,16 +230,7 @@ struct ContentView: View {
     }
 
     private func toggleAnimationPlayerWindow() {
-        if isAnimationPlayerWindowVisible {
-            dismissWindow(id: AppModel.animationPlayerWindowID)
-        } else {
-            if let animationManager = appModel.animationManager,
-               animationManager.currentScene == nil {
-                animationManager.currentScene = animationManager.scenes.first
-            }
-            openWindow(id: AppModel.animationPlayerWindowID)
-        }
-        isAnimationPlayerWindowVisible.toggle()
+        appModel.toggleAnimationPlayerWindow()
     }
 
     private func resetCurrentFractalSettings() {
@@ -333,11 +331,11 @@ struct ContentView: View {
                 toggleAnimationPlayerWindow()
             } label: {
                 VStack(spacing: 4) {
-                    Image(systemName: isAnimationPlayerWindowVisible ? "xmark.rectangle.fill" : "play.rectangle")
+                    Image(systemName: appModel.isAnimationPlayerWindowVisible ? "xmark.rectangle.fill" : "play.rectangle")
                         .font(.system(size: 18))
                     Text("Player")
                         .font(.caption2)
-                    Text(isAnimationPlayerWindowVisible ? "Close" : "Open")
+                    Text(appModel.isAnimationPlayerWindowVisible ? "Close" : "Open")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -426,7 +424,7 @@ struct ContentView: View {
                 ScrollViewReader { scrollProxy in
                     VStack(spacing: 12) {
                         switch fractalSubTab {
-                        case .browse:  FractalGridView(cache: cache, gestureController: appModel.gestureController)
+                        case .browse:  FractalGridView(cache: cache, gestureController: appModel.gestureController, animationManager: appModel.animationManager)
                         case .shape:   fractalShapeContent
                         case .space:   fractalSpaceContent
                         case .quality: fractalQualityContent
@@ -844,7 +842,7 @@ struct ContentView: View {
                 }
 
                 if cache.quality.tileSize == 8 {
-                    Text("\(effectiveDirectBudgetLabel) is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling.")
+                    Text(effectiveDirectBudgetUnavailableText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
@@ -1291,6 +1289,7 @@ struct ContentView: View {
                     switch effectsSubTab {
                     case .static:  effectsStaticContent
                     case .dynamic: effectsDynamicContent
+                    case .audio:   effectsAudioContent
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
@@ -1452,6 +1451,329 @@ struct ContentView: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+    }
+
+    private var effectsAudioContent: some View {
+        VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.badge.plus" : "waveform.badge.minus")
+                        .font(.title2)
+                        .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+                        .frame(width: 30)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Audio Reactive Effects")
+                            .font(.headline)
+                        Text("Keep music-driven visuals one tap away from the rest of your effects.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+
+                Toggle(isOn: Binding(
+                    get: { cache.audioReactive.fractalAudioReactiveEnabled },
+                    set: { isOn in
+                        cache.audioReactive.fractalAudioReactiveEnabled = isOn
+                        cache.push(\.fractalAudioReactiveEnabled, value: isOn)
+                        if isOn {
+                            cache.display.lightingMode = .audioReactive
+                            cache.push(\.lightingMode, value: .audioReactive)
+                        }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Music Reactive Visual Effects")
+                            .font(.subheadline.weight(.semibold))
+                        Text(cache.audioReactive.fractalAudioReactiveEnabled ? "Live audio can drive lighting and mapped parameters." : "Turn this on to let music modulate the fractal.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                Toggle("Show Music Shortcuts on Parameters", isOn: $cache.display.showMusicShortcuts)
+                    .onChange(of: cache.display.showMusicShortcuts) { _, value in
+                        cache.push(\.showMusicShortcuts, value: value)
+                    }
+
+                if cache.audioReactive.fractalAudioReactiveEnabled {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Active mappings")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("\(cache.audioReactive.musicReactiveMappings.count)")
+                                .font(.title3.weight(.semibold))
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("Lighting mode")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(cache.display.lightingMode.displayName)
+                                .font(.subheadline.weight(.medium))
+                        }
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.08)))
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedTab = .music
+                    }
+                } label: {
+                    HStack {
+                        Label("Open Full Audio Controls", systemImage: "slider.horizontal.3")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "arrow.right")
+                            .font(.caption.weight(.bold))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.14)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.08)))
+
+            if cache.audioReactive.fractalAudioReactiveEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Genre Presets")
+                        .font(.subheadline.weight(.medium))
+
+                    HStack(spacing: 6) {
+                        ForEach(ReactivityPreset.allCases, id: \.self) { preset in
+                            Button {
+                                applyAudioReactivityPreset(preset)
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Image(systemName: preset.icon)
+                                        .font(.caption)
+                                    Text(preset.rawValue)
+                                        .font(.system(size: 9))
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 7)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.06)))
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Quick Mix")
+                        .font(.subheadline.weight(.medium))
+
+                    Slider(value: Binding(
+                        get: { cache.audioReactive.fractalAudioAmount },
+                        set: { value in
+                            cache.audioReactive.fractalAudioAmount = value
+                            cache.push(\.fractalAudioAmount, value: value)
+                        }
+                    ), in: 0...1)
+
+                    HStack {
+                        Text("Subtle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Intensity \(Int(cache.audioReactive.fractalAudioAmount * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Max")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Slider(value: Binding(
+                        get: { cache.audioReactive.fractalBeatPunch },
+                        set: { value in
+                            cache.audioReactive.fractalBeatPunch = value
+                            cache.push(\.fractalBeatPunch, value: value)
+                        }
+                    ), in: 0...1)
+
+                    HStack {
+                        Text("Soft Beat")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Beat Punch \(Int(cache.audioReactive.fractalBeatPunch * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Hard Beat")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.06)))
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Mapped Parameters")
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        Menu {
+                            let available = availableAudioMappingTargetsToAdd
+                            let universalTargets = available.filter { !$0.isFormulaParam }
+                            let formulaTargets = available.filter { $0.isFormulaParam }
+
+                            if !universalTargets.isEmpty {
+                                Section("Universal") {
+                                    ForEach(universalTargets, id: \.self) { target in
+                                        Button {
+                                            addAudioMapping(target)
+                                        } label: {
+                                            Label(target.displayName, systemImage: target.icon)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if !formulaTargets.isEmpty {
+                                Section("\(cache.fractalType.displayName) Params") {
+                                    ForEach(formulaTargets, id: \.self) { target in
+                                        Button {
+                                            addAudioMapping(target)
+                                        } label: {
+                                            Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
+                                        }
+                                    }
+                                }
+                            }
+
+                            if available.isEmpty {
+                                Text("All targets added")
+                            }
+                        } label: {
+                            Label("Add Mapping", systemImage: "plus")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+
+                    if cache.audioReactive.musicReactiveMappings.isEmpty {
+                        Text("No mapped parameters yet. Add one here or open the full Audio controls for advanced shaping.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                            HStack(spacing: 10) {
+                                Toggle("", isOn: Binding(
+                                    get: { audioMappingAt(index)?.isEnabled ?? false },
+                                    set: { newValue in updateAudioMapping(index) { $0.isEnabled = newValue } }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(mapping.target.displayName(for: cache.fractalType))
+                                        .font(.caption.weight(.semibold))
+                                    Text(mapping.source.displayName)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                Text("\(Int(abs(mapping.amount) * 100))%")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+
+                                Button {
+                                    removeAudioMapping(at: index)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption2)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+
+                            if index < cache.audioReactive.musicReactiveMappings.count - 1 {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.green.opacity(0.06)))
+            }
+        }
+    }
+
+    private func applyAudioReactivityPreset(_ preset: ReactivityPreset) {
+        let settings = preset.settings
+        cache.audioReactive.fractalAudioAmount = settings.audioAmount
+        cache.audioReactive.fractalBeatPunch = settings.beatPunch
+        cache.audioReactive.bassSensitivity = settings.bassSensitivity
+        cache.audioReactive.midSensitivity = settings.midSensitivity
+        cache.audioReactive.trebleSensitivity = settings.trebleSensitivity
+        cache.audioReactive.beatSensitivity = settings.beatSensitivity
+        cache.push(\.fractalAudioAmount, value: settings.audioAmount)
+        cache.push(\.fractalBeatPunch, value: settings.beatPunch)
+        cache.push(\.bassSensitivity, value: settings.bassSensitivity)
+        cache.push(\.midSensitivity, value: settings.midSensitivity)
+        cache.push(\.trebleSensitivity, value: settings.trebleSensitivity)
+        cache.push(\.beatSensitivity, value: settings.beatSensitivity)
+
+        let mappings = preset.defaultMappings(for: cache.fractalType)
+        cache.audioReactive.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
+    }
+
+    private var availableAudioMappingTargetsToAdd: [MusicReactiveTarget] {
+        let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.target))
+        return MusicReactiveTarget.availableCases(for: cache.fractalType).filter { target in
+            !existing.contains(target)
+        }
+    }
+
+    private func audioMappingAt(_ index: Int) -> MusicReactiveMapping? {
+        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return nil }
+        return cache.audioReactive.musicReactiveMappings[index]
+    }
+
+    private func updateAudioMapping(_ index: Int, mutate: (inout MusicReactiveMapping) -> Void) {
+        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
+        var mappings = cache.audioReactive.musicReactiveMappings
+        mutate(&mappings[index])
+        mappings[index].sanitizeInPlace()
+        cache.audioReactive.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
+    }
+
+    private func addAudioMapping(_ target: MusicReactiveTarget) {
+        var mappings = cache.audioReactive.musicReactiveMappings
+        guard !mappings.contains(where: { $0.target == target }) else { return }
+        mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
+        cache.audioReactive.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
+    }
+
+    private func removeAudioMapping(at index: Int) {
+        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
+        var mappings = cache.audioReactive.musicReactiveMappings
+        mappings.remove(at: index)
+        cache.audioReactive.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
     }
     
     // ═══════════════════════════════════════════════════════════════════════════

@@ -231,6 +231,25 @@ struct MusicTabContent: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
+
+                if viewModel.hasConnectedProvider {
+                    Button {
+                        openWindow(id: AppModel.libraryWindowID)
+                    } label: {
+                        HStack {
+                            Label("Change Song", systemImage: "music.note.list")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.4)))
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
                 // Empty state
                 VStack(spacing: 8) {

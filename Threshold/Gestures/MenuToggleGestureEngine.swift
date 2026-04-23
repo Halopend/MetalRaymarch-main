@@ -75,7 +75,9 @@ final class MenuToggleGestureEngine {
     private func menuToggleStrength(for mode: MenuToggleGestureMode, context: GestureContext) -> Float {
         switch mode {
         case .middleToPalm:
-            return context.rightHand.middleFingerTouchingPalm()
+            // Selective: middle touching palm but ring NOT, so this doesn't fire when
+            // the user curls all fingers (e.g. for the animation-player ring gesture).
+            return max(0, context.rightHand.middleFingerTouchingPalm() - context.rightHand.ringFingerTouchingPalm())
         case .middleAndRingToPalm:
             return min(context.rightHand.middleFingerTouchingPalm(), context.rightHand.ringFingerTouchingPalm())
         case .fist:
@@ -87,6 +89,10 @@ final class MenuToggleGestureEngine {
             return max(leftTapsRight, rightTapsLeft)
         case .thumbToIndexPalmUp:
             return context.rightHand.thumbToIndexPalmUpStrength()
+        case .ringToPalm:
+            // Selective: ring touching palm but middle NOT, so the menu and animation
+            // player gestures (middle-to-palm) don't trigger together when curling.
+            return max(0, context.rightHand.ringFingerTouchingPalm() - context.rightHand.middleFingerTouchingPalm())
         }
     }
 
@@ -109,6 +115,10 @@ final class MenuToggleGestureEngine {
         case .thumbToIndexPalmUp:
             // Combined pinch + orientation, moderate thresholds
             return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
+        case .ringToPalm:
+            // Mirror middle-to-palm tuning. Selective math already prevents overlap
+            // with the animation-player (middle-to-palm) gesture.
+            return (activate: baseActivate, release: baseRelease - 0.05)
         }
     }
 }

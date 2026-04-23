@@ -836,7 +836,6 @@ struct SceneEditorView: View {
     @State private var isEditMode: EditMode = .inactive
     @State private var showSceneSettings = false
     @State private var showSongPicker = false
-    @State private var hasPersistedScene = false
     @State private var showCapturedFlash = false
     
     var body: some View {
@@ -927,6 +926,7 @@ struct SceneEditorView: View {
                 .environment(\.editMode, $isEditMode)
         }
         .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
+        .onChange(of: scene) { _, _ in persistSceneIfNeeded() }
         .onDisappear { persistSceneIfNeeded() }
     }
     
@@ -1222,6 +1222,7 @@ struct SceneEditorView: View {
             }
             .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
         }
+        .onChange(of: scene) { _, _ in persistSceneIfNeeded() }
         .onDisappear { persistSceneIfNeeded() }
     }
     
@@ -1314,9 +1315,7 @@ struct SceneEditorView: View {
     }
 
     private func persistSceneIfNeeded() {
-        guard hasPersistedScene == false else { return }
         animationManager.updateScene(scene)
-        hasPersistedScene = true
     }
 
     private func closeEditor() {

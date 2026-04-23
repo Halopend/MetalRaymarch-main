@@ -32,6 +32,7 @@ final class GestureController {
     private var operationFrameCounter: UInt64 = 0
     private let featureFlags = GestureFeatureFlags()
     private let menuToggleEngine = MenuToggleGestureEngine()
+    private let animationPlayerToggleEngine = AnimationPlayerToggleGestureEngine()
     private let arbitrationEngine = GestureArbitrationEngine()
     private let twoHandScalarEngine = TwoHandScalarGestureEngine()
     private let twoPointGrabEngine = TwoPointGrabEngine()
@@ -118,6 +119,7 @@ final class GestureController {
     
     // Gesture callbacks
     var onMenuToggle: (() -> Void)?
+    var onAnimationPlayerToggle: (() -> Void)?
     
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
@@ -147,6 +149,7 @@ final class GestureController {
         twoPointGrabEngine.reset()
         singleHandDragEngine.reset(accumulatedPosition: settings.effectiveTargetPosition)
         menuToggleEngine.reset()
+        animationPlayerToggleEngine.reset()
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -201,6 +204,13 @@ final class GestureController {
             }
         } else {
             processMenuToggleGesture(deltaTime: deltaTime)
+        }
+
+        if let settings = renderSettings {
+            let ops = animationPlayerToggleEngine.process(context: context, settings: settings)
+            if ops.contains(where: { if case .toggleAnimationPlayer = $0 { return true } else { return false } }) {
+                onAnimationPlayerToggle?()
+            }
         }
     }
     
@@ -282,7 +292,7 @@ final class GestureController {
     private func menuToggleStrength(for mode: MenuToggleGestureMode) -> Float {
         switch mode {
         case .middleToPalm:
-            return rightHand.middleFingerTouchingPalm()
+            return max(0, rightHand.middleFingerTouchingPalm() - rightHand.ringFingerTouchingPalm())
         case .middleAndRingToPalm:
             return min(rightHand.middleFingerTouchingPalm(), rightHand.ringFingerTouchingPalm())
         case .fist:
@@ -293,6 +303,8 @@ final class GestureController {
             return max(leftTapsRight, rightTapsLeft)
         case .thumbToIndexPalmUp:
             return rightHand.thumbToIndexPalmUpStrength()
+        case .ringToPalm:
+            return max(0, rightHand.ringFingerTouchingPalm() - rightHand.middleFingerTouchingPalm())
         }
     }
 
@@ -311,6 +323,8 @@ final class GestureController {
             return (activate: min(0.90, baseActivate + 0.10), release: min(0.85, baseRelease + 0.10))
         case .thumbToIndexPalmUp:
             return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
+        case .ringToPalm:
+            return (activate: baseActivate + 0.02, release: baseRelease - 0.05)
         }
     }
 
