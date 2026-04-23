@@ -1,12 +1,12 @@
 import Foundation
 
-/// Right-hand middle-finger-to-palm "hold" gesture that toggles the
+/// Right-hand ring-finger-to-palm "hold" gesture that toggles the
 /// Animation Player window. Mirrors `MenuToggleGestureEngine`'s shape and
 /// reuses the same hold/cooldown/threshold tuning from `RenderSettings`,
 /// but is independent of the menu toggle so both can coexist.
 ///
-/// Strength is selective (`max(0, middle - ring)`) so curling all fingers
-/// doesn't trigger this and the menu's ring-to-palm gesture simultaneously.
+/// Strength is selective (`max(0, ring - middle)`) so curling all fingers
+/// doesn't trigger this and the menu's middle-to-palm gesture simultaneously.
 @MainActor
 final class AnimationPlayerToggleGestureEngine {
     var state = MenuToggleGestureState()
@@ -34,7 +34,7 @@ final class AnimationPlayerToggleGestureEngine {
 
         let strength = max(
             0,
-            context.rightHand.middleFingerTouchingPalm() - context.rightHand.ringFingerTouchingPalm()
+            context.rightHand.ringFingerTouchingPalm() - context.rightHand.middleFingerTouchingPalm()
         )
         let baseActivate = settings.menuToggleActivateThreshold
         let baseRelease = min(settings.menuToggleReleaseThreshold, baseActivate - 0.05)

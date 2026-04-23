@@ -257,6 +257,7 @@ class AppModel {
         
         // Restore domain config structs (new persistence format, overlays legacy per-key values)
         SettingsPersistence.restoreAll(into: renderSettings)
+        migrateDistinctWindowGestureDefaultsIfNeeded()
         
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
@@ -366,6 +367,24 @@ class AppModel {
     /// Capture a screenshot for preset thumbnails
     func captureScreenshot() async -> Data? {
         return await captureScreenshotHandler?()
+    }
+
+    /// One-time migration to keep menu and animation window gestures distinct:
+    /// - Menu: right middle finger to palm
+    /// - Animation player: right ring finger to palm
+    ///
+    /// Older installs defaulted menu mode to ring-to-palm, which conflicts with
+    /// the dedicated animation-player ring gesture.
+    private func migrateDistinctWindowGestureDefaultsIfNeeded() {
+        let migrationKey = "gestureDistinctWindowMapping.v1"
+        guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
+
+        // Only coerce when still on the old ring default.
+        if renderSettings.menuToggleGestureMode == .ringToPalm {
+            renderSettings.menuToggleGestureMode = .middleToPalm
+        }
+
+        UserDefaults.standard.set(true, forKey: migrationKey)
     }
 
 }

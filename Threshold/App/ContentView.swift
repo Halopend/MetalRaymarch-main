@@ -960,7 +960,7 @@ struct ContentView: View {
                         }
                     } label: {
                         Label(
-                            animateEditButtonsVisible ? "Done Editing" : "Edit Scenes",
+                            animateEditButtonsVisible ? "Done Editing" : "Edit Animation",
                             systemImage: animateEditButtonsVisible ? "checkmark.circle" : "pencil.and.list.clipboard"
                         )
                     }

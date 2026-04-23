@@ -24,7 +24,7 @@ enum GestureDefaults {
 
     // MARK: - Menu toggle gesture
     static let menuToggleGestureEnabled = true
-    static let menuToggleGestureMode: MenuToggleGestureMode = .ringToPalm
+    static let menuToggleGestureMode: MenuToggleGestureMode = .middleToPalm
     static let menuToggleHoldDuration: Float = 0.10
     static let menuToggleCooldown: Float = 0.4
     static let menuToggleActivateThreshold: Float = 0.55
