@@ -19,18 +19,16 @@ struct FractalGridView: View {
     var onEditScene: ((AnimationScene) -> Void)? = nil
     @State private var innerTab: FractalBrowseInnerTab = .formulas
 
-    private let columns = [GridItem(.adaptive(minimum: 140, maximum: 200), spacing: 12)]
+    private let columns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
     private let sceneColumns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
     private static let categoryOrder = ["Box Folds", "Power / Quaternion", "Hybrid Folds", "Kaleidoscopic IFS"]
 
-    /// Categories in display order, derived once from the selectable descriptors.
-    private let categorizedTypes: [(category: String, types: [FractalModelType])] = Self.cachedCategorizedTypes
+    /// Formula types sorted by category order first, then display name.
+    private let orderedTypes: [FractalModelType] = Self.cachedOrderedTypes
 
-    /// Cache the category grouping once so entering the tab does not redo the
-    /// descriptor walk every time SwiftUI recreates the view.
-    private static let cachedCategorizedTypes = Self.makeCategorizedTypes()
+    private static let cachedOrderedTypes = Self.makeOrderedTypes()
 
-    private static func makeCategorizedTypes() -> [(category: String, types: [FractalModelType])] {
+    private static func makeOrderedTypes() -> [FractalModelType] {
         let selectable = FractalModelType.selectableCases
         var seen: [String: [FractalModelType]] = [:]
         var order: [String] = []
@@ -41,7 +39,12 @@ struct FractalGridView: View {
         }
         let preferredOrder = categoryOrder.filter { seen[$0] != nil }
         let remainingOrder = order.filter { !categoryOrder.contains($0) }
-        return (preferredOrder + remainingOrder).map { category in (category: category, types: seen[category] ?? []) }
+        return (preferredOrder + remainingOrder)
+            .flatMap { category in
+                (seen[category] ?? []).sorted {
+                    $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                }
+            }
     }
 
     var body: some View {
@@ -64,26 +67,29 @@ struct FractalGridView: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     switch selectedTab {
                     case .formulas:
-                        ForEach(categorizedTypes, id: \.category) { group in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(group.category)
-                                    .font(.headline)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 4)
+                        VStack(alignment: .leading, spacing: 10) {
+                            browserHeader(
+                                title: "Fractal Formulas",
+                                systemImage: "square.grid.2x2",
+                                description: "Choose a formula from the same card browser used for scenes.",
+                                current: cache.fractalType.displayName,
+                                accentColor: .pink
+                            )
 
-                                LazyVGrid(columns: columns, spacing: 12) {
-                                    ForEach(group.types, id: \.self) { type in
-                                        FractalGridCell(
-                                            type: type,
-                                            isSelected: type == cache.fractalType
-                                        ) {
-                                            cache.fractalType = type
-                                            cache.pushFractalType(type, gestureController: gestureController)
-                                        }
+                            LazyVGrid(columns: columns, spacing: 12) {
+                                ForEach(orderedTypes, id: \.self) { type in
+                                    FractalGridCell(
+                                        type: type,
+                                        isSelected: type == cache.fractalType
+                                    ) {
+                                        cache.fractalType = type
+                                        cache.pushFractalType(type, gestureController: gestureController)
                                     }
                                 }
                             }
                         }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.pink.opacity(0.08)))
 
                     case .scenes:
                         if let animationManager {
@@ -101,18 +107,13 @@ struct FractalGridView: View {
     @ViewBuilder
     private func sceneGrid(_ animationManager: AnimationManager) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Label("Fractal Scenes", systemImage: "film.stack")
-                    .font(.headline)
-                Text("Choose the active scene for the animation player and editor from a grid while you browse.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("Current: \(animationManager.currentScene?.name ?? "None")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            browserHeader(
+                title: "Fractal Scenes",
+                systemImage: "film.stack",
+                description: "Choose the active scene for the animation player and editor from a grid while you browse.",
+                current: animationManager.currentScene?.name ?? "None",
+                accentColor: .blue
+            )
 
             LazyVGrid(columns: sceneColumns, spacing: 12) {
                 sceneCard(
@@ -150,6 +151,34 @@ struct FractalGridView: View {
         animationManager.play()
     }
 
+    private func browserHeader(title: String, systemImage: String, description: String, current: String, accentColor: Color) -> some View {
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: 4) {
+                Label(title, systemImage: systemImage)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Text(description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+
+            Text("Current: \(current)")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(accentColor)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(accentColor.opacity(0.12))
+                )
+        }
+    }
+
     private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
@@ -166,7 +195,7 @@ struct FractalGridView: View {
                         Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .lineLimit(1)
                     }
                 }
 
@@ -213,26 +242,46 @@ private struct FractalGridCell: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: type.icon)
-                    .font(.system(size: 28))
-                    .frame(height: 32)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: type.icon)
+                        .font(.subheadline)
+                        .frame(width: 18)
 
-                Text(type.displayName)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(type.displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+
+                        Text(type.category)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(Color.secondary.opacity(0.12))
+                            )
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Label("Selected", systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
+                }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
+            .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.blue.opacity(0.25) : Color.white.opacity(0.06))
+                    .fill(isSelected ? Color.blue.opacity(0.2) : Color.white.opacity(0.06))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isSelected ? Color.blue.opacity(0.6) : Color.clear, lineWidth: 1.5)
+                    .strokeBorder(isSelected ? Color.blue.opacity(0.55) : Color.secondary.opacity(0.15), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

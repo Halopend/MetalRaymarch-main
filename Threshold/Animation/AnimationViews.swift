@@ -849,76 +849,54 @@ struct SceneEditorView: View {
     // Inline: simple VStack with header – renders correctly inside an HStack pane
     private var inlineContent: some View {
         VStack(spacing: 0) {
-            // Header bar
-            HStack {
-                Button {
-                    closeEditor()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .font(.title3)
-                }
-                TextField("Scene Name", text: $scene.name)
-                    .font(.headline)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1)
-                Spacer()
-                Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
-                    withAnimation {
-                        isEditMode = isEditMode == .active ? .inactive : .active
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Button {
+                        closeEditor()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+
+                    TextField("Scene Name", text: $scene.name)
+                        .font(.headline)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 0)
+
+                    Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
+                        withAnimation {
+                            isEditMode = isEditMode == .active ? .inactive : .active
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        showSceneSettings.toggle()
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .popover(isPresented: $showSceneSettings, arrowEdge: .top) {
+                        sceneSettingsPopover
                     }
                 }
-                .font(.subheadline)
-                Button {
-                    showSceneSettings.toggle()
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.subheadline)
-                }
-                .popover(isPresented: $showSceneSettings, arrowEdge: .top) {
-                    sceneSettingsPopover
-                }
-            }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            
-            // Loop + playback mode + duration row
-            HStack(spacing: 16) {
-                Toggle(isOn: $scene.isLooping) {
-                    Label("Loop", systemImage: "repeat")
-                        .font(.caption)
-                }
-                .toggleStyle(.button)
-                .buttonStyle(.bordered)
-                .tint(scene.isLooping ? .blue : .secondary)
-                
-                Picker(selection: $scene.playbackMode) {
-                    ForEach(AnimationPlaybackMode.allCases, id: \.self) { mode in
-                        Label(mode.displayName, systemImage: mode.icon).tag(mode)
+
+                ViewThatFits(in: .horizontal) {
+                    inlineMetaRow
+                    VStack(alignment: .leading, spacing: 8) {
+                        inlineMetaLeadingRow
+                        durationControlRow
                     }
-                } label: {
-                    Image(systemName: scene.playbackMode.icon)
-                        .font(.caption)
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: 130)
-                
-                Spacer()
-                
-                Image(systemName: "timer")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Default Duration")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
-                    .frame(maxWidth: 120)
-                Text("\(String(format: "%.1f", defaultDuration))s")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 34, alignment: .trailing)
             }
-            .frame(height: 32)
-            .padding(.horizontal, 16).padding(.vertical, 4)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             
             Divider()
             
@@ -932,23 +910,24 @@ struct SceneEditorView: View {
     
     // Scene settings popover
     private var sceneSettingsPopover: some View {
-        VStack(spacing: 12) {
-            Text("Scene Settings").font(.headline)
-            TextField("Name", text: $scene.name)
-                .textFieldStyle(.roundedBorder)
-            Toggle("Loop Animation", isOn: $scene.isLooping)
-            HStack {
-                Text("Playback")
-                Spacer()
-                Picker("Playback", selection: $scene.playbackMode) {
-                    ForEach(AnimationPlaybackMode.allCases, id: \.self) { mode in
-                        Label(mode.displayName, systemImage: mode.icon).tag(mode)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Scene Settings").font(.headline)
+                TextField("Name", text: $scene.name)
+                    .textFieldStyle(.roundedBorder)
+                Toggle("Loop Animation", isOn: $scene.isLooping)
+                HStack {
+                    Text("Playback")
+                    Spacer()
+                    Picker("Playback", selection: $scene.playbackMode) {
+                        ForEach(AnimationPlaybackMode.allCases, id: \.self) { mode in
+                            Label(mode.displayName, systemImage: mode.icon).tag(mode)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 160)
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: 160)
-            }
-            Toggle("Use Scene Playback Speed", isOn: Binding(
+                Toggle("Use Scene Playback Speed", isOn: Binding(
                 get: { scene.playbackSpeedOverride != nil },
                 set: { enabled in
                     if enabled {
@@ -957,110 +936,110 @@ struct SceneEditorView: View {
                         scene.playbackSpeedOverride = nil
                     }
                 }
-            ))
-
-            if scene.playbackSpeedOverride != nil {
-                HStack {
-                    Text("Speed")
-                    Spacer()
-                    Slider(value: Binding(
-                        get: { scene.playbackSpeedOverride ?? 1.0 },
-                        set: { scene.playbackSpeedOverride = $0 }
-                    ), in: 0.1...4.0, step: 0.05)
-                    .frame(maxWidth: 150)
-                    Text(String(format: "%.2fx", scene.playbackSpeedOverride ?? 1.0))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 48, alignment: .trailing)
-                }
-            }
-            HStack {
-                Text("Total Duration")
-                Spacer()
-                Text(formatDuration(scene.totalDuration))
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Text("Source Fractal")
-                Spacer()
-                if let fractalType = scene.fractalType {
-                    Label(fractalType.displayName, systemImage: fractalType.icon)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Unspecified")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Divider()
-            
-            // Safety bubble / blend window
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Safety Bubble")
-                    .font(.subheadline.bold())
-                
-                Toggle("Enabled", isOn: Binding(
-                    get: { scene.safetyBubbleEnabled ?? true },
-                    set: { scene.safetyBubbleEnabled = $0 }
                 ))
-                .font(.subheadline)
-                
-                if scene.safetyBubbleEnabled ?? true {
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("Radius").font(.caption)
-                            Slider(value: Binding(
-                                get: { scene.safetyBubbleRadius ?? 0.5 },
-                                set: { scene.safetyBubbleRadius = $0 }
-                            ), in: 0.1...2.0, step: 0.05)
-                            Text(String(format: "%.2f", scene.safetyBubbleRadius ?? 0.5))
-                                .font(.caption.monospacedDigit())
-                                .frame(width: 34, alignment: .trailing)
-                        }
-                        HStack {
-                            Text("Shape").font(.caption)
-                            Slider(value: Binding(
-                                get: { scene.safetyBubbleShape ?? 0.5 },
-                                set: { scene.safetyBubbleShape = $0 }
-                            ), in: 0.0...1.0, step: 0.05)
-                            Text(String(format: "%.2f", scene.safetyBubbleShape ?? 0.5))
-                                .font(.caption.monospacedDigit())
-                                .frame(width: 34, alignment: .trailing)
-                        }
-                        HStack {
-                            Text("Blend").font(.caption)
-                            Slider(value: Binding(
-                                get: { UISettingsCache.blendValueToSlider(scene.safetyBubbleBlend ?? 0.5) },
-                                set: { scene.safetyBubbleBlend = UISettingsCache.blendSliderToValue(Float($0)) }
-                            ), in: 0.0...1.0, step: 0.05)
-                            Text(String(format: "%.2f", scene.safetyBubbleBlend ?? 0.5))
-                                .font(.caption.monospacedDigit())
-                                .frame(width: 34, alignment: .trailing)
-                        }
+
+                if scene.playbackSpeedOverride != nil {
+                    HStack {
+                        Text("Speed")
+                        Spacer()
+                        Slider(value: Binding(
+                            get: { scene.playbackSpeedOverride ?? 1.0 },
+                            set: { scene.playbackSpeedOverride = $0 }
+                        ), in: 0.1...4.0, step: 0.05)
+                        .frame(maxWidth: 150)
+                        Text(String(format: "%.2fx", scene.playbackSpeedOverride ?? 1.0))
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 48, alignment: .trailing)
+                    }
+                }
+                HStack {
+                    Text("Total Duration")
+                    Spacer()
+                    Text(formatDuration(scene.totalDuration))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack {
+                    Text("Source Fractal")
+                    Spacer()
+                    if let fractalType = scene.fractalType {
+                        Label(fractalType.displayName, systemImage: fractalType.icon)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Unspecified")
+                            .foregroundStyle(.secondary)
                     }
                 }
                 
-                Button {
-                    let settings = appModel.renderSettings
-                    scene.safetyBubbleEnabled = settings.safetyBubbleEnabled
-                    scene.safetyBubbleRadius = settings.safetyBubbleRadius
-                    scene.safetyBubbleShape = settings.safetyBubbleShape
-                    scene.safetyBubbleBlend = settings.safetyBubbleBlend
-                } label: {
-                    Label("Capture Current Settings", systemImage: "camera.fill")
-                        .font(.caption)
+                Divider()
+                
+                // Safety bubble / blend window
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Safety Bubble")
+                        .font(.subheadline.bold())
+                
+                    Toggle("Enabled", isOn: Binding(
+                        get: { scene.safetyBubbleEnabled ?? true },
+                        set: { scene.safetyBubbleEnabled = $0 }
+                    ))
+                    .font(.subheadline)
+                
+                    if scene.safetyBubbleEnabled ?? true {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Text("Radius").font(.caption)
+                                Slider(value: Binding(
+                                    get: { scene.safetyBubbleRadius ?? 0.5 },
+                                    set: { scene.safetyBubbleRadius = $0 }
+                                ), in: 0.1...2.0, step: 0.05)
+                                Text(String(format: "%.2f", scene.safetyBubbleRadius ?? 0.5))
+                                    .font(.caption.monospacedDigit())
+                                    .frame(width: 34, alignment: .trailing)
+                            }
+                            HStack {
+                                Text("Shape").font(.caption)
+                                Slider(value: Binding(
+                                    get: { scene.safetyBubbleShape ?? 0.5 },
+                                    set: { scene.safetyBubbleShape = $0 }
+                                ), in: 0.0...1.0, step: 0.05)
+                                Text(String(format: "%.2f", scene.safetyBubbleShape ?? 0.5))
+                                    .font(.caption.monospacedDigit())
+                                    .frame(width: 34, alignment: .trailing)
+                            }
+                            HStack {
+                                Text("Blend").font(.caption)
+                                Slider(value: Binding(
+                                    get: { UISettingsCache.blendValueToSlider(scene.safetyBubbleBlend ?? 0.5) },
+                                    set: { scene.safetyBubbleBlend = UISettingsCache.blendSliderToValue(Float($0)) }
+                                ), in: 0.0...1.0, step: 0.05)
+                                Text(String(format: "%.2f", scene.safetyBubbleBlend ?? 0.5))
+                                    .font(.caption.monospacedDigit())
+                                    .frame(width: 34, alignment: .trailing)
+                            }
+                        }
+                    }
+                
+                    Button {
+                        let settings = appModel.renderSettings
+                        scene.safetyBubbleEnabled = settings.safetyBubbleEnabled
+                        scene.safetyBubbleRadius = settings.safetyBubbleRadius
+                        scene.safetyBubbleShape = settings.safetyBubbleShape
+                        scene.safetyBubbleBlend = settings.safetyBubbleBlend
+                    } label: {
+                        Label("Capture Current Settings", systemImage: "camera.fill")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-            
-            Divider()
-            
-            // Attached song
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Attached Song")
-                    .font(.subheadline.bold())
+                
+                Divider()
+                
+                // Attached song
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Attached Song")
+                        .font(.subheadline.bold())
                 
                 if let song = scene.attachedSong {
                     HStack(spacing: 8) {
@@ -1182,10 +1161,11 @@ struct SceneEditorView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+                }
             }
+            .padding(16)
         }
-        .padding(16)
-        .frame(width: 280)
+        .frame(width: 360, height: 620)
         .sheet(isPresented: $showSongPicker) {
             SongPickerSheet(musicService: appModel.musicService) { track in
                 Task {
@@ -1321,6 +1301,50 @@ struct SceneEditorView: View {
     private func closeEditor() {
         persistSceneIfNeeded()
         onDismiss()
+    }
+
+    private var inlineMetaRow: some View {
+        HStack(spacing: 10) {
+            inlineMetaLeadingRow
+            Spacer(minLength: 0)
+            durationControlRow
+        }
+    }
+
+    private var inlineMetaLeadingRow: some View {
+        HStack(spacing: 10) {
+            Toggle(isOn: $scene.isLooping) {
+                Label("Loop", systemImage: "repeat")
+                    .font(.caption)
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(scene.isLooping ? .blue : .secondary)
+
+            Picker("Playback", selection: $scene.playbackMode) {
+                ForEach(AnimationPlaybackMode.allCases, id: \.self) { mode in
+                    Label(mode.displayName, systemImage: mode.icon).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .controlSize(.small)
+        }
+    }
+
+    private var durationControlRow: some View {
+        HStack(spacing: 8) {
+            Label("Duration", systemImage: "timer")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
+                .frame(minWidth: 120, maxWidth: 180)
+            Text("\(String(format: "%.1f", defaultDuration))s")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+        }
     }
     
     private func addKeyframe() {

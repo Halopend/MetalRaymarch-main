@@ -37,24 +37,19 @@ enum SidebarTab: String, CaseIterable {
 }
 
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", quality = "Quality" }
-enum AnimateSceneSubTab: String, CaseIterable { case accompanied = "Accompanied", solo = "Solo" }
+enum AnimateSceneSubTab: String, CaseIterable {
+    case all = "All"
+    case accompanied = "Accompanied"
+    case solo = "Solo"
+}
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static", audio = "Audio" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
 
-private enum SaveDestinationOption: String, CaseIterable {
-    case preset = "Preset"
-    case reset = "Reset"
-}
-
-private enum SavePresetNameMode: String, CaseIterable {
-    case auto = "Auto"
-    case manual = "Manual"
-}
-
-private enum PresetNameEntryMethod: String, CaseIterable {
-    case text = "Text"
-    case voice = "Voice"
+private enum SaveChoice: String, CaseIterable {
+    case resetLocation = "Reset Location"
+    case presetAutoNamed = "Preset - Auto Named"
+    case presetCustomName = "Preset - Custom Name"
 }
 
 enum RendererModeOption: String, CaseIterable {
@@ -120,7 +115,7 @@ struct ContentView: View {
     @State private var cache = UISettingsCache()
     @State private var selectedTab: SidebarTab = .fractal
     @State private var fractalSubTab: FractalSubTab = .shape
-    @State private var animateSceneSubTab: AnimateSceneSubTab = .accompanied
+    @State private var animateSceneSubTab: AnimateSceneSubTab = .all
     @State private var animateEditButtonsVisible = false
     @State private var coloringSubTab: ColoringSubTab = .gradient
     @State private var effectsSubTab: EffectsSubTab = .dynamic
@@ -130,8 +125,6 @@ struct ContentView: View {
 
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
-    @AppStorage("presetNameEntryMethod.v1") private var presetNameEntryMethodRaw: String = PresetNameEntryMethod.text.rawValue
-
     private var qualityGoalPreference: QualityGoalPreference {
         let selected = QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
         // Control is temporarily disabled in UI; fall back to the last direct choice.
@@ -160,11 +153,6 @@ struct ContentView: View {
         return "\(effectiveDirectBudgetLabel) is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling."
     }
 
-    private var presetNameEntryMethod: PresetNameEntryMethod {
-        get { PresetNameEntryMethod(rawValue: presetNameEntryMethodRaw) ?? .text }
-        nonmutating set { presetNameEntryMethodRaw = newValue.rawValue }
-    }
-    
     // Developer state
     @State private var isProfilerRunning = false
     @State private var lastProfileTime: Date?
@@ -203,20 +191,14 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showSaveDestinationSheet) {
             SaveDestinationSheet(
-                entryMethod: presetNameEntryMethod,
-                onSave: { destination, nameMode, manualName in
-                    switch destination {
-                    case .reset:
+                onSave: { choice, customName in
+                    switch choice {
+                    case .resetLocation:
                         saveCurrentAsResetDefaults()
-                    case .preset:
-                        let chosenName: String?
-                        if nameMode == .manual {
-                            let trimmed = manualName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            chosenName = trimmed.isEmpty ? nil : trimmed
-                        } else {
-                            chosenName = nil
-                        }
-                        saveCurrentAsPreset(named: chosenName)
+                    case .presetAutoNamed:
+                        saveCurrentAsPreset()
+                    case .presetCustomName:
+                        saveCurrentAsPreset(named: customName)
                     }
                     showSaveDestinationSheet = false
                 },
@@ -224,7 +206,7 @@ struct ContentView: View {
                     showSaveDestinationSheet = false
                 }
             )
-            .presentationDetents([.height(320)])
+            .presentationDetents([.height(220), .height(280)])
             .presentationDragIndicator(.visible)
         }
     }
@@ -973,6 +955,9 @@ struct ContentView: View {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             animateEditButtonsVisible.toggle()
                         }
+                        if !animateEditButtonsVisible {
+                            dismissWindow(id: AppModel.animationEditorWindowID)
+                        }
                     } label: {
                         Label(
                             animateEditButtonsVisible ? "Done Editing" : "Edit Scenes",
@@ -1005,13 +990,9 @@ struct ContentView: View {
                             description: Text("Open Scene Editor to create animation scenes"))
                     } else if filteredScenes.isEmpty {
                         ContentUnavailableView(
-                            animateSceneSubTab == .accompanied ? "No Accompanied Scenes" : "No Solo Scenes",
-                            systemImage: animateSceneSubTab == .accompanied ? "music.note" : "speaker.slash",
-                            description: Text(
-                                animateSceneSubTab == .accompanied
-                                ? "Attach songs to scenes to see them here."
-                                : "Scenes without attached songs will appear here."
-                            )
+                            animateEmptyStateTitle,
+                            systemImage: animateEmptyStateSymbol,
+                            description: Text(animateEmptyStateDescription)
                         )
                     } else {
                         ForEach(filteredScenes) { scene in
@@ -1041,10 +1022,45 @@ struct ContentView: View {
 
     private func animateFilteredScenes(from scenes: [AnimationScene]) -> [AnimationScene] {
         switch animateSceneSubTab {
+        case .all:
+            return scenes
         case .accompanied:
             return scenes.filter { $0.attachedSong != nil }
         case .solo:
             return scenes.filter { $0.attachedSong == nil }
+        }
+    }
+
+    private var animateEmptyStateTitle: String {
+        switch animateSceneSubTab {
+        case .all:
+            return "No Scenes"
+        case .accompanied:
+            return "No Accompanied Scenes"
+        case .solo:
+            return "No Solo Scenes"
+        }
+    }
+
+    private var animateEmptyStateSymbol: String {
+        switch animateSceneSubTab {
+        case .all:
+            return "film.stack"
+        case .accompanied:
+            return "music.note"
+        case .solo:
+            return "speaker.slash"
+        }
+    }
+
+    private var animateEmptyStateDescription: String {
+        switch animateSceneSubTab {
+        case .all:
+            return "Open Scene Editor to create animation scenes."
+        case .accompanied:
+            return "Attach songs to scenes to see them here."
+        case .solo:
+            return "Scenes without attached songs will appear here."
         }
     }
 
@@ -2046,36 +2062,6 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
-            VStack(spacing: 8) {
-                HStack {
-                    Label("Preset Name Entry", systemImage: "keyboard")
-                        .font(.headline)
-                    Spacer()
-                }
-
-                Picker("Entry Method", selection: Binding(
-                    get: { presetNameEntryMethod },
-                    set: { presetNameEntryMethod = $0 }
-                )) {
-                    ForEach(PresetNameEntryMethod.allCases, id: \.self) { method in
-                        Text(method.rawValue).tag(method)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("Used when Save destination is Preset and Name mode is Manual.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                if presetNameEntryMethod == .voice {
-                    Text("Voice mode uses system dictation in the manual name field.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
-
             // SharePlay section
             if let shareSession = appModel.shareSession {
                 VStack(spacing: 8) {
@@ -2470,94 +2456,108 @@ private struct HoldToSaveResetButton: View {
 }
 
 private struct SaveDestinationSheet: View {
-    let entryMethod: PresetNameEntryMethod
-    let onSave: (SaveDestinationOption, SavePresetNameMode, String) -> Void
+    let onSave: (SaveChoice, String?) -> Void
     let onCancel: () -> Void
 
-    @State private var destination: SaveDestinationOption = .preset
-    @State private var presetNameMode: SavePresetNameMode = .auto
+    @State private var choice: SaveChoice = .resetLocation
     @State private var manualPresetName = ""
 
     private var canSave: Bool {
-        if destination == .reset { return true }
-        if presetNameMode == .auto { return true }
+        if choice != .presetCustomName { return true }
         return !manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Save Current Settings")
-                        .font(.headline)
-                    Text("Choose where to save and how to name it.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Picker("Destination", selection: $destination) {
-                    ForEach(SaveDestinationOption.allCases, id: \.self) { option in
-                        Text(option.rawValue).tag(option)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 190)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Save Current Settings")
+                    .font(.headline)
+                Text("Choose one destination.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            if destination == .preset {
-                Divider()
+            VStack(spacing: 8) {
+                saveChoiceButton(
+                    choice: .resetLocation,
+                    title: "Reset Location",
+                    subtitle: "Replace the current reset/default state.",
+                    systemImage: "arrow.counterclockwise"
+                )
 
-                HStack {
-                    Text("Name")
-                        .font(.subheadline)
-                    Spacer()
-                    Picker("Name Mode", selection: $presetNameMode) {
-                        ForEach(SavePresetNameMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 170)
-                }
+                saveChoiceButton(
+                    choice: .presetAutoNamed,
+                    title: "Preset - Auto Named",
+                    subtitle: "Save with a timestamped preset name.",
+                    systemImage: "clock.badge.checkmark"
+                )
 
-                if presetNameMode == .auto {
-                    Text("Auto generates a timestamped preset name.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if entryMethod == .voice {
-                            Label("Voice entry mode enabled. Use dictation to enter the preset name.", systemImage: "mic.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        TextField(entryMethod == .voice ? "Speak or type preset name" : "Preset name", text: $manualPresetName)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                }
+                saveChoiceButton(
+                    choice: .presetCustomName,
+                    title: "Preset - Custom Name",
+                    subtitle: "Save with a name you enter.",
+                    systemImage: "character.cursor.ibeam"
+                )
             }
 
-            Spacer(minLength: 0)
+            if choice == .presetCustomName {
+                TextField("Preset name", text: $manualPresetName)
+                    .textFieldStyle(.roundedBorder)
+            }
 
             HStack {
                 Button("Cancel", role: .cancel) {
                     onCancel()
                 }
-
                 Spacer()
 
                 Button("Save") {
-                    onSave(destination, presetNameMode, manualPresetName)
+                    let trimmed = manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onSave(choice, trimmed.isEmpty ? nil : trimmed)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSave)
             }
         }
         .padding(16)
-        .frame(width: 460)
+        .frame(width: 360)
+    }
+
+    private func saveChoiceButton(choice: SaveChoice, title: String, subtitle: String, systemImage: String) -> some View {
+        Button {
+            self.choice = choice
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if self.choice == choice {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.blue)
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(self.choice == choice ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(self.choice == choice ? Color.blue.opacity(0.4) : Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
