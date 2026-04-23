@@ -50,6 +50,37 @@ fileprivate struct SceneTimingSnapshot {
     }
 }
 
+fileprivate enum AnimationEditorLayout {
+    static let sidebarWidth: CGFloat = 300
+    static let sceneEditorMinWidth: CGFloat = 560
+    static let workspaceInset: CGFloat = 6
+
+    static let headerHorizontalPadding: CGFloat = 18
+    static let headerVerticalPadding: CGFloat = 12
+    static let headerSpacing: CGFloat = 12
+
+    static let metaSpacing: CGFloat = 12
+    static let defaultRowHeight: CGFloat = 34
+    static let keyframeRowHeight: CGFloat = 46
+
+    static let settingsPopoverWidth: CGFloat = 392
+    static let settingsPopoverHeight: CGFloat = 640
+    static let settingsContentPadding: CGFloat = 18
+    static let settingsSectionSpacing: CGFloat = 14
+    static let settingsLabelWidth: CGFloat = 110
+    static let settingsValueWidth: CGFloat = 52
+    static let settingsSliderMinWidth: CGFloat = 150
+    static let settingsSliderMaxWidth: CGFloat = 200
+
+    static let keyframeSheetMinWidth: CGFloat = 720
+    static let keyframeSheetIdealWidth: CGFloat = 820
+    static let keyframeSheetRightPaneWidth: CGFloat = 286
+    static let keyframeSheetHorizontalPadding: CGFloat = 18
+    static let keyframeSheetSectionSpacing: CGFloat = 14
+    static let keyframeSheetRowHeight: CGFloat = 24
+    static let keyframeSheetControlRowHeight: CGFloat = 32
+}
+
 // MARK: - Animation Player Window
 
 /// Utility window for animation playback controls, positioned below the main menu.
@@ -398,7 +429,7 @@ private struct AnimationEditorWorkspaceView: View {
                 isInline: true,
                 isEditing: false
             )
-            .frame(width: 280)
+            .frame(width: AnimationEditorLayout.sidebarWidth)
 
             Divider()
 
@@ -413,7 +444,8 @@ private struct AnimationEditorWorkspaceView: View {
                     isInline: true
                 )
                 .id(scene.id)
-                .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: AnimationEditorLayout.sceneEditorMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, AnimationEditorLayout.workspaceInset)
             } else {
                 ContentUnavailableView(
                     "Select a Scene",
@@ -421,6 +453,7 @@ private struct AnimationEditorWorkspaceView: View {
                     description: Text("Choose a scene on the left to edit it in this utility window.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, AnimationEditorLayout.workspaceInset)
             }
         }
     }
@@ -455,7 +488,7 @@ struct SceneListView: View {
     private var inlineContent: some View {
         VStack(spacing: 0) {
             // Header with title and add button
-            HStack {
+            HStack(spacing: 10) {
                 Text("Scenes").font(.headline)
                 Spacer()
                 if !isEditing {
@@ -464,10 +497,12 @@ struct SceneListView: View {
                         showingCreateSheet = true
                     } label: {
                         Image(systemName: "plus.circle.fill")
+                            .font(.title3)
                     }
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
+            .padding(.horizontal, AnimationEditorLayout.headerHorizontalPadding)
+            .padding(.vertical, AnimationEditorLayout.headerVerticalPadding)
             
             sceneList
         }
@@ -605,6 +640,8 @@ struct SceneListView: View {
                             .font(.caption)
                     }
                 }
+                .frame(minHeight: 34)
+                .padding(.vertical, 4)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     animationManager.currentScene = scene
@@ -849,8 +886,8 @@ struct SceneEditorView: View {
     // Inline: simple VStack with header – renders correctly inside an HStack pane
     private var inlineContent: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: AnimationEditorLayout.headerSpacing) {
+                HStack(spacing: AnimationEditorLayout.headerSpacing) {
                     Button {
                         closeEditor()
                     } label: {
@@ -864,6 +901,7 @@ struct SceneEditorView: View {
                         .font(.headline)
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(1)
+                        .frame(minWidth: 180)
 
                     Spacer(minLength: 0)
 
@@ -873,7 +911,7 @@ struct SceneEditorView: View {
                         }
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.regular)
 
                     Button {
                         showSceneSettings.toggle()
@@ -881,7 +919,7 @@ struct SceneEditorView: View {
                         Label("Settings", systemImage: "gearshape")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.regular)
                     .popover(isPresented: $showSceneSettings, arrowEdge: .top) {
                         sceneSettingsPopover
                     }
@@ -889,14 +927,14 @@ struct SceneEditorView: View {
 
                 ViewThatFits(in: .horizontal) {
                     inlineMetaRow
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         inlineMetaLeadingRow
                         durationControlRow
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, AnimationEditorLayout.headerHorizontalPadding)
+            .padding(.vertical, AnimationEditorLayout.headerVerticalPadding)
             
             Divider()
             
@@ -911,13 +949,14 @@ struct SceneEditorView: View {
     // Scene settings popover
     private var sceneSettingsPopover: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: AnimationEditorLayout.settingsSectionSpacing) {
                 Text("Scene Settings").font(.headline)
                 TextField("Name", text: $scene.name)
                     .textFieldStyle(.roundedBorder)
                 Toggle("Loop Animation", isOn: $scene.isLooping)
                 HStack {
                     Text("Playback")
+                        .frame(width: AnimationEditorLayout.settingsLabelWidth, alignment: .leading)
                     Spacer()
                     Picker("Playback", selection: $scene.playbackMode) {
                         ForEach(AnimationPlaybackMode.allCases, id: \.self) { mode in
@@ -925,7 +964,7 @@ struct SceneEditorView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 160)
+                    .frame(maxWidth: 180)
                 }
                 Toggle("Use Scene Playback Speed", isOn: Binding(
                 get: { scene.playbackSpeedOverride != nil },
@@ -939,21 +978,21 @@ struct SceneEditorView: View {
                 ))
 
                 if scene.playbackSpeedOverride != nil {
-                    HStack {
-                        Text("Speed")
-                        Spacer()
-                        Slider(value: Binding(
+                    settingsSliderRow(
+                        label: "Speed",
+                        value: Binding(
                             get: { scene.playbackSpeedOverride ?? 1.0 },
                             set: { scene.playbackSpeedOverride = $0 }
-                        ), in: 0.1...4.0, step: 0.05)
-                        .frame(maxWidth: 150)
-                        Text(String(format: "%.2fx", scene.playbackSpeedOverride ?? 1.0))
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 48, alignment: .trailing)
-                    }
+                        ),
+                        range: 0.1...4.0,
+                        step: 0.05,
+                        format: "%.2f",
+                        suffix: "x"
+                    )
                 }
                 HStack {
                     Text("Total Duration")
+                        .frame(width: AnimationEditorLayout.settingsLabelWidth, alignment: .leading)
                     Spacer()
                     Text(formatDuration(scene.totalDuration))
                         .foregroundStyle(.secondary)
@@ -961,6 +1000,7 @@ struct SceneEditorView: View {
 
                 HStack {
                     Text("Source Fractal")
+                        .frame(width: AnimationEditorLayout.settingsLabelWidth, alignment: .leading)
                     Spacer()
                     if let fractalType = scene.fractalType {
                         Label(fractalType.displayName, systemImage: fractalType.icon)
@@ -986,37 +1026,37 @@ struct SceneEditorView: View {
                     .font(.subheadline)
                 
                     if scene.safetyBubbleEnabled ?? true {
-                        VStack(spacing: 8) {
-                            HStack {
-                                Text("Radius").font(.caption)
-                                Slider(value: Binding(
+                        VStack(spacing: 10) {
+                            settingsSliderRow(
+                                label: "Radius",
+                                value: Binding(
                                     get: { scene.safetyBubbleRadius ?? 0.5 },
                                     set: { scene.safetyBubbleRadius = $0 }
-                                ), in: 0.1...2.0, step: 0.05)
-                                Text(String(format: "%.2f", scene.safetyBubbleRadius ?? 0.5))
-                                    .font(.caption.monospacedDigit())
-                                    .frame(width: 34, alignment: .trailing)
-                            }
-                            HStack {
-                                Text("Shape").font(.caption)
-                                Slider(value: Binding(
+                                ),
+                                range: 0.1...2.0,
+                                step: 0.05,
+                                format: "%.2f"
+                            )
+                            settingsSliderRow(
+                                label: "Shape",
+                                value: Binding(
                                     get: { scene.safetyBubbleShape ?? 0.5 },
                                     set: { scene.safetyBubbleShape = $0 }
-                                ), in: 0.0...1.0, step: 0.05)
-                                Text(String(format: "%.2f", scene.safetyBubbleShape ?? 0.5))
-                                    .font(.caption.monospacedDigit())
-                                    .frame(width: 34, alignment: .trailing)
-                            }
-                            HStack {
-                                Text("Blend").font(.caption)
-                                Slider(value: Binding(
+                                ),
+                                range: 0.0...1.0,
+                                step: 0.05,
+                                format: "%.2f"
+                            )
+                            settingsSliderRow(
+                                label: "Blend",
+                                value: Binding(
                                     get: { UISettingsCache.blendValueToSlider(scene.safetyBubbleBlend ?? 0.5) },
-                                    set: { scene.safetyBubbleBlend = UISettingsCache.blendSliderToValue(Float($0)) }
-                                ), in: 0.0...1.0, step: 0.05)
-                                Text(String(format: "%.2f", scene.safetyBubbleBlend ?? 0.5))
-                                    .font(.caption.monospacedDigit())
-                                    .frame(width: 34, alignment: .trailing)
-                            }
+                                    set: { scene.safetyBubbleBlend = UISettingsCache.blendSliderToValue($0) }
+                                ),
+                                range: 0.0...1.0,
+                                step: 0.05,
+                                format: "%.2f"
+                            )
                         }
                     }
                 
@@ -1069,7 +1109,7 @@ struct SceneEditorView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(8)
+                    .padding(10)
                     .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
                 } else {
                     Text("Auto-plays when the scene starts.")
@@ -1134,27 +1174,29 @@ struct SceneEditorView: View {
 
                     let fadeControlsEnabled = (scene.songFadeOutDuration ?? 0) > 0 || (scene.songFadeOutOffset ?? 0) > 0
                     if fadeControlsEnabled {
-                        VStack(spacing: 8) {
-                            HStack {
-                                Text("Fade Duration").font(.caption)
-                                Slider(value: Binding(
+                        VStack(spacing: 10) {
+                            settingsSliderRow(
+                                label: "Fade Duration",
+                                value: Binding(
                                     get: { scene.songFadeOutDuration ?? 0.35 },
                                     set: { scene.songFadeOutDuration = $0 }
-                                ), in: 0.05...2.0, step: 0.05)
-                                Text(String(format: "%.2fs", scene.songFadeOutDuration ?? 0.35))
-                                    .font(.caption.monospacedDigit())
-                                    .frame(width: 44, alignment: .trailing)
-                            }
-                            HStack {
-                                Text("Fade Offset").font(.caption)
-                                Slider(value: Binding(
+                                ),
+                                range: 0.05...2.0,
+                                step: 0.05,
+                                format: "%.2f",
+                                suffix: "s"
+                            )
+                            settingsSliderRow(
+                                label: "Fade Offset",
+                                value: Binding(
                                     get: { scene.songFadeOutOffset ?? 0.0 },
                                     set: { scene.songFadeOutOffset = $0 }
-                                ), in: 0.0...3.0, step: 0.05)
-                                Text(String(format: "%.2fs", scene.songFadeOutOffset ?? 0.0))
-                                    .font(.caption.monospacedDigit())
-                                    .frame(width: 44, alignment: .trailing)
-                            }
+                                ),
+                                range: 0.0...3.0,
+                                step: 0.05,
+                                format: "%.2f",
+                                suffix: "s"
+                            )
                         }
                         Text("Shape-stream velocity dampens near the song tail. Offset holds a near-stop before the end.")
                             .font(.caption2)
@@ -1163,9 +1205,9 @@ struct SceneEditorView: View {
                 }
                 }
             }
-            .padding(16)
+            .padding(AnimationEditorLayout.settingsContentPadding)
         }
-        .frame(width: 360, height: 620)
+        .frame(width: AnimationEditorLayout.settingsPopoverWidth, height: AnimationEditorLayout.settingsPopoverHeight)
         .sheet(isPresented: $showSongPicker) {
             SongPickerSheet(musicService: appModel.musicService) { track in
                 Task {
@@ -1304,7 +1346,7 @@ struct SceneEditorView: View {
     }
 
     private var inlineMetaRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AnimationEditorLayout.metaSpacing) {
             inlineMetaLeadingRow
             Spacer(minLength: 0)
             durationControlRow
@@ -1312,14 +1354,14 @@ struct SceneEditorView: View {
     }
 
     private var inlineMetaLeadingRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AnimationEditorLayout.metaSpacing) {
             Toggle(isOn: $scene.isLooping) {
                 Label("Loop", systemImage: "repeat")
                     .font(.caption)
             }
             .toggleStyle(.button)
             .buttonStyle(.bordered)
-            .controlSize(.small)
+            .controlSize(.regular)
             .tint(scene.isLooping ? .blue : .secondary)
 
             Picker("Playback", selection: $scene.playbackMode) {
@@ -1329,22 +1371,51 @@ struct SceneEditorView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
-            .controlSize(.small)
+            .controlSize(.regular)
         }
     }
 
     private var durationControlRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Label("Duration", systemImage: "timer")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
-                .frame(minWidth: 120, maxWidth: 180)
+                .frame(minWidth: 140, maxWidth: 210)
             Text("\(String(format: "%.1f", defaultDuration))s")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: 44, alignment: .trailing)
         }
+        .frame(minHeight: AnimationEditorLayout.defaultRowHeight)
+    }
+
+    private func settingsSliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>, step: Float, format: String = "%.2f") -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.caption)
+                .frame(width: AnimationEditorLayout.settingsLabelWidth, alignment: .leading)
+            Slider(value: value, in: range, step: step)
+                .frame(minWidth: AnimationEditorLayout.settingsSliderMinWidth, maxWidth: AnimationEditorLayout.settingsSliderMaxWidth)
+            Text(String(format: format, value.wrappedValue))
+                .font(.caption.monospacedDigit())
+                .frame(width: AnimationEditorLayout.settingsValueWidth, alignment: .trailing)
+        }
+        .frame(minHeight: AnimationEditorLayout.defaultRowHeight)
+    }
+
+    private func settingsSliderRow(label: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, format: String = "%.2f", suffix: String = "") -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.caption)
+                .frame(width: AnimationEditorLayout.settingsLabelWidth, alignment: .leading)
+            Slider(value: value, in: range, step: step)
+                .frame(minWidth: AnimationEditorLayout.settingsSliderMinWidth, maxWidth: AnimationEditorLayout.settingsSliderMaxWidth)
+            Text("\(String(format: format, value.wrappedValue))\(suffix)")
+                .font(.caption.monospacedDigit())
+                .frame(width: AnimationEditorLayout.settingsValueWidth, alignment: .trailing)
+        }
+        .frame(minHeight: AnimationEditorLayout.defaultRowHeight)
     }
     
     private func addKeyframe() {
@@ -1480,11 +1551,11 @@ struct KeyframeRowView: View {
     @State private var dragDuration: TimeInterval = 0
     
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             // Index badge
             Text("\(index + 1)")
                 .font(.caption.bold())
-                .frame(width: 24, height: 24)
+                .frame(width: 28, height: 28)
                 .background(Circle().fill(.secondary.opacity(0.3)))
             
             Text(keyframe.name)
@@ -1498,9 +1569,11 @@ struct KeyframeRowView: View {
                 let displayDuration = isDraggingDuration ? dragDuration : keyframe.duration
                 Text("\(String(format: "%.1f", displayDuration))s")
                     .font(.caption.monospacedDigit())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
                     .background(Capsule().fill(isDraggingDuration ? Color.blue.opacity(0.3) : Color.secondary.opacity(0.2)))
+                    .accessibilityLabel("Segment duration")
+                    .accessibilityValue("\(String(format: "%.1f", displayDuration)) seconds")
                     .gesture(
                         DragGesture(minimumDistance: 4)
                             .onChanged { value in
@@ -1519,36 +1592,46 @@ struct KeyframeRowView: View {
                     )
             }
             
-            // Preview — apply keyframe to current render
-            Button { onJump() } label: {
-                Image(systemName: "eye")
-            }
-            .buttonStyle(.bordered)
-            .help("Preview — apply this keyframe's values")
-            
-            // Edit easing / details
-            Button { onEdit() } label: {
-                Image(systemName: "slider.horizontal.3")
-            }
-            .buttonStyle(.bordered)
-            .help("Edit keyframe details")
-            
-            // More actions
-            Menu {
-                Button { onOverwrite() } label: {
-                    Label("Replace with Current", systemImage: "arrow.down.circle")
+            HStack(spacing: 6) {
+                // Preview — apply keyframe to current render
+                Button { onJump() } label: {
+                    Image(systemName: "eye")
                 }
-                if let onDuplicate {
-                    Button { onDuplicate() } label: {
-                        Label("Duplicate", systemImage: "plus.square.on.square")
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Preview — apply this keyframe's values")
+                .accessibilityLabel("Preview keyframe")
+                
+                // Edit easing / details
+                Button { onEdit() } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Edit keyframe details")
+                .accessibilityLabel("Edit keyframe details")
+                
+                // More actions
+                Menu {
+                    Button { onOverwrite() } label: {
+                        Label("Replace with Current", systemImage: "arrow.down.circle")
                     }
+                    if let onDuplicate {
+                        Button { onDuplicate() } label: {
+                            Label("Duplicate", systemImage: "plus.square.on.square")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("More actions")
+                .accessibilityLabel("More keyframe actions")
             }
-            .buttonStyle(.bordered)
-            .help("More actions")
         }
+        .frame(minHeight: AnimationEditorLayout.keyframeRowHeight)
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
     }
 }
@@ -1565,7 +1648,7 @@ struct KeyframeEditorView: View {
             HStack(spacing: 0) {
                 // ── LEFT COLUMN: Editable core + read-only parameter summary ──
                 ScrollView {
-                    VStack(spacing: 12) {
+                    VStack(spacing: AnimationEditorLayout.keyframeSheetSectionSpacing) {
                         // ── Core (editable) ──
                         summarySection("Core") {
                             HStack {
@@ -1574,19 +1657,19 @@ struct KeyframeEditorView: View {
                                 TextField("Keyframe Name", text: $keyframe.name)
                                     .font(.caption)
                                     .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: 160)
+                                    .frame(maxWidth: 220)
                             }
-                            .frame(height: 28)
+                            .frame(height: AnimationEditorLayout.keyframeSheetControlRowHeight)
                             HStack {
                                 Text("Duration").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
                                 Slider(value: $keyframe.duration, in: 0.0...30.0, step: 0.1)
-                                    .frame(maxWidth: 100)
+                                    .frame(maxWidth: 170)
                                 Text(String(format: "%.1fs", keyframe.duration))
                                     .font(.caption.monospacedDigit())
-                                    .frame(width: 40, alignment: .trailing)
+                                    .frame(width: 46, alignment: .trailing)
                             }
-                            .frame(height: 28)
+                            .frame(height: AnimationEditorLayout.keyframeSheetControlRowHeight)
                             summaryRow("Easing", text: keyframe.easingType.displayName)
                         }
                         
@@ -1679,14 +1762,14 @@ struct KeyframeEditorView: View {
                         
                         Spacer(minLength: 20)
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 10)
                 }
                 
                 Divider()
                 
                 // ── RIGHT COLUMN: Easing (interactive) ──
                 ScrollView {
-                    VStack(spacing: 12) {
+                    VStack(spacing: AnimationEditorLayout.keyframeSheetSectionSpacing) {
                         sectionHeader("Easing Curve")
                         
                         Picker("Easing", selection: $keyframe.easingType) {
@@ -1740,9 +1823,9 @@ struct KeyframeEditorView: View {
                         
                         Spacer(minLength: 20)
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 10)
                 }
-                .frame(width: 260)
+                .frame(width: AnimationEditorLayout.keyframeSheetRightPaneWidth)
             }
             .navigationTitle("Keyframe Details")
             .navigationBarTitleDisplayMode(.inline)
@@ -1757,7 +1840,7 @@ struct KeyframeEditorView: View {
                 }
             }
         }
-        .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
+        .frame(minWidth: AnimationEditorLayout.keyframeSheetMinWidth, idealWidth: AnimationEditorLayout.keyframeSheetIdealWidth, minHeight: 560, idealHeight: 700)
     }
     
     // MARK: - Summary Helpers
@@ -1785,12 +1868,12 @@ struct KeyframeEditorView: View {
     
     @ViewBuilder
     private func summarySection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionHeader(title)
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 content()
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, AnimationEditorLayout.keyframeSheetHorizontalPadding)
         }
     }
     
@@ -1801,7 +1884,7 @@ struct KeyframeEditorView: View {
             Text(String(format: format, value))
                 .font(.caption.monospacedDigit())
         }
-        .frame(height: 22)
+        .frame(height: AnimationEditorLayout.keyframeSheetRowHeight)
     }
     
     private func summaryRow(_ label: String, text: String) -> some View {
@@ -1811,7 +1894,7 @@ struct KeyframeEditorView: View {
             Text(text)
                 .font(.caption.monospacedDigit())
         }
-        .frame(height: 22)
+        .frame(height: AnimationEditorLayout.keyframeSheetRowHeight)
     }
     
     @ViewBuilder
@@ -1849,10 +1932,10 @@ struct KeyframeEditorView: View {
             Image(systemName: icon)
                 .font(.caption)
                 .foregroundStyle(.primary)
-                .frame(width: 16)
+                .frame(width: 18)
             Text(label)
                 .font(.subheadline)
-                .frame(width: 56, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
                 .lineLimit(1)
             if let step {
                 Slider(value: value, in: range, step: step)
@@ -1862,10 +1945,10 @@ struct KeyframeEditorView: View {
             Text(String(format: format, value.wrappedValue))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 50, alignment: .trailing)
+                .frame(width: 54, alignment: .trailing)
         }
-        .frame(height: 32)
-        .padding(.horizontal, 16)
+        .frame(height: 36)
+        .padding(.horizontal, AnimationEditorLayout.keyframeSheetHorizontalPadding)
     }
     
     private func sectionHeader(_ title: String) -> some View {
@@ -1873,8 +1956,8 @@ struct KeyframeEditorView: View {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
+        .padding(.horizontal, AnimationEditorLayout.keyframeSheetHorizontalPadding)
+        .padding(.top, 6)
     }
 }
 
