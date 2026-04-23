@@ -24,6 +24,7 @@ struct FractalGridView: View {
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
     var onEditScene: ((AnimationScene) -> Void)? = nil
+    var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
     @State private var innerTab: FractalBrowseInnerTab = .formulas
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
@@ -149,7 +150,7 @@ struct FractalGridView: View {
                     systemImage: "xmark.circle",
                     isSelected: activeSelection == .none
                 ) {
-                    animationManager.currentScene = nil
+                    animationManager.clearCurrentSceneSelection()
                     selectedStaticSceneID = nil
                 }
 
@@ -213,6 +214,12 @@ struct FractalGridView: View {
     private func selectScene(_ scene: AnimationScene, using animationManager: AnimationManager) {
         selectedStaticSceneID = nil
         animationManager.currentScene = scene
+        onLoadAnimationScene?(scene)
+
+        if scene.keyframes.count == 1 {
+            animationManager.jumpToKeyframe(0)
+            return
+        }
 
         guard scene.keyframes.count >= 2 else { return }
         animationManager.play()
@@ -220,7 +227,7 @@ struct FractalGridView: View {
 
     private func selectStaticScenePreset(_ preset: FractalPreset, using animationManager: AnimationManager) {
         selectedStaticSceneID = preset.id
-        animationManager.currentScene = nil
+        animationManager.clearCurrentSceneSelection()
         onLoadStaticScene?(preset)
     }
 

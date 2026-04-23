@@ -401,7 +401,11 @@ struct FractalPreset: Codable, Identifiable {
     }
     
     /// Apply this preset to render settings
-    func apply(to settings: RenderSettings, includePerformance: Bool = false) {
+    func apply(to settings: RenderSettings, includePerformance: Bool = false, resetEnvironment: Bool = false) {
+        if resetEnvironment {
+            settings.audioReactiveConfig = AudioReactiveConfig()
+        }
+
         settings.baseFractalIterations = fractalIterations
         settings.baseMaxRaySteps = maxRaySteps
         settings.colorMix = colorMix
@@ -525,7 +529,12 @@ struct FractalPreset: Codable, Identifiable {
             settings.lightingSoftness = lightingSoftness
         }
         if let musicReactiveMappings = musicReactiveMappings {
-            settings.musicReactiveMappings = musicReactiveMappings
+            var audioConfig = settings.audioReactiveConfig
+            audioConfig.musicReactiveMappings = musicReactiveMappings
+            if !musicReactiveMappings.isEmpty {
+                audioConfig.fractalAudioReactiveEnabled = true
+            }
+            settings.audioReactiveConfig = audioConfig
         }
         
         // Log preset load for debugging

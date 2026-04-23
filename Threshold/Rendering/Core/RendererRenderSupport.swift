@@ -470,6 +470,12 @@ extension Renderer {
         }
 
         var params = MetalFXResolveParams()
+        if let firstView = drawable.views.first {
+            let vp = firstView.textureMap.viewport
+            let viewportAspect = Float(max(1.0, vp.width) / max(1.0, vp.height))
+            let textureAspect = Float(max(1, outputTexture.width)) / Float(max(1, outputTexture.height))
+            params.aspectCorrection = textureAspect / viewportAspect
+        }
 
         let colorPassDescriptor = MTLRenderPassDescriptor()
         colorPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]

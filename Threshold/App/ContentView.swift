@@ -411,9 +411,16 @@ struct ContentView: View {
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
                     onEditScene: openAnimationEditor,
+                    onLoadAnimationScene: { _ in
+                        appModel.dismissMenuWindowForSceneLoad()
+                    },
                     onLoadStaticScene: { preset in
                         Task { await appModel.preparePipelineHandler?(preset) }
-                        appModel.presetManager.loadPreset(preset, into: appModel.renderSettings)
+                        appModel.presetManager.loadPreset(
+                            preset,
+                            into: appModel.renderSettings,
+                            resetEnvironment: true
+                        )
                         appModel.gestureController?.syncWithSettings()
                         cache.loadFromSettings()
                     }

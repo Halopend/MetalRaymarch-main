@@ -202,6 +202,10 @@ final class AnimationManager {
     /// Callback to start playing the scene's attached song.
     /// Set from AppModel — receives the SongAttachment to play.
     var playSongHandler: ((SongAttachment) -> Void)?
+
+    /// Callback to stop any scene-driven song playback.
+    /// Set from AppModel.
+    var stopSongHandler: (() -> Void)?
     
     // ═══════════════════════════════════════════════════════════════════════════
     // FILE STORAGE
@@ -443,6 +447,9 @@ final class AnimationManager {
         if let settings = renderSettings, let scene = currentScene {
             // Clear lingering user/gesture offsets so playback starts from clean scene values.
             settings.clearAnimationManualOffsets()
+            // Scenes own their music-reactive state. Start from defaults so a
+            // previous scene's audio settings don't leak into this one.
+            settings.audioReactiveConfig = AudioReactiveConfig()
 
             if isStartingFromBeginning,
                let speedOverride = scene.playbackSpeedOverride {
@@ -533,12 +540,26 @@ final class AnimationManager {
         uiThrottleCounter = 0
         UsageAnalytics.shared.trackAnimationUsed()
 
+        let hadAttachedSceneSong = stopWhenAttachedSongEnds
         stopWhenAttachedSongEnds = (currentScene?.attachedSong != nil)
         attachedSongFadeVelocityScale = 1.0
         
         // Auto-play attached song when scene starts
         if let song = currentScene?.attachedSong {
             playSongHandler?(song)
+        } else if hadAttachedSceneSong {
+            // Prevent audio carry-over from a previously selected music scene.
+            stopSongHandler?()
+        }
+    }
+
+    /// Fully clears active scene playback/selection and any scene-driven song.
+    func clearCurrentSceneSelection() {
+        let shouldStopSceneSong = stopWhenAttachedSongEnds || (currentScene?.attachedSong != nil)
+        stop()
+        currentScene = nil
+        if shouldStopSceneSong {
+            stopSongHandler?()
         }
     }
 
@@ -1011,9 +1032,9 @@ final class AnimationManager {
             settings.lightingSoftness = soft
         }
 
-        if let musicConfig = keyframe.musicReactiveConfig,
-           settings.audioReactiveConfig != musicConfig {
-            settings.audioReactiveConfig = musicConfig
+        let resolvedMusicConfig = keyframe.musicReactiveConfig ?? AudioReactiveConfig()
+        if settings.audioReactiveConfig != resolvedMusicConfig {
+            settings.audioReactiveConfig = resolvedMusicConfig
         }
         
         // Also set TARGETS so they're in sync when animation stops

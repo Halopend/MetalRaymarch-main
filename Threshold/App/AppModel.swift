@@ -210,6 +210,10 @@ class AppModel {
         animationManager?.playSongHandler = { [weak self] song in
             self?.musicService.play(attachment: song)
         }
+        animationManager?.stopSongHandler = { [weak self] in
+            guard let self, self.musicService.isPlaying else { return }
+            self.musicService.togglePlayPause()
+        }
 
         // Stop looping music scenes when the attached track naturally ends,
         // and clear residual audio-reactive layers/state.
@@ -294,6 +298,18 @@ class AppModel {
             print("📋 Menu window opened")
         }
         refreshMenuInteractionState()
+    }
+
+    /// Dismiss the menu window and clear any lingering interaction state.
+    /// Used when loading a scene so hand gestures are immediately available.
+    func dismissMenuWindowForSceneLoad() {
+        guard isMenuWindowVisible else { return }
+        isMenuWindowVisible = false
+        isMenuHovering = false
+        menuAdjustmentDepth = 0
+        dismissMenuWindowHandler?()
+        refreshMenuInteractionState()
+        print("Menu window dismissed for scene load")
     }
 
     /// Toggle the Animation Player window visibility (gesture- or UI-driven).
