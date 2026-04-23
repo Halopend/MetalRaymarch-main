@@ -779,9 +779,9 @@ struct ContentView: View {
                             // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full
                             let items: [(String, Float, String, String)] = [
                                 // Detail mode: use a dashed screen outline + inner grid to convey pixel density.
-                                ("Low", 0.67, "circle.grid.2x2", QualityPreset.low.icon),
-                                ("Medium", 0.75, "circle.grid.3x3", QualityPreset.medium.icon),
-                                ("High", 0.85, "circle.grid.3x3.fill", QualityPreset.high.icon),
+                                ("Low", 0.33, "circle.grid.2x2", QualityPreset.low.icon),
+                                ("Medium", 0.50, "circle.grid.3x3", QualityPreset.medium.icon),
+                                ("High", 0.75, "circle.grid.3x3.fill", QualityPreset.high.icon),
                                 ("Full", 1.0, "circle.grid.3x3.circle.fill", QualityPreset.ultra.icon)
                             ]
 
@@ -842,7 +842,7 @@ struct ContentView: View {
                             cache.quality.resolutionScale = snapped
                             cache.push(\.resolutionScale, value: snapped)
                         }
-                    ), in: 0.5...1.0, step: 0.01)
+                    ), in: 0.33...1.0, step: 0.01)
                     .disabled(cache.quality.tileSize == 8)
                 }
 

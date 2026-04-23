@@ -534,10 +534,10 @@ final class RenderSettings: @unchecked Sendable {
     
     var resolutionScale: Float {
         get { withLock { _resolutionScale } }
-        // Min 0.5 (50%) - below this spatial upscaling quality degrades significantly
+        // Min 0.33 (33%) for expanded low-resolution budget options
         // Max 1.0 (100%) - no upscaling needed
         // Sweet spot is 0.67-0.75 for best quality/performance balance
-        set { withLock { _resolutionScale = max(0.5, min(1.0, newValue)) } }
+        set { withLock { _resolutionScale = max(0.33, min(1.0, newValue)) } }
     }
     
     var fractalType: FractalModelType {

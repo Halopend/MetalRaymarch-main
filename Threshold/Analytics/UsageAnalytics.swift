@@ -185,6 +185,11 @@ final class UsageAnalytics {
     var analyticsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(analyticsEnabled, forKey: "AnalyticsEnabled")
+            if analyticsEnabled {
+                Task {
+                    await uploadPendingSnapshots()
+                }
+            }
         }
     }
     
@@ -192,9 +197,11 @@ final class UsageAnalytics {
         // Default to disabled — user must explicitly opt in
         self.analyticsEnabled = UserDefaults.standard.object(forKey: "AnalyticsEnabled") as? Bool ?? false
         
-        // Try to upload any pending snapshots from previous sessions
-        Task {
-            await uploadPendingSnapshots()
+        // Try to upload any pending snapshots from previous sessions when opted in.
+        if analyticsEnabled {
+            Task {
+                await uploadPendingSnapshots()
+            }
         }
     }
 
@@ -340,37 +347,41 @@ final class UsageAnalytics {
     
     /// Mark that hand gestures were used
     func trackHandGestureUsed() {
+        guard analyticsEnabled else { return }
         usedHandGestures = true
     }
     
     
     /// Mark that SharePlay was used
     func trackSharePlayUsed() {
+        guard analyticsEnabled else { return }
         usedSharePlay = true
     }
     
     /// Mark that animation playback was used
     func trackAnimationUsed() {
+        guard analyticsEnabled else { return }
         usedAnimation = true
     }
     
     /// Track preset load
     func trackPresetLoaded(name: String) {
+        guard analyticsEnabled else { return }
         presetsLoaded += 1
         presetLoadCounts[name, default: 0] += 1
     }
     
     /// Track preset save
     func trackPresetSaved() {
+        guard analyticsEnabled else { return }
         presetsSaved += 1
     }
     
     /// Track preset save with full preset data for analysis
     /// This uploads the complete preset to CloudKit so you can see what users are creating
     func trackPresetSaved(preset: FractalPreset) {
-        presetsSaved += 1
-        
         guard analyticsEnabled else { return }
+        presetsSaved += 1
         
         Task {
             await uploadPresetSnapshot(preset)
@@ -381,6 +392,7 @@ final class UsageAnalytics {
     
     /// Upload a saved preset to CloudKit for analysis
     private func uploadPresetSnapshot(_ preset: FractalPreset) async {
+        guard analyticsEnabled else { return }
         let record = CKRecord(recordType: "PresetSnapshot")
         
         // Metadata
@@ -473,6 +485,7 @@ final class UsageAnalytics {
     }
     
     private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
+        guard analyticsEnabled else { return }
         let record = CKRecord(recordType: "UsageSnapshot")
         
         // Session info
@@ -568,6 +581,7 @@ final class UsageAnalytics {
     }
     
     private func uploadPendingSnapshots() async {
+        guard analyticsEnabled else { return }
         let pending = loadPendingSnapshots()
         guard !pending.isEmpty else { return }
         

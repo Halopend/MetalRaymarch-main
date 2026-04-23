@@ -209,7 +209,7 @@ extension Renderer {
     /// The compute/Buddhabrot paths are deliberately excluded for now — they can
     /// be routed through MetalFX in a future phase once depth ownership and
     /// tile-shared history semantics are designed.
-    /// Minimum scale is clamped to 0.5 by `RenderSettings.resolutionScale`.
+    /// Minimum scale is clamped to 0.33 by `RenderSettings.resolutionScale`.
     func isMetalFXActive(for settingsSnapshot: RenderSettingsSnapshot, framePath: RenderFramePath) -> Bool {
         #if canImport(MetalFX)
         switch framePath {

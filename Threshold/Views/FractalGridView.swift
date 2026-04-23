@@ -42,7 +42,7 @@ struct FractalGridView: View {
             guard let selectedStaticSceneIDRaw else { return nil }
             return UUID(uuidString: selectedStaticSceneIDRaw)
         }
-        set {
+        nonmutating set {
             selectedStaticSceneIDRaw = newValue?.uuidString
         }
     }

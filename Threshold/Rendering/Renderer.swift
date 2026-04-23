@@ -1203,12 +1203,12 @@ actor Renderer {
 
         renderEncoder.endEncoding()
 
-        // Spatial upscale + blit to drawable when MetalFX is active.
+        // Spatial upscale + resolve to drawable when MetalFX is active.
         #if canImport(MetalFX)
         if let bundle = metalFXBundle {
             do {
                 try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
-                blitMetalFXOutputToDrawable(
+                resolveMetalFXOutputToDrawable(
                     commandBuffer: commandBuffer,
                     metalFX: bundle.manager,
                     drawable: drawable
