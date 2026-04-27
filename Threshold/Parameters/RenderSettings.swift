@@ -204,6 +204,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorSchemeShadows: Float = -0.018         // Shadow lift/crush (-0.05 to 0.05)
     private var _colorSchemeHighlights: Float = 0.02        // Highlight boost/reduction (-0.5 to 1.0)
     private var _lightingSoftness: Float = 0.35              // 0 = sharp vibrance-driven, 1 = classic soft lighting
+    private var _cellShadingEnabled: Bool = false
+    private var _cellShadingLevels: Float = 4.0
     
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
@@ -1258,6 +1260,22 @@ final class RenderSettings: @unchecked Sendable {
             persistColor()
         }
     }
+
+    var cellShadingEnabled: Bool {
+        get { withLock { _cellShadingEnabled } }
+        set {
+            withLock { _cellShadingEnabled = newValue }
+            persistColor()
+        }
+    }
+
+    var cellShadingLevels: Float {
+        get { withLock { _cellShadingLevels } }
+        set {
+            withLock { _cellShadingLevels = max(2.0, min(8.0, newValue)) }
+            persistColor()
+        }
+    }
     
     /// Midtone curve adjustment (-1 to 1)
     var colorSchemeCurve: Float {
@@ -1634,6 +1652,10 @@ final class RenderSettings: @unchecked Sendable {
             colorCurve: _colorSchemeCurve,
             shadows: _colorSchemeShadows,
             highlights: _colorSchemeHighlights,
+            cellShadingEnabled: _cellShadingEnabled ? 1 : 0,
+            cellShadingLevels: _cellShadingLevels,
+            cellEdgeStrength: 0.0,
+            _cellPad: 0.0,
             neonIntensity: neonIntensity,
             hueFrequency: hueFreq,
             hueOffset: hueOffset,
@@ -2726,6 +2748,8 @@ final class RenderSettings: @unchecked Sendable {
                 c.colorSchemeShadows = _colorSchemeShadows
                 c.colorSchemeHighlights = _colorSchemeHighlights
                 c.lightingSoftness = _lightingSoftness
+                c.cellShadingEnabled = _cellShadingEnabled
+                c.cellShadingLevels = _cellShadingLevels
                 c.colorSchemeAutoTransition = _colorSchemeAutoTransition
                 c.colorSchemeAutoInterval = _colorSchemeAutoInterval
                 c.colorSchemeTransitionDuration = _colorSchemeTransitionDuration
@@ -2750,6 +2774,8 @@ final class RenderSettings: @unchecked Sendable {
                 _colorSchemeShadows = newValue.colorSchemeShadows
                 _colorSchemeHighlights = newValue.colorSchemeHighlights
                 _lightingSoftness = newValue.lightingSoftness
+                _cellShadingEnabled = newValue.cellShadingEnabled
+                _cellShadingLevels = max(2.0, min(8.0, newValue.cellShadingLevels))
                 _colorSchemeAutoTransition = newValue.colorSchemeAutoTransition
                 _colorSchemeAutoInterval = newValue.colorSchemeAutoInterval
                 _colorSchemeTransitionDuration = newValue.colorSchemeTransitionDuration

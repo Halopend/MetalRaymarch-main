@@ -19,6 +19,7 @@ enum FractalModelType: Int32, CaseIterable {
     case theliPseudoKleinian = 15
     case kleinian              = 17
     case boxSphereFolder         = 20
+    case mandelboxSphereProjection = 21
     
     /// Descriptor from the registry — all metadata is defined there.
     var descriptor: FractalTypeDescriptor { FractalTypeRegistry.descriptor(for: self) }

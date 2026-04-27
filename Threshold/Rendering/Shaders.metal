@@ -247,6 +247,12 @@ FORCE_INLINE half3 clampColor(half3 col) {
     return clamp(col, half3(0.0h), half3(2.0h));
 }
 
+FORCE_INLINE half quantizeCelLight(half value, ColorSchemeParams scheme) {
+    if (scheme.cellShadingEnabled == 0) { return value; }
+    half levels = half(max(scheme.cellShadingLevels, 2.0f));
+    return floor(saturate(value) * levels) / max(levels - 1.0h, 1.0h);
+}
+
 // === LIGHTING BLEND: Classic (soft) ↔ Current (vibrance-driven sharp) ===
 // lightingSoftness: 0 = current vibrance-driven system, 1 = classic fixed lighting
 // This allows smooth blending between the old lighting look and the new one.
@@ -1708,6 +1714,8 @@ kernel void adaptiveHierarchical8x8(
     texture2d_array<float, access::write> curColorTexture [[texture(4)]]
 ) {
     const uint ADAPTIVE_TILE_SIZE = 8;
+    const uint ADAPTIVE_SUPERTILE_SIZE = 32;
+    const uint ADAPTIVE_SUPERTILE_TILE_COUNT = ADAPTIVE_SUPERTILE_SIZE / ADAPTIVE_TILE_SIZE;
     uint2 viewportPixelCoord = tileId * ADAPTIVE_TILE_SIZE + localId;
     uint2 viewportSize = uint2(uniforms.resolution);
     
@@ -1873,8 +1881,13 @@ kernel void adaptiveHierarchical8x8(
             float2 tileCenterNDC = (tileCenter / uniforms.resolution) * 2.0 - 1.0;
             tileCenterNDC.y = -tileCenterNDC.y;
             float4 tcClip = float4(tileCenterNDC.x, tileCenterNDC.y, 0.0, 1.0);
-            float4 tcView = uniforms.invProjMatrix * tcClip;
-            float3 tcRd = normalize((uniforms.invViewMatrix * float4(normalize(tcView.xyz), 0.0)).xyz);
+            float4 tcView4 = uniforms.invProjMatrix * tcClip;
+            float tcViewW = abs(tcView4.w) > 1e-6f
+                ? tcView4.w
+                : (tcView4.w >= 0.0f ? 1e-6f : -1e-6f);
+            float3 tcView = tcView4.xyz / tcViewW;
+            float3 tcModelPoint = (uniforms.invViewMatrix * float4(tcView, 1.0)).xyz;
+            float3 tcRd = normalize(tcModelPoint - marchOrigin);
             float bsT = rayIntersectBoundingSphere(marchOrigin, tcRd, float3(0.0), uniforms.boundingSphereRadius);
             if (bsT < 0.0) {
                 tileIsEmpty = 1;
@@ -1883,11 +1896,135 @@ kernel void adaptiveHierarchical8x8(
         }
         
         if (!tileIsEmpty) {
+        bool seededFromSuperTileHistory = false;
+        bool seededFromTileHistory = false;
+
+        // 32x32 supertile seed:
+        // Build a parent-grid hint from previous-frame depths so child 8x8 tiles
+        // can skip coarse marching when temporal history is coherent.
+        if (uniforms.temporalReprojectionEnabled != 0 && uniforms.blendFactor < 0.6f) {
+            uint2 superTileId = tileId / ADAPTIVE_SUPERTILE_TILE_COUNT;
+            uint2 superTileBase = viewportOrigin + superTileId * ADAPTIVE_SUPERTILE_SIZE;
+            uint2 superTileEnd = min(superTileBase + uint2(ADAPTIVE_SUPERTILE_SIZE - 1), viewportOrigin + viewportSize - 1);
+            uint2 superTileCenterPx = min(superTileBase + uint2(ADAPTIVE_SUPERTILE_SIZE / 2), viewportOrigin + viewportSize - 1);
+
+            int superHistoryHits = 0;
+            float superMinHitDepth = kRayMissThreshold + 100.0f;
+
+            float s0 = prevDepthTexture.read(superTileCenterPx, uniforms.eyeIndex).x;
+            if (s0 > 0.0f && s0 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s0);
+            }
+
+            float s1 = prevDepthTexture.read(superTileBase, uniforms.eyeIndex).x;
+            if (s1 > 0.0f && s1 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s1);
+            }
+
+            float s2 = prevDepthTexture.read(uint2(superTileEnd.x, superTileBase.y), uniforms.eyeIndex).x;
+            if (s2 > 0.0f && s2 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s2);
+            }
+
+            float s3 = prevDepthTexture.read(uint2(superTileBase.x, superTileEnd.y), uniforms.eyeIndex).x;
+            if (s3 > 0.0f && s3 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s3);
+            }
+
+            float s4 = prevDepthTexture.read(superTileEnd, uniforms.eyeIndex).x;
+            if (s4 > 0.0f && s4 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s4);
+            }
+
+            float s5 = prevDepthTexture.read(uint2(superTileCenterPx.x, superTileBase.y), uniforms.eyeIndex).x;
+            if (s5 > 0.0f && s5 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s5);
+            }
+
+            float s6 = prevDepthTexture.read(uint2(superTileCenterPx.x, superTileEnd.y), uniforms.eyeIndex).x;
+            if (s6 > 0.0f && s6 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s6);
+            }
+
+            float s7 = prevDepthTexture.read(uint2(superTileBase.x, superTileCenterPx.y), uniforms.eyeIndex).x;
+            if (s7 > 0.0f && s7 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s7);
+            }
+
+            float s8 = prevDepthTexture.read(uint2(superTileEnd.x, superTileCenterPx.y), uniforms.eyeIndex).x;
+            if (s8 > 0.0f && s8 < kRayMissThreshold) {
+                superHistoryHits++;
+                superMinHitDepth = min(superMinHitDepth, s8);
+            }
+
+            if (superHistoryHits >= 3) {
+                tileStartT = max(0.05f, superMinHitDepth * 0.75f);
+                seededFromSuperTileHistory = true;
+            }
+        }
+
+        // Tile-level temporal neighborhood seed:
+        // sample center + 4 corners from previous-frame depth and use the
+        // nearest hit as a conservative start distance for the whole 8x8 tile.
+        // This reuses both frame-to-frame and nearby-pixel information.
+        if (uniforms.temporalReprojectionEnabled != 0 && uniforms.blendFactor < 0.6f) {
+            uint2 tileBase = viewportOrigin + tileId * ADAPTIVE_TILE_SIZE;
+            uint2 tileEnd = min(tileBase + uint2(ADAPTIVE_TILE_SIZE - 1), viewportOrigin + viewportSize - 1);
+            uint2 tileCenterPx = min(tileBase + uint2(ADAPTIVE_TILE_SIZE / 2), viewportOrigin + viewportSize - 1);
+
+            int tileHistoryHits = 0;
+            float tileMinHitDepth = kRayMissThreshold + 100.0f;
+
+            float d0 = prevDepthTexture.read(tileCenterPx, uniforms.eyeIndex).x;
+            if (d0 > 0.0f && d0 < kRayMissThreshold) {
+                tileHistoryHits++;
+                tileMinHitDepth = min(tileMinHitDepth, d0);
+            }
+
+            float d1 = prevDepthTexture.read(tileBase, uniforms.eyeIndex).x;
+            if (d1 > 0.0f && d1 < kRayMissThreshold) {
+                tileHistoryHits++;
+                tileMinHitDepth = min(tileMinHitDepth, d1);
+            }
+
+            float d2 = prevDepthTexture.read(uint2(tileEnd.x, tileBase.y), uniforms.eyeIndex).x;
+            if (d2 > 0.0f && d2 < kRayMissThreshold) {
+                tileHistoryHits++;
+                tileMinHitDepth = min(tileMinHitDepth, d2);
+            }
+
+            float d3 = prevDepthTexture.read(uint2(tileBase.x, tileEnd.y), uniforms.eyeIndex).x;
+            if (d3 > 0.0f && d3 < kRayMissThreshold) {
+                tileHistoryHits++;
+                tileMinHitDepth = min(tileMinHitDepth, d3);
+            }
+
+            float d4 = prevDepthTexture.read(tileEnd, uniforms.eyeIndex).x;
+            if (d4 > 0.0f && d4 < kRayMissThreshold) {
+                tileHistoryHits++;
+                tileMinHitDepth = min(tileMinHitDepth, d4);
+            }
+
+            // Require multiple agreeing history samples to avoid stale-start artifacts.
+            if (tileHistoryHits >= 2) {
+                tileStartT = max(0.05f, tileMinHitDepth * 0.8f);
+                seededFromTileHistory = true;
+            }
+        }
+
         if (reprojectionValid) {
             // Temporal reprojection is valid for thread 0 — surface definitely exists
             // near this depth. Use reprojected depth as tile start, skip coarse+probes.
             tileStartT = max(0.05f, reprojectedStartT * 0.85f);
-        } else {
+        } else if (!seededFromTileHistory && !seededFromSuperTileHistory) {
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
@@ -1900,8 +2037,13 @@ kernel void adaptiveHierarchical8x8(
                 float2 tileCenterNDC = (tileCenter / uniforms.resolution) * 2.0 - 1.0;
                 tileCenterNDC.y = -tileCenterNDC.y;
                 float4 tcClip = float4(tileCenterNDC.x, tileCenterNDC.y, 0.0, 1.0);
-                float4 tcView = uniforms.invProjMatrix * tcClip;
-                float3 tcRd = normalize((uniforms.invViewMatrix * float4(normalize(tcView.xyz), 0.0)).xyz);
+                float4 tcView4 = uniforms.invProjMatrix * tcClip;
+                float tcViewW = abs(tcView4.w) > 1e-6f
+                    ? tcView4.w
+                    : (tcView4.w >= 0.0f ? 1e-6f : -1e-6f);
+                float3 tcView = tcView4.xyz / tcViewW;
+                float3 tcModelPoint = (uniforms.invViewMatrix * float4(tcView, 1.0)).xyz;
+                float3 tcRd = normalize(tcModelPoint - marchOrigin);
                 
                 float probeIters = float(lodIterations) * 0.6;
                 float3 probe1 = marchOrigin + tcRd * 2.0;
@@ -2059,8 +2201,8 @@ kernel void adaptiveHierarchical8x8(
         }
         
         float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
-        half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
+        half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
+        half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
                     uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
@@ -2079,8 +2221,10 @@ kernel void adaptiveHierarchical8x8(
         float3 Hsun = normalize(sunDir + V);
         float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
         float specSun = powr(max(dot(nor, Hsun), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
-        col += half3(specSpot) * shaSpot * bri;
-        col += half3(specSun) * shaSun * briSun;
+        if (uniforms.colorScheme.cellShadingEnabled == 0) {
+            col += half3(specSpot) * shaSpot * bri;
+            col += half3(specSun) * shaSun * briSun;
+        }
     }
     
     // Apply fog, glow, and clamp using helper functions
@@ -2358,8 +2502,8 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
 
             float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-            half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
-            half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
+            half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
+            half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
 
             col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
             
@@ -2368,7 +2512,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half ambient = 0.15h + hemisphereAO * 0.1h;
             col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
 
-            if (quality > kMinQualityForSpecular) {
+            if (quality > kMinQualityForSpecular && uniforms.colorScheme.cellShadingEnabled == 0) {
                 float3 V = -marchDir;
                 float NoV = saturate(dot(nor, V));
                 float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
@@ -2391,7 +2535,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             // Classic low-quality used: dot * 0.5 + 0.3
             // Current uses: dot * sunDiffuseScale * 2.5 + 0.3
             float diffuseMultiplier = mix(sunDiffuseScale * 2.5f, 0.5f, uniforms.lightingSoftness);
-            half diffuse = half(max(dot(nor, sunDir), 0.0) * diffuseMultiplier + 0.3);
+            half diffuse = quantizeCelLight(half(max(dot(nor, sunDir), 0.0) * diffuseMultiplier + 0.3), uniforms.colorScheme);
             col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache) * diffuse;
         }
         // Depth already written at start of this block via clipPos
@@ -2558,8 +2702,8 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         
         // Per-pixel lighting with shared shadows
         float attenPow = powr(max(atten, kPowEpsilon), kAttenPower);
-        half bri = half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity);
-        half briSun = half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale);
+        half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
+        half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
         
         col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
         
@@ -2569,11 +2713,13 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
         
         // Specular
-        float3 ref = reflect(marchDir, nor);
-        float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
-        float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
-        col += half3(specSpot) * shaSpot * bri;
-        col += half3(specSun) * shaSun * briSun;
+        if (uniforms.colorScheme.cellShadingEnabled == 0) {
+            float3 ref = reflect(marchDir, nor);
+            float specSpot = powr(max(max(dot(spot, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity * lightIntensity;
+            float specSun = powr(max(max(dot(sunDir, ref), 0.0), kPowEpsilon), kSpecularPower) * kSpecularIntensity;
+            col += half3(specSpot) * shaSpot * bri;
+            col += half3(specSun) * shaSun * briSun;
+        }
         
 
 

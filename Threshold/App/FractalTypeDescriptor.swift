@@ -125,6 +125,7 @@ extension FractalTypeDescriptor {
 enum FractalTypeRegistry {
     private static let allDescriptors: [any FractalTypeDescriptor] = [
         MandelboxDescriptor(),
+        MandelboxSphereProjectionDescriptor(),
         MandelbulbDescriptor(),
         MengerDescriptor(),
         MandelbulbJuliaDescriptor(),
@@ -173,6 +174,29 @@ private struct MandelboxDescriptor: FractalTypeDescriptor {
     func defaultFormulaParams() -> FormulaParams {
         var fp = Self.baseFormulaParams()
         fp.params.0 = 0.8; fp.params.1 = 1.0; fp.params.2 = 0.5
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+}
+
+private struct MandelboxSphereProjectionDescriptor: FractalTypeDescriptor {
+    let rawValue: Int32 = 21
+    let displayName = "Mandelbox Sphere Projection"
+    let icon = "globe.asia.australia"
+    let category = "Box Folds"
+    let codableString = "mandelboxSphereProjection"
+    let isSelectableInUI = true
+    let supportedCoreGestureActions = standardCoreGestureActions
+    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
+    var defaultColorScheme: ColorScheme? { .rainbow }
+    func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        fp.params.0 = 0.8   // Min Distance
+        fp.params.1 = 1.0   // Folding Limit
+        fp.params.2 = 0.5   // Sphere Radius
+        fp.params.3 = 2.8   // Scale
+        fp.params.4 = 1.0   // Projection Blend
+        fp.params.5 = 1.0   // Projection Radius
         FormulaCatalog.normalizeRotationFlags(&fp)
         return fp
     }

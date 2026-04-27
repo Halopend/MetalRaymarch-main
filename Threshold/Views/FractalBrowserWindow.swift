@@ -252,6 +252,12 @@ enum FractalBrowserCatalog {
                             targetFractalScale: 2.5
                         )
                     ]
+                ),
+                FractalTypeBrowserInfo(
+                    type: .mandelboxSphereProjection,
+                    subtitle: "Mandelbox with post-fold spherical projection",
+                    historicalInfo: "A production accident yielded a compelling sphere-projected Mandelbox silhouette; this variant keeps that behavior as a controllable formula.",
+                    variants: []
                 )
             ]
         ),
@@ -512,6 +518,8 @@ struct FractalBrowserWindow: View {
         switch type {
         case .mandelbox:
             return "p_{n+1} = scale * boxFold(sphereFold(p_n)) + c"
+        case .mandelboxSphereProjection:
+            return "p_{n+1} = scale * projSphere(boxFold(sphereFold(p_n))) + c"
         case .mandelbulb:
             return "z_{n+1} = z_n^p + c"
         case .mandelbulbJulia:

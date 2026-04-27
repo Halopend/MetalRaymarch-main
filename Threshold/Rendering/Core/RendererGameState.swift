@@ -33,12 +33,23 @@ extension Renderer {
         let translationMatrix = matrix4x4_translation(smoothedPosition.x, smoothedPosition.y, smoothedPosition.z)
         // Combine base scale with detail scale factor (from grab gesture)
         let effectiveScale = smoothedScale * settingsSnapshot.detailScale
-        let traceScale = max(effectiveScale, 0.15)
-        let targetMaxViewDistance = min(80.0, RenderSettings.maxViewDistance / traceScale)
+        let isKleinianFamily =
+            settingsSnapshot.fractalType == .kleinian ||
+            settingsSnapshot.fractalType == .theliPseudoKleinian
+
+        // Kleinian formulas benefit from a larger trace horizon when zooming out;
+        // otherwise they look artificially bounded and fade away too early.
+        let traceScaleFloor: Float = isKleinianFamily ? 0.02 : 0.15
+        let traceScale = max(effectiveScale, traceScaleFloor)
+        let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
+        let baseViewDistance: Float = isKleinianFamily
+            ? (RenderSettings.maxViewDistance * 2.0)
+            : RenderSettings.maxViewDistance
+        let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / traceScale)
         let maxViewDistanceSpeed: Float = (targetMaxViewDistance > smoothedMaxViewDistance) ? 30.0 : 10.0
         let maxViewDistanceBlend = 1.0 - exp(-maxViewDistanceSpeed * cachedDeltaTime)
         smoothedMaxViewDistance += (targetMaxViewDistance - smoothedMaxViewDistance) * maxViewDistanceBlend
-        let maxViewDistance = max(4.0, min(80.0, smoothedMaxViewDistance))
+        let maxViewDistance = max(4.0, min(maxViewDistanceCap, smoothedMaxViewDistance))
         let scaleMatrix = matrix4x4_scale(effectiveScale, effectiveScale, effectiveScale)
 
         let modelMatrix = translationMatrix * combinedRotationMatrix * scaleMatrix
@@ -77,7 +88,17 @@ extension Renderer {
             beatIntensity: settingsSnapshot.beatIntensity
         )
         let precomputedAudio = Self.makePrecomputedAudio(from: settingsSnapshot)
-        let precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)
+        var precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)
+        if isKleinianFamily {
+            // Keep atmospheric depth while avoiding distant wash-out during deep zoom-out.
+            let baseFog = precomputedFog.fog.x
+            if baseFog > 1e-6 {
+                let fogScale = min(1.0, max(0.08, traceScale / 0.15))
+                let fogIntensity = baseFog * fogScale
+                let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
+                precomputedFog = PrecomputedFog(fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0))
+            }
+        }
 
         // Hoist lightingWave out of per-eye loop — sin() is identical for both eyes
         let baseColorMix = settingsSnapshot.colorMix

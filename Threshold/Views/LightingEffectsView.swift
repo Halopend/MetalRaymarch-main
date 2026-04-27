@@ -138,6 +138,50 @@ struct LightingEffectsSection: View {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(Color.orange.opacity(0.2), lineWidth: 1)
             )
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Cel Shading", systemImage: "circle.grid.cross.fill")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { cache.color.cellShadingEnabled },
+                        set: { value in
+                            cache.color.cellShadingEnabled = value
+                            cache.push(\.cellShadingEnabled, value: value)
+                        }
+                    ))
+                    .labelsHidden()
+                    .scaleEffect(0.8)
+                }
+
+                if cache.color.cellShadingEnabled {
+                    HStack {
+                        Text("Bands")
+                        Spacer()
+                        Text("\(Int(cache.color.cellShadingLevels.rounded()))")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(value: Binding(
+                        get: { cache.color.cellShadingLevels },
+                        set: { cache.color.cellShadingLevels = $0 }
+                    ), in: 2...8, step: 1, onEditingChanged: { editing in
+                        if !editing {
+                            cache.push(\.cellShadingLevels, value: cache.color.cellShadingLevels)
+                        }
+                    })
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(cache.color.cellShadingEnabled ? Color.indigo.opacity(0.1) : Color.gray.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(cache.color.cellShadingEnabled ? Color.indigo.opacity(0.3) : Color.clear, lineWidth: 1)
+            )
             
             Divider()
             

@@ -74,6 +74,7 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeTheliPseudoKleinian = 15,
     FractalTypeKleinian              = 17,
     FractalTypeBoxSphereFolder         = 20,
+    FractalTypeMandelboxSphereProjection = 21,
 };
 
 // === FORMULA PARAMETERS ===
@@ -109,6 +110,10 @@ typedef struct
     float colorCurve;                 // Midtone curve adjustment
     float shadows;                    // Shadow adjustment
     float highlights;                 // Highlight adjustment
+    int cellShadingEnabled;           // 0 = smooth lighting, 1 = quantized diffuse bands
+    float cellShadingLevels;          // Number of lighting bands (2-8)
+    float cellEdgeStrength;           // Reserved for outline/rim strength
+    float _cellPad;                   // Alignment padding
     
     // Neon mode parameters (HSV-based orbit trap coloring)
     float neonIntensity;              // 0 = off, 1 = full neon mode

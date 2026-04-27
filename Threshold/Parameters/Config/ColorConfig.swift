@@ -24,6 +24,8 @@ struct ColorConfig: Codable, Equatable, Sendable {
     var colorSchemeShadows: Float = -0.018 // -0.05 - 0.05
     var colorSchemeHighlights: Float = 0.02 // -0.5 - 1.0
     var lightingSoftness: Float = 0.5      // 0.0 - 1.0
+    var cellShadingEnabled: Bool = false
+    var cellShadingLevels: Float = 4.0     // 2.0 - 8.0
 
     // Auto-transition
     var colorSchemeAutoTransition: Bool = false
@@ -42,6 +44,7 @@ struct ColorConfig: Codable, Equatable, Sendable {
         colorSchemeShadows = max(-0.05, min(0.05, colorSchemeShadows))
         colorSchemeHighlights = max(-0.5, min(1.0, colorSchemeHighlights))
         lightingSoftness = max(0.0, min(1.0, lightingSoftness))
+        cellShadingLevels = max(2.0, min(8.0, cellShadingLevels))
         colorSchemeAutoInterval = max(5.0, min(120.0, colorSchemeAutoInterval))
         colorSchemeTransitionDuration = max(0.1, min(10.0, colorSchemeTransitionDuration))
     }

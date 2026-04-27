@@ -23,6 +23,12 @@ struct FramePhaseBreakdown {
 
 extension Renderer {
     func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {
+        // Resolution scaling is currently implemented only on the fragment path via MetalFX.
+        // If scale < native, force fragment rendering so the user's resolution budget applies.
+        if settingsSnapshot.resolutionScale < 0.999 {
+            return .fragment(useQuadShared: settingsSnapshot.tileSize == 2)
+        }
+
         if settingsSnapshot.prefersAdaptiveComputePath,
            adaptiveHierarchicalPipeline8x8 != nil {
             return .adaptiveCompute
@@ -477,12 +483,25 @@ extension Renderer {
             params.aspectCorrection = textureAspect / viewportAspect
         }
 
+        // Preserve compositor foveation mapping in resolve passes; without this,
+        // viewport-space sampling can appear zoomed/cropped per eye.
+        let resolveRateMap: MTLRasterizationRateMap? = {
+            guard let map = drawable.rasterizationRateMaps.first else { return nil }
+            let physical = map.physicalSize(layer: 0)
+            let colorTex = drawable.colorTextures[0]
+            guard physical.width == colorTex.width, physical.height == colorTex.height else {
+                return nil
+            }
+            return map
+        }()
+
         let colorPassDescriptor = MTLRenderPassDescriptor()
         colorPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
         colorPassDescriptor.colorAttachments[0].loadAction = .clear
         colorPassDescriptor.colorAttachments[0].storeAction = .store
         colorPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
         colorPassDescriptor.renderTargetArrayLength = canUseArrayRouting ? drawable.views.count : 1
+        colorPassDescriptor.rasterizationRateMap = resolveRateMap
 
         guard let colorEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: colorPassDescriptor) else {
             blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
@@ -506,6 +525,7 @@ extension Renderer {
         depthPassDescriptor.depthAttachment.storeAction = .store
         depthPassDescriptor.depthAttachment.clearDepth = 1.0
         depthPassDescriptor.renderTargetArrayLength = canUseArrayRouting ? drawable.views.count : 1
+        depthPassDescriptor.rasterizationRateMap = resolveRateMap
 
         guard let depthEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: depthPassDescriptor) else {
             return
