@@ -37,6 +37,7 @@ final class GestureController {
     private let twoHandScalarEngine = TwoHandScalarGestureEngine()
     private let twoPointGrabEngine = TwoPointGrabEngine()
     private let singleHandDragEngine = SingleHandDragEngine()
+    private var windowPullState = WindowPullGestureState()
 
     // ==========================================================================
     // PER-FRACTAL PARAMETER RANGES  (cached from FractalTypeDescriptor)
@@ -120,6 +121,7 @@ final class GestureController {
     // Gesture callbacks
     var onMenuToggle: (() -> Void)?
     var onAnimationPlayerToggle: (() -> Void)?
+    var onMenuWindowPullTowardUser: (() -> Void)?
     
     // Reference to render settings
     private weak var renderSettings: RenderSettings?
@@ -150,6 +152,7 @@ final class GestureController {
         singleHandDragEngine.reset(accumulatedPosition: settings.effectiveTargetPosition)
         menuToggleEngine.reset()
         animationPlayerToggleEngine.reset()
+        windowPullState = WindowPullGestureState()
     }
     
     /// Apply default parameter values for the current fractal type.
@@ -212,6 +215,8 @@ final class GestureController {
                 onAnimationPlayerToggle?()
             }
         }
+
+        processWindowPullGesture(deltaTime: deltaTime)
     }
     
     @available(visionOS 2.0, *)
@@ -375,6 +380,53 @@ final class GestureController {
         } else {
             menuToggleEngine.state.isActive = false
             menuToggleEngine.state.holdTimer = 0
+        }
+    }
+
+    private func processWindowPullGesture(deltaTime: Float) {
+        guard let settings = renderSettings else { return }
+
+        if windowPullState.cooldown > 0 {
+            windowPullState.cooldown = max(0, windowPullState.cooldown - deltaTime)
+        }
+
+        guard rightHand.isTracked,
+              simd_length_squared(rightHand.palmPosition) > 1e-6 else {
+            windowPullState = WindowPullGestureState(cooldown: windowPullState.cooldown)
+            return
+        }
+
+        let poseStrength = min(rightHand.middleFingerTouchingPalm(), rightHand.ringFingerTouchingPalm())
+        let activateThreshold = max(0.55, settings.menuToggleActivateThreshold)
+        let releaseThreshold = max(0.20, min(settings.menuToggleReleaseThreshold, activateThreshold - 0.10))
+        let poseActive = windowPullState.isActive
+            ? poseStrength >= releaseThreshold
+            : poseStrength >= activateThreshold
+
+        guard poseActive else {
+            windowPullState.isActive = false
+            windowPullState.startPalmPosition = .zero
+            windowPullState.hasTriggered = false
+            return
+        }
+
+        if !windowPullState.isActive {
+            windowPullState.isActive = true
+            windowPullState.startPalmPosition = rightHand.palmPosition
+            windowPullState.hasTriggered = false
+            return
+        }
+
+        guard windowPullState.cooldown <= 0,
+              !windowPullState.hasTriggered else { return }
+
+        let delta = rightHand.palmPosition - windowPullState.startPalmPosition
+        let pullTowardUser = delta.z
+        let lateralDrift = hypot(delta.x, delta.y)
+        if pullTowardUser >= 0.08, pullTowardUser > lateralDrift * 0.75 {
+            windowPullState.hasTriggered = true
+            windowPullState.cooldown = 0.8
+            onMenuWindowPullTowardUser?()
         }
     }
     

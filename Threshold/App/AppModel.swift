@@ -250,6 +250,9 @@ class AppModel {
             print("🎬 onAnimationPlayerToggle callback fired!")
             self?.toggleAnimationPlayerWindow()
         }
+        gestureController?.onMenuWindowPullTowardUser = { [weak self] in
+            self?.pullMenuWindowTowardUser()
+        }
 
         refreshMenuInteractionState()
         
@@ -280,6 +283,9 @@ class AppModel {
     /// Callback to dismiss the menu window (set by App scene)
     var dismissMenuWindowHandler: (() -> Void)?
 
+    /// Callback to pull the menu window forward toward the user (set by App scene)
+    var pullMenuWindowTowardUserHandler: (() -> Void)?
+
     /// Callback to open the animation player window (set by App scene)
     var openAnimationPlayerWindowHandler: (() -> Void)?
 
@@ -298,6 +304,16 @@ class AppModel {
             print("📋 Menu window opened")
         }
         refreshMenuInteractionState()
+    }
+
+    func pullMenuWindowTowardUser() {
+        if !isMenuWindowVisible {
+            isMenuWindowVisible = true
+            openMenuWindowHandler?()
+        }
+        pullMenuWindowTowardUserHandler?()
+        refreshMenuInteractionState()
+        print("📋 Menu window pulled toward user")
     }
 
     /// Dismiss the menu window and clear any lingering interaction state.

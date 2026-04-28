@@ -36,3 +36,10 @@ struct SingleHandDragEngineState {
     var perSlot: [String: SingleHandDragPerSlotState] = [:]
     var accumulatedPosition: SIMD3<Float> = .zero
 }
+
+struct WindowPullGestureState {
+    var isActive: Bool = false
+    var startPalmPosition: SIMD3<Float> = .zero
+    var hasTriggered: Bool = false
+    var cooldown: Float = 0
+}

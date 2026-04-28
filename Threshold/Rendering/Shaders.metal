@@ -2845,14 +2845,14 @@ struct DepthOutput {
     float depth [[depth(any)]];
 };
 
-// Stereo depth upscale fragment shader
-// Use BILINEAR filtering for depth to reduce shimmer during ASW reprojection.
-// While nearest preserves exact depth discontinuities, bilinear provides
-// smoother depth gradients that ASW can interpolate more accurately.
+// Stereo depth resolve fragment shader.
+// Preserve low-res depth discontinuities instead of averaging foreground and
+// background depths. Blended depth edges make compositor reprojection treat
+// projected surfaces as flatter than the color stereo pair suggests.
 fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[stage_in]],
                                                  depth2d_array<float> sourceTexture [[texture(0)]],
                                                  constant FormatConversionParams& params [[buffer(0)]]) {
-    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest,
                                       address::clamp_to_edge);
     
     DepthOutput out;
@@ -2868,7 +2868,7 @@ fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[s
 fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
                                           depth2d<float> sourceTexture [[texture(0)]],
                                           constant FormatConversionParams& params [[buffer(0)]]) {
-    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear, 
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest,
                                       address::clamp_to_edge);
     
     DepthOutput out;

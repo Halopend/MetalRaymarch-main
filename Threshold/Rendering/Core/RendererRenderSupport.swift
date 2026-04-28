@@ -103,8 +103,10 @@ extension Renderer {
 
     /// Select a drawable from `frame.queryDrawables()`.
     ///
-    /// CompositorServices may return multiple drawables per frame. Without an explicit
-    /// dynamic quality controller, we select the default (lowest-resolution) candidate.
+    /// CompositorServices may return multiple drawables per frame. Use the highest
+    /// resolution candidate here and let the app's own resolutionScale control
+    /// low-res rendering. Picking the smallest drawable first double-dips quality
+    /// loss before MetalFX ever sees the image.
     func selectDrawable(from drawables: [LayerRenderer.Drawable]) -> LayerRenderer.Drawable? {
         guard !drawables.isEmpty else { return nil }
         if drawables.count == 1 { return drawables[0] }
@@ -135,7 +137,7 @@ extension Renderer {
         var bestIndex = 0
         var bestArea = candidates[0].area
         for (index, candidate) in candidates.enumerated() {
-            if candidate.area < bestArea {
+            if candidate.area > bestArea {
                 bestArea = candidate.area
                 bestIndex = index
             }
@@ -475,13 +477,11 @@ extension Renderer {
             }
         }
 
+        // The resolve viewport and rasterization-rate map already define the
+        // drawable-space mapping. Applying a second UV aspect correction here
+        // squeezes each eye horizontally on some compositor layouts, softening
+        // stereo disparity and making the scene feel flatter.
         var params = MetalFXResolveParams()
-        if let firstView = drawable.views.first {
-            let vp = firstView.textureMap.viewport
-            let viewportAspect = Float(max(1.0, vp.width) / max(1.0, vp.height))
-            let textureAspect = Float(max(1, outputTexture.width)) / Float(max(1, outputTexture.height))
-            params.aspectCorrection = textureAspect / viewportAspect
-        }
 
         // Preserve compositor foveation mapping in resolve passes; without this,
         // viewport-space sampling can appear zoomed/cropped per eye.
