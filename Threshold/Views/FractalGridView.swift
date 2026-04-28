@@ -23,7 +23,6 @@ struct FractalGridView: View {
     let gestureController: GestureController?
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
-    var activitySummary: AnyView? = nil
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
@@ -96,11 +95,6 @@ struct FractalGridView: View {
                                 current: cache.fractalType.displayName,
                                 accentColor: .pink
                             )
-
-                            if let activitySummary {
-                                activitySummary
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
 
                             LazyVGrid(columns: columns, spacing: 12) {
                                 ForEach(orderedTypes, id: \.self) { type in

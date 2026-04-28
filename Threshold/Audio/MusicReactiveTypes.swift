@@ -34,12 +34,15 @@ enum ResponseCurve: String, CaseIterable, Codable, Sendable {
     /// Heavily smoothed, slow-moving modulation — ideal for color drift.
     /// Audio energy causes a gentle, lagging offset from the base.
     case drift
+    /// Blends beat pulse with slow drift for punch + movement at the same time.
+    case hybrid
 
     var displayName: String {
         switch self {
         case .sinusoidal: return "Wave"
         case .pulse:      return "Pulse"
         case .drift:      return "Drift"
+        case .hybrid:     return "Hybrid"
         }
     }
 
@@ -48,6 +51,7 @@ enum ResponseCurve: String, CaseIterable, Codable, Sendable {
         case .sinusoidal: return "waveform.path"
         case .pulse:      return "bolt.fill"
         case .drift:      return "wind"
+        case .hybrid:     return "point.topleft.down.curvedto.point.bottomright.up"
         }
     }
 }

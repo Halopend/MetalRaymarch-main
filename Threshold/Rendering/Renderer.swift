@@ -909,6 +909,24 @@ actor Renderer {
                         drifted += (target - drifted) * min(1.0, dt / driftRate)
                         musicReactiveDriftByTarget[mapping.target] = drifted
                         delta = drifted
+
+                    case .hybrid:
+                        // Blend a beat punch with slower drift for "both at once" feel.
+                        let attack = sourceValue * sourceValue
+                        var decay = musicReactiveDecayByTarget[mapping.target] ?? 0
+                        decay = max(attack, decay * exp(-6.0 * dt))
+                        musicReactiveDecayByTarget[mapping.target] = decay
+                        let pulseDelta = decay * maxDeviation * sign
+
+                        let target = sourceValue * maxDeviation * sign
+                        var drifted = musicReactiveDriftByTarget[mapping.target] ?? 0
+                        let driftRate: Float = 2.0
+                        drifted += (target - drifted) * min(1.0, dt / driftRate)
+                        musicReactiveDriftByTarget[mapping.target] = drifted
+
+                        let combined = pulseDelta * 0.7 + drifted * 0.5
+                        let limit = maxDeviation * 1.25
+                        delta = max(-limit, min(limit, combined))
                     }
 
                     // ── 5. Optional LFO overlay ──

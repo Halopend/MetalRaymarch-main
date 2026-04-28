@@ -36,7 +36,7 @@ enum SidebarTab: String, CaseIterable {
     }
 }
 
-enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", quality = "Quality" }
+enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", render = "Render" }
 enum AnimateSceneSubTab: String, CaseIterable {
     case all = "All"
     case accompanied = "Accompanied"
@@ -338,13 +338,22 @@ struct ContentView: View {
                 toggleAnimationPlayerWindow()
             } label: {
                 VStack(spacing: 4) {
-                    Image(systemName: appModel.isAnimationPlayerWindowVisible ? "xmark.rectangle.fill" : "play.rectangle")
-                        .font(.system(size: 18))
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: appModel.isAnimationPlayerWindowVisible ? "xmark.rectangle.fill" : "play.rectangle")
+                            .font(.system(size: 18))
+
+                        if isAnimationPlaying {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 15, height: 15)
+                                .background(Circle().fill(Color.green))
+                                .offset(x: 9, y: -7)
+                                .accessibilityHidden(true)
+                        }
+                    }
                     Text("Player")
                         .font(.caption2)
-                    Text(appModel.isAnimationPlayerWindowVisible ? "Close" : "Open")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
                 .frame(width: 64, height: 54)
                 .background(
@@ -363,14 +372,6 @@ struct ContentView: View {
     @ViewBuilder
     private func sidebarBadge(for tab: SidebarTab) -> some View {
         switch tab {
-        case .animate where isAnimationPlaying:
-            Image(systemName: "play.fill")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 15, height: 15)
-                .background(Circle().fill(Color.green))
-                .offset(x: 9, y: -7)
-                .accessibilityHidden(true)
         case .effects where activeDynamicEffectCount > 0:
             sidebarCountBadge(activeDynamicEffectCount, color: .pink)
         case .music where activeMusicPermutationCount > 0:
@@ -394,8 +395,6 @@ struct ContentView: View {
 
     private func sidebarAccessibilityValue(for tab: SidebarTab) -> String {
         switch tab {
-        case .animate where isAnimationPlaying:
-            return "animation playing"
         case .effects where activeDynamicEffectCount > 0:
             return "\(activeDynamicEffectCount) dynamic effects active"
         case .music where activeMusicPermutationCount > 0:
@@ -430,31 +429,37 @@ struct ContentView: View {
     
     private var bottomBar: some View {
         ZStack {
-            HStack(spacing: 10) {
-                Spacer()
+            HStack(spacing: 12) {
+                activityTrafficLights
 
-                PresetButton(
-                    presetManager: appModel.presetManager,
-                    settings: appModel.renderSettings,
-                    animationManager: appModel.animationManager,
-                    captureScreenshot: { await appModel.captureScreenshot() },
-                    onLoadPreset: { preset in
-                        Task { await appModel.preparePipelineHandler?(preset) }
-                        preset.apply(to: appModel.renderSettings)
-                        appModel.gestureController?.syncWithSettings()
-                        cache.loadFromSettings()
-                    }
-                )
+                Spacer(minLength: 24)
 
-                HoldToSaveResetButton(
-                    onTapReset: resetCurrentFractalSettings,
-                    onHoldReady: {
-                        showSaveDestinationSheet = true
-                    }
-                )
+                HStack(spacing: 10) {
+                    PresetButton(
+                        presetManager: appModel.presetManager,
+                        settings: appModel.renderSettings,
+                        animationManager: appModel.animationManager,
+                        captureScreenshot: { await appModel.captureScreenshot() },
+                        onLoadPreset: { preset in
+                            Task { await appModel.preparePipelineHandler?(preset) }
+                            preset.apply(to: appModel.renderSettings)
+                            appModel.gestureController?.syncWithSettings()
+                            cache.loadFromSettings()
+                        }
+                    )
+
+                    HoldToSaveResetButton(
+                        onTapReset: resetCurrentFractalSettings,
+                        onHoldReady: {
+                            showSaveDestinationSheet = true
+                        }
+                    )
+                }
             }
 
             ToggleImmersiveSpaceButton()
+                .fixedSize()
+                .offset(x: -100)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -583,7 +588,6 @@ struct ContentView: View {
                     gestureController: appModel.gestureController,
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
-                    activitySummary: AnyView(activityTrafficLights),
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in
                         appModel.dismissMenuWindowForSceneLoad()
@@ -615,7 +619,7 @@ struct ContentView: View {
                         .padding(.vertical, 8)
                 }
 
-            case .quality:
+            case .render:
                 ScrollView(.vertical, showsIndicators: true) {
                     fractalQualityContent
                         .padding(.horizontal, 16)
@@ -2721,6 +2725,7 @@ private struct ActivityLightButton: View {
     let isActive: Bool
     let count: Int?
     let action: () -> Void
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
@@ -2738,8 +2743,15 @@ private struct ActivityLightButton: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(Capsule().fill((isActive ? color : Color.secondary).opacity(isActive ? 0.14 : 0.08)))
-                .overlay(Capsule().strokeBorder((isActive ? color : Color.secondary).opacity(isActive ? 0.34 : 0.12), lineWidth: 1))
+                .background(
+                    Capsule()
+                        .fill((isActive ? color : Color.secondary).opacity(isHovering ? 0.2 : (isActive ? 0.14 : 0.08)))
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder((isActive ? color : Color.secondary).opacity(isHovering ? 0.55 : (isActive ? 0.34 : 0.12)), lineWidth: 1)
+                )
+                .scaleEffect(isHovering ? 1.06 : 1.0)
 
                 if let count {
                     Text("\(count)")
@@ -2754,6 +2766,12 @@ private struct ActivityLightButton: View {
             }
         }
         .buttonStyle(.plain)
+        .hoverEffect()
+        .onHover { hovering in
+            withAnimation(.snappy(duration: 0.18, extraBounce: 0.05)) {
+                isHovering = hovering
+            }
+        }
         .help("\(title): \(isActive ? "On" : "Off")")
         .accessibilityLabel(title)
         .accessibilityValue(isActive ? "On" : "Off")
