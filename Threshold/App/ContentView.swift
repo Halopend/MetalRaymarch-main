@@ -43,7 +43,7 @@ enum AnimateSceneSubTab: String, CaseIterable {
     case solo = "Solo"
 }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
-enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic", `static` = "Static", audio = "Audio" }
+enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere", audio = "Audio" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
 
 private enum SaveChoice: String, CaseIterable {
@@ -122,6 +122,26 @@ struct ContentView: View {
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
+
+    private var activeMusicPermutationCount: Int {
+        guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
+        return cache.audioReactive.musicReactiveMappings.filter(\.isEnabled).count
+    }
+
+    private var isAnimationPlaying: Bool {
+        appModel.animationManager?.isPlaying ?? appModel.renderSettings.isAnimationPlaying
+    }
+
+    private var activeDynamicEffectCount: Int {
+        var count = 0
+        if cache.lighting.gradientCycleEffect.enabled { count += 1 }
+        if cache.lighting.hueRotationEffect.enabled { count += 1 }
+        if cache.lighting.pulseEffect.enabled { count += 1 }
+        if cache.lighting.beatFlashEffect.enabled { count += 1 }
+        if cache.fractalType.supports(.polarRotation), cache.lighting.polarRotationEffect.enabled { count += 1 }
+        if cache.fractalType.supports(.juliaDrift), cache.lighting.juliaDriftEffect.enabled { count += 1 }
+        return count
+    }
 
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
@@ -290,8 +310,12 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedTab = tab }
                 } label: {
                     VStack(spacing: 4) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 18))
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 18))
+                                .frame(width: 28, height: 22)
+                            sidebarBadge(for: tab)
+                        }
                         Text(tab.rawValue)
                             .font(.caption2)
                     }
@@ -304,6 +328,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.rawValue)
+                .accessibilityValue(sidebarAccessibilityValue(for: tab))
                 .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }
 
@@ -333,6 +358,51 @@ struct ContentView: View {
         }
         .padding(.vertical, 8)
         .frame(width: 72)
+    }
+
+    @ViewBuilder
+    private func sidebarBadge(for tab: SidebarTab) -> some View {
+        switch tab {
+        case .animate where isAnimationPlaying:
+            Image(systemName: "play.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 15, height: 15)
+                .background(Circle().fill(Color.green))
+                .offset(x: 9, y: -7)
+                .accessibilityHidden(true)
+        case .effects where activeDynamicEffectCount > 0:
+            sidebarCountBadge(activeDynamicEffectCount, color: .pink)
+        case .music where activeMusicPermutationCount > 0:
+            sidebarCountBadge(activeMusicPermutationCount, color: .green)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func sidebarCountBadge(_ count: Int, color: Color) -> some View {
+        Text("\(count)")
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .frame(minWidth: 15, minHeight: 15)
+            .padding(.horizontal, 2)
+            .background(Capsule().fill(color))
+            .offset(x: 9, y: -7)
+            .accessibilityHidden(true)
+    }
+
+    private func sidebarAccessibilityValue(for tab: SidebarTab) -> String {
+        switch tab {
+        case .animate where isAnimationPlaying:
+            return "animation playing"
+        case .effects where activeDynamicEffectCount > 0:
+            return "\(activeDynamicEffectCount) dynamic effects active"
+        case .music where activeMusicPermutationCount > 0:
+            return "\(activeMusicPermutationCount) music permutations active"
+        default:
+            return ""
+        }
     }
     
     // MARK: - Content Panel
@@ -389,6 +459,109 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
+
+    private var activityTrafficLights: some View {
+        HStack(spacing: 6) {
+            ActivityLightButton(
+                title: "Music permutations",
+                systemImage: "waveform",
+                color: .green,
+                isActive: activeMusicPermutationCount > 0,
+                count: activeMusicPermutationCount > 0 ? activeMusicPermutationCount : nil,
+                action: toggleMusicPermutationsActive
+            )
+            ActivityLightButton(
+                title: "Animation",
+                systemImage: "play.fill",
+                color: .blue,
+                isActive: isAnimationPlaying,
+                count: nil,
+                action: toggleAnimationPlaybackActive
+            )
+            ActivityLightButton(
+                title: "Dynamic color",
+                systemImage: "sparkles",
+                color: .pink,
+                isActive: activeDynamicEffectCount > 0,
+                count: activeDynamicEffectCount > 0 ? activeDynamicEffectCount : nil,
+                action: toggleDynamicEffectsActive
+            )
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.secondary.opacity(0.08)))
+        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1))
+        .help("Quick toggles for music permutations, animation, and dynamic color")
+    }
+
+    private func toggleMusicPermutationsActive() {
+        let shouldEnable = activeMusicPermutationCount == 0
+        cache.audioReactive.fractalAudioReactiveEnabled = shouldEnable
+        cache.push(\.fractalAudioReactiveEnabled, value: shouldEnable)
+
+        if shouldEnable {
+            cache.display.lightingMode = .audioReactive
+            cache.push(\.lightingMode, value: .audioReactive)
+            if cache.audioReactive.musicReactiveMappings.isEmpty {
+                applyAudioReactivityPreset(.ambient)
+            } else if !cache.audioReactive.musicReactiveMappings.contains(where: \.isEnabled) {
+                var mappings = cache.audioReactive.musicReactiveMappings
+                for index in mappings.indices {
+                    mappings[index].isEnabled = true
+                    mappings[index].sanitizeInPlace()
+                }
+                cache.audioReactive.musicReactiveMappings = mappings
+                cache.push(\.musicReactiveMappings, value: mappings)
+            }
+        }
+    }
+
+    private func toggleAnimationPlaybackActive() {
+        guard let animationManager = appModel.animationManager else { return }
+        if isAnimationPlaying {
+            animationManager.stop()
+            return
+        }
+
+        if animationManager.currentScene?.keyframes.count ?? 0 < 2 {
+            animationManager.currentScene = animationManager.scenes.first { $0.keyframes.count >= 2 }
+        }
+        animationManager.play()
+    }
+
+    private func toggleDynamicEffectsActive() {
+        if activeDynamicEffectCount > 0 {
+            cache.lighting.gradientCycleEffect.enabled = false
+            cache.commitGradientCycleEffect()
+
+            cache.lighting.hueRotationEffect.enabled = false
+            cache.commitHueRotationEffect()
+
+            cache.lighting.pulseEffect.enabled = false
+            cache.commitPulseEffect()
+
+            cache.lighting.beatFlashEffect.enabled = false
+            cache.commitBeatFlashEffect()
+
+            cache.lighting.polarRotationEffect.direction = .off
+            cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
+
+            cache.lighting.juliaDriftEffect.enabled = false
+            cache.commitJuliaDriftEffect()
+        } else {
+            cache.lighting.gradientCycleEffect = .slow
+            cache.commitGradientCycleEffect()
+
+            cache.lighting.hueRotationEffect = .subtle
+            cache.commitHueRotationEffect()
+
+            cache.lighting.pulseEffect = .subtle
+            cache.commitPulseEffect()
+        }
+
+        cache.lighting.lightingPreset = .custom
+        cache.push(\.lightingPreset, value: .custom)
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Fractal Tab
@@ -410,6 +583,7 @@ struct ContentView: View {
                     gestureController: appModel.gestureController,
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
+                    activitySummary: AnyView(activityTrafficLights),
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in
                         appModel.dismissMenuWindowForSceneLoad()
@@ -1445,44 +1619,13 @@ struct ContentView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
             
-            // ── Lighting Presets (collapsible) ──
-            DisclosureGroup(isExpanded: $showLightingPresets) {
-                VStack(spacing: 10) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(LightingPreset.allCases, id: \.self) { preset in
-                                PresetCardButton(preset: preset, isSelected: cache.lighting.lightingPreset == preset) {
-                                    cache.lighting.lightingPreset = preset
-                                    cache.push(\.lightingPreset, value: preset)
-                                    cache.reloadLightingEffects()
-                                }
-                            }
-                        }.padding(.horizontal, 4)
-                    }
-                    Text("Current: \(cache.lighting.lightingPreset.displayName)")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.blue)
-                        .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.blue.opacity(0.12)))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if cache.lighting.lightingPreset != .custom {
-                        Text(cache.lighting.lightingPreset.description).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.top, 8)
-            } label: {
-                Label("Lighting Presets", systemImage: "sparkles")
-                    .font(.subheadline.weight(.medium))
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
         }
     }
     
     private var effectsDynamicContent: some View {
         VStack(spacing: 12) {
+            dynamicPresetDisclosure
+
             // ── Color Animation ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
@@ -1582,6 +1725,44 @@ struct ContentView: View {
         }
     }
 
+    private var dynamicPresetDisclosure: some View {
+        DisclosureGroup(isExpanded: $showLightingPresets) {
+            VStack(spacing: 10) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(LightingPreset.allCases, id: \.self) { preset in
+                            PresetCardButton(preset: preset, isSelected: cache.lighting.lightingPreset == preset) {
+                                cache.lighting.lightingPreset = preset
+                                cache.push(\.lightingPreset, value: preset)
+                                cache.reloadLightingEffects()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+                Text("Current: \(cache.lighting.lightingPreset.displayName)")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.blue)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.blue.opacity(0.12)))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if cache.lighting.lightingPreset != .custom {
+                    Text(cache.lighting.lightingPreset.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 8)
+        } label: {
+            Label("Dynamic Presets", systemImage: "sparkles")
+                .font(.subheadline.weight(.medium))
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
+    }
+
     private var effectsAudioContent: some View {
         VStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1631,11 +1812,12 @@ struct ContentView: View {
                 if cache.audioReactive.fractalAudioReactiveEnabled {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Active mappings")
+                            Text("Music permutations active")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                            Text("\(cache.audioReactive.musicReactiveMappings.count)")
+                            Text("\(activeMusicPermutationCount)")
                                 .font(.title3.weight(.semibold))
+                                .monospacedDigit()
                         }
 
                         Spacer()
@@ -2529,6 +2711,52 @@ private struct HoldToSaveResetButton: View {
             isPressing = false
             holdCompleted = false
         }
+    }
+}
+
+private struct ActivityLightButton: View {
+    let title: String
+    let systemImage: String
+    let color: Color
+    let isActive: Bool
+    let count: Int?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(isActive ? color : Color.secondary.opacity(0.35))
+                        .frame(width: 8, height: 8)
+                        .shadow(color: isActive ? color.opacity(0.65) : .clear, radius: 4)
+
+                    Image(systemName: systemImage)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isActive ? color : .secondary)
+                        .frame(width: 14, height: 14)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Capsule().fill((isActive ? color : Color.secondary).opacity(isActive ? 0.14 : 0.08)))
+                .overlay(Capsule().strokeBorder((isActive ? color : Color.secondary).opacity(isActive ? 0.34 : 0.12), lineWidth: 1))
+
+                if let count {
+                    Text("\(count)")
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 13, minHeight: 13)
+                        .padding(.horizontal, 1)
+                        .background(Capsule().fill(color))
+                        .offset(x: 5, y: -5)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help("\(title): \(isActive ? "On" : "Off")")
+        .accessibilityLabel(title)
+        .accessibilityValue(isActive ? "On" : "Off")
     }
 }
 

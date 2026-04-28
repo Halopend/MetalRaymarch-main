@@ -283,9 +283,6 @@ class AppModel {
     /// Callback to dismiss the menu window (set by App scene)
     var dismissMenuWindowHandler: (() -> Void)?
 
-    /// Callback to pull the menu window forward toward the user (set by App scene)
-    var pullMenuWindowTowardUserHandler: (() -> Void)?
-
     /// Callback to open the animation player window (set by App scene)
     var openAnimationPlayerWindowHandler: (() -> Void)?
 
@@ -307,11 +304,14 @@ class AppModel {
     }
 
     func pullMenuWindowTowardUser() {
-        if !isMenuWindowVisible {
-            isMenuWindowVisible = true
-            openMenuWindowHandler?()
+        guard !isMenuWindowVisible else {
+            refreshMenuInteractionState()
+            print("📋 Menu window already visible; pull gesture ignored")
+            return
         }
-        pullMenuWindowTowardUserHandler?()
+
+        isMenuWindowVisible = true
+        openMenuWindowHandler?()
         refreshMenuInteractionState()
         print("📋 Menu window pulled toward user")
     }

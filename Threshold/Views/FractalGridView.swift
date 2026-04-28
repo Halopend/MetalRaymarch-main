@@ -23,6 +23,7 @@ struct FractalGridView: View {
     let gestureController: GestureController?
     let animationManager: AnimationManager?
     let presetManager: PresetManager?
+    var activitySummary: AnyView? = nil
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
@@ -30,7 +31,7 @@ struct FractalGridView: View {
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
 
     private let columns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
-    private let sceneColumns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
+    private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
     private static let categoryOrder = ["Box Folds", "Power / Quaternion", "Hybrid Folds", "Kaleidoscopic IFS"]
 
     /// Formula types sorted by category order first, then display name.
@@ -96,6 +97,11 @@ struct FractalGridView: View {
                                 accentColor: .pink
                             )
 
+                            if let activitySummary {
+                                activitySummary
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
                             LazyVGrid(columns: columns, spacing: 12) {
                                 ForEach(orderedTypes, id: \.self) { type in
                                     FractalGridCell(
@@ -143,17 +149,6 @@ struct FractalGridView: View {
             )
 
             LazyVGrid(columns: sceneColumns, spacing: 12) {
-                sceneCard(
-                    title: "None",
-                    subtitle: "No scene selected",
-                    detail: "Animation playback is detached from scenes.",
-                    systemImage: "xmark.circle",
-                    isSelected: activeSelection == .none
-                ) {
-                    animationManager.clearCurrentSceneSelection()
-                    selectedStaticSceneID = nil
-                }
-
                 ForEach(animationManager.scenes) { scene in
                     sceneCard(
                         title: scene.name,
@@ -200,7 +195,7 @@ struct FractalGridView: View {
     private func currentSceneSelectionLabel(selection: FractalSceneSelection, animationManager: AnimationManager, staticScenePresets: [FractalPreset]) -> String {
         switch selection {
         case .none:
-            return "None"
+            return "Choose a scene"
         case .animation(let sceneID):
             return animationManager.scenes.first(where: { $0.id == sceneID })?.name
                 ?? animationManager.currentScene?.name
@@ -299,7 +294,7 @@ struct FractalGridView: View {
                         .foregroundStyle(.blue)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 116, maxHeight: 116, alignment: .leading)
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 12)

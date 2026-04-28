@@ -22,6 +22,11 @@ struct MusicTabContent: View {
 
     @State private var viewModel: MusicTabViewModel
 
+    private var activeMusicPermutationCount: Int {
+        guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
+        return cache.audioReactive.musicReactiveMappings.filter(\.isEnabled).count
+    }
+
     init(cache: UISettingsCache, musicService: MusicService, audioAnalyzer: AudioAnalyzer, renderSettings: RenderSettings) {
         self.cache = cache
         self.musicService = musicService
@@ -637,6 +642,20 @@ struct MusicTabContent: View {
                     }
                 }
             ))
+
+            HStack(spacing: 8) {
+                Label("Music permutations active", systemImage: activeMusicPermutationCount > 0 ? "waveform.badge.plus" : "waveform.badge.minus")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(activeMusicPermutationCount > 0 ? .green : .secondary)
+                Spacer()
+                Text("\(activeMusicPermutationCount)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(activeMusicPermutationCount > 0 ? .green : .secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill((activeMusicPermutationCount > 0 ? Color.green : Color.secondary).opacity(0.14)))
+            }
+            .accessibilityElement(children: .combine)
 
             Toggle("Show Music Shortcuts on Parameters", isOn: $cache.display.showMusicShortcuts)
                 .onChange(of: cache.display.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }

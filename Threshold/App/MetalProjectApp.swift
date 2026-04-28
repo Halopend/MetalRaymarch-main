@@ -48,7 +48,6 @@ struct MetalProjectTestApp: App {
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.pushWindow) private var pushWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some Scene {
@@ -72,13 +71,6 @@ struct MetalProjectTestApp: App {
                     // Set up handler to dismiss the menu window for real
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
-                    }
-                    appModel.pullMenuWindowTowardUserHandler = {
-                        if #available(visionOS 2.0, *) {
-                            pushWindow(id: appModel.menuWindowID)
-                        } else {
-                            openWindow(id: appModel.menuWindowID)
-                        }
                     }
                     // Animation Player window (gesture: right ring finger to palm)
                     appModel.openAnimationPlayerWindowHandler = {
