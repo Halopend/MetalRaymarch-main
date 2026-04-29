@@ -98,7 +98,7 @@ struct AnimationPlayerWindowView: View {
                 )
             }
         }
-        .frame(minWidth: 700, idealWidth: 700, minHeight: 180, idealHeight: 180)
+        .frame(minWidth: 700, idealWidth: 700, minHeight: 136, idealHeight: 150)
         .glassBackgroundEffect()
     }
 }
@@ -264,7 +264,8 @@ private struct AnimationPlayerContent: View {
         .onAppear {
             musicScrubFraction = appModel.musicService.progressFraction
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .sheet(item: $editingKeyframe) { keyframe in
             KeyframeEditorView(
                 keyframe: keyframe,
