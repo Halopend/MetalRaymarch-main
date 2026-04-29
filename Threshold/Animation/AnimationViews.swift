@@ -98,7 +98,7 @@ struct AnimationPlayerWindowView: View {
                 )
             }
         }
-        .frame(minWidth: 540, minHeight: 124)
+        .frame(minWidth: 700, idealWidth: 700, minHeight: 180, idealHeight: 180)
         .glassBackgroundEffect()
     }
 }
@@ -143,111 +143,115 @@ private struct AnimationPlayerContent: View {
                             .lineLimit(1)
                     }
                     .font(.subheadline)
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
-                if let timing, panelMode == .animation {
-                    Text(timing.progressText(for: animationManager.uiPlayhead, formatTime: formatTime))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+                Text(timing?.progressText(for: animationManager.uiPlayhead, formatTime: formatTime) ?? "0.0 / 0.0")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .opacity(panelMode == .animation && timing != nil ? 1 : 0)
+                    .frame(width: 92, alignment: .trailing)
 
                 headerMusicTransportControls
             }
 
-            if panelMode == .animation {
-                if let currentScene, let timing {
-                    KeyframeTimelineView(
-                        timing: timing,
-                        playhead: animationManager.uiPlayhead,
-                        onEditKeyframe: { keyframe in editingKeyframe = keyframe },
-                        onJumpToKeyframe: { index in animationManager.jumpToKeyframe(index) },
-                        onJumpToTime: { time in animationManager.jumpToTime(time) },
-                        onAddKeyframe: {
-                            animationManager.addKeyframeToScene(currentScene.id, duration: 2.0)
-                        },
-                        onDeleteKeyframe: { index in
-                            animationManager.removeKeyframe(at: index, from: currentScene.id)
-                        },
-                        onOverwriteKeyframe: { index in
-                            animationManager.overwriteKeyframe(at: index, in: currentScene.id)
-                        },
-                        onScrubBegin: {
-                            wasPlayingBeforeScrub = animationManager.isPlaying
-                            if animationManager.isPlaying { animationManager.pause() }
-                        },
-                        onScrubEnd: {
-                            if wasPlayingBeforeScrub { animationManager.play() }
+            Group {
+                if panelMode == .animation {
+                    if let currentScene, let timing {
+                        KeyframeTimelineView(
+                            timing: timing,
+                            playhead: animationManager.uiPlayhead,
+                            onEditKeyframe: { keyframe in editingKeyframe = keyframe },
+                            onJumpToKeyframe: { index in animationManager.jumpToKeyframe(index) },
+                            onJumpToTime: { time in animationManager.jumpToTime(time) },
+                            onAddKeyframe: {
+                                animationManager.addKeyframeToScene(currentScene.id, duration: 2.0)
+                            },
+                            onDeleteKeyframe: { index in
+                                animationManager.removeKeyframe(at: index, from: currentScene.id)
+                            },
+                            onOverwriteKeyframe: { index in
+                                animationManager.overwriteKeyframe(at: index, in: currentScene.id)
+                            },
+                            onScrubBegin: {
+                                wasPlayingBeforeScrub = animationManager.isPlaying
+                                if animationManager.isPlaying { animationManager.pause() }
+                            },
+                            onScrubEnd: {
+                                if wasPlayingBeforeScrub { animationManager.play() }
+                            }
+                        )
+                        .frame(height: 44)
+                    }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            if animationManager.isPlaying { animationManager.stop() }
+                            else { animationManager.jumpToKeyframe(0) }
+                        } label: {
+                            Image(systemName: "backward.end.fill")
                         }
-                    )
-                    .frame(height: 44)
-                }
+                        .disabled(animationManager.currentScene == nil)
 
-                HStack(spacing: 12) {
-                    Button {
-                        if animationManager.isPlaying { animationManager.stop() }
-                        else { animationManager.jumpToKeyframe(0) }
-                    } label: {
-                        Image(systemName: "backward.end.fill")
-                    }
-                    .disabled(animationManager.currentScene == nil)
+                        Button {
+                            animationManager.togglePlayPause()
+                        } label: {
+                            Image(systemName: animationManager.isPlaying ? "pause.fill" : "play.fill")
+                        }
+                        .font(.title2)
 
-                    Button {
-                        animationManager.togglePlayPause()
-                    } label: {
-                        Image(systemName: animationManager.isPlaying ? "pause.fill" : "play.fill")
-                    }
-                    .font(.title2)
+                        Menu {
+                            Button("0.5x") { animationManager.playbackSpeed = 0.5 }
+                            Button("1x") { animationManager.playbackSpeed = 1.0 }
+                            Button("2x") { animationManager.playbackSpeed = 2.0 }
+                            Button("4x") { animationManager.playbackSpeed = 4.0 }
+                        } label: {
+                            Text("\(String(format: "%.1f", animationManager.playbackSpeed))x")
+                                .font(.caption)
+                        }
 
-                    Menu {
-                        Button("0.5x") { animationManager.playbackSpeed = 0.5 }
-                        Button("1x") { animationManager.playbackSpeed = 1.0 }
-                        Button("2x") { animationManager.playbackSpeed = 2.0 }
-                        Button("4x") { animationManager.playbackSpeed = 4.0 }
-                    } label: {
-                        Text("\(String(format: "%.1f", animationManager.playbackSpeed))x")
-                            .font(.caption)
-                    }
-
-                    Menu {
-                        ForEach(EasingFunction.allCases, id: \.self) { easing in
-                            Button {
-                                animationManager.easingFunction = easing
-                            } label: {
-                                HStack {
-                                    Text(easing.displayName)
-                                    if animationManager.easingFunction == easing {
-                                        Image(systemName: "checkmark")
+                        Menu {
+                            ForEach(EasingFunction.allCases, id: \.self) { easing in
+                                Button {
+                                    animationManager.easingFunction = easing
+                                } label: {
+                                    HStack {
+                                        Text(easing.displayName)
+                                        if animationManager.easingFunction == easing {
+                                            Image(systemName: "checkmark")
+                                        }
                                     }
                                 }
                             }
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: animationManager.easingFunction == .smooth ? "waveform.path" : "curve.bezier")
+                                Text(animationManager.easingFunction.displayName)
+                                    .font(.caption)
+                            }
                         }
-                    } label: {
-                        HStack(spacing: 2) {
-                            Image(systemName: animationManager.easingFunction == .smooth ? "waveform.path" : "curve.bezier")
-                            Text(animationManager.easingFunction.displayName)
+
+                        Spacer()
+
+                        Button {
+                            animationManager.disablePlaybackOverrides()
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward.circle")
+                        }
+                        .help("Reset to scene values")
+                        .disabled(animationManager.currentScene == nil)
+
+                        if let scene = animationManager.currentScene {
+                            Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
                                 .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
-
-                    Spacer()
-
-                    Button {
-                        animationManager.disablePlaybackOverrides()
-                    } label: {
-                        Image(systemName: "arrow.uturn.backward.circle")
-                    }
-                    .help("Reset to scene values")
-                    .disabled(animationManager.currentScene == nil)
-
-                    if let scene = animationManager.currentScene {
-                        Text("KF \(animationManager.uiPlayhead.currentKeyframeIndex + 1)/\(scene.keyframes.count)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                } else {
+                    musicScrubberSection
                 }
-            } else {
-                musicScrubberSection
             }
+            .frame(minHeight: 88, alignment: .top)
         }
         .onChange(of: panelMode) { _, newMode in
             if newMode == .music {

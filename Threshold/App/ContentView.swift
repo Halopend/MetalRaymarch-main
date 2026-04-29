@@ -633,13 +633,6 @@ struct ContentView: View {
                 Label(cache.fractalType.displayName, systemImage: cache.fractalType.icon)
                     .font(.headline)
                 Spacer()
-                Button {
-                    fractalSubTab = .browse
-                } label: {
-                    Label("Change", systemImage: "square.grid.2x2")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
 
             Divider()

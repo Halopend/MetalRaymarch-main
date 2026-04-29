@@ -60,33 +60,36 @@ struct FormulaParamsEditor: View {
 
     var body: some View {
         if let desc = descriptor, !parameterBatch.allNodes.isEmpty {
-            VStack(spacing: 4) {
+            VStack(spacing: 8) {
                 HStack {
                     Label("\(desc.name) Parameters", systemImage: cache.fractalType.icon)
                         .font(.headline)
                     Spacer()
-                    Button { cache.resetFormulaParams() } label: {
-                        Image(systemName: "arrow.counterclockwise").font(.caption)
+                    Button {
+                        cache.resetFormulaParams()
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                            .font(.caption)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .help("Reset to defaults")
                 }
-                .padding(.bottom, 4)
 
                 Text(desc.description)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 4)
 
                 ForEach(cachedGroups) { group in
-                    if group.id != cachedGroups.first?.id { Divider().padding(.leading, 159) }
-                    
                     if let triplet = group.triplet {
-                        DisclosureGroup {
-                            VStack(spacing: 0) {
+                        VStack(spacing: 6) {
+                            TripletRow(cache: cache, triplet: triplet)
+
+                            DisclosureGroup("Parameters") {
+                                VStack(spacing: 6) {
                                 ForEach(group.nodes) { node in
-                                    if node.id != group.nodes.first?.id { Divider().padding(.leading, 159) }
                                     ParameterNodeRow(cache: cache, node: node)
                                         .id(node.id)
                                     if node.id == "formula.1.0.Power" {
@@ -94,20 +97,24 @@ struct FormulaParamsEditor: View {
                                     }
                                 }
                             }
-                            .padding(.leading, 16)
-                            .padding(.top, 4)
-                        } label: {
-                            TripletRow(cache: cache, triplet: triplet)
-                        }
-                    } else {
-                        ForEach(group.nodes) { node in
-                            ParameterNodeRow(cache: cache, node: node)
-                                .id(node.id)
-                            
-                            if node.id == "formula.1.0.Power" {
-                                PowerQuickPicker(cache: cache, node: node)
+                            .padding(.top, 2)
                             }
                         }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
+                    } else {
+                        VStack(spacing: 6) {
+                            ForEach(group.nodes) { node in
+                                ParameterNodeRow(cache: cache, node: node)
+                                    .id(node.id)
+
+                                if node.id == "formula.1.0.Power" {
+                                    PowerQuickPicker(cache: cache, node: node)
+                                }
+                            }
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
                     }
                 }
             }
