@@ -113,13 +113,14 @@ struct ContentView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     
     @State private var cache = UISettingsCache()
-    @State private var selectedTab: SidebarTab = .fractal
-    @State private var fractalSubTab: FractalSubTab = .shape
-    @State private var animateSceneSubTab: AnimateSceneSubTab = .all
+    // Persist last-selected tab and sub-tabs across launches.
+    @AppStorage("ContentView.selectedTab") private var selectedTab: SidebarTab = .fractal
+    @AppStorage("ContentView.fractalSubTab") private var fractalSubTab: FractalSubTab = .shape
+    @AppStorage("ContentView.animateSceneSubTab") private var animateSceneSubTab: AnimateSceneSubTab = .all
     @State private var animateEditButtonsVisible = false
-    @State private var coloringSubTab: ColoringSubTab = .gradient
-    @State private var effectsSubTab: EffectsSubTab = .dynamic
-    @State private var settingsSubTab: SettingsSubTab = .general
+    @AppStorage("ContentView.coloringSubTab") private var coloringSubTab: ColoringSubTab = .gradient
+    @AppStorage("ContentView.effectsSubTab") private var effectsSubTab: EffectsSubTab = .dynamic
+    @AppStorage("ContentView.settingsSubTab") private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
     @State private var didLongPressPlayerButton = false
@@ -147,9 +148,7 @@ struct ContentView: View {
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     private var qualityGoalPreference: QualityGoalPreference {
-        let selected = QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
-        // Control is temporarily disabled in UI; fall back to the last direct choice.
-        return selected == .control ? lastDirectBudgetPreference : selected
+        QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
     }
 
     private var lastDirectBudgetPreference: QualityGoalPreference {
@@ -868,7 +867,6 @@ struct ContentView: View {
                     Picker("Budget Goal", selection: Binding(
                         get: { qualityGoalPreference },
                         set: { newValue in
-                            guard newValue != .control else { return }
                             qualityGoalPreferenceRaw = newValue.rawValue
                             if newValue == .framerate || newValue == .detail {
                                 qualityGoalLastDirectPreferenceRaw = newValue.rawValue
@@ -876,15 +874,13 @@ struct ContentView: View {
                         }
                     )) {
                         ForEach(QualityGoalPreference.allCases, id: \.rawValue) { goal in
-                            Text(goal.displayName)
-                                .tag(goal)
-                                .disabled(goal == .control)
+                            Text(goal.displayName).tag(goal)
                         }
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 340)
                 }
-                Text("Framerate and Detail optimize preset behavior. Control is currently disabled.")
+                Text("Framerate and Detail apply curated presets. Control unlocks free-form iteration and resolution sliders.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

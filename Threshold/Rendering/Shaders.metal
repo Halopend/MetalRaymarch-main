@@ -207,7 +207,9 @@ constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
 // === FOG COLOR ===
 constant half3 kFogColor = half3(0.01h, 0.015h, 0.02h);
-constant half3 kGlowColor = half3(0.02h, 0.04h, 0.1h);
+// Always-on inner glow tint (per-step accumulation contribution).
+// Kept cool to avoid muddy yellow shifts when post glow is enabled.
+constant half3 kGlowColor = half3(0.07h, 0.11h, 0.20h);
 
 // =============================================================================
 // SHARED HELPER FUNCTIONS - Eliminate duplicate code across shaders
@@ -1565,19 +1567,30 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
     rgb = fma(rgb - half3(0.5h), half3(scheme.contrast), half3(0.5h + scheme.brightness));
     
     // === GLOW EFFECT (OPTIONAL) ===
-    if (scheme.glowEnabled) {
-        half glowAmount = rayGlow * half(scheme.glowIntensity);
-        if (glowAmount > 0.01h) {
-            half3 glowColor = rgb * fma(glowAmount, 2.0h, 1.0h);
-            rgb = mix(rgb, glowColor, glowAmount * 0.5h);
-        }
+    // Build a smoother halo from rayGlow while preserving source hue.
+    if (scheme.glowEnabled && scheme.glowIntensity > 0.001f) {
+        half intensity = half(scheme.glowIntensity);
+        half lumaNow = dot(rgb, half3(0.2126h, 0.7152h, 0.0722h));
+        half3 huePreserve = rgb / max(lumaNow, 0.02h);
+        half3 haloTint = mix(half3(0.95h, 0.97h, 1.0h), saturate(huePreserve), 0.45h);
+        half glowCore = smoothstep(0.06h, 0.30h, rayGlow);
+        half glowTail = rayGlow * rayGlow;
+        half glowAmount = (glowCore * (0.35h + 0.90h * intensity)) + (glowTail * (0.15h + 0.65h * intensity));
+        rgb = rgb + haloTint * glowAmount;
     }
     
     // === BLOOM EFFECT (OPTIONAL) ===
-    if (scheme.bloomEnabled) {
-        half brightness = dot(rgb, half3(0.299h, 0.587h, 0.114h));
-        half bloomAmount = max(0.0h, brightness - 0.7h) * half(scheme.bloomStrength);
-        rgb = fma(half3(0.3h, 0.3h, 0.35h), half3(bloomAmount), rgb);
+    // Bright-pass bloom with soft knee, plus rayGlow assist so dark palettes still bloom.
+    if (scheme.bloomEnabled && scheme.bloomStrength > 0.001f) {
+        half strength = half(scheme.bloomStrength);
+        half lumaNow = dot(rgb, half3(0.299h, 0.587h, 0.114h));
+        half threshold = mix(0.52h, 0.22h, strength);
+        half knee = 0.18h;
+        half brightPass = smoothstep(threshold - knee, threshold + knee, lumaNow);
+        half glowAssist = smoothstep(0.04h, 0.35h, rayGlow) * (0.25h + 0.95h * strength);
+        half bloomAmount = brightPass * (0.18h + 1.25h * strength) + glowAssist;
+        half3 bloomTint = mix(half3(1.0h, 0.96h, 0.88h), saturate(rgb + 0.08h), 0.35h);
+        rgb = rgb + bloomTint * bloomAmount;
     }
     
     // === HIGHLIGHTS/EXPOSURE (skip when identity) ===

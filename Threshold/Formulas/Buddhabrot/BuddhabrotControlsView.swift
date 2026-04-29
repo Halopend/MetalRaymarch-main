@@ -52,9 +52,9 @@ struct BuddhabrotControlsView: View {
                             .font(.caption.monospacedDigit())
                         
                         if settings.renderMode == .volumeRayMarch {
-                            HStack {
-                                Text("Resolution")
-                                Spacer()
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Volume Resolution")
+                                    .font(.subheadline)
                                 Picker("", selection: Binding(
                                     get: { settings.resolution },
                                     set: { newVal in
@@ -70,14 +70,14 @@ struct BuddhabrotControlsView: View {
                                     Text("756³").tag(756)
                                 }
                                 .pickerStyle(.menu)
-                                .frame(width: 140)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                         
                         if settings.renderMode == .gaussianSplats {
-                            HStack {
+                            VStack(alignment: .leading, spacing: 4) {
                                 Text("Max Splats")
-                                Spacer()
+                                    .font(.subheadline)
                                 Picker("", selection: Binding(
                                     get: { settings.maxSplatCount },
                                     set: { settings.maxSplatCount = $0; settings.needsClear = true }
@@ -88,7 +88,7 @@ struct BuddhabrotControlsView: View {
                                     Text("512K").tag(524_288)
                                 }
                                 .pickerStyle(.menu)
-                                .frame(width: 140)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                         
@@ -133,9 +133,9 @@ struct BuddhabrotControlsView: View {
                             set: { settings.batchSize = Int($0) }
                         ), range: 4096...262144, format: "%.0f")
                         
-                        HStack {
-                            Text("Batches / Frame")
-                            Spacer()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Batches Per Frame")
+                                .font(.subheadline)
                             Picker("", selection: Binding(
                                 get: { settings.batchesPerFrame },
                                 set: { settings.batchesPerFrame = $0 }
@@ -146,13 +146,12 @@ struct BuddhabrotControlsView: View {
                                 Text("8").tag(8)
                             }
                             .pickerStyle(.segmented)
-                            .frame(width: 200)
                         }
                         
                         if settings.renderMode == .volumeRayMarch {
-                            HStack {
-                                Text("Normalize Every")
-                                Spacer()
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Normalize Every (frames)")
+                                    .font(.subheadline)
                                 Picker("", selection: Binding(
                                     get: { settings.normalizationInterval },
                                     set: { settings.normalizationInterval = $0 }
@@ -163,8 +162,6 @@ struct BuddhabrotControlsView: View {
                                     Text("8").tag(8)
                                 }
                                 .pickerStyle(.segmented)
-                                .frame(width: 200)
-                                Text("frames")
                             }
                             
                             Toggle("RGB Nebulabrot Mode", isOn: Binding(
@@ -287,15 +284,21 @@ private struct SliderRow: View {
     @Binding var value: Float
     let range: ClosedRange<Float>
     let format: String
-    
+
     var body: some View {
-        HStack {
-            Text(label)
-                .frame(width: 120, alignment: .leading)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(String(format: format, value))
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             Slider(value: $value, in: range)
-            Text(String(format: format, value))
-                .font(.caption.monospacedDigit())
-                .frame(width: 60, alignment: .trailing)
         }
+        .padding(.vertical, 2)
     }
 }

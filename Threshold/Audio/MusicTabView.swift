@@ -12,6 +12,11 @@ import SwiftUI
 
 // MARK: - Music Tab Content
 
+private enum MusicInnerTab: String, CaseIterable {
+    case music = "Music"
+    case visualizations = "Visualizations"
+}
+
 struct MusicTabContent: View {
     @Environment(\.openWindow) private var openWindow
     @Bindable var cache: UISettingsCache
@@ -21,6 +26,7 @@ struct MusicTabContent: View {
     private let renderSettings: RenderSettings
 
     @State private var viewModel: MusicTabViewModel
+    @AppStorage("MusicTabContent.innerTab") private var innerTab: MusicInnerTab = .music
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
@@ -36,45 +42,60 @@ struct MusicTabContent: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 14) {
-                // 1. Service toggle / picker
-                serviceToggle
-
-                // 2. Unified Now Playing
-                nowPlayingCard
-
-                // 3. Open Library button (pops into its own window)
-                if let commandErrorMessage = viewModel.commandErrorMessage {
-                    Text(commandErrorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if viewModel.hasConnectedProvider {
-                    openLibraryButton
-                }
-
-                // 4. Audio Reactivity (the main event)
-                reactivitySection
-
-                // 5. Saved music presets
-                musicPresetsSection
-
-                // 6. Level meters
-                levelMeters
-
-                // 7. Service connections (settings)
-                connectionsSection
-
-                // 8. Fallback priority ordering
-                if viewModel.hasMultipleConnectedProviders {
-                    servicePrioritySection
+        VStack(spacing: 10) {
+            Picker("Section", selection: $innerTab) {
+                ForEach(MusicInnerTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
             }
+            .pickerStyle(.segmented)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.top, 8)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 14) {
+                    switch innerTab {
+                    case .music:
+                        // Service toggle / picker
+                        serviceToggle
+
+                        // Unified Now Playing
+                        nowPlayingCard
+
+                        // Open Library button (pops into its own window)
+                        if let commandErrorMessage = viewModel.commandErrorMessage {
+                            Text(commandErrorMessage)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        if viewModel.hasConnectedProvider {
+                            openLibraryButton
+                        }
+
+                        // Service connections (settings)
+                        connectionsSection
+
+                        // Fallback priority ordering
+                        if viewModel.hasMultipleConnectedProviders {
+                            servicePrioritySection
+                        }
+
+                    case .visualizations:
+                        // Audio Reactivity (the main event)
+                        reactivitySection
+
+                        // Saved music presets
+                        musicPresetsSection
+
+                        // Level meters
+                        levelMeters
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
         }
     }
 

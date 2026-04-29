@@ -9,7 +9,8 @@ import SwiftUI
 
 private enum FractalBrowseInnerTab: String, CaseIterable {
     case formulas = "Formulas"
-    case scenes = "Scenes"
+    case staticScenes = "Static"
+    case animated = "Animated"
 }
 
 private enum FractalSceneSelection: Equatable {
@@ -26,7 +27,7 @@ struct FractalGridView: View {
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
-    @State private var innerTab: FractalBrowseInnerTab = .formulas
+    @AppStorage("FractalGridView.innerTab") private var innerTab: FractalBrowseInnerTab = .formulas
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
 
     private let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: 3)
@@ -69,19 +70,19 @@ struct FractalGridView: View {
 
     var body: some View {
         let hasScenes = animationManager?.scenes.isEmpty == false
-        let selectedTab = hasScenes ? innerTab : .formulas
+        // If the persisted tab is "animated" but there are no animation scenes,
+        // gracefully fall back to formulas without overwriting the stored choice.
+        let selectedTab: FractalBrowseInnerTab = (innerTab == .animated && !hasScenes) ? .formulas : innerTab
 
         VStack(spacing: 10) {
-            if hasScenes {
-                Picker("Browse", selection: $innerTab) {
-                    ForEach(FractalBrowseInnerTab.allCases, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
+            Picker("Browse", selection: $innerTab) {
+                ForEach(FractalBrowseInnerTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
 
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
@@ -111,9 +112,14 @@ struct FractalGridView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 12).fill(Color.pink.opacity(0.08)))
 
-                    case .scenes:
+                    case .animated:
                         if let animationManager {
-                            sceneGrid(animationManager)
+                            animatedScenesGrid(animationManager)
+                        }
+
+                    case .staticScenes:
+                        if let animationManager {
+                            staticScenesGrid(animationManager)
                         }
                     }
                 }
@@ -125,57 +131,93 @@ struct FractalGridView: View {
     }
 
     @ViewBuilder
-    private func sceneGrid(_ animationManager: AnimationManager) -> some View {
-        let staticScenePresets = (presetManager?.presets ?? [])
-            .filter { preset in
-                // Skip transient utility entries if they ever leak into the shared preset list.
-                preset.name != "__lastState__"
-            }
+    private func animatedScenesGrid(_ animationManager: AnimationManager) -> some View {
+        let staticScenePresets = filteredStaticPresets()
         let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
 
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
-                title: "Fractal Scenes",
-                systemImage: "film.stack",
-                description: "Browse animated scenes and static scene presets in one grid.",
+                title: "Animated Scenes",
+                systemImage: "sparkles.rectangle.stack",
+                description: "Keyframed animations and music-attached scenes.",
                 current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
-                accentColor: .blue
+                accentColor: .purple
             )
 
-            LazyVGrid(columns: sceneColumns, spacing: 12) {
-                // Use per-list index identity to avoid duplicate UUID collisions
-                // from imported/shared scene data causing LazyVGrid gaps.
-                ForEach(Array(animationManager.scenes.enumerated()), id: \.offset) { _, scene in
-                    sceneCard(
-                        title: scene.name,
-                        subtitle: scene.fractalType?.displayName ?? "Any fractal",
-                        detail: scene.attachedSong?.title ?? "Visual-only scene",
-                        systemImage: scene.attachedSong == nil ? "sparkles.rectangle.stack" : "music.note",
-                        isSelected: activeSelection == .animation(scene.id),
-                        onEdit: { onEditScene?(scene) }
-                    ) {
-                        selectScene(scene, using: animationManager)
-                    }
-                }
-
-                ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
-                    sceneCard(
-                        title: preset.name,
-                        subtitle: preset.fractalType.displayName,
-                        detail: staticSceneDetail(for: preset),
-                        systemImage: (preset.musicReactiveMappings?.isEmpty == false) ? "music.note" : "photo",
-                        isSelected: activeSelection == .staticPreset(preset.id),
-                        onEdit: nil
-                    ) {
-                        selectStaticScenePreset(preset, using: animationManager)
+            if animationManager.scenes.isEmpty {
+                emptySectionLabel("No animated scenes yet")
+            } else {
+                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                    ForEach(Array(animationManager.scenes.enumerated()), id: \.offset) { _, scene in
+                        sceneCard(
+                            title: scene.name,
+                            subtitle: scene.fractalType?.displayName ?? "Any fractal",
+                            detail: scene.attachedSong?.title ?? "Visual-only scene",
+                            systemImage: scene.attachedSong == nil ? "sparkles.rectangle.stack" : "music.note",
+                            isSelected: activeSelection == .animation(scene.id),
+                            onEdit: { onEditScene?(scene) }
+                        ) {
+                            selectScene(scene, using: animationManager)
+                        }
                     }
                 }
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.07)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.08)))
     }
 
+    @ViewBuilder
+    private func staticScenesGrid(_ animationManager: AnimationManager) -> some View {
+        let staticScenePresets = filteredStaticPresets()
+        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+
+        VStack(alignment: .leading, spacing: 10) {
+            browserHeader(
+                title: "Static Scenes",
+                systemImage: "photo.on.rectangle.angled",
+                description: "Saved still presets — tap to load instantly.",
+                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
+                accentColor: .teal
+            )
+
+            if staticScenePresets.isEmpty {
+                emptySectionLabel("No static scenes saved")
+            } else {
+                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                    ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
+                        sceneCard(
+                            title: preset.name,
+                            subtitle: preset.fractalType.displayName,
+                            detail: staticSceneDetail(for: preset),
+                            systemImage: (preset.musicReactiveMappings?.isEmpty == false) ? "music.note" : "photo",
+                            isSelected: activeSelection == .staticPreset(preset.id),
+                            onEdit: nil
+                        ) {
+                            selectStaticScenePreset(preset, using: animationManager)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.teal.opacity(0.08)))
+    }
+
+    private func filteredStaticPresets() -> [FractalPreset] {
+        (presetManager?.presets ?? []).filter { preset in
+            // Skip transient utility entries if they ever leak into the shared preset list.
+            preset.name != "__lastState__"
+        }
+    }
+
+    private func emptySectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 6)
+    }
     private func currentSceneSelection(using animationManager: AnimationManager, staticScenePresets: [FractalPreset]) -> FractalSceneSelection {
         if let sceneID = animationManager.currentScene?.id {
             return .animation(sceneID)
