@@ -481,18 +481,10 @@ struct ContentView: View {
             ActivityLightButton(
                 title: "Music permutations",
                 systemImage: "waveform",
-                color: .green,
+                color: .blue,
                 isActive: activeMusicPermutationCount > 0,
                 count: activeMusicPermutationCount > 0 ? activeMusicPermutationCount : nil,
                 action: toggleMusicPermutationsActive
-            )
-            ActivityLightButton(
-                title: "Animation",
-                systemImage: "play.fill",
-                color: .blue,
-                isActive: isAnimationPlaying,
-                count: nil,
-                action: toggleAnimationPlaybackActive
             )
             ActivityLightButton(
                 title: "Dynamic color",
@@ -502,12 +494,20 @@ struct ContentView: View {
                 count: activeDynamicEffectCount > 0 ? activeDynamicEffectCount : nil,
                 action: toggleDynamicEffectsActive
             )
+            ActivityLightButton(
+                title: "Video",
+                systemImage: "play.fill",
+                color: .green,
+                isActive: isAnimationPlaying,
+                count: nil,
+                action: toggleAnimationPlaybackActive
+            )
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Capsule().fill(Color.secondary.opacity(0.08)))
         .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1))
-        .help("Quick toggles for music permutations, animation, and dynamic color")
+        .help("Quick toggles for music permutations, dynamic color, and video")
     }
 
     private func toggleMusicPermutationsActive() {

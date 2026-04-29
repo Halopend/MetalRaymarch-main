@@ -479,6 +479,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     var responseCurve: ResponseCurve
     var lfo: LFOSettings
     var smoothingWindow: Float
+    /// Hybrid-only blend: 0 = mostly drift, 1 = more fast vibration.
+    var hybridCombo: Float
 
     init(id: UUID = UUID(),
          target: MusicReactiveTarget,
@@ -491,7 +493,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
          mode: MusicReactiveMode = .relative,
          responseCurve: ResponseCurve? = nil,
          lfo: LFOSettings = .default,
-         smoothingWindow: Float = 0.0) {
+         smoothingWindow: Float = 0.0,
+         hybridCombo: Float = 0.35) {
         self.id = id
         self.target = target
         self.source = source
@@ -504,6 +507,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.responseCurve = responseCurve ?? target.defaultResponseCurve
         self.lfo = lfo
         self.smoothingWindow = smoothingWindow
+        self.hybridCombo = hybridCombo
         sanitizeInPlace()
     }
 
@@ -517,6 +521,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         responseSpeed = max(0.01, min(1.0, responseSpeed))
         amount = max(-3.0, min(3.0, amount))
         smoothingWindow = max(0.0, min(2.0, smoothingWindow))
+        hybridCombo = max(0.0, min(1.0, hybridCombo))
         lfo.sanitizeInPlace()
     }
 
@@ -531,6 +536,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         responseSpeed = max(0.01, min(1.0, responseSpeed))
         amount = max(-3.0, min(3.0, amount))
         smoothingWindow = max(0.0, min(2.0, smoothingWindow))
+        hybridCombo = max(0.0, min(1.0, hybridCombo))
         lfo.sanitizeInPlace()
     }
 
@@ -543,7 +549,7 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, target, source, rangeMin, rangeMax, responseSpeed, amount, isEnabled
-        case mode, responseCurve, lfo, smoothingWindow
+        case mode, responseCurve, lfo, smoothingWindow, hybridCombo
     }
 
     init(from decoder: Decoder) throws {
@@ -563,7 +569,9 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
             ?? target.defaultResponseCurve
         self.lfo = try c.decodeIfPresent(LFOSettings.self, forKey: .lfo) ?? .default
         self.smoothingWindow = try c.decodeIfPresent(Float.self, forKey: .smoothingWindow) ?? 0.0
+        self.hybridCombo = try c.decodeIfPresent(Float.self, forKey: .hybridCombo) ?? 0.35
         _ = rawMode // consumed for backward compat only
+        sanitizeInPlace()
     }
 
     /// Migrate legacy Mandelbox-specific mappings to generic formula param slots.

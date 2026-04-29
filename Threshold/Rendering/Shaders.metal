@@ -1873,23 +1873,35 @@ kernel void adaptiveHierarchical8x8(
         tileIsEmpty = 0;
         
         // === BOUNDING SPHERE TILE EARLY-EXIT (GMT-fractals technique) ===
-        // Before coarse raymarching, test the tile-center ray against the bounding sphere.
-        // If the bounding sphere is enabled and the center ray misses it, the entire
-        // 8x8 tile is guaranteed empty — skip coarse march + probes entirely.
+        // Before coarse raymarching, test rays at the tile center + 4 corners
+        // against the bounding sphere. Only declare empty if ALL 5 rays miss.
+        // Single-center probing dropped 8x8 tiles whenever a thin off-axis
+        // feature crossed only the corner of the tile.
         if (uniforms.boundingSphereRadius > 0.0) {
-            float2 tileCenter = float2(tileId * ADAPTIVE_TILE_SIZE) + float2(ADAPTIVE_TILE_SIZE * 0.5);
-            float2 tileCenterNDC = (tileCenter / uniforms.resolution) * 2.0 - 1.0;
-            tileCenterNDC.y = -tileCenterNDC.y;
-            float4 tcClip = float4(tileCenterNDC.x, tileCenterNDC.y, 0.0, 1.0);
-            float4 tcView4 = uniforms.invProjMatrix * tcClip;
-            float tcViewW = abs(tcView4.w) > 1e-6f
-                ? tcView4.w
-                : (tcView4.w >= 0.0f ? 1e-6f : -1e-6f);
-            float3 tcView = tcView4.xyz / tcViewW;
-            float3 tcModelPoint = (uniforms.invViewMatrix * float4(tcView, 1.0)).xyz;
-            float3 tcRd = normalize(tcModelPoint - marchOrigin);
-            float bsT = rayIntersectBoundingSphere(marchOrigin, tcRd, float3(0.0), uniforms.boundingSphereRadius);
-            if (bsT < 0.0) {
+            const float2 bsOffsets[5] = {
+                float2(ADAPTIVE_TILE_SIZE * 0.5f, ADAPTIVE_TILE_SIZE * 0.5f),
+                float2(0.0f, 0.0f),
+                float2(float(ADAPTIVE_TILE_SIZE), 0.0f),
+                float2(0.0f, float(ADAPTIVE_TILE_SIZE)),
+                float2(float(ADAPTIVE_TILE_SIZE), float(ADAPTIVE_TILE_SIZE))
+            };
+            int bsMissCount = 0;
+            for (int i = 0; i < 5; ++i) {
+                float2 px = float2(tileId * ADAPTIVE_TILE_SIZE) + bsOffsets[i];
+                float2 ndcBS = (px / uniforms.resolution) * 2.0 - 1.0;
+                ndcBS.y = -ndcBS.y;
+                float4 bsClip = float4(ndcBS.x, ndcBS.y, 0.0, 1.0);
+                float4 bsView4 = uniforms.invProjMatrix * bsClip;
+                float bsViewW = abs(bsView4.w) > 1e-6f
+                    ? bsView4.w
+                    : (bsView4.w >= 0.0f ? 1e-6f : -1e-6f);
+                float3 bsView = bsView4.xyz / bsViewW;
+                float3 bsModelPoint = (uniforms.invViewMatrix * float4(bsView, 1.0)).xyz;
+                float3 bsRd = normalize(bsModelPoint - marchOrigin);
+                float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), uniforms.boundingSphereRadius);
+                if (bsT < 0.0) bsMissCount++;
+            }
+            if (bsMissCount >= 5) {
                 tileIsEmpty = 1;
                 tileStartT = 0.05;
             }
@@ -1965,8 +1977,10 @@ kernel void adaptiveHierarchical8x8(
                 superMinHitDepth = min(superMinHitDepth, s8);
             }
 
-            if (superHistoryHits >= 3) {
-                tileStartT = max(0.05f, superMinHitDepth * 0.75f);
+            // 9-sample super-tile seed: tighten threshold + backoff to avoid
+            // skipping closer geometry across 32x32 depth discontinuities.
+            if (superHistoryHits >= 5) {
+                tileStartT = max(0.05f, superMinHitDepth * 0.6f);
                 seededFromSuperTileHistory = true;
             }
         }
@@ -2014,52 +2028,87 @@ kernel void adaptiveHierarchical8x8(
             }
 
             // Require multiple agreeing history samples to avoid stale-start artifacts.
-            if (tileHistoryHits >= 2) {
-                tileStartT = max(0.05f, tileMinHitDepth * 0.8f);
+            // 3-of-5 (was 2-of-5) + tighter 0.6 backoff (was 0.8) prevents 8x8
+            // silhouette artifacts where 2 corners hit far depth and the rest
+            // miss closer surface.
+            if (tileHistoryHits >= 3) {
+                tileStartT = max(0.05f, tileMinHitDepth * 0.6f);
                 seededFromTileHistory = true;
             }
         }
 
-        if (reprojectionValid) {
-            // Temporal reprojection is valid for thread 0 — surface definitely exists
-            // near this depth. Use reprojected depth as tile start, skip coarse+probes.
-            tileStartT = max(0.05f, reprojectedStartT * 0.85f);
-        } else if (!seededFromTileHistory && !seededFromSuperTileHistory) {
+        // Build a model-space ray for an arbitrary viewport-pixel coord.
+        // Used for multi-corner probing in the bounding-sphere test, the
+        // empty-tile test, and (when reprojection is valid) for a conservative
+        // coarse march at the tile center.
+        float coarseTCenter = kRayMissThreshold + 1.0f;
+        bool ranCoarseMarch = false;
+
+        if (!seededFromTileHistory && !seededFromSuperTileHistory) {
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
                 marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
-            float coarseT = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
-            
-            if (coarseT >= kRayMissThreshold) {
-                // Coarse pass missed — check center of tile for empty-space skip.
-                float2 tileCenter = float2(tileId * ADAPTIVE_TILE_SIZE) + float2(ADAPTIVE_TILE_SIZE * 0.5);
-                float2 tileCenterNDC = (tileCenter / uniforms.resolution) * 2.0 - 1.0;
-                tileCenterNDC.y = -tileCenterNDC.y;
-                float4 tcClip = float4(tileCenterNDC.x, tileCenterNDC.y, 0.0, 1.0);
-                float4 tcView4 = uniforms.invProjMatrix * tcClip;
-                float tcViewW = abs(tcView4.w) > 1e-6f
-                    ? tcView4.w
-                    : (tcView4.w >= 0.0f ? 1e-6f : -1e-6f);
-                float3 tcView = tcView4.xyz / tcViewW;
-                float3 tcModelPoint = (uniforms.invViewMatrix * float4(tcView, 1.0)).xyz;
-                float3 tcRd = normalize(tcModelPoint - marchOrigin);
-                
+            coarseTCenter = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
+            ranCoarseMarch = true;
+
+            if (coarseTCenter >= kRayMissThreshold) {
+                // Coarse-center missed — probe FIVE rays (4 corners + center) to confirm
+                // the tile is truly empty. Single-center probing was the source of
+                // 8x8 dropouts on thin off-axis fractal features.
+                const float2 cornerOffsets[5] = {
+                    float2(0.5f, 0.5f),                                     // center
+                    float2(0.0f, 0.0f),                                     // TL
+                    float2(float(ADAPTIVE_TILE_SIZE), 0.0f),                // TR
+                    float2(0.0f, float(ADAPTIVE_TILE_SIZE)),                // BL
+                    float2(float(ADAPTIVE_TILE_SIZE), float(ADAPTIVE_TILE_SIZE)) // BR
+                };
                 float probeIters = float(lodIterations) * 0.6;
-                float3 probe1 = marchOrigin + tcRd * 2.0;
-                float3 probe2 = marchOrigin + tcRd * 6.0;
-                float d1 = MapContinuousUnified(probe1, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
-                float d2 = MapContinuousUnified(probe2, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
-                
                 float tileAngularSize1 = ADAPTIVE_TILE_SIZE / min(uniforms.resolution.x, uniforms.resolution.y) * 2.0 * 2.0;
                 float tileAngularSize2 = ADAPTIVE_TILE_SIZE / min(uniforms.resolution.x, uniforms.resolution.y) * 2.0 * 6.0;
-                
-                if (d1 > tileAngularSize1 && d2 > tileAngularSize2) {
+                int cornerEmpty = 0;
+                for (int c = 0; c < 5; ++c) {
+                    float2 cornerPx = float2(tileId * ADAPTIVE_TILE_SIZE) + cornerOffsets[c];
+                    float2 cornerNDC = (cornerPx / uniforms.resolution) * 2.0 - 1.0;
+                    cornerNDC.y = -cornerNDC.y;
+                    float4 cClip = float4(cornerNDC.x, cornerNDC.y, 0.0, 1.0);
+                    float4 cView4 = uniforms.invProjMatrix * cClip;
+                    float cViewW = abs(cView4.w) > 1e-6f
+                        ? cView4.w
+                        : (cView4.w >= 0.0f ? 1e-6f : -1e-6f);
+                    float3 cView = cView4.xyz / cViewW;
+                    float3 cModelPoint = (uniforms.invViewMatrix * float4(cView, 1.0)).xyz;
+                    float3 cRd = normalize(cModelPoint - marchOrigin);
+
+                    float3 probe1 = marchOrigin + cRd * 2.0;
+                    float3 probe2 = marchOrigin + cRd * 6.0;
+                    float d1 = MapContinuousUnified(probe1, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
+                    float d2 = MapContinuousUnified(probe2, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
+                    if (d1 > tileAngularSize1 && d2 > tileAngularSize2) {
+                        cornerEmpty++;
+                    }
+                }
+                // Require ALL 5 probes to declare empty — conservative.
+                if (cornerEmpty >= 5) {
                     tileIsEmpty = 1;
                 }
                 tileStartT = 0.05;
             } else {
-                tileStartT = coarseT;
+                tileStartT = coarseTCenter;
+            }
+        }
+
+        if (reprojectionValid) {
+            // Temporal reprojection is valid for thread 0 — surface exists near
+            // this depth FOR THE CENTER PIXEL. But other threads in the tile may
+            // have no valid reprojection (silhouettes/disocclusions). To avoid
+            // skipping closer geometry on those edges, use the MORE CONSERVATIVE
+            // (closer) of the reprojected start and the coarse-march result.
+            float reprojSeed = max(0.05f, reprojectedStartT * 0.85f);
+            if (ranCoarseMarch && coarseTCenter < kRayMissThreshold) {
+                tileStartT = min(reprojSeed, coarseTCenter);
+            } else {
+                tileStartT = reprojSeed;
             }
         }
         } // end if (!tileIsEmpty)

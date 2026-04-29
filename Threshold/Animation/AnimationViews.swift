@@ -740,6 +740,8 @@ struct SceneRowView: View {
     var onEdit: (() -> Void)? = nil
     var onPlay: (() -> Void)? = nil
     var onResetDefault: (() -> Void)? = nil
+
+    @State private var isResetButtonPressed = false
     
     var body: some View {
         HStack {
@@ -788,12 +790,23 @@ struct SceneRowView: View {
             HStack(spacing: 16) {
                 // Reset edited default back to original
                 if let onResetDefault {
-                    Button { onResetDefault() } label: {
+                    Button {
+                        onResetDefault()
+                    } label: {
                         Image(systemName: "arrow.uturn.backward")
                     }
                     .buttonStyle(.bordered)
-                    .tint(.orange)
+                    .tint(isResetButtonPressed ? .green : .red)
                     .help("Reset to original")
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.01)
+                            .onChanged { _ in
+                                isResetButtonPressed = true
+                            }
+                            .onEnded { _ in
+                                isResetButtonPressed = false
+                            }
+                    )
                 }
                 if let onPlay {
                     Button { onPlay() } label: {

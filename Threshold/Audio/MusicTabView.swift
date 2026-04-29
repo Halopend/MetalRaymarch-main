@@ -626,52 +626,48 @@ struct MusicTabContent: View {
 
     private var reactivitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Audio Reactivity")
-                .font(.subheadline.bold())
+            HStack {
+                Text("Music")
+                    .font(.subheadline.bold())
+                Spacer()
+                HStack(spacing: 8) {
+                    Label("React to Music", systemImage: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+                    Text("\(activeMusicPermutationCount)")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.14)))
+                }
+                .accessibilityElement(children: .combine)
+            }
 
-            // Master toggle
             Toggle("React to Music", isOn: Binding(
                 get: { cache.audioReactive.fractalAudioReactiveEnabled },
                 set: { isOn in
                     cache.audioReactive.fractalAudioReactiveEnabled = isOn
                     cache.push(\.fractalAudioReactiveEnabled, value: isOn)
                     if isOn {
-                        // Auto-enable audio-reactive lighting
                         cache.display.lightingMode = .audioReactive
                         cache.push(\.lightingMode, value: .audioReactive)
                     }
                 }
             ))
 
-            HStack(spacing: 8) {
-                Label("Music permutations active", systemImage: activeMusicPermutationCount > 0 ? "waveform.badge.plus" : "waveform.badge.minus")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(activeMusicPermutationCount > 0 ? .green : .secondary)
-                Spacer()
-                Text("\(activeMusicPermutationCount)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(activeMusicPermutationCount > 0 ? .green : .secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill((activeMusicPermutationCount > 0 ? Color.green : Color.secondary).opacity(0.14)))
-            }
-            .accessibilityElement(children: .combine)
-
             Toggle("Show Music Shortcuts on Parameters", isOn: $cache.display.showMusicShortcuts)
                 .onChange(of: cache.display.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
 
             if cache.audioReactive.fractalAudioReactiveEnabled {
-                // Genre presets (Fractal Forge–inspired)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Genre Presets")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    
+
                     HStack(spacing: 6) {
                         ForEach(ReactivityPreset.allCases, id: \.self) { preset in
-                            Button {
-                                applyPreset(preset)
-                            } label: {
+                            Button { applyPreset(preset) } label: {
                                 VStack(spacing: 2) {
                                     Image(systemName: preset.icon).font(.caption2)
                                     Text(preset.rawValue).font(.system(size: 9))
@@ -682,191 +678,193 @@ struct MusicTabContent: View {
                             .buttonStyle(.bordered)
                         }
                     }
-                }
 
-                // Amount slider
-                sliderRow(label: "Amount", value: Binding(
-                    get: { cache.audioReactive.fractalAudioAmount },
-                    set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
-                ), range: 0...1)
+                    sliderRow(label: "Amount", value: Binding(
+                        get: { cache.audioReactive.fractalAudioAmount },
+                        set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
+                    ), range: 0...1)
 
-                // Beat Punch slider
-                sliderRow(label: "Beat Punch", value: Binding(
-                    get: { cache.audioReactive.fractalBeatPunch },
-                    set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
-                ), range: 0...1)
+                    sliderRow(label: "Beat Punch", value: Binding(
+                        get: { cache.audioReactive.fractalBeatPunch },
+                        set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
+                    ), range: 0...1)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Mapped Parameters")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Menu {
-                            let available = availableMappingTargetsToAdd
-                            let universalTargets = available.filter { !$0.isFormulaParam }
-                            let formulaTargets = available.filter { $0.isFormulaParam }
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Mapped Parameters")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Menu {
+                                let available = availableMappingTargetsToAdd
+                                let universalTargets = available.filter { !$0.isFormulaParam }
+                                let formulaTargets = available.filter { $0.isFormulaParam }
 
-                            if !universalTargets.isEmpty {
-                                Section("Universal") {
-                                    ForEach(universalTargets, id: \.self) { target in
-                                        Button {
-                                            addMapping(target)
-                                        } label: {
-                                            Label(target.displayName, systemImage: target.icon)
+                                if !universalTargets.isEmpty {
+                                    Section("Universal") {
+                                        ForEach(universalTargets, id: \.self) { target in
+                                            Button { addMapping(target) } label: {
+                                                Label(target.displayName, systemImage: target.icon)
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            if !formulaTargets.isEmpty {
-                                Section("\(cache.fractalType.displayName) Params") {
-                                    ForEach(formulaTargets, id: \.self) { target in
-                                        Button {
-                                            addMapping(target)
-                                        } label: {
-                                            Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
+                                if !formulaTargets.isEmpty {
+                                    Section("\(cache.fractalType.displayName) Params") {
+                                        ForEach(formulaTargets, id: \.self) { target in
+                                            Button { addMapping(target) } label: {
+                                                Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            if available.isEmpty {
-                                Text("All targets added")
+                                if available.isEmpty {
+                                    Text("All targets added")
+                                }
+                            } label: {
+                                Label("Add", systemImage: "plus")
+                                    .font(.caption)
                             }
-                        } label: {
-                            Label("Add", systemImage: "plus")
-                                .font(.caption)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
 
-                    ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
-                        VStack(spacing: 6) {
-                            // ── Header: toggle + name + trash ──
-                            HStack(spacing: 8) {
-                                Toggle("", isOn: Binding(
-                                    get: { mappingAt(index)?.isEnabled ?? false },
-                                    set: { newValue in updateMapping(index) { $0.isEnabled = newValue } }
-                                ))
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
+                        ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                            VStack(spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Toggle("", isOn: Binding(
+                                        get: { mappingAt(index)?.isEnabled ?? false },
+                                        set: { newValue in updateMapping(index) { $0.isEnabled = newValue } }
+                                    ))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
 
-                                Image(systemName: mapping.target.icon(for: cache.fractalType))
+                                    Image(systemName: mapping.target.icon(for: cache.fractalType))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    Text(mapping.target.displayName(for: cache.fractalType))
+                                        .font(.caption.bold())
+
+                                    Spacer()
+
+                                    Button { removeMapping(at: index) } label: {
+                                        Image(systemName: "trash")
+                                            .font(.caption2)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.secondary)
+                                }
+
+                                Picker("Source", selection: Binding(
+                                    get: { mappingAt(index)?.source ?? .composite },
+                                    set: { newValue in updateMapping(index) { $0.source = newValue } }
+                                )) {
+                                    ForEach(MusicReactiveSource.allCases, id: \.self) { source in
+                                        Text(source.displayName).tag(source)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                                Picker("Curve", selection: Binding(
+                                    get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
+                                    set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
+                                )) {
+                                    ForEach(ResponseCurve.allCases, id: \.self) { curve in
+                                        Label(curve.displayName, systemImage: curve.icon).tag(curve)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                                if (mappingAt(index)?.responseCurve ?? .sinusoidal) == .hybrid {
+                                    sliderRow(label: "Hybrid Combo", value: Binding(
+                                        get: { mappingAt(index)?.hybridCombo ?? 0.35 },
+                                        set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
+                                    ), range: 0...1)
+
+                                    HStack {
+                                        Text("Drift")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Text("Vibration")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+
+                                Text("Music modulation is always relative to the current animation or manual base value.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
 
-                                Text(mapping.target.displayName(for: cache.fractalType))
-                                    .font(.caption.bold())
+                                sliderRow(label: "Intensity", value: Binding(
+                                    get: { mappingAt(index)?.amount ?? 1.0 },
+                                    set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
+                                ), range: 0...3)
 
-                                Spacer()
+                                sliderRow(label: "Smooth", value: Binding(
+                                    get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
+                                    set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
+                                ), range: 0...2)
 
-                                Button {
-                                    removeMapping(at: index)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption2)
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.secondary)
-                            }
-
-                            // ── Audio source ──
-                            Picker("Source", selection: Binding(
-                                get: { mappingAt(index)?.source ?? .composite },
-                                set: { newValue in updateMapping(index) { $0.source = newValue } }
-                            )) {
-                                ForEach(MusicReactiveSource.allCases, id: \.self) { source in
-                                    Text(source.displayName).tag(source)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            // ── Response curve ──
-                            Picker("Curve", selection: Binding(
-                                get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
-                                set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
-                            )) {
-                                ForEach(ResponseCurve.allCases, id: \.self) { curve in
-                                    Label(curve.displayName, systemImage: curve.icon).tag(curve)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            Text("Music modulation is always relative to the current animation or manual base value.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            // ── Intensity: how much audio drives the parameter ──
-                            sliderRow(label: "Intensity", value: Binding(
-                                get: { mappingAt(index)?.amount ?? 1.0 },
-                                set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
-                            ), range: 0...3)
-
-                            // ── Smooth: single feel knob (snappy ↔ smooth) ──
-                            sliderRow(label: "Smooth", value: Binding(
-                                get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
-                                set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
-                            ), range: 0...2)
-
-                            // ── Advanced: Invert + LFO (collapsed) ──
-                            DisclosureGroup {
-                                VStack(spacing: 6) {
-                                    Toggle("Invert", isOn: Binding(
-                                        get: { (mappingAt(index)?.amount ?? 1.0) < 0 },
-                                        set: { invert in
-                                            updateMapping(index) { $0.amount = invert ? -abs($0.amount) : abs($0.amount) }
-                                        }
-                                    ))
-                                    .font(.caption2)
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-
-                                    Divider()
-
-                                    Toggle("LFO Oscillator", isOn: Binding(
-                                        get: { mappingAt(index)?.lfo.enabled ?? false },
-                                        set: { newValue in updateMapping(index) { $0.lfo.enabled = newValue } }
-                                    ))
-                                    .font(.caption2)
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-
-                                    if mappingAt(index)?.lfo.enabled == true {
-                                        Picker("Shape", selection: Binding(
-                                            get: { mappingAt(index)?.lfo.shape ?? .sine },
-                                            set: { newValue in updateMapping(index) { $0.lfo.shape = newValue } }
-                                        )) {
-                                            ForEach(LFOShape.allCases, id: \.self) { shape in
-                                                Image(systemName: shape.icon).tag(shape)
+                                DisclosureGroup {
+                                    VStack(spacing: 6) {
+                                        Toggle("Invert", isOn: Binding(
+                                            get: { (mappingAt(index)?.amount ?? 1.0) < 0 },
+                                            set: { invert in
+                                                updateMapping(index) { $0.amount = invert ? -abs($0.amount) : abs($0.amount) }
                                             }
+                                        ))
+                                        .font(.caption2)
+                                        .toggleStyle(.switch)
+                                        .controlSize(.small)
+
+                                        Divider()
+
+                                        Toggle("LFO Oscillator", isOn: Binding(
+                                            get: { mappingAt(index)?.lfo.enabled ?? false },
+                                            set: { newValue in updateMapping(index) { $0.lfo.enabled = newValue } }
+                                        ))
+                                        .font(.caption2)
+                                        .toggleStyle(.switch)
+                                        .controlSize(.small)
+
+                                        if mappingAt(index)?.lfo.enabled == true {
+                                            Picker("Shape", selection: Binding(
+                                                get: { mappingAt(index)?.lfo.shape ?? .sine },
+                                                set: { newValue in updateMapping(index) { $0.lfo.shape = newValue } }
+                                            )) {
+                                                ForEach(LFOShape.allCases, id: \.self) { shape in
+                                                    Image(systemName: shape.icon).tag(shape)
+                                                }
+                                            }
+                                            .pickerStyle(.segmented)
+
+                                            sliderRow(label: "Speed", value: Binding(
+                                                get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
+                                                set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
+                                            ), range: 0.01...5.0)
+
+                                            sliderRow(label: "Depth", value: Binding(
+                                                get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
+                                                set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
+                                            ), range: 0...1)
                                         }
-                                        .pickerStyle(.segmented)
-
-                                        sliderRow(label: "Speed", value: Binding(
-                                            get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
-                                            set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
-                                        ), range: 0.01...5.0)
-
-                                        sliderRow(label: "Depth", value: Binding(
-                                            get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
-                                            set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
-                                        ), range: 0...1)
                                     }
+                                } label: {
+                                    Text("Advanced")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                 }
-                            } label: {
-                                Text("Advanced")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                .font(.caption2)
                             }
-                            .font(.caption2)
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
                         }
-                        .padding(8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
                     }
-
                 }
             }
         }

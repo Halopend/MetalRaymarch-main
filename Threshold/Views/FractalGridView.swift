@@ -29,7 +29,7 @@ struct FractalGridView: View {
     @State private var innerTab: FractalBrowseInnerTab = .formulas
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
 
-    private let columns = [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)]
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: 3)
     private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
     private static let categoryOrder = ["Box Folds", "Power / Quaternion", "Hybrid Folds", "Kaleidoscopic IFS"]
 

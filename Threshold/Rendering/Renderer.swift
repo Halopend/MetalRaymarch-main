@@ -911,21 +911,29 @@ actor Renderer {
                         delta = drifted
 
                     case .hybrid:
-                        // Blend a beat punch with slower drift for "both at once" feel.
-                        let attack = sourceValue * sourceValue
-                        var decay = musicReactiveDecayByTarget[mapping.target] ?? 0
-                        decay = max(attack, decay * exp(-6.0 * dt))
-                        musicReactiveDecayByTarget[mapping.target] = decay
-                        let pulseDelta = decay * maxDeviation * sign
+                        // True hybrid: large slow drift + smaller fast vibration.
+                        // hybridCombo controls how pronounced/energetic the fast vibration is.
+                        let combo = max(0.0, min(1.0, mapping.hybridCombo))
 
+                        // Slow large-scale movement (drift backbone)
                         let target = sourceValue * maxDeviation * sign
                         var drifted = musicReactiveDriftByTarget[mapping.target] ?? 0
-                        let driftRate: Float = 2.0
+                        let driftRate: Float = 2.4
                         drifted += (target - drifted) * min(1.0, dt / driftRate)
                         musicReactiveDriftByTarget[mapping.target] = drifted
 
-                        let combined = pulseDelta * 0.7 + drifted * 0.5
-                        let limit = maxDeviation * 1.25
+                        // Fast micro-vibration (wave overlay), still music-driven.
+                        let vibrationSpeed: Float = 6.0 + sourceValue * 8.0 + combo * 4.0
+                        var phase = musicReactivePhaseByTarget[mapping.target] ?? 0
+                        phase += vibrationSpeed * dt
+                        phase = phase - floor(phase)
+                        musicReactivePhaseByTarget[mapping.target] = phase
+
+                        let vibrationAmplitude = maxDeviation * sourceValue * (0.08 + 0.35 * combo)
+                        let vibration = sin(phase * 2.0 * .pi) * vibrationAmplitude * sign
+
+                        let combined = drifted + vibration
+                        let limit = maxDeviation * 1.2
                         delta = max(-limit, min(limit, combined))
                     }
 
