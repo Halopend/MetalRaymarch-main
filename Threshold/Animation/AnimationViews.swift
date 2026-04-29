@@ -98,7 +98,7 @@ struct AnimationPlayerWindowView: View {
                 )
             }
         }
-        .frame(minWidth: 600, minHeight: 140)
+        .frame(minWidth: 540, minHeight: 124)
         .glassBackgroundEffect()
     }
 }
@@ -106,7 +106,7 @@ struct AnimationPlayerWindowView: View {
 /// Inner content for the player window — shows scene selector, playback controls, and timeline.
 private struct AnimationPlayerContent: View {
     private enum PanelMode: String, CaseIterable {
-        case animation = "Animation"
+        case animation = "Video"
         case music = "Music"
     }
 
@@ -121,58 +121,9 @@ private struct AnimationPlayerContent: View {
     var body: some View {
         let currentScene = animationManager.currentScene
         let timing = currentScene.map(SceneTimingSnapshot.init(scene:))
-        let audioVisualScenes = animationManager.scenes.filter { $0.attachedSong != nil }
-        let visualScenes = animationManager.scenes.filter { $0.attachedSong == nil }
 
         VStack(spacing: 10) {
             HStack {
-                Menu {
-                    if !audioVisualScenes.isEmpty {
-                        Section("Accompanied") {
-                            ForEach(audioVisualScenes) { scene in
-                                Button {
-                                    animationManager.currentScene = scene
-                                } label: {
-                                    HStack {
-                                        Text(scene.name)
-                                        if animationManager.currentScene?.id == scene.id {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if !visualScenes.isEmpty {
-                        Section("Solo") {
-                            ForEach(visualScenes) { scene in
-                                Button {
-                                    animationManager.currentScene = scene
-                                } label: {
-                                    HStack {
-                                        Text(scene.name)
-                                        if animationManager.currentScene?.id == scene.id {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "film.stack")
-                        Text(animationManager.currentScene?.name ?? "No Scene")
-                            .lineLimit(1)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
-                    }
-                    .font(.subheadline)
-                }
-
-                Spacer()
-
                 Picker("Panel", selection: $panelMode) {
                     ForEach(PanelMode.allCases, id: \.self) { mode in
                         Text(mode.rawValue).tag(mode)
@@ -181,11 +132,26 @@ private struct AnimationPlayerContent: View {
                 .pickerStyle(.segmented)
                 .frame(width: 180)
 
+                Spacer()
+
+                if panelMode == .music {
+                    headerMusicTitle
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "film.stack")
+                        Text(animationManager.currentScene?.name ?? "No Scene")
+                            .lineLimit(1)
+                    }
+                    .font(.subheadline)
+                }
+
                 if let timing, panelMode == .animation {
                     Text(timing.progressText(for: animationManager.uiPlayhead, formatTime: formatTime))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+
+                headerMusicTransportControls
             }
 
             if panelMode == .animation {
@@ -285,6 +251,9 @@ private struct AnimationPlayerContent: View {
         }
         .onChange(of: panelMode) { _, newMode in
             if newMode == .music {
+                if animationManager.isPlaying {
+                    animationManager.pause()
+                }
                 musicScrubFraction = appModel.musicService.progressFraction
             }
         }
@@ -312,44 +281,10 @@ private struct AnimationPlayerContent: View {
         let music = appModel.musicService
 
         return VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: music.sourceIcon)
-                    .font(.caption)
-                    .foregroundStyle(music.accentColor)
-
-                if let track = music.nowPlayingUnified {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(track.title)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                        Text(track.artist)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                } else {
-                    Text("No song playing")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button { music.previous() } label: {
-                    Image(systemName: "backward.fill")
-                }
-                .buttonStyle(.plain)
-
-                Button { music.togglePlayPause() } label: {
-                    Image(systemName: music.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
-
-                Button { music.next() } label: {
-                    Image(systemName: "forward.fill")
-                }
-                .buttonStyle(.plain)
+            if music.nowPlayingUnified == nil {
+                Text("No song playing")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
 
             TimelineView(.periodic(from: .now, by: 0.2)) { _ in
@@ -380,6 +315,60 @@ private struct AnimationPlayerContent: View {
                     }
                 }
             }
+        }
+    }
+
+    private var headerMusicTitle: some View {
+        let music = appModel.musicService
+
+        return HStack(spacing: 6) {
+            Image(systemName: music.sourceIcon)
+                .font(.caption)
+                .foregroundStyle(music.accentColor)
+
+            if let track = music.nowPlayingUnified {
+                Text(track.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            } else {
+                Text("No song playing")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: 260, alignment: .leading)
+    }
+
+    private var headerMusicTransportControls: some View {
+        let music = appModel.musicService
+        let hasTrack = music.nowPlayingUnified != nil
+
+        return HStack(spacing: 8) {
+            Button { music.previous() } label: {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 34, height: 34)
+            .background(Circle().fill(Color.primary.opacity(0.10)))
+            .disabled(!hasTrack)
+
+            Button { music.togglePlayPause() } label: {
+                Image(systemName: music.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 30))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 42, height: 42)
+            .disabled(!hasTrack)
+
+            Button { music.next() } label: {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 34, height: 34)
+            .background(Circle().fill(Color.primary.opacity(0.10)))
+            .disabled(!hasTrack)
         }
     }
 
@@ -913,6 +902,15 @@ struct SceneEditorView: View {
                     .controlSize(.regular)
 
                     Button {
+                        updateLightingAcrossKeyframes()
+                    } label: {
+                        Label("Update Lighting", systemImage: "lightbulb.max")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .disabled(scene.keyframes.isEmpty)
+
+                    Button {
                         showSceneSettings.toggle()
                     } label: {
                         Label("Settings", systemImage: "gearshape")
@@ -1230,6 +1228,13 @@ struct SceneEditorView: View {
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 12) {
                         Button {
+                            updateLightingAcrossKeyframes()
+                        } label: {
+                            Image(systemName: "lightbulb.max")
+                        }
+                        .disabled(scene.keyframes.isEmpty)
+
+                        Button {
                             showSceneSettings.toggle()
                         } label: {
                             Image(systemName: "gearshape")
@@ -1512,6 +1517,25 @@ struct SceneEditorView: View {
             formulaParamValues: copy.formulaParamValues
         )
         scene.keyframes.insert(copy, at: index + 1)
+    }
+
+    private func updateLightingAcrossKeyframes() {
+        guard !scene.keyframes.isEmpty else { return }
+
+        // Snapshot current lighting/effects once, then apply to all keyframes.
+        let snapshot = AnimationKeyframe(from: appModel.renderSettings, name: "Lighting Snapshot", duration: 0)
+
+        for index in scene.keyframes.indices {
+            scene.keyframes[index].lightingMode = snapshot.lightingMode
+            scene.keyframes[index].lightingPreset = snapshot.lightingPreset
+            scene.keyframes[index].hueRotationEffect = snapshot.hueRotationEffect
+            scene.keyframes[index].pulseEffect = snapshot.pulseEffect
+            scene.keyframes[index].glowEffect = snapshot.glowEffect
+            scene.keyframes[index].bloomEffect = snapshot.bloomEffect
+            scene.keyframes[index].fogEffect = snapshot.fogEffect
+            scene.keyframes[index].gradientCycleEffect = snapshot.gradientCycleEffect
+            scene.keyframes[index].lightingSoftness = snapshot.lightingSoftness
+        }
     }
     
     private func formatDuration(_ duration: TimeInterval) -> String {

@@ -133,7 +133,7 @@ struct MetalProjectTestApp: App {
         .windowResizability(.contentMinSize)
 
         // Animation Player pop-out window (positioned below main menu)
-        Window("Animation Player", id: AppModel.animationPlayerWindowID) {
+        Window("Video Player", id: AppModel.animationPlayerWindowID) {
             AnimationPlayerWindowView()
                 .environment(appModel)
         }

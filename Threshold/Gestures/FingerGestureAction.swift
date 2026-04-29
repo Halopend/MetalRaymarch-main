@@ -4,11 +4,13 @@ import Foundation
 enum GestureDirection: String, CaseIterable, Codable, Hashable, Sendable {
     case vertical    // Y-axis finger movement (up/down) — default
     case horizontal  // X-axis finger movement (left/right)
+    case depth       // Z-axis finger movement (toward/away)
 
     var displayName: String {
         switch self {
         case .vertical:   return "Vertical"
         case .horizontal: return "Horizontal"
+        case .depth:      return "Depth"
         }
     }
 
@@ -16,6 +18,7 @@ enum GestureDirection: String, CaseIterable, Codable, Hashable, Sendable {
         switch self {
         case .vertical:   return "arrow.up.arrow.down"
         case .horizontal: return "arrow.left.arrow.right"
+        case .depth:      return "arrow.up.and.down.and.arrow.left.and.right"
         }
     }
 
@@ -23,6 +26,7 @@ enum GestureDirection: String, CaseIterable, Codable, Hashable, Sendable {
         switch self {
         case .vertical:   return "V"
         case .horizontal: return "H"
+        case .depth:      return "Z"
         }
     }
 }
@@ -113,15 +117,23 @@ struct GestureSlot: Hashable, Codable, Sendable {
     let hand: GestureHandMode
     let finger: FingerDigit
     /// Direction constraint for single-hand scalar bindings.
-    /// `.vertical` (default) = Y-axis drag, `.horizontal` = X-axis drag.
+    /// `.vertical` (default) = Y-axis drag, `.horizontal` = X-axis drag,
+    /// `.depth` = Z-axis drag.
     /// Both-hand slots ignore this (always nil).
     var direction: GestureDirection?
 
-    /// UserDefaults persistence key, e.g. "leftIndexBinding" or "leftIndexBindingH"
+    /// UserDefaults persistence key, e.g. "leftIndexBinding", "leftIndexBindingH", "leftIndexBindingZ"
     var persistenceKey: String {
         let base = "\(hand.rawValue)\(finger.displayName)Binding"
-        guard let dir = direction, dir == .horizontal else { return base }
-        return base + "H"
+        guard let dir = direction else { return base }
+        switch dir {
+        case .vertical:
+            return base
+        case .horizontal:
+            return base + "H"
+        case .depth:
+            return base + "Z"
+        }
     }
 
     /// Legacy key (no direction suffix) for backward-compatible loading.
@@ -144,6 +156,7 @@ struct GestureSlot: Hashable, Codable, Sendable {
                 } else {
                     slots.append(GestureSlot(hand: hand, finger: finger, direction: .vertical))
                     slots.append(GestureSlot(hand: hand, finger: finger, direction: .horizontal))
+                    slots.append(GestureSlot(hand: hand, finger: finger, direction: .depth))
                 }
             }
         }
@@ -167,7 +180,8 @@ struct GestureSlot: Hashable, Codable, Sendable {
         }
         return FingerDigit.allCases.flatMap { finger in
             [GestureSlot(hand: hand, finger: finger, direction: .vertical),
-             GestureSlot(hand: hand, finger: finger, direction: .horizontal)]
+             GestureSlot(hand: hand, finger: finger, direction: .horizontal),
+             GestureSlot(hand: hand, finger: finger, direction: .depth)]
         }
     }
 }

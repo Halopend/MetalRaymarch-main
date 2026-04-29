@@ -358,7 +358,7 @@ struct ContentView: View {
                 .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
-            .help("Open or close Animation Player")
+            .help("Open or close Video Player")
             .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 24) {
                 didLongPressPlayerButton = true
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -1100,6 +1100,151 @@ struct ContentView: View {
         return (qz * qy * qx).normalized
     }
 
+    private var gesturePictographicAssignmentPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Hand Assignments", systemImage: "hand.point.up.left.and.text")
+                .font(.subheadline.weight(.semibold))
+
+            HStack(spacing: 10) {
+                singleHandGesturePictograph(.left)
+                singleHandGesturePictograph(.right)
+            }
+
+            Text("Tap a fingertip to map vertical and horizontal single-finger gestures.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func singleHandGesturePictograph(_ handMode: GestureHandMode) -> some View {
+        VStack(spacing: 8) {
+            Label(handMode.displayName, systemImage: handMode.icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.secondary.opacity(0.08))
+
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 44, weight: .regular))
+                    .foregroundStyle(.secondary.opacity(0.30))
+                    .scaleEffect(x: handMode == .left ? -1 : 1, y: 1)
+                    .offset(y: 10)
+
+                HStack(spacing: 8) {
+                    ForEach(FingerDigit.allCases, id: \.self) { finger in
+                        singleFingerTipAssignmentButton(handMode: handMode, finger: finger)
+                    }
+                }
+                .offset(y: -26)
+            }
+            .frame(height: 112)
+
+            VStack(spacing: 4) {
+                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                    singleFingerMappingSummaryRow(handMode: handMode, finger: finger)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func singleFingerTipAssignmentButton(handMode: GestureHandMode, finger: FingerDigit) -> some View {
+        let verticalSlot = GestureSlot(hand: handMode, finger: finger, direction: .vertical)
+        let horizontalSlot = GestureSlot(hand: handMode, finger: finger, direction: .horizontal)
+        let verticalBinding = cache.gestureBinding(for: verticalSlot)
+        let horizontalBinding = cache.gestureBinding(for: horizontalSlot)
+        let bindings = GestureActionBinding.availableBindings(for: cache.fractalType, handMode: handMode)
+
+        return Menu {
+            Section("Vertical") {
+                ForEach(bindings, id: \.self) { action in
+                    Button {
+                        cache.setGestureBinding(action, for: verticalSlot)
+                    } label: {
+                        HStack {
+                            Label(action.contextualDisplayName(for: cache.fractalType), systemImage: action.icon)
+                            if verticalBinding == action {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Horizontal") {
+                ForEach(bindings, id: \.self) { action in
+                    Button {
+                        cache.setGestureBinding(action, for: horizontalSlot)
+                    } label: {
+                        HStack {
+                            Label(action.contextualDisplayName(for: cache.fractalType), systemImage: action.icon)
+                            if horizontalBinding == action {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if verticalBinding != .core(.none) || horizontalBinding != .core(.none) {
+                Divider()
+                Button("Clear Finger Mappings", role: .destructive) {
+                    cache.setGestureBinding(.core(.none), for: verticalSlot)
+                    cache.setGestureBinding(.core(.none), for: horizontalSlot)
+                }
+            }
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: finger.icon)
+                    .font(.caption)
+                HStack(spacing: 4) {
+                    Image(systemName: verticalBinding.icon)
+                        .font(.caption2)
+                    Image(systemName: horizontalBinding.icon)
+                        .font(.caption2)
+                }
+            }
+            .frame(width: 34, height: 38)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.blue.opacity(0.3), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func singleFingerMappingSummaryRow(handMode: GestureHandMode, finger: FingerDigit) -> some View {
+        let verticalSlot = GestureSlot(hand: handMode, finger: finger, direction: .vertical)
+        let horizontalSlot = GestureSlot(hand: handMode, finger: finger, direction: .horizontal)
+        let verticalBinding = cache.gestureBinding(for: verticalSlot)
+        let horizontalBinding = cache.gestureBinding(for: horizontalSlot)
+
+        return HStack(spacing: 6) {
+            Text(finger.displayName)
+                .font(.caption2.weight(.semibold))
+                .frame(width: 46, alignment: .leading)
+
+            Text("V")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(verticalBinding.contextualDisplayName(for: cache.fractalType))
+                .font(.caption2)
+                .lineLimit(1)
+
+            Text("H")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+
+            Text(horizontalBinding.contextualDisplayName(for: cache.fractalType))
+                .font(.caption2)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+    }
+
     @ViewBuilder
     private func gestureHandSection(mode: GestureHandMode) -> some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1738,14 +1883,19 @@ struct ContentView: View {
                         set: { appModel.handTrackingEnabled = $0 }
                     ))
 
-                    // ── Hand Assignments (per-hand × per-finger) ──────────────
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Hand Assignments", systemImage: "hand.point.up.braille")
-                            .font(.subheadline.weight(.semibold))
+                    // ── Hand Assignments ───────────────────────────────────────
+                    gesturePictographicAssignmentPanel
 
-                        ForEach(GestureHandMode.allCases, id: \.self) { mode in
-                            gestureHandSection(mode: mode)
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(GestureHandMode.allCases, id: \.self) { mode in
+                                gestureHandSection(mode: mode)
+                            }
                         }
+                        .padding(.top, 4)
+                    } label: {
+                        Label("Detailed Assignments", systemImage: "list.bullet.rectangle")
+                            .font(.subheadline.weight(.semibold))
                     }
 
                     Divider().padding(.vertical, 2)

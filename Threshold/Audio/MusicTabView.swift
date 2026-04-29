@@ -64,8 +64,6 @@ struct MusicTabContent: View {
                 VStack(spacing: 10) {
                     switch innerTab {
                     case .music:
-                        musicHeaderSection
-
                         // Service toggle / picker
                         serviceToggle
 
@@ -158,22 +156,6 @@ struct MusicTabContent: View {
         .buttonStyle(.plain)
         .disabled(!cache.audioReactive.fractalAudioReactiveEnabled || availableMappingTargetsToAdd.isEmpty)
         .opacity((!cache.audioReactive.fractalAudioReactiveEnabled || availableMappingTargetsToAdd.isEmpty) ? 0.45 : 1.0)
-    }
-
-    private var musicHeaderSection: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Music Controls")
-                    .font(.subheadline.bold())
-                Text("Playback, services, and routing")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
     }
 
     private var visualizationHeaderSection: some View {
@@ -355,22 +337,44 @@ struct MusicTabContent: View {
                 .frame(maxWidth: .infinity)
 
                 if viewModel.hasConnectedProvider {
-                    Button {
-                        openWindow(id: AppModel.libraryWindowID)
-                    } label: {
-                        HStack {
-                            Label("Change Song", systemImage: "music.note.list")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Image(systemName: "arrow.up.right.square")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    VStack(spacing: 8) {
+                        Button {
+                            openWindow(id: AppModel.libraryWindowID)
+                        } label: {
+                            HStack {
+                                Label("Change Song", systemImage: "music.note.list")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.4)))
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.4)))
+                        .buttonStyle(.plain)
+
+                        HStack(spacing: 8) {
+                            Button {
+                                viewModel.nextTrack()
+                            } label: {
+                                Label("Next Song", systemImage: "forward.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Button {
+                                openWindow(id: AppModel.libraryWindowID)
+                            } label: {
+                                Label("Playlists", systemImage: "music.note.list")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             } else {
                 // Empty state
@@ -866,57 +870,6 @@ struct MusicTabContent: View {
                                 get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
                                 set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
                             ), range: 0...2)
-
-                            DisclosureGroup {
-                                VStack(spacing: 6) {
-                                    Toggle("Invert", isOn: Binding(
-                                        get: { (mappingAt(index)?.amount ?? 1.0) < 0 },
-                                        set: { invert in
-                                            updateMapping(index) { $0.amount = invert ? -abs($0.amount) : abs($0.amount) }
-                                        }
-                                    ))
-                                    .font(.caption2)
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-
-                                    Divider()
-
-                                    Toggle("LFO Oscillator", isOn: Binding(
-                                        get: { mappingAt(index)?.lfo.enabled ?? false },
-                                        set: { newValue in updateMapping(index) { $0.lfo.enabled = newValue } }
-                                    ))
-                                    .font(.caption2)
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-
-                                    if mappingAt(index)?.lfo.enabled == true {
-                                        Picker("Shape", selection: Binding(
-                                            get: { mappingAt(index)?.lfo.shape ?? .sine },
-                                            set: { newValue in updateMapping(index) { $0.lfo.shape = newValue } }
-                                        )) {
-                                            ForEach(LFOShape.allCases, id: \.self) { shape in
-                                                Image(systemName: shape.icon).tag(shape)
-                                            }
-                                        }
-                                        .pickerStyle(.segmented)
-
-                                        numericSliderRow(label: "LFO Speed", value: Binding(
-                                            get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
-                                            set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
-                                        ), range: 0.01...5.0, format: "%.2f")
-
-                                        numericSliderRow(label: "LFO Depth", value: Binding(
-                                            get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
-                                            set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
-                                        ), range: 0...1, format: "%.2f")
-                                    }
-                                }
-                            } label: {
-                                Text("Advanced")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.caption2)
                         }
                         .padding(6)
                         .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
@@ -1024,18 +977,6 @@ struct MusicTabContent: View {
                 .frame(width: 72, alignment: .leading)
             Slider(value: value, in: range)
             Text("\(Int(value.wrappedValue * 100))%")
-                .font(.caption.monospacedDigit())
-                .frame(width: 44, alignment: .trailing)
-        }
-    }
-
-    private func numericSliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>, format: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .frame(width: 72, alignment: .leading)
-            Slider(value: value, in: range)
-            Text(String(format: format, value.wrappedValue))
                 .font(.caption.monospacedDigit())
                 .frame(width: 44, alignment: .trailing)
         }
