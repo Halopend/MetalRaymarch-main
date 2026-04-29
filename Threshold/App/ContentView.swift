@@ -122,6 +122,7 @@ struct ContentView: View {
     @State private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
+    @State private var didLongPressPlayerButton = false
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
@@ -335,11 +336,15 @@ struct ContentView: View {
             Spacer()
 
             Button {
+                if didLongPressPlayerButton {
+                    didLongPressPlayerButton = false
+                    return
+                }
                 toggleAnimationPlayerWindow()
             } label: {
                 VStack(spacing: 4) {
                     ZStack(alignment: .topTrailing) {
-                        Image(systemName: appModel.isAnimationPlayerWindowVisible ? "xmark.rectangle.fill" : "play.rectangle")
+                        Image(systemName: appModel.isAnimationPlayerWindowVisible ? "film.stack.fill" : "film.stack")
                             .font(.system(size: 18))
 
                         if isAnimationPlaying {
@@ -364,6 +369,12 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .help("Open or close Animation Player")
+            .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 24) {
+                didLongPressPlayerButton = true
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedTab = .animate
+                }
+            }
         }
         .padding(.vertical, 8)
         .frame(width: 72)
@@ -432,7 +443,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 activityTrafficLights
 
-                Spacer(minLength: 24)
+                Spacer()
 
                 HStack(spacing: 10) {
                     PresetButton(
@@ -459,7 +470,7 @@ struct ContentView: View {
 
             ToggleImmersiveSpaceButton()
                 .fixedSize()
-                .offset(x: -100)
+                .offset(x: -40)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -2616,8 +2627,8 @@ private struct HoldToSaveResetButton: View {
     @State private var holdTask: Task<Void, Never>?
     @State private var holdCompleted = false
 
-    private let holdArmDelay: TimeInterval = 1.2
-    private let holdDuration: TimeInterval = 3.0
+    private let holdArmDelay: TimeInterval = 0.25
+    private let holdDuration: TimeInterval = 1.1
 
     private var totalHoldDuration: TimeInterval {
         holdArmDelay + holdDuration
@@ -2626,11 +2637,11 @@ private struct HoldToSaveResetButton: View {
     var body: some View {
         ZStack {
             Capsule()
-                .fill(Color.orange.opacity(0.12))
+                .fill(Color.green.opacity(0.12))
 
             GeometryReader { geo in
                 Capsule()
-                    .fill(Color.orange.opacity(0.28))
+                    .fill(Color.green.opacity(0.28))
                     .frame(width: max(0, geo.size.width * holdProgress))
             }
             .clipShape(Capsule())
@@ -2642,7 +2653,7 @@ private struct HoldToSaveResetButton: View {
                         .frame(width: 18, height: 18)
                     Circle()
                         .trim(from: 0, to: holdProgress)
-                        .stroke(Color.orange,
+                        .stroke(Color.green,
                                 style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .frame(width: 18, height: 18)
@@ -2662,7 +2673,7 @@ private struct HoldToSaveResetButton: View {
         .contentShape(Capsule())
         .overlay(
             Capsule()
-                .stroke(Color.orange.opacity(0.45), lineWidth: 1)
+                .stroke(Color.green.opacity(0.45), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.15), value: holdProgress)
         .animation(.easeInOut(duration: 0.2), value: isPressing)

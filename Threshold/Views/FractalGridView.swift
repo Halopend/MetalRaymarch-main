@@ -143,7 +143,9 @@ struct FractalGridView: View {
             )
 
             LazyVGrid(columns: sceneColumns, spacing: 12) {
-                ForEach(animationManager.scenes) { scene in
+                // Use per-list index identity to avoid duplicate UUID collisions
+                // from imported/shared scene data causing LazyVGrid gaps.
+                ForEach(Array(animationManager.scenes.enumerated()), id: \.offset) { _, scene in
                     sceneCard(
                         title: scene.name,
                         subtitle: scene.fractalType?.displayName ?? "Any fractal",
@@ -156,7 +158,7 @@ struct FractalGridView: View {
                     }
                 }
 
-                ForEach(staticScenePresets) { preset in
+                ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
                     sceneCard(
                         title: preset.name,
                         subtitle: preset.fractalType.displayName,
