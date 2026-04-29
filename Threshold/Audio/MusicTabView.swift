@@ -30,7 +30,7 @@ struct MusicTabContent: View {
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
-        return cache.audioReactive.musicReactiveMappings.filter(\.isEnabled).count
+        return cache.audioReactive.musicReactiveMappings.count
     }
 
     init(cache: UISettingsCache, musicService: MusicService, audioAnalyzer: AudioAnalyzer, renderSettings: RenderSettings) {
@@ -43,19 +43,29 @@ struct MusicTabContent: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Picker("Section", selection: $innerTab) {
-                ForEach(MusicInnerTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
+            HStack(spacing: 8) {
+                Picker("Section", selection: $innerTab) {
+                    ForEach(MusicInnerTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if innerTab == .visualizations {
+                    visualizationAddButton
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            .animation(.snappy(duration: 0.24, extraBounce: 0.12), value: innerTab)
 
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 14) {
+                VStack(spacing: 10) {
                     switch innerTab {
                     case .music:
+                        musicHeaderSection
+
                         // Service toggle / picker
                         serviceToggle
 
@@ -70,10 +80,6 @@ struct MusicTabContent: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
-                        if viewModel.hasConnectedProvider {
-                            openLibraryButton
-                        }
-
                         // Service connections (settings)
                         connectionsSection
 
@@ -83,11 +89,10 @@ struct MusicTabContent: View {
                         }
 
                     case .visualizations:
+                        visualizationHeaderSection
+
                         // Audio Reactivity (the main event)
                         reactivitySection
-
-                        // Saved music presets
-                        musicPresetsSection
 
                         // Level meters
                         levelMeters
@@ -97,6 +102,110 @@ struct MusicTabContent: View {
                 .padding(.vertical, 10)
             }
         }
+    }
+
+    private var reactToMusicBinding: Binding<Bool> {
+        Binding(
+            get: { cache.audioReactive.fractalAudioReactiveEnabled },
+            set: { isOn in
+                cache.audioReactive.fractalAudioReactiveEnabled = isOn
+                cache.push(\.fractalAudioReactiveEnabled, value: isOn)
+                if isOn {
+                    cache.display.lightingMode = .audioReactive
+                    cache.push(\.lightingMode, value: .audioReactive)
+                }
+            }
+        )
+    }
+
+    private var visualizationAddButton: some View {
+        Menu {
+            let available = availableMappingTargetsToAdd
+            let universalTargets = available.filter { !$0.isFormulaParam }
+            let formulaTargets = available.filter { $0.isFormulaParam }
+
+            if !universalTargets.isEmpty {
+                Section("Universal") {
+                    ForEach(universalTargets, id: \.self) { target in
+                        Button { addMapping(target) } label: {
+                            Label(target.displayName, systemImage: target.icon)
+                        }
+                    }
+                }
+            }
+
+            if !formulaTargets.isEmpty {
+                Section("\(cache.fractalType.displayName) Params") {
+                    ForEach(formulaTargets, id: \.self) { target in
+                        Button { addMapping(target) } label: {
+                            Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
+                        }
+                    }
+                }
+            }
+
+            if available.isEmpty {
+                Text("All targets added")
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.blue)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(Color.blue.opacity(0.14)))
+                .overlay(Circle().stroke(Color.blue.opacity(0.30), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(!cache.audioReactive.fractalAudioReactiveEnabled || availableMappingTargetsToAdd.isEmpty)
+        .opacity((!cache.audioReactive.fractalAudioReactiveEnabled || availableMappingTargetsToAdd.isEmpty) ? 0.45 : 1.0)
+    }
+
+    private var musicHeaderSection: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Music Controls")
+                    .font(.subheadline.bold())
+                Text("Playback, services, and routing")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
+    }
+
+    private var visualizationHeaderSection: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Music Reactive Visuals")
+                    .font(.subheadline.bold())
+                Text("Toggle and map audio-driven modulation")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Toggle("React to Music", isOn: reactToMusicBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+            HStack(spacing: 6) {
+                Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
+                    .font(.caption)
+                Text("\(activeMusicPermutationCount)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+            }
+            .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.14)))
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
     }
 
 
@@ -141,21 +250,8 @@ struct MusicTabContent: View {
                     }
                     .pickerStyle(.segmented)
                 }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-            } else if connected.count == 1, let single = connected.first {
-                HStack {
-                    Image(systemName: single.iconName)
-                        .foregroundStyle(single.accentColor)
-                    Text(single.displayName)
-                        .font(.subheadline.bold())
-                    Spacer()
-                    Text("Active")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
             }
         }
     }
@@ -293,8 +389,8 @@ struct MusicTabContent: View {
                 .padding(.vertical, 16)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.indigo.opacity(0.08)))
     }
 
     private func artPlaceholder(for source: SongSource) -> some View {
@@ -316,6 +412,19 @@ struct MusicTabContent: View {
                 Text("Services")
                     .font(.subheadline.bold())
                 Spacer()
+                Menu {
+                    Button {
+                        cache.display.showMusicShortcuts.toggle()
+                        cache.push(\.showMusicShortcuts, value: cache.display.showMusicShortcuts)
+                    } label: {
+                        Label(cache.display.showMusicShortcuts ? "Hide Parameter Shortcuts" : "Show Parameter Shortcuts", systemImage: cache.display.showMusicShortcuts ? "checkmark.circle.fill" : "circle")
+                    }
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             // Dynamic rows for every registered provider
@@ -347,8 +456,8 @@ struct MusicTabContent: View {
                 .controlSize(.small)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.10)))
     }
 
     /// A single service connection row — works for any provider.
@@ -453,8 +562,8 @@ struct MusicTabContent: View {
                 }
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.08)))
     }
 
     // MARK: - Unified Library Browser
@@ -647,296 +756,183 @@ struct MusicTabContent: View {
 
     private var reactivitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Music")
-                    .font(.subheadline.bold())
-                Spacer()
-                HStack(spacing: 8) {
-                    Label("React to Music", systemImage: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
-                    Text("\(activeMusicPermutationCount)")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.14)))
-                }
-                .accessibilityElement(children: .combine)
-            }
-
-            Toggle("React to Music", isOn: Binding(
-                get: { cache.audioReactive.fractalAudioReactiveEnabled },
-                set: { isOn in
-                    cache.audioReactive.fractalAudioReactiveEnabled = isOn
-                    cache.push(\.fractalAudioReactiveEnabled, value: isOn)
-                    if isOn {
-                        cache.display.lightingMode = .audioReactive
-                        cache.push(\.lightingMode, value: .audioReactive)
-                    }
-                }
-            ))
-
-            Toggle("Show Music Shortcuts on Parameters", isOn: $cache.display.showMusicShortcuts)
-                .onChange(of: cache.display.showMusicShortcuts) { _, v in cache.push(\.showMusicShortcuts, value: v) }
-
             if cache.audioReactive.fractalAudioReactiveEnabled {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Genre Presets")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 6) {
-                        ForEach(ReactivityPreset.allCases, id: \.self) { preset in
-                            Button { applyPreset(preset) } label: {
-                                VStack(spacing: 2) {
-                                    Image(systemName: preset.icon).font(.caption2)
-                                    Text(preset.rawValue).font(.system(size: 9))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
+                    Text("Quick Mix")
+                        .font(.subheadline.bold())
 
                     sliderRow(label: "Amount", value: Binding(
                         get: { cache.audioReactive.fractalAudioAmount },
                         set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
                     ), range: 0...1)
 
-                    sliderRow(label: "Beat Punch", value: Binding(
+                    sliderRow(label: "Beat", value: Binding(
                         get: { cache.audioReactive.fractalBeatPunch },
                         set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
                     ), range: 0...1)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Mapped Parameters")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Menu {
-                                let available = availableMappingTargetsToAdd
-                                let universalTargets = available.filter { !$0.isFormulaParam }
-                                let formulaTargets = available.filter { $0.isFormulaParam }
-
-                                if !universalTargets.isEmpty {
-                                    Section("Universal") {
-                                        ForEach(universalTargets, id: \.self) { target in
-                                            Button { addMapping(target) } label: {
-                                                Label(target.displayName, systemImage: target.icon)
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if !formulaTargets.isEmpty {
-                                    Section("\(cache.fractalType.displayName) Params") {
-                                        ForEach(formulaTargets, id: \.self) { target in
-                                            Button { addMapping(target) } label: {
-                                                Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if available.isEmpty {
-                                    Text("All targets added")
-                                }
-                            } label: {
-                                Label("Add", systemImage: "plus")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
-                            VStack(spacing: 6) {
-                                HStack(spacing: 8) {
-                                    Toggle("", isOn: Binding(
-                                        get: { mappingAt(index)?.isEnabled ?? false },
-                                        set: { newValue in updateMapping(index) { $0.isEnabled = newValue } }
-                                    ))
-                                    .labelsHidden()
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-
-                                    Image(systemName: mapping.target.icon(for: cache.fractalType))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-
-                                    Text(mapping.target.displayName(for: cache.fractalType))
-                                        .font(.caption.bold())
-
-                                    Spacer()
-
-                                    Button { removeMapping(at: index) } label: {
-                                        Image(systemName: "trash")
-                                            .font(.caption2)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .foregroundStyle(.secondary)
-                                }
-
-                                Picker("Source", selection: Binding(
-                                    get: { mappingAt(index)?.source ?? .composite },
-                                    set: { newValue in updateMapping(index) { $0.source = newValue } }
-                                )) {
-                                    ForEach(MusicReactiveSource.allCases, id: \.self) { source in
-                                        Text(source.displayName).tag(source)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-
-                                Picker("Curve", selection: Binding(
-                                    get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
-                                    set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
-                                )) {
-                                    ForEach(ResponseCurve.allCases, id: \.self) { curve in
-                                        Label(curve.displayName, systemImage: curve.icon).tag(curve)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-
-                                if (mappingAt(index)?.responseCurve ?? .sinusoidal) == .hybrid {
-                                    sliderRow(label: "Hybrid Combo", value: Binding(
-                                        get: { mappingAt(index)?.hybridCombo ?? 0.35 },
-                                        set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
-                                    ), range: 0...1)
-
-                                    HStack {
-                                        Text("Drift")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                        Spacer()
-                                        Text("Vibration")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-
-                                Text("Music modulation is always relative to the current animation or manual base value.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                sliderRow(label: "Intensity", value: Binding(
-                                    get: { mappingAt(index)?.amount ?? 1.0 },
-                                    set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
-                                ), range: 0...3)
-
-                                sliderRow(label: "Smooth", value: Binding(
-                                    get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
-                                    set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
-                                ), range: 0...2)
-
-                                DisclosureGroup {
-                                    VStack(spacing: 6) {
-                                        Toggle("Invert", isOn: Binding(
-                                            get: { (mappingAt(index)?.amount ?? 1.0) < 0 },
-                                            set: { invert in
-                                                updateMapping(index) { $0.amount = invert ? -abs($0.amount) : abs($0.amount) }
-                                            }
-                                        ))
-                                        .font(.caption2)
-                                        .toggleStyle(.switch)
-                                        .controlSize(.small)
-
-                                        Divider()
-
-                                        Toggle("LFO Oscillator", isOn: Binding(
-                                            get: { mappingAt(index)?.lfo.enabled ?? false },
-                                            set: { newValue in updateMapping(index) { $0.lfo.enabled = newValue } }
-                                        ))
-                                        .font(.caption2)
-                                        .toggleStyle(.switch)
-                                        .controlSize(.small)
-
-                                        if mappingAt(index)?.lfo.enabled == true {
-                                            Picker("Shape", selection: Binding(
-                                                get: { mappingAt(index)?.lfo.shape ?? .sine },
-                                                set: { newValue in updateMapping(index) { $0.lfo.shape = newValue } }
-                                            )) {
-                                                ForEach(LFOShape.allCases, id: \.self) { shape in
-                                                    Image(systemName: shape.icon).tag(shape)
-                                                }
-                                            }
-                                            .pickerStyle(.segmented)
-
-                                            sliderRow(label: "Speed", value: Binding(
-                                                get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
-                                                set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
-                                            ), range: 0.01...5.0)
-
-                                            sliderRow(label: "Depth", value: Binding(
-                                                get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
-                                                set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
-                                            ), range: 0...1)
-                                        }
-                                    }
-                                } label: {
-                                    Text("Advanced")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .font(.caption2)
-                            }
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
-                        }
-                    }
                 }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.10)))
 
-    private var musicPresetsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Music Presets")
-                .font(.subheadline.bold())
-
-            HStack(spacing: 6) {
-                TextField("Preset Name", text: musicPresetNameBinding)
-                    .textFieldStyle(.roundedBorder)
-                Button("Save") { viewModel.saveMusicPreset(using: cache) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(viewModel.musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            if viewModel.musicPresets.isEmpty {
-                Text("No music presets saved yet")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.musicPresets) { preset in
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(preset.name)
-                                .font(.caption.bold())
-                            Text(preset.createdAt, style: .date)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("Mapped Parameters")
+                            .font(.subheadline.bold())
                         Spacer()
-                        Button("Load") { viewModel.loadMusicPreset(preset, into: cache) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        Button(role: .destructive) { viewModel.deleteMusicPreset(preset.id) } label: {
-                            Image(systemName: "trash")
-                                .font(.caption2)
+
+                        Menu {
+                            Section("Preset Shortcuts") {
+                                ForEach(ReactivityPreset.allCases, id: \.self) { preset in
+                                    Button {
+                                        applyPreset(preset)
+                                    } label: {
+                                        Label(preset.rawValue, systemImage: preset.icon)
+                                    }
+                                }
+                            }
+
+                            if !cache.audioReactive.musicReactiveMappings.isEmpty {
+                                Divider()
+                                Button("Clear Mappings", role: .destructive) {
+                                    cache.audioReactive.musicReactiveMappings = []
+                                    cache.push(\.musicReactiveMappings, value: [])
+                                }
+                            }
+                        } label: {
+                            Label("Shortcuts", systemImage: "sparkles")
+                                .font(.caption)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+
+                        Text("\(activeMusicPermutationCount) active")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                        VStack(spacing: 4) {
+                            HStack(spacing: 8) {
+                                Image(systemName: mapping.target.icon(for: cache.fractalType))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Text(mapping.target.displayName(for: cache.fractalType))
+                                    .font(.caption.bold())
+
+                                Spacer()
+
+                                Button { removeMapping(at: index) } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption2)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                            }
+
+                            Picker("Source", selection: Binding(
+                                get: { mappingAt(index)?.source ?? .composite },
+                                set: { newValue in updateMapping(index) { $0.source = newValue } }
+                            )) {
+                                ForEach(MusicReactiveSource.allCases, id: \.self) { source in
+                                    Text(source.displayName).tag(source)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            Picker("Curve", selection: Binding(
+                                get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
+                                set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
+                            )) {
+                                ForEach(ResponseCurve.allCases, id: \.self) { curve in
+                                    Label(curve.displayName, systemImage: curve.icon).tag(curve)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            if (mappingAt(index)?.responseCurve ?? .sinusoidal) == .hybrid {
+                                sliderRow(label: "Hybrid", value: Binding(
+                                    get: { mappingAt(index)?.hybridCombo ?? 0.35 },
+                                    set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
+                                ), range: 0...1)
+                            }
+
+                            sliderRow(label: "Intensity", value: Binding(
+                                get: { mappingAt(index)?.amount ?? 1.0 },
+                                set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
+                            ), range: 0...3)
+
+                            sliderRow(label: "Smooth", value: Binding(
+                                get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
+                                set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
+                            ), range: 0...2)
+
+                            DisclosureGroup {
+                                VStack(spacing: 6) {
+                                    Toggle("Invert", isOn: Binding(
+                                        get: { (mappingAt(index)?.amount ?? 1.0) < 0 },
+                                        set: { invert in
+                                            updateMapping(index) { $0.amount = invert ? -abs($0.amount) : abs($0.amount) }
+                                        }
+                                    ))
+                                    .font(.caption2)
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+
+                                    Divider()
+
+                                    Toggle("LFO Oscillator", isOn: Binding(
+                                        get: { mappingAt(index)?.lfo.enabled ?? false },
+                                        set: { newValue in updateMapping(index) { $0.lfo.enabled = newValue } }
+                                    ))
+                                    .font(.caption2)
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+
+                                    if mappingAt(index)?.lfo.enabled == true {
+                                        Picker("Shape", selection: Binding(
+                                            get: { mappingAt(index)?.lfo.shape ?? .sine },
+                                            set: { newValue in updateMapping(index) { $0.lfo.shape = newValue } }
+                                        )) {
+                                            ForEach(LFOShape.allCases, id: \.self) { shape in
+                                                Image(systemName: shape.icon).tag(shape)
+                                            }
+                                        }
+                                        .pickerStyle(.segmented)
+
+                                        numericSliderRow(label: "LFO Speed", value: Binding(
+                                            get: { mappingAt(index)?.lfo.frequency ?? 0.1 },
+                                            set: { newValue in updateMapping(index) { $0.lfo.frequency = newValue; $0.lfo.sanitizeInPlace() } }
+                                        ), range: 0.01...5.0, format: "%.2f")
+
+                                        numericSliderRow(label: "LFO Depth", value: Binding(
+                                            get: { mappingAt(index)?.lfo.amplitude ?? 0.2 },
+                                            set: { newValue in updateMapping(index) { $0.lfo.amplitude = newValue; $0.lfo.sanitizeInPlace() } }
+                                        ), range: 0...1, format: "%.2f")
+                                    }
+                                }
+                            } label: {
+                                Text("Advanced")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.caption2)
+                        }
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
                     }
                 }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
+            } else {
+                Text("Enable React to Music above to start visualization mappings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.10)))
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
     }
 
     private func applyPreset(_ preset: ReactivityPreset) {
@@ -955,7 +951,7 @@ struct MusicTabContent: View {
         cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
         cache.push(\.beatSensitivity, value: s.beatSensitivity)
         
-        let mappings = preset.defaultMappings(for: cache.fractalType)
+        var mappings = preset.defaultMappings(for: cache.fractalType)
         cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
@@ -984,7 +980,8 @@ struct MusicTabContent: View {
     private func addMapping(_ target: MusicReactiveTarget) {
         var mappings = cache.audioReactive.musicReactiveMappings
         guard !mappings.contains(where: { $0.target == target }) else { return }
-        mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
+        let mapping = target.defaultMapping(for: cache.fractalType, enabled: true)
+        mappings.append(mapping)
         cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }
@@ -1024,11 +1021,23 @@ struct MusicTabContent: View {
         HStack {
             Text(label)
                 .font(.caption)
-                .frame(width: 120, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
             Slider(value: value, in: range)
             Text("\(Int(value.wrappedValue * 100))%")
                 .font(.caption.monospacedDigit())
-                .frame(width: 36)
+                .frame(width: 44, alignment: .trailing)
+        }
+    }
+
+    private func numericSliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>, format: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .frame(width: 72, alignment: .leading)
+            Slider(value: value, in: range)
+            Text(String(format: format, value.wrappedValue))
+                .font(.caption.monospacedDigit())
+                .frame(width: 44, alignment: .trailing)
         }
     }
 

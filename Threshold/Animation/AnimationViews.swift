@@ -51,7 +51,6 @@ fileprivate struct SceneTimingSnapshot {
 }
 
 fileprivate enum AnimationEditorLayout {
-    static let sidebarWidth: CGFloat = 300
     static let sceneEditorMinWidth: CGFloat = 560
     static let workspaceInset: CGFloat = 6
 
@@ -419,20 +418,7 @@ private struct AnimationEditorWorkspaceView: View {
     @Bindable var appModel: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            SceneListView(
-                animationManager: animationManager,
-                appModel: appModel,
-                onEditScene: { scene in
-                    animationManager.currentScene = scene
-                },
-                isInline: true,
-                isEditing: false
-            )
-            .frame(width: AnimationEditorLayout.sidebarWidth)
-
-            Divider()
-
+        Group {
             if let scene = animationManager.currentScene {
                 SceneEditorView(
                     scene: scene,
@@ -448,9 +434,9 @@ private struct AnimationEditorWorkspaceView: View {
                 .padding(.horizontal, AnimationEditorLayout.workspaceInset)
             } else {
                 ContentUnavailableView(
-                    "Select a Scene",
+                    "No Scene Selected",
                     systemImage: "pencil.and.list.clipboard",
-                    description: Text("Choose a scene on the left to edit it in this utility window.")
+                    description: Text("Pick a scene in Video and open Edit to edit it here.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, AnimationEditorLayout.workspaceInset)

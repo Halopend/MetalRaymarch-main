@@ -37,18 +37,12 @@ enum SidebarTab: String, CaseIterable {
 }
 
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", render = "Render" }
-enum AnimateSceneSubTab: String, CaseIterable {
-    case all = "All"
-    case accompanied = "Accompanied"
-    case solo = "Solo"
-}
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
-enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere", audio = "Audio" }
+enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
 
 private enum SaveChoice: String, CaseIterable {
     case resetLocation = "Reset Location"
-    case presetAutoNamed = "Preset - Auto Named"
     case presetCustomName = "Preset - Custom Name"
 }
 
@@ -116,7 +110,6 @@ struct ContentView: View {
     // Persist last-selected tab and sub-tabs across launches.
     @AppStorage("ContentView.selectedTab") private var selectedTab: SidebarTab = .fractal
     @AppStorage("ContentView.fractalSubTab") private var fractalSubTab: FractalSubTab = .shape
-    @AppStorage("ContentView.animateSceneSubTab") private var animateSceneSubTab: AnimateSceneSubTab = .all
     @State private var animateEditButtonsVisible = false
     @AppStorage("ContentView.coloringSubTab") private var coloringSubTab: ColoringSubTab = .gradient
     @AppStorage("ContentView.effectsSubTab") private var effectsSubTab: EffectsSubTab = .dynamic
@@ -127,7 +120,7 @@ struct ContentView: View {
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
-        return cache.audioReactive.musicReactiveMappings.filter(\.isEnabled).count
+        return cache.audioReactive.musicReactiveMappings.count
     }
 
     private var isAnimationPlaying: Bool {
@@ -215,8 +208,6 @@ struct ContentView: View {
                     switch choice {
                     case .resetLocation:
                         saveCurrentAsResetDefaults()
-                    case .presetAutoNamed:
-                        saveCurrentAsPreset()
                     case .presetCustomName:
                         saveCurrentAsPreset(named: customName)
                     }
@@ -248,7 +239,7 @@ struct ContentView: View {
     private func saveCurrentAsPreset(named providedName: String? = nil) {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        let autoName = "Quick Save \(formatter.string(from: Date()))"
+        let autoName = "Preset \(formatter.string(from: Date()))"
         let presetName = providedName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = (presetName?.isEmpty == false) ? presetName! : autoName
         appModel.presetManager.savePreset(name: finalName, settings: appModel.renderSettings)
@@ -444,27 +435,12 @@ struct ContentView: View {
 
                 Spacer()
 
-                HStack(spacing: 10) {
-                    PresetButton(
-                        presetManager: appModel.presetManager,
-                        settings: appModel.renderSettings,
-                        animationManager: appModel.animationManager,
-                        captureScreenshot: { await appModel.captureScreenshot() },
-                        onLoadPreset: { preset in
-                            Task { await appModel.preparePipelineHandler?(preset) }
-                            preset.apply(to: appModel.renderSettings)
-                            appModel.gestureController?.syncWithSettings()
-                            cache.loadFromSettings()
-                        }
-                    )
-
-                    HoldToSaveResetButton(
-                        onTapReset: resetCurrentFractalSettings,
-                        onHoldReady: {
-                            showSaveDestinationSheet = true
-                        }
-                    )
-                }
+                HoldToSaveResetButton(
+                    onTapReset: resetCurrentFractalSettings,
+                    onHoldReady: {
+                        showSaveDestinationSheet = true
+                    }
+                )
             }
 
             ToggleImmersiveSpaceButton()
@@ -519,16 +495,28 @@ struct ContentView: View {
             cache.push(\.lightingMode, value: .audioReactive)
             if cache.audioReactive.musicReactiveMappings.isEmpty {
                 applyAudioReactivityPreset(.ambient)
-            } else if !cache.audioReactive.musicReactiveMappings.contains(where: \.isEnabled) {
-                var mappings = cache.audioReactive.musicReactiveMappings
-                for index in mappings.indices {
-                    mappings[index].isEnabled = true
-                    mappings[index].sanitizeInPlace()
-                }
-                cache.audioReactive.musicReactiveMappings = mappings
-                cache.push(\.musicReactiveMappings, value: mappings)
             }
         }
+    }
+
+    private func applyAudioReactivityPreset(_ preset: ReactivityPreset) {
+        let settings = preset.settings
+        cache.audioReactive.fractalAudioAmount = settings.audioAmount
+        cache.audioReactive.fractalBeatPunch = settings.beatPunch
+        cache.audioReactive.bassSensitivity = settings.bassSensitivity
+        cache.audioReactive.midSensitivity = settings.midSensitivity
+        cache.audioReactive.trebleSensitivity = settings.trebleSensitivity
+        cache.audioReactive.beatSensitivity = settings.beatSensitivity
+        cache.push(\.fractalAudioAmount, value: settings.audioAmount)
+        cache.push(\.fractalBeatPunch, value: settings.beatPunch)
+        cache.push(\.bassSensitivity, value: settings.bassSensitivity)
+        cache.push(\.midSensitivity, value: settings.midSensitivity)
+        cache.push(\.trebleSensitivity, value: settings.trebleSensitivity)
+        cache.push(\.beatSensitivity, value: settings.beatSensitivity)
+
+        let mappings = preset.defaultMappings(for: cache.fractalType)
+        cache.audioReactive.musicReactiveMappings = mappings
+        cache.push(\.musicReactiveMappings, value: mappings)
     }
 
     private func toggleAnimationPlaybackActive() {
@@ -1184,35 +1172,46 @@ struct ContentView: View {
     }
 
     private var animateToolbar: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                if appModel.animationManager != nil {
-                    Spacer()
+        HStack(spacing: 10) {
+            Label("Scenes", systemImage: "film.stack")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
 
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            animateEditButtonsVisible.toggle()
-                        }
-                        if !animateEditButtonsVisible {
-                            dismissWindow(id: AppModel.animationEditorWindowID)
-                        }
-                    } label: {
-                        Label(
-                            animateEditButtonsVisible ? "Done Editing" : "Edit Animation",
-                            systemImage: animateEditButtonsVisible ? "checkmark.circle" : "pencil.and.list.clipboard"
-                        )
+            Spacer()
+
+            Picker("Mode", selection: Binding(
+                get: { animateEditButtonsVisible ? 1 : 0 },
+                set: { newValue in
+                    withAnimation(.snappy(duration: 0.22, extraBounce: 0.10)) {
+                        animateEditButtonsVisible = (newValue == 1)
                     }
-                    .buttonStyle(.bordered)
+                    if newValue == 0 {
+                        dismissWindow(id: AppModel.animationEditorWindowID)
+                    }
                 }
-            }
-
-            Picker("Scene Type", selection: $animateSceneSubTab) {
-                ForEach(AnimateSceneSubTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
+            )) {
+                Text("Play").tag(0)
+                Text("Edit").tag(1)
             }
             .pickerStyle(.segmented)
+            .frame(maxWidth: 170)
+
+            if animateEditButtonsVisible {
+                Button {
+                    openAnimationEditor()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(Color.blue.opacity(0.14)))
+                        .overlay(Circle().stroke(Color.blue.opacity(0.30), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
+        .animation(.snappy(duration: 0.22, extraBounce: 0.10), value: animateEditButtonsVisible)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
@@ -1220,20 +1219,12 @@ struct ContentView: View {
     private var animatePlayContent: some View {
         VStack(spacing: 0) {
             if let animationManager = appModel.animationManager {
-                let filteredScenes = animateFilteredScenes(from: animationManager.scenes)
-
                 List {
                     if animationManager.scenes.isEmpty {
                         ContentUnavailableView("No Scenes", systemImage: "film.stack",
                             description: Text("Open Scene Editor to create animation scenes"))
-                    } else if filteredScenes.isEmpty {
-                        ContentUnavailableView(
-                            animateEmptyStateTitle,
-                            systemImage: animateEmptyStateSymbol,
-                            description: Text(animateEmptyStateDescription)
-                        )
                     } else {
-                        ForEach(filteredScenes) { scene in
+                        ForEach(animationManager.scenes) { scene in
                             SceneRowView(
                                 scene: scene,
                                 isSelected: animationManager.currentScene?.id == scene.id,
@@ -1243,7 +1234,7 @@ struct ContentView: View {
                                 onEdit: animateEditButtonsVisible ? {
                                     openAnimationEditor(for: scene)
                                 } : nil,
-                                onPlay: {
+                                onPlay: animateEditButtonsVisible ? nil : {
                                     animationManager.currentScene = scene
                                     animationManager.play()
                                     openWindow(id: AppModel.animationPlayerWindowID)
@@ -1255,50 +1246,6 @@ struct ContentView: View {
                 }
                 .listStyle(.plain)
             }
-        }
-    }
-
-    private func animateFilteredScenes(from scenes: [AnimationScene]) -> [AnimationScene] {
-        switch animateSceneSubTab {
-        case .all:
-            return scenes
-        case .accompanied:
-            return scenes.filter { $0.attachedSong != nil }
-        case .solo:
-            return scenes.filter { $0.attachedSong == nil }
-        }
-    }
-
-    private var animateEmptyStateTitle: String {
-        switch animateSceneSubTab {
-        case .all:
-            return "No Scenes"
-        case .accompanied:
-            return "No Accompanied Scenes"
-        case .solo:
-            return "No Solo Scenes"
-        }
-    }
-
-    private var animateEmptyStateSymbol: String {
-        switch animateSceneSubTab {
-        case .all:
-            return "film.stack"
-        case .accompanied:
-            return "music.note"
-        case .solo:
-            return "speaker.slash"
-        }
-    }
-
-    private var animateEmptyStateDescription: String {
-        switch animateSceneSubTab {
-        case .all:
-            return "Open Scene Editor to create animation scenes."
-        case .accompanied:
-            return "Attach songs to scenes to see them here."
-        case .solo:
-            return "Scenes without attached songs will appear here."
         }
     }
 
@@ -1595,15 +1542,12 @@ struct ContentView: View {
                     switch effectsSubTab {
                     case .static:  effectsStaticContent
                     case .dynamic: effectsDynamicContent
-                    case .audio:   effectsAudioContent
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
             }
         }
     }
-    
-    @State private var showLightingPresets = false
     
     private var effectsStaticContent: some View {
         VStack(spacing: 12) {
@@ -1737,365 +1681,40 @@ struct ContentView: View {
     }
 
     private var dynamicPresetDisclosure: some View {
-        DisclosureGroup(isExpanded: $showLightingPresets) {
-            VStack(spacing: 10) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(LightingPreset.allCases, id: \.self) { preset in
-                            PresetCardButton(preset: preset, isSelected: cache.lighting.lightingPreset == preset) {
-                                cache.lighting.lightingPreset = preset
-                                cache.push(\.lightingPreset, value: preset)
-                                cache.reloadLightingEffects()
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 4)
-                }
-                Text("Current: \(cache.lighting.lightingPreset.displayName)")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.blue)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.blue.opacity(0.12)))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if cache.lighting.lightingPreset != .custom {
-                    Text(cache.lighting.lightingPreset.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.top, 8)
-        } label: {
+        VStack(alignment: .leading, spacing: 10) {
             Label("Dynamic Presets", systemImage: "sparkles")
                 .font(.subheadline.weight(.medium))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(LightingPreset.allCases, id: \.self) { preset in
+                        PresetCardButton(preset: preset, isSelected: cache.lighting.lightingPreset == preset) {
+                            cache.lighting.lightingPreset = preset
+                            cache.push(\.lightingPreset, value: preset)
+                            cache.reloadLightingEffects()
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+
+            Text("Current: \(cache.lighting.lightingPreset.displayName)")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.blue)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.blue.opacity(0.12)))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if cache.lighting.lightingPreset != .custom {
+                Text(cache.lighting.lightingPreset.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
-    }
-
-    private var effectsAudioContent: some View {
-        VStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.badge.plus" : "waveform.badge.minus")
-                        .font(.title2)
-                        .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
-                        .frame(width: 30)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Audio Reactive Effects")
-                            .font(.headline)
-                        Text("Keep music-driven visuals one tap away from the rest of your effects.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-                }
-
-                Toggle(isOn: Binding(
-                    get: { cache.audioReactive.fractalAudioReactiveEnabled },
-                    set: { isOn in
-                        cache.audioReactive.fractalAudioReactiveEnabled = isOn
-                        cache.push(\.fractalAudioReactiveEnabled, value: isOn)
-                        if isOn {
-                            cache.display.lightingMode = .audioReactive
-                            cache.push(\.lightingMode, value: .audioReactive)
-                        }
-                    }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Music Reactive Visual Effects")
-                            .font(.subheadline.weight(.semibold))
-                        Text(cache.audioReactive.fractalAudioReactiveEnabled ? "Live audio can drive lighting and mapped parameters." : "Turn this on to let music modulate the fractal.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-
-                Toggle("Show Music Shortcuts on Parameters", isOn: $cache.display.showMusicShortcuts)
-                    .onChange(of: cache.display.showMusicShortcuts) { _, value in
-                        cache.push(\.showMusicShortcuts, value: value)
-                    }
-
-                if cache.audioReactive.fractalAudioReactiveEnabled {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Music permutations active")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text("\(activeMusicPermutationCount)")
-                                .font(.title3.weight(.semibold))
-                                .monospacedDigit()
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text("Lighting mode")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text(cache.display.lightingMode.displayName)
-                                .font(.subheadline.weight(.medium))
-                        }
-                    }
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.08)))
-                }
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        selectedTab = .music
-                    }
-                } label: {
-                    HStack {
-                        Label("Open Full Audio Controls", systemImage: "slider.horizontal.3")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Image(systemName: "arrow.right")
-                            .font(.caption.weight(.bold))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.14)))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.08)))
-
-            if cache.audioReactive.fractalAudioReactiveEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Genre Presets")
-                        .font(.subheadline.weight(.medium))
-
-                    HStack(spacing: 6) {
-                        ForEach(ReactivityPreset.allCases, id: \.self) { preset in
-                            Button {
-                                applyAudioReactivityPreset(preset)
-                            } label: {
-                                VStack(spacing: 2) {
-                                    Image(systemName: preset.icon)
-                                        .font(.caption)
-                                    Text(preset.rawValue)
-                                        .font(.system(size: 9))
-                                        .lineLimit(1)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 7)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.06)))
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Quick Mix")
-                        .font(.subheadline.weight(.medium))
-
-                    Slider(value: Binding(
-                        get: { cache.audioReactive.fractalAudioAmount },
-                        set: { value in
-                            cache.audioReactive.fractalAudioAmount = value
-                            cache.push(\.fractalAudioAmount, value: value)
-                        }
-                    ), in: 0...1)
-
-                    HStack {
-                        Text("Subtle")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Intensity \(Int(cache.audioReactive.fractalAudioAmount * 100))%")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Max")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Slider(value: Binding(
-                        get: { cache.audioReactive.fractalBeatPunch },
-                        set: { value in
-                            cache.audioReactive.fractalBeatPunch = value
-                            cache.push(\.fractalBeatPunch, value: value)
-                        }
-                    ), in: 0...1)
-
-                    HStack {
-                        Text("Soft Beat")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Beat Punch \(Int(cache.audioReactive.fractalBeatPunch * 100))%")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Hard Beat")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.06)))
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Mapped Parameters")
-                            .font(.subheadline.weight(.medium))
-                        Spacer()
-                        Menu {
-                            let available = availableAudioMappingTargetsToAdd
-                            let universalTargets = available.filter { !$0.isFormulaParam }
-                            let formulaTargets = available.filter { $0.isFormulaParam }
-
-                            if !universalTargets.isEmpty {
-                                Section("Universal") {
-                                    ForEach(universalTargets, id: \.self) { target in
-                                        Button {
-                                            addAudioMapping(target)
-                                        } label: {
-                                            Label(target.displayName, systemImage: target.icon)
-                                        }
-                                    }
-                                }
-                            }
-
-                            if !formulaTargets.isEmpty {
-                                Section("\(cache.fractalType.displayName) Params") {
-                                    ForEach(formulaTargets, id: \.self) { target in
-                                        Button {
-                                            addAudioMapping(target)
-                                        } label: {
-                                            Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
-                                        }
-                                    }
-                                }
-                            }
-
-                            if available.isEmpty {
-                                Text("All targets added")
-                            }
-                        } label: {
-                            Label("Add Mapping", systemImage: "plus")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-
-                    if cache.audioReactive.musicReactiveMappings.isEmpty {
-                        Text("No mapped parameters yet. Add one here or open the full Audio controls for advanced shaping.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
-                            HStack(spacing: 10) {
-                                Toggle("", isOn: Binding(
-                                    get: { audioMappingAt(index)?.isEnabled ?? false },
-                                    set: { newValue in updateAudioMapping(index) { $0.isEnabled = newValue } }
-                                ))
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(mapping.target.displayName(for: cache.fractalType))
-                                        .font(.caption.weight(.semibold))
-                                    Text(mapping.source.displayName)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Spacer()
-
-                                Text("\(Int(abs(mapping.amount) * 100))%")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-
-                                Button {
-                                    removeAudioMapping(at: index)
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption2)
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
-
-                            if index < cache.audioReactive.musicReactiveMappings.count - 1 {
-                                Divider()
-                            }
-                        }
-                    }
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.green.opacity(0.06)))
-            }
-        }
-    }
-
-    private func applyAudioReactivityPreset(_ preset: ReactivityPreset) {
-        let settings = preset.settings
-        cache.audioReactive.fractalAudioAmount = settings.audioAmount
-        cache.audioReactive.fractalBeatPunch = settings.beatPunch
-        cache.audioReactive.bassSensitivity = settings.bassSensitivity
-        cache.audioReactive.midSensitivity = settings.midSensitivity
-        cache.audioReactive.trebleSensitivity = settings.trebleSensitivity
-        cache.audioReactive.beatSensitivity = settings.beatSensitivity
-        cache.push(\.fractalAudioAmount, value: settings.audioAmount)
-        cache.push(\.fractalBeatPunch, value: settings.beatPunch)
-        cache.push(\.bassSensitivity, value: settings.bassSensitivity)
-        cache.push(\.midSensitivity, value: settings.midSensitivity)
-        cache.push(\.trebleSensitivity, value: settings.trebleSensitivity)
-        cache.push(\.beatSensitivity, value: settings.beatSensitivity)
-
-        let mappings = preset.defaultMappings(for: cache.fractalType)
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
-    }
-
-    private var availableAudioMappingTargetsToAdd: [MusicReactiveTarget] {
-        let existing = Set(cache.audioReactive.musicReactiveMappings.map(\.target))
-        return MusicReactiveTarget.availableCases(for: cache.fractalType).filter { target in
-            !existing.contains(target)
-        }
-    }
-
-    private func audioMappingAt(_ index: Int) -> MusicReactiveMapping? {
-        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return nil }
-        return cache.audioReactive.musicReactiveMappings[index]
-    }
-
-    private func updateAudioMapping(_ index: Int, mutate: (inout MusicReactiveMapping) -> Void) {
-        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
-        var mappings = cache.audioReactive.musicReactiveMappings
-        mutate(&mappings[index])
-        mappings[index].sanitizeInPlace()
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
-    }
-
-    private func addAudioMapping(_ target: MusicReactiveTarget) {
-        var mappings = cache.audioReactive.musicReactiveMappings
-        guard !mappings.contains(where: { $0.target == target }) else { return }
-        mappings.append(target.defaultMapping(for: cache.fractalType, enabled: true))
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
-    }
-
-    private func removeAudioMapping(at index: Int) {
-        guard cache.audioReactive.musicReactiveMappings.indices.contains(index) else { return }
-        var mappings = cache.audioReactive.musicReactiveMappings
-        mappings.remove(at: index)
-        cache.audioReactive.musicReactiveMappings = mappings
-        cache.push(\.musicReactiveMappings, value: mappings)
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2813,13 +2432,6 @@ private struct SaveDestinationSheet: View {
                     title: "Reset Location",
                     subtitle: "Replace the current reset/default state.",
                     systemImage: "arrow.counterclockwise"
-                )
-
-                saveChoiceButton(
-                    choice: .presetAutoNamed,
-                    title: "Preset - Auto Named",
-                    subtitle: "Save with a timestamped preset name.",
-                    systemImage: "clock.badge.checkmark"
                 )
 
                 saveChoiceButton(
