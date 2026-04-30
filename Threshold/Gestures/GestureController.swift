@@ -297,7 +297,9 @@ final class GestureController {
     private func menuToggleStrength(for mode: MenuToggleGestureMode) -> Float {
         switch mode {
         case .middleToPalm:
-            return max(0, rightHand.middleFingerTouchingPalm() - rightHand.ringFingerTouchingPalm())
+            let middle = rightHand.middleFingerTouchingPalm()
+            let ring = rightHand.ringFingerTouchingPalm()
+            return max(0, middle - max(0, ring - 0.4))
         case .middleAndRingToPalm:
             return min(rightHand.middleFingerTouchingPalm(), rightHand.ringFingerTouchingPalm())
         case .fist:
@@ -309,7 +311,9 @@ final class GestureController {
         case .thumbToIndexPalmUp:
             return rightHand.thumbToIndexPalmUpStrength()
         case .ringToPalm:
-            return max(0, rightHand.ringFingerTouchingPalm() - rightHand.middleFingerTouchingPalm())
+            let ring = rightHand.ringFingerTouchingPalm()
+            let middle = rightHand.middleFingerTouchingPalm()
+            return max(0, ring - max(0, middle - 0.4))
         }
     }
 

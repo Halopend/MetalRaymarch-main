@@ -75,9 +75,13 @@ final class MenuToggleGestureEngine {
     private func menuToggleStrength(for mode: MenuToggleGestureMode, context: GestureContext) -> Float {
         switch mode {
         case .middleToPalm:
-            // Selective: middle touching palm but ring NOT, so this doesn't fire when
-            // the user curls all fingers (e.g. for the animation-player ring gesture).
-            return max(0, context.rightHand.middleFingerTouchingPalm() - context.rightHand.ringFingerTouchingPalm())
+            // Selective: middle touching palm, with a deadzone so sympathetic ring
+            // movement (which naturally accompanies a middle curl) doesn't kill the
+            // signal. Only a clearly-curled ring (>0.4) penalizes, which is what
+            // distinguishes this from the animation-player ring-to-palm gesture.
+            let middle = context.rightHand.middleFingerTouchingPalm()
+            let ring = context.rightHand.ringFingerTouchingPalm()
+            return max(0, middle - max(0, ring - 0.4))
         case .middleAndRingToPalm:
             return min(context.rightHand.middleFingerTouchingPalm(), context.rightHand.ringFingerTouchingPalm())
         case .fist:
@@ -90,9 +94,11 @@ final class MenuToggleGestureEngine {
         case .thumbToIndexPalmUp:
             return context.rightHand.thumbToIndexPalmUpStrength()
         case .ringToPalm:
-            // Selective: ring touching palm but middle NOT, so the menu and animation
-            // player gestures (middle-to-palm) don't trigger together when curling.
-            return max(0, context.rightHand.ringFingerTouchingPalm() - context.rightHand.middleFingerTouchingPalm())
+            // Selective with deadzone — mirror of middleToPalm. Only a clearly-curled
+            // middle (>0.4) penalizes ring strength.
+            let ring = context.rightHand.ringFingerTouchingPalm()
+            let middle = context.rightHand.middleFingerTouchingPalm()
+            return max(0, ring - max(0, middle - 0.4))
         }
     }
 
