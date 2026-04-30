@@ -2123,7 +2123,104 @@ struct ContentView: View {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
+
+            // iCloud Drive section
+            iCloudDriveSection
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MARK: iCloud Drive
+    // ─────────────────────────────────────────────────────────────────
+
+    @ViewBuilder
+    private var iCloudDriveSection: some View {
+        let cloud = appModel.iCloudBackup
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("iCloud Drive", systemImage: "icloud").font(.headline)
+                Spacer()
+                if cloud.isBusy { ProgressView().controlSize(.small) }
+            }
+
+            if cloud.isAvailable {
+                Text("Sync your scenes, animations, and settings to iCloud Drive. Files are stored in a public **Threshold** folder visible in the Files app and on your Mac in Finder under iCloud Drive.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Folder structure:").font(.caption2).foregroundStyle(.tertiary)
+                    Text("Threshold/Settings/   • settings.json").font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                    Text("Threshold/Scenes/     • <name>.threshscene").font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                    Text("Threshold/Animations/ • <name>.threshanim").font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                }
+                .padding(.vertical, 2)
+
+                HStack(spacing: 8) {
+                    Button {
+                        appModel.iCloudBackup.syncToCloud(
+                            settings: appModel.renderSettings,
+                            presetManager: appModel.presetManager,
+                            animationManager: appModel.animationManager
+                        )
+                    } label: {
+                        Label("Back Up Now", systemImage: "arrow.up.to.line.compact")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.cyan)
+                    .disabled(cloud.isBusy)
+
+                    Button {
+                        appModel.iCloudBackup.restoreFromCloud(
+                            into: appModel.renderSettings,
+                            presetManager: appModel.presetManager,
+                            animationManager: appModel.animationManager
+                        )
+                    } label: {
+                        Label("Restore", systemImage: "arrow.down.to.line.compact")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(cloud.isBusy)
+                }
+
+                Button {
+                    appModel.iCloudBackup.openInFilesApp()
+                } label: {
+                    Label("Open Threshold Folder in Files", systemImage: "folder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                if let date = cloud.lastSyncDate {
+                    Text("Last sync: \(date.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let error = cloud.lastError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text("iCloud Drive isn't available. Sign in to iCloud and enable iCloud Drive in System Settings to back up your scenes and animations.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    appModel.iCloudBackup.resolveContainer()
+                } label: {
+                    Label("Check Again", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
     }
     
     private var themeColor: Color {

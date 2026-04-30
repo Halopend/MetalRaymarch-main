@@ -134,6 +134,9 @@ class AppModel {
     // Preset management
     let presetManager = PresetManager()
 
+    // iCloud Drive backup/restore (presets, scenes, settings)
+    let iCloudBackup = ICloudBackupManager()
+
     // Error reporting for transient banners
     let errorReporter = ErrorReporter()
 

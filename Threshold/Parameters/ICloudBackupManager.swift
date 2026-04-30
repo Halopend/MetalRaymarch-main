@@ -2,13 +2,29 @@
 //  ICloudBackupManager.swift
 //  Threshold
 //
-//  Backs up and restores user settings, presets, and scenes to iCloud Drive
-//  under a "threshold" folder.  Uses FileManager ubiquity container so files
-//  are visible in Files.app and sync automatically across devices.
+//  Syncs user settings, fractal presets, and animation scenes to a public
+//  iCloud Drive folder named "Threshold" (declared via NSUbiquitousContainers
+//  in Info.plist). Files are stored as individual JSON documents in named
+//  subfolders so they are browseable in Files.app on iOS/visionOS and in
+//  Finder on macOS — even on devices that do not have the app installed.
+//
+//      iCloud Drive/
+//        └── Threshold/
+//            ├── Settings/
+//            │   └── settings.json
+//            ├── Scenes/
+//            │   ├── Bright_Preset.threshscene
+//            │   └── Cosmic_Drift.threshscene
+//            └── Animations/
+//                ├── Demo_Loop.threshanim
+//                └── Music_Video.threshanimv
 //
 
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @Observable
 @MainActor
@@ -17,36 +33,21 @@ final class ICloudBackupManager {
     // MARK: - Public State
 
     private(set) var isAvailable: Bool = false
-    private(set) var lastBackupDate: Date?
+    private(set) var lastSyncDate: Date?
     private(set) var isBusy: Bool = false
     private(set) var lastError: String?
 
+    /// Resolved iCloud "Threshold" folder URL (nil when iCloud is unavailable).
+    private(set) var cloudFolderURL: URL?
+
     // MARK: - Constants
 
-    /// Folder name inside the ubiquity container's Documents directory.
-    private nonisolated static let folderName = "threshold"
-    private nonisolated static let settingsFile = "settings.json"
-    private nonisolated static let presetsFile  = "presets.json"
-    private nonisolated static let scenesFile   = "scenes.json"
-    private nonisolated static let metadataFile = "backup_metadata.json"
-
-    // MARK: - Private
-
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        e.dateEncodingStrategy = .iso8601
-        return e
-    }()
-
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
-
-    /// Resolved iCloud folder URL (nil when iCloud is unavailable).
-    private var cloudFolderURL: URL?
+    private nonisolated static let folderName       = "Threshold"
+    private nonisolated static let settingsSubdir   = "Settings"
+    private nonisolated static let scenesSubdir     = "Scenes"
+    private nonisolated static let animationsSubdir = "Animations"
+    private nonisolated static let settingsFile     = "settings.json"
+    private nonisolated static let metadataFile     = ".metadata.json"
 
     // MARK: - Init
 
@@ -56,8 +57,8 @@ final class ICloudBackupManager {
 
     // MARK: - Container Resolution
 
-    /// Discovers the ubiquity container on a background thread and caches the
-    /// resolved folder URL.  Safe to call multiple times.
+    /// Discovers the ubiquity container off the main actor and caches the
+    /// resolved folder URL. Safe to call multiple times.
     func resolveContainer() {
         Task {
             let folder = await Self.discoverCloudFolder()
@@ -66,31 +67,41 @@ final class ICloudBackupManager {
                 self.isAvailable = true
                 self.loadMetadata()
             } else {
+                self.cloudFolderURL = nil
                 self.isAvailable = false
             }
         }
     }
 
-    /// Blocking ubiquity lookup — runs off main actor via nonisolated async.
     private nonisolated static func discoverCloudFolder() async -> URL? {
         guard let containerURL = FileManager.default
-                .url(forUbiquityContainerIdentifier: nil) else {
+            .url(forUbiquityContainerIdentifier: nil) else {
             return nil
         }
-        let folder = containerURL
-            .appendingPathComponent("Documents", isDirectory: true)
-            .appendingPathComponent(folderName, isDirectory: true)
-        try? FileManager.default.createDirectory(
-            at: folder, withIntermediateDirectories: true)
-        return folder
+        // The Documents subfolder is what surfaces in Files.app / Finder when
+        // NSUbiquitousContainerIsDocumentScopePublic is YES. The container
+        // itself is named via NSUbiquitousContainerName, so we don't add an
+        // extra "Threshold" component here — Documents IS the Threshold root.
+        let docs = containerURL.appendingPathComponent("Documents", isDirectory: true)
+        try? FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+        // Pre-create subfolders so they always appear, even when empty.
+        for sub in [settingsSubdir, scenesSubdir, animationsSubdir] {
+            let subURL = docs.appendingPathComponent(sub, isDirectory: true)
+            try? FileManager.default.createDirectory(at: subURL, withIntermediateDirectories: true)
+        }
+        return docs
     }
 
-    // MARK: - Backup
+    // MARK: - Sync (Push)
 
-    /// Writes current settings, presets, and user scenes to iCloud Drive.
-    func backup(settings: RenderSettings, presetManager: PresetManager, animationManager: AnimationManager) {
+    /// Writes current settings, presets, and user animation scenes to iCloud
+    /// Drive. Existing files in the iCloud folders are removed for items that
+    /// no longer exist locally so the cloud mirrors the local state.
+    func syncToCloud(settings: RenderSettings,
+                     presetManager: PresetManager,
+                     animationManager: AnimationManager?) {
         guard let folder = cloudFolderURL else {
-            lastError = "iCloud Drive is not available"
+            lastError = "iCloud Drive is not available."
             return
         }
         guard !isBusy else { return }
@@ -98,19 +109,21 @@ final class ICloudBackupManager {
         isBusy = true
         lastError = nil
 
-        // Gather data on main actor (settings uses os_unfair_lock internally).
+        // Snapshot data on main actor.
         let settingsPayload = SettingsBackupPayload(from: settings)
         let presets = presetManager.presets
-        let scenes = animationManager.userScenes
+        let scenes = animationManager?.userScenes ?? []
 
-        Task {
-            let result = await Self.performBackup(
-                to: folder, settingsPayload: settingsPayload,
-                presets: presets, scenes: scenes
+        Task { [folder] in
+            let result = await Self.performSync(
+                to: folder,
+                settingsPayload: settingsPayload,
+                presets: presets,
+                scenes: scenes
             )
             switch result {
             case .success(let date):
-                self.lastBackupDate = date
+                self.lastSyncDate = date
             case .failure(let error):
                 self.lastError = error.localizedDescription
             }
@@ -118,8 +131,7 @@ final class ICloudBackupManager {
         }
     }
 
-    /// File I/O for backup — runs off main actor.
-    private nonisolated static func performBackup(
+    private nonisolated static func performSync(
         to folder: URL,
         settingsPayload: SettingsBackupPayload,
         presets: [FractalPreset],
@@ -128,39 +140,75 @@ final class ICloudBackupManager {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
+        let fm = FileManager.default
 
         do {
+            // ── Settings ─────────────────────────────────────────────────
+            let settingsDir = folder.appendingPathComponent(settingsSubdir, isDirectory: true)
+            try fm.createDirectory(at: settingsDir, withIntermediateDirectories: true)
             let settingsData = try encoder.encode(settingsPayload)
-            try settingsData.write(to: folder.appendingPathComponent(settingsFile), options: .atomic)
+            try settingsData.write(to: settingsDir.appendingPathComponent(settingsFile),
+                                   options: .atomic)
 
-            let presetsData = try encoder.encode(presets)
-            try presetsData.write(to: folder.appendingPathComponent(presetsFile), options: .atomic)
+            // ── Scenes (Fractal Presets) ────────────────────────────────
+            let scenesDir = folder.appendingPathComponent(scenesSubdir, isDirectory: true)
+            try fm.createDirectory(at: scenesDir, withIntermediateDirectories: true)
+            var keepSceneFiles = Set<String>()
+            for preset in presets {
+                let hasMusic = !(preset.musicReactiveMappings?.isEmpty ?? true)
+                let ext = hasMusic ? "threshmp" : "threshscene"
+                let fileName = sanitizedFileName(preset.name, id: preset.id, ext: ext)
+                keepSceneFiles.insert(fileName)
+                let url = scenesDir.appendingPathComponent(fileName)
+                let data = try encoder.encode(preset)
+                try data.write(to: url, options: .atomic)
+            }
+            pruneFiles(in: scenesDir, keep: keepSceneFiles,
+                       extensions: ["threshscene", "threshmp"])
 
-            let scenesData = try encoder.encode(scenes)
-            try scenesData.write(to: folder.appendingPathComponent(scenesFile), options: .atomic)
+            // ── Animations ───────────────────────────────────────────────
+            let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
+            try fm.createDirectory(at: animDir, withIntermediateDirectories: true)
+            var keepAnimFiles = Set<String>()
+            for scene in scenes {
+                let ext = scene.attachedSong != nil ? "threshanimv" : "threshanim"
+                let fileName = sanitizedFileName(scene.name, id: scene.id, ext: ext)
+                keepAnimFiles.insert(fileName)
+                let url = animDir.appendingPathComponent(fileName)
+                let data = try encoder.encode(scene)
+                try data.write(to: url, options: .atomic)
+            }
+            pruneFiles(in: animDir, keep: keepAnimFiles,
+                       extensions: ["threshanim", "threshanimv"])
 
-            let meta = BackupMetadata(date: Date(), settingsCount: 8, presetsCount: presets.count, scenesCount: scenes.count)
+            // ── Metadata ─────────────────────────────────────────────────
+            let meta = BackupMetadata(date: Date(),
+                                      presetsCount: presets.count,
+                                      scenesCount: scenes.count)
             let metaData = try encoder.encode(meta)
-            try metaData.write(to: folder.appendingPathComponent(metadataFile), options: .atomic)
-
+            try metaData.write(to: folder.appendingPathComponent(metadataFile),
+                               options: .atomic)
             return .success(meta.date)
         } catch {
             return .failure(error)
         }
     }
 
-    // MARK: - Restore
+    // MARK: - Restore (Pull)
 
     private struct RestoredData: Sendable {
         let settings: SettingsBackupPayload?
-        let presets: [FractalPreset]?
-        let scenes: [AnimationScene]?
+        let presets: [FractalPreset]
+        let scenes: [AnimationScene]
     }
 
-    /// Reads settings, presets, and scenes from iCloud Drive and applies them.
-    func restore(into settings: RenderSettings, presetManager: PresetManager, animationManager: AnimationManager) {
+    /// Reads settings, presets, and animation scenes from iCloud Drive and
+    /// applies them, replacing local user data.
+    func restoreFromCloud(into settings: RenderSettings,
+                          presetManager: PresetManager,
+                          animationManager: AnimationManager?) {
         guard let folder = cloudFolderURL else {
-            lastError = "iCloud Drive is not available"
+            lastError = "iCloud Drive is not available."
             return
         }
         guard !isBusy else { return }
@@ -168,7 +216,7 @@ final class ICloudBackupManager {
         isBusy = true
         lastError = nil
 
-        Task {
+        Task { [folder] in
             let result = await Self.performRestore(from: folder)
             switch result {
             case .success(let restored):
@@ -176,12 +224,13 @@ final class ICloudBackupManager {
                     payload.apply(to: settings)
                     SettingsPersistence.saveAll(from: settings)
                 }
-                if let presets = restored.presets {
-                    presetManager.replaceAll(with: presets)
+                if !restored.presets.isEmpty {
+                    presetManager.replaceAll(with: restored.presets)
                 }
-                if let scenes = restored.scenes {
-                    animationManager.replaceUserScenes(with: scenes)
+                if !restored.scenes.isEmpty {
+                    animationManager?.replaceUserScenes(with: restored.scenes)
                 }
+                self.lastSyncDate = Date()
             case .failure(let error):
                 self.lastError = error.localizedDescription
             }
@@ -189,38 +238,66 @@ final class ICloudBackupManager {
         }
     }
 
-    /// File I/O for restore — runs off main actor.
     private nonisolated static func performRestore(from folder: URL) async -> Result<RestoredData, Error> {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        let fm = FileManager.default
 
         do {
+            // ── Settings ─────────────────────────────────────────────────
             var restoredSettings: SettingsBackupPayload?
-            var restoredPresets: [FractalPreset]?
-            var restoredScenes: [AnimationScene]?
-
-            let settingsURL = folder.appendingPathComponent(settingsFile)
-            if FileManager.default.fileExists(atPath: settingsURL.path) {
+            let settingsURL = folder
+                .appendingPathComponent(settingsSubdir, isDirectory: true)
+                .appendingPathComponent(settingsFile)
+            try? fm.startDownloadingUbiquitousItem(at: settingsURL)
+            if fm.fileExists(atPath: settingsURL.path) {
                 let data = try Data(contentsOf: settingsURL)
                 restoredSettings = try decoder.decode(SettingsBackupPayload.self, from: data)
             }
 
-            let presetsURL = folder.appendingPathComponent(presetsFile)
-            if FileManager.default.fileExists(atPath: presetsURL.path) {
-                let data = try Data(contentsOf: presetsURL)
-                restoredPresets = try decoder.decode([FractalPreset].self, from: data)
-            }
+            // ── Scenes (Presets) ────────────────────────────────────────
+            let scenesDir = folder.appendingPathComponent(scenesSubdir, isDirectory: true)
+            let presets: [FractalPreset] = decodeAll(in: scenesDir,
+                                                     extensions: ["threshscene", "threshmp"],
+                                                     decoder: decoder)
 
-            let scenesURL = folder.appendingPathComponent(scenesFile)
-            if FileManager.default.fileExists(atPath: scenesURL.path) {
-                let data = try Data(contentsOf: scenesURL)
-                restoredScenes = try decoder.decode([AnimationScene].self, from: data)
-            }
+            // ── Animations ───────────────────────────────────────────────
+            let animDir = folder.appendingPathComponent(animationsSubdir, isDirectory: true)
+            let scenes: [AnimationScene] = decodeAll(in: animDir,
+                                                     extensions: ["threshanim", "threshanimv"],
+                                                     decoder: decoder)
 
-            return .success(RestoredData(settings: restoredSettings, presets: restoredPresets, scenes: restoredScenes))
+            return .success(RestoredData(settings: restoredSettings,
+                                         presets: presets,
+                                         scenes: scenes))
         } catch {
             return .failure(error)
         }
+    }
+
+    // MARK: - Open in Files App
+
+    /// Opens the Threshold iCloud Drive folder in the system Files app.
+    /// Uses the documented `shareddocuments://` URL scheme on iOS/visionOS.
+    func openInFilesApp() {
+        guard let folder = cloudFolderURL else {
+            lastError = "iCloud Drive is not available."
+            return
+        }
+        #if canImport(UIKit)
+        // shareddocuments:// expects an absolute path component.
+        var components = URLComponents()
+        components.scheme = "shareddocuments"
+        components.path = folder.path
+        guard let url = components.url else { return }
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            Task { @MainActor in
+                if !success {
+                    self?.lastError = "Could not open Files app."
+                }
+            }
+        }
+        #endif
     }
 
     // MARK: - Metadata
@@ -228,17 +305,65 @@ final class ICloudBackupManager {
     private func loadMetadata() {
         guard let folder = cloudFolderURL else { return }
         let url = folder.appendingPathComponent(Self.metadataFile)
+        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
         guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
-              let meta = try? decoder.decode(BackupMetadata.self, from: data) else { return }
-        lastBackupDate = meta.date
+              let data = try? Data(contentsOf: url) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let meta = try? decoder.decode(BackupMetadata.self, from: data) {
+            lastSyncDate = meta.date
+        }
+    }
+
+    // MARK: - File Helpers
+
+    /// Builds a filename of the form `Sanitized_Name_<short-id>.<ext>` so that
+    /// renames don't collide with other items sharing the same display name.
+    private nonisolated static func sanitizedFileName(_ name: String, id: UUID, ext: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+        let cleaned = name.components(separatedBy: invalid).joined()
+            .replacingOccurrences(of: " ", with: "_")
+        let trimmed = cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(64))
+        let shortID = String(id.uuidString.prefix(8))
+        return "\(trimmed)_\(shortID).\(ext)"
+    }
+
+    /// Removes files in `dir` (matching any of `extensions`) whose names are
+    /// not in the `keep` set. Used to mirror local deletions to the cloud.
+    private nonisolated static func pruneFiles(in dir: URL,
+                                                keep: Set<String>,
+                                                extensions: [String]) {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        for url in contents {
+            guard extensions.contains(url.pathExtension) else { continue }
+            if !keep.contains(url.lastPathComponent) {
+                try? fm.removeItem(at: url)
+            }
+        }
+    }
+
+    private nonisolated static func decodeAll<T: Decodable>(in dir: URL,
+                                                            extensions: [String],
+                                                            decoder: JSONDecoder) -> [T] {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        var results: [T] = []
+        for url in contents where extensions.contains(url.pathExtension) {
+            try? fm.startDownloadingUbiquitousItem(at: url)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            if let decoded = try? decoder.decode(T.self, from: data) {
+                results.append(decoded)
+            }
+        }
+        return results
     }
 }
 
-// MARK: - Backup Payload
+// MARK: - Backup Payloads
 
 /// Bundles all 8 config domains into a single Codable envelope.
-private struct SettingsBackupPayload: Codable {
+private struct SettingsBackupPayload: Codable, Sendable {
     var geometry: GeometryConfig
     var quality: QualityConfig
     var color: ColorConfig
@@ -249,14 +374,14 @@ private struct SettingsBackupPayload: Codable {
     var display: DisplayConfig
 
     init(from settings: RenderSettings) {
-        geometry     = settings.geometryConfig
-        quality      = settings.qualityConfig
-        color        = settings.colorConfig
-        lighting     = settings.lightingConfig
+        geometry      = settings.geometryConfig
+        quality       = settings.qualityConfig
+        color         = settings.colorConfig
+        lighting      = settings.lightingConfig
         audioReactive = settings.audioReactiveConfig
-        gesture      = settings.gestureConfig
-        safetyBubble = settings.safetyBubbleConfig
-        display      = settings.displayConfig
+        gesture       = settings.gestureConfig
+        safetyBubble  = settings.safetyBubbleConfig
+        display       = settings.displayConfig
     }
 
     func apply(to settings: RenderSettings) {
@@ -271,9 +396,8 @@ private struct SettingsBackupPayload: Codable {
     }
 }
 
-private struct BackupMetadata: Codable {
+private struct BackupMetadata: Codable, Sendable {
     let date: Date
-    let settingsCount: Int
     let presetsCount: Int
     let scenesCount: Int
 }
