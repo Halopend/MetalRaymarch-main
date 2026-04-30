@@ -2149,6 +2149,22 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle("Sync to iCloud Drive", isOn: Binding(
+                    get: { appModel.iCloudBackup.isSyncEnabled },
+                    set: { newValue in
+                        appModel.iCloudBackup.isSyncEnabled = newValue
+                        if newValue {
+                            // Push current state immediately on enable.
+                            appModel.iCloudBackup.syncToCloud(
+                                settings: appModel.renderSettings,
+                                presetManager: appModel.presetManager,
+                                animationManager: appModel.animationManager
+                            )
+                        }
+                    }
+                ))
+                .tint(.cyan)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Folder structure:").font(.caption2).foregroundStyle(.tertiary)
                     Text("Threshold/Settings/   • settings.json").font(.caption2.monospaced()).foregroundStyle(.tertiary)
@@ -2170,7 +2186,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.cyan)
-                    .disabled(cloud.isBusy)
+                    .disabled(cloud.isBusy || !cloud.isSyncEnabled)
 
                     Button {
                         appModel.iCloudBackup.restoreFromCloud(
@@ -2183,7 +2199,7 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(cloud.isBusy)
+                    .disabled(cloud.isBusy || !cloud.isSyncEnabled)
                 }
 
                 Button {

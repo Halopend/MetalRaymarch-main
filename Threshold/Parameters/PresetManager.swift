@@ -281,15 +281,39 @@ extension PresetManager {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        // Try subdirectory first, then bundle root, then deep-scan as final fallback.
-        var sceneURLs = Bundle.main.urls(forResourcesWithExtension: "threshscene", subdirectory: "Examples/Scenes") ?? []
-        var musicPresetURLs = Bundle.main.urls(forResourcesWithExtension: "threshmp", subdirectory: "Examples/Scenes") ?? []
+        // Bundled scene files use either `.threshscene` / `.threshmp` or the
+        // double extension `.threshscene.json` / `.threshmp.json` (some assets
+        // were exported with the `.json` suffix to keep editor syntax
+        // highlighting). Search for both forms in subdirectory and bundle root.
+        var sceneURLs: [URL] = []
+        var musicPresetURLs: [URL] = []
+        let sceneExts = ["threshscene", "json"]
+        let musicExts = ["threshmp", "json"]
 
+        for ext in sceneExts {
+            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
+        }
+        for ext in musicExts {
+            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
+        }
         if sceneURLs.isEmpty {
-            sceneURLs = Bundle.main.urls(forResourcesWithExtension: "threshscene", subdirectory: nil) ?? []
+            for ext in sceneExts {
+                sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
+            }
         }
         if musicPresetURLs.isEmpty {
-            musicPresetURLs = Bundle.main.urls(forResourcesWithExtension: "threshmp", subdirectory: nil) ?? []
+            for ext in musicExts {
+                musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
+            }
+        }
+        // Filter the .json hits down to ones that are actually our preset files.
+        sceneURLs = sceneURLs.filter {
+            let n = $0.lastPathComponent
+            return n.hasSuffix(".threshscene") || n.hasSuffix(".threshscene.json")
+        }
+        musicPresetURLs = musicPresetURLs.filter {
+            let n = $0.lastPathComponent
+            return n.hasSuffix(".threshmp") || n.hasSuffix(".threshmp.json")
         }
 
         // Deep-scan fallback: enumerate the entire bundle for our custom extensions
@@ -297,8 +321,11 @@ extension PresetManager {
             let enumerator = FileManager.default.enumerator(atPath: resourcePath)
             while let file = enumerator?.nextObject() as? String {
                 let url = URL(fileURLWithPath: resourcePath).appendingPathComponent(file)
-                if file.hasSuffix(".threshscene") { sceneURLs.append(url) }
-                else if file.hasSuffix(".threshmp") { musicPresetURLs.append(url) }
+                if file.hasSuffix(".threshscene") || file.hasSuffix(".threshscene.json") {
+                    sceneURLs.append(url)
+                } else if file.hasSuffix(".threshmp") || file.hasSuffix(".threshmp.json") {
+                    musicPresetURLs.append(url)
+                }
             }
         }
 

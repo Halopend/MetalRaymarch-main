@@ -37,6 +37,17 @@ final class ICloudBackupManager {
     private(set) var isBusy: Bool = false
     private(set) var lastError: String?
 
+    /// Persisted toggle for whether iCloud sync is active.
+    /// Mirrors UserDefaults["ICloud.syncEnabled"]. Defaults to false until
+    /// the user opts in from Settings.
+    var isSyncEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isSyncEnabled, forKey: Self.syncEnabledKey)
+        }
+    }
+
+    private nonisolated static let syncEnabledKey = "ICloud.syncEnabled"
+
     /// Resolved iCloud "Threshold" folder URL (nil when iCloud is unavailable).
     private(set) var cloudFolderURL: URL?
 
@@ -52,6 +63,7 @@ final class ICloudBackupManager {
     // MARK: - Init
 
     init() {
+        self.isSyncEnabled = UserDefaults.standard.bool(forKey: Self.syncEnabledKey)
         resolveContainer()
     }
 
@@ -110,9 +122,12 @@ final class ICloudBackupManager {
         lastError = nil
 
         // Snapshot data on main actor.
+        // We intentionally upload ALL visible scenes (defaults + user-edited
+        // overrides + user scenes) so users can browse every preset/animation
+        // in iCloud Drive on devices that don't have the app installed.
         let settingsPayload = SettingsBackupPayload(from: settings)
         let presets = presetManager.presets
-        let scenes = animationManager?.userScenes ?? []
+        let scenes = animationManager?.scenes ?? []
 
         Task { [folder] in
             let result = await Self.performSync(
@@ -227,8 +242,14 @@ final class ICloudBackupManager {
                 if !restored.presets.isEmpty {
                     presetManager.replaceAll(with: restored.presets)
                 }
+                // Only replace USER scenes from cloud — bundled defaults are
+                // recreated on launch and live as overrides if the user edited
+                // them. Filter out anything matching a default scene ID.
                 if !restored.scenes.isEmpty {
-                    animationManager?.replaceUserScenes(with: restored.scenes)
+                    let userOnly = restored.scenes.filter { !DefaultScenes.isDefault($0.id) }
+                    if !userOnly.isEmpty {
+                        animationManager?.replaceUserScenes(with: userOnly)
+                    }
                 }
                 self.lastSyncDate = Date()
             case .failure(let error):
