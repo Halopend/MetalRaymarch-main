@@ -98,7 +98,7 @@ struct AnimationPlayerWindowView: View {
                 )
             }
         }
-        .frame(minWidth: 700, idealWidth: 700, minHeight: 136, idealHeight: 150)
+        .frame(minWidth: 700, idealWidth: 700, minHeight: 170, idealHeight: 182)
         .glassBackgroundEffect()
     }
 }
@@ -122,7 +122,7 @@ private struct AnimationPlayerContent: View {
         let currentScene = animationManager.currentScene
         let timing = currentScene.map(SceneTimingSnapshot.init(scene:))
 
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             HStack {
                 Picker("Panel", selection: $panelMode) {
                     ForEach(PanelMode.allCases, id: \.self) { mode in
@@ -251,7 +251,6 @@ private struct AnimationPlayerContent: View {
                     musicScrubberSection
                 }
             }
-            .frame(minHeight: 88, alignment: .top)
         }
         .onChange(of: panelMode) { _, newMode in
             if newMode == .music {
@@ -265,7 +264,7 @@ private struct AnimationPlayerContent: View {
             musicScrubFraction = appModel.musicService.progressFraction
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .sheet(item: $editingKeyframe) { keyframe in
             KeyframeEditorView(
                 keyframe: keyframe,

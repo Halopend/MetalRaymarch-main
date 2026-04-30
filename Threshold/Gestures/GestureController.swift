@@ -323,7 +323,7 @@ final class GestureController {
 
         switch mode {
         case .middleToPalm:
-            return (activate: baseActivate + 0.02, release: baseRelease - 0.05)
+            return (activate: baseActivate, release: baseRelease - 0.05)
         case .middleAndRingToPalm:
             return (activate: baseActivate, release: baseRelease)
         case .fist:
@@ -333,7 +333,7 @@ final class GestureController {
         case .thumbToIndexPalmUp:
             return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
         case .ringToPalm:
-            return (activate: baseActivate + 0.02, release: baseRelease - 0.05)
+            return (activate: baseActivate, release: baseRelease - 0.05)
         }
     }
 

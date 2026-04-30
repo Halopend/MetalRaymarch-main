@@ -9,6 +9,10 @@ import Foundation
 /// doesn't trigger this and the menu's middle-to-palm gesture simultaneously.
 @MainActor
 final class AnimationPlayerToggleGestureEngine {
+    private static let activationThreshold: Float = 0.42
+    private static let releaseThreshold: Float = 0.24
+    private static let activationDebounceFrames = 2
+
     var state = MenuToggleGestureState()
 
     func reset() {
@@ -23,41 +27,43 @@ final class AnimationPlayerToggleGestureEngine {
         guard settings.menuToggleGestureEnabled else {
             state.isActive = false
             state.holdTimer = 0
+            state.consecutiveFramesAboveActivate = 0
             return []
         }
 
         guard context.rightHand.isTracked else {
             state.isActive = false
             state.holdTimer = 0
+            state.consecutiveFramesAboveActivate = 0
             return []
         }
 
-        let strength = max(
-            0,
-            context.rightHand.ringFingerTouchingPalm() - context.rightHand.middleFingerTouchingPalm()
-        )
-        let baseActivate = settings.menuToggleActivateThreshold
-        let baseRelease = min(settings.menuToggleReleaseThreshold, baseActivate - 0.05)
-        let activate = baseActivate
-        let release = baseRelease - 0.05
+        let ring = context.rightHand.ringFingerTouchingPalm()
+        let middle = context.rightHand.middleFingerTouchingPalm()
+        let strength = max(0, ring - max(0, middle - 0.4))
 
         let shouldBeActive: Bool = state.isActive
-            ? (strength >= release)
-            : (strength >= activate)
+            ? (strength >= Self.releaseThreshold)
+            : (strength >= Self.activationThreshold)
 
         if shouldBeActive {
             if !state.isActive {
-                state.holdTimer += context.deltaTime
+                state.consecutiveFramesAboveActivate += 1
+                if state.consecutiveFramesAboveActivate >= Self.activationDebounceFrames {
+                    state.holdTimer += context.deltaTime
+                }
                 if state.cooldown <= 0, state.holdTimer >= settings.menuToggleHoldDuration {
                     state.isActive = true
                     state.holdTimer = 0
                     state.cooldown = settings.menuToggleCooldown
+                    state.consecutiveFramesAboveActivate = 0
                     return [.toggleAnimationPlayer]
                 }
             }
         } else {
             state.isActive = false
             state.holdTimer = 0
+            state.consecutiveFramesAboveActivate = 0
         }
 
         return []

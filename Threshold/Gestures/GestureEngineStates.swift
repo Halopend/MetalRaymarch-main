@@ -5,6 +5,7 @@ struct MenuToggleGestureState {
     var isActive: Bool = false
     var holdTimer: Float = 0
     var cooldown: Float = 0
+    var consecutiveFramesAboveActivate: Int = 0
 }
 
 struct TwoPointGrabGestureState {

@@ -93,8 +93,8 @@ struct HandData {
         let distance = simd_length(middleTip - palmCenter)
         
         // Touch threshold (in meters)
-        let touchDist: Float = 0.04   // 4cm = touching
-        let awayDist: Float = 0.10    // 10cm = clearly away
+        let touchDist: Float = 0.038  // 3.8cm = touching
+        let awayDist: Float = 0.115   // 11.5cm = clearly away
         
         let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
         return simd_clamp(normalized, 0, 1)

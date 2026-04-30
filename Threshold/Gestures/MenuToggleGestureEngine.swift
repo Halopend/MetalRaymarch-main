@@ -2,6 +2,8 @@ import Foundation
 
 @MainActor
 final class MenuToggleGestureEngine {
+    private static let activationDebounceFrames = 2
+
     var state = MenuToggleGestureState()
     #if DEBUG
     private var debugFrameCounter: Int = 0
@@ -19,6 +21,7 @@ final class MenuToggleGestureEngine {
         guard settings.menuToggleGestureEnabled else {
             state.isActive = false
             state.holdTimer = 0
+            state.consecutiveFramesAboveActivate = 0
             return []
         }
 
@@ -29,12 +32,14 @@ final class MenuToggleGestureEngine {
             guard context.leftHand.isTracked, context.rightHand.isTracked else {
                 state.isActive = false
                 state.holdTimer = 0
+                state.consecutiveFramesAboveActivate = 0
                 return []
             }
         } else {
             guard context.rightHand.isTracked else {
                 state.isActive = false
                 state.holdTimer = 0
+                state.consecutiveFramesAboveActivate = 0
                 return []
             }
         }
@@ -56,17 +61,22 @@ final class MenuToggleGestureEngine {
 
         if shouldBeActive {
             if !state.isActive {
-                state.holdTimer += context.deltaTime
+                state.consecutiveFramesAboveActivate += 1
+                if state.consecutiveFramesAboveActivate >= Self.activationDebounceFrames {
+                    state.holdTimer += context.deltaTime
+                }
                 if state.cooldown <= 0, state.holdTimer >= settings.menuToggleHoldDuration {
                     state.isActive = true
                     state.holdTimer = 0
                     state.cooldown = settings.menuToggleCooldown
+                    state.consecutiveFramesAboveActivate = 0
                     return [.toggleMenu]
                 }
             }
         } else {
             state.isActive = false
             state.holdTimer = 0
+            state.consecutiveFramesAboveActivate = 0
         }
 
         return []

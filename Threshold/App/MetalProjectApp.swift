@@ -137,7 +137,7 @@ struct MetalProjectTestApp: App {
             AnimationPlayerWindowView()
                 .environment(appModel)
         }
-        .defaultSize(width: 700, height: 150)
+        .defaultSize(width: 700, height: 182)
         .defaultWindowPlacement { _, context in
             if let anchorWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) ?? context.windows.first {
                 return WindowPlacement(.below(anchorWindow))
