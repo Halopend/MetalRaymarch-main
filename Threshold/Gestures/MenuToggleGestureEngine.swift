@@ -109,6 +109,14 @@ final class MenuToggleGestureEngine {
             let ring = context.rightHand.ringFingerTouchingPalm()
             let middle = context.rightHand.middleFingerTouchingPalm()
             return max(0, ring - max(0, middle - 0.4))
+        case .middleOrRingToPalm:
+            // Easy-open mode: either middle OR ring touching palm can open the menu.
+            // Use selective per-finger strengths to avoid cross-talk from sympathetic curl.
+            let middle = context.rightHand.middleFingerTouchingPalm()
+            let ring = context.rightHand.ringFingerTouchingPalm()
+            let selectiveMiddle = max(0, middle - max(0, ring - 0.4))
+            let selectiveRing = max(0, ring - max(0, middle - 0.4))
+            return max(selectiveMiddle, selectiveRing)
         }
     }
 
@@ -134,6 +142,8 @@ final class MenuToggleGestureEngine {
         case .ringToPalm:
             // Mirror middle-to-palm tuning. Selective math already prevents overlap
             // with the animation-player (middle-to-palm) gesture.
+            return (activate: baseActivate, release: baseRelease - 0.05)
+        case .middleOrRingToPalm:
             return (activate: baseActivate, release: baseRelease - 0.05)
         }
     }

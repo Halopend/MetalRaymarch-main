@@ -247,11 +247,16 @@ class AppModel {
         // Setup gesture callbacks
         gestureController?.onMenuToggle = { [weak self] in
             print("📋 onMenuToggle callback fired!")
-            self?.toggleMenuWindow()
+            self?.openMenuWindowFromGesture()
         }
         gestureController?.onAnimationPlayerToggle = { [weak self] in
             print("🎬 onAnimationPlayerToggle callback fired!")
-            self?.toggleAnimationPlayerWindow()
+            guard let self else { return }
+            guard self.isMenuWindowVisible else {
+                self.openMenuWindowFromGesture()
+                return
+            }
+            self.toggleAnimationPlayerWindow()
         }
         gestureController?.onMenuWindowPullTowardUser = { [weak self] in
             self?.pullMenuWindowTowardUser()
@@ -304,6 +309,20 @@ class AppModel {
             print("📋 Menu window opened")
         }
         refreshMenuInteractionState()
+    }
+
+    /// Gesture path favors reliability: both middle/ring gestures should make
+    /// opening the main menu easy, so this only opens (no gesture-close).
+    func openMenuWindowFromGesture() {
+        guard !isMenuWindowVisible else {
+            refreshMenuInteractionState()
+            return
+        }
+
+        isMenuWindowVisible = true
+        openMenuWindowHandler?()
+        refreshMenuInteractionState()
+        print("📋 Menu window opened (gesture)")
     }
 
     func pullMenuWindowTowardUser() {
@@ -404,19 +423,16 @@ class AppModel {
         return await captureScreenshotHandler?()
     }
 
-    /// One-time migration to keep menu and animation window gestures distinct:
-    /// - Menu: right middle finger to palm
-    /// - Animation player: right ring finger to palm
-    ///
-    /// Older installs defaulted menu mode to ring-to-palm, which conflicts with
-    /// the dedicated animation-player ring gesture.
+    /// One-time migration to keep menu opening easy with either finger.
+    /// Moves old single-finger defaults to the new middle-or-ring mode.
     private func migrateDistinctWindowGestureDefaultsIfNeeded() {
-        let migrationKey = "gestureDistinctWindowMapping.v1"
+        let migrationKey = "gestureDistinctWindowMapping.v2"
         guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
 
-        // Only coerce when still on the old ring default.
-        if renderSettings.menuToggleGestureMode == .ringToPalm {
-            renderSettings.menuToggleGestureMode = .middleToPalm
+        // Only coerce known legacy defaults; preserve explicit user choices.
+        if renderSettings.menuToggleGestureMode == .ringToPalm ||
+            renderSettings.menuToggleGestureMode == .middleToPalm {
+            renderSettings.menuToggleGestureMode = .middleOrRingToPalm
         }
 
         UserDefaults.standard.set(true, forKey: migrationKey)

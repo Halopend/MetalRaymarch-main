@@ -314,6 +314,12 @@ final class GestureController {
             let ring = rightHand.ringFingerTouchingPalm()
             let middle = rightHand.middleFingerTouchingPalm()
             return max(0, ring - max(0, middle - 0.4))
+        case .middleOrRingToPalm:
+            let middle = rightHand.middleFingerTouchingPalm()
+            let ring = rightHand.ringFingerTouchingPalm()
+            let selectiveMiddle = max(0, middle - max(0, ring - 0.4))
+            let selectiveRing = max(0, ring - max(0, middle - 0.4))
+            return max(selectiveMiddle, selectiveRing)
         }
     }
 
@@ -333,6 +339,8 @@ final class GestureController {
         case .thumbToIndexPalmUp:
             return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
         case .ringToPalm:
+            return (activate: baseActivate, release: baseRelease - 0.05)
+        case .middleOrRingToPalm:
             return (activate: baseActivate, release: baseRelease - 0.05)
         }
     }
