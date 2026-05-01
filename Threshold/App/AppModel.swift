@@ -285,6 +285,26 @@ class AppModel {
         // Configure SharePlay session listener
         shareSession?.configureGroupSessions()
 
+        // Start watching the iCloud Animations/ folder once the container resolves.
+        // iCloudBackup.resolveContainer() runs async; we listen for the notification
+        // it posts when the URL first becomes available, and also do a quick poll
+        // in case resolution happened before we registered the observer.
+        NotificationCenter.default.addObserver(
+            forName: ICloudBackupManager.cloudFolderResolvedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let animDir = (notification.object as? URL)?
+                      .appendingPathComponent("Animations", isDirectory: true) else { return }
+            self.animationManager?.startWatchingiCloudAnimations(animDir: animDir)
+        }
+        // Also try immediately in case the container was already resolved.
+        if let animDir = iCloudBackup.cloudFolderURL?
+            .appendingPathComponent("Animations", isDirectory: true) {
+            animationManager?.startWatchingiCloudAnimations(animDir: animDir)
+        }
+
     }
     
     /// Save current state for restore on next launch

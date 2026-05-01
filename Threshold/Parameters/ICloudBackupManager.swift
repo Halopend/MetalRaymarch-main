@@ -69,15 +69,26 @@ final class ICloudBackupManager {
 
     // MARK: - Container Resolution
 
+    /// Posted on the main queue when `cloudFolderURL` is first resolved.
+    /// The `object` is the resolved `URL`.
+    nonisolated static let cloudFolderResolvedNotification = Notification.Name("ICloudBackupManager.cloudFolderResolved")
+
     /// Discovers the ubiquity container off the main actor and caches the
     /// resolved folder URL. Safe to call multiple times.
     func resolveContainer() {
         Task {
             let folder = await Self.discoverCloudFolder()
             if let folder {
+                let alreadyResolved = self.cloudFolderURL != nil
                 self.cloudFolderURL = folder
                 self.isAvailable = true
                 self.loadMetadata()
+                if !alreadyResolved {
+                    NotificationCenter.default.post(
+                        name: Self.cloudFolderResolvedNotification,
+                        object: folder
+                    )
+                }
             } else {
                 self.cloudFolderURL = nil
                 self.isAvailable = false

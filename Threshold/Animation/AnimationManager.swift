@@ -9,6 +9,9 @@
 import Foundation
 import simd
 import QuartzCore
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 @Observable
@@ -207,6 +210,118 @@ final class AnimationManager {
     /// Set from AppModel.
     var stopSongHandler: (() -> Void)?
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // iCLOUD DROP-IN WATCHER
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Metadata query watching the iCloud Animations/ folder for new scene files.
+    @ObservationIgnored private var iCloudQuery: NSMetadataQuery?
+    /// The Animations/ folder URL currently being watched.
+    @ObservationIgnored private var iCloudAnimDir: URL?
+
+    /// Start watching `animDir` (the iCloud Drive Animations/ subfolder) for new
+    /// `.threshanim` / `.threshanimv` files. Idempotent — calling again with the
+    /// same URL is a no-op; calling with a new URL restarts the query.
+    func startWatchingiCloudAnimations(animDir: URL) {
+        guard iCloudAnimDir != animDir else { return }
+        stopWatchingiCloudAnimations()
+        iCloudAnimDir = animDir
+
+        // Do an immediate import pass for files already sitting in the folder.
+        importScenesFromiCloud(animDir: animDir)
+
+        // Then set up an NSMetadataQuery to catch files added later (including
+        // those that are still downloading from the cloud).
+        let query = NSMetadataQuery()
+        query.searchScopes = [NSMetadataQueryUbiquitousDocumentsScope]
+        // Restrict to files inside our Animations subfolder.
+        query.predicate = NSPredicate(
+            format: "%K BEGINSWITH %@ AND (%K ENDSWITH '.threshanim' OR %K ENDSWITH '.threshanimv')",
+            NSMetadataItemPathKey, animDir.path,
+            NSMetadataItemFSNameKey,
+            NSMetadataItemFSNameKey
+        )
+        query.operationQueue = .main
+
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidFinishGathering,
+            object: query,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleiCloudQueryUpdate()
+        }
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidUpdate,
+            object: query,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleiCloudQueryUpdate()
+        }
+
+        query.start()
+        iCloudQuery = query
+        print("☁️ Watching iCloud Animations folder: \(animDir.lastPathComponent)")
+    }
+
+    func stopWatchingiCloudAnimations() {
+        if let query = iCloudQuery {
+            query.stop()
+            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
+            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidUpdate, object: query)
+            iCloudQuery = nil
+        }
+        iCloudAnimDir = nil
+    }
+
+    private func handleiCloudQueryUpdate() {
+        guard let animDir = iCloudAnimDir else { return }
+        importScenesFromiCloud(animDir: animDir)
+    }
+
+    /// Scan `animDir` and import any `.threshanim`/`.threshanimv` files whose
+    /// UUID is not already present in the full merged scene list (defaults,
+    /// edited overrides, and user scenes). All new scenes are bulk-appended
+    /// in one operation so `rebuildScenes()` only fires once per call.
+    func importScenesFromiCloud(animDir: URL) {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(
+            at: animDir,
+            includingPropertiesForKeys: [.isDownloadingKey, .ubiquitousItemDownloadingStatusKey],
+            options: .skipsHiddenFiles
+        ) else { return }
+
+        // Build once against the FULL merged list (defaults + overrides + user).
+        // This prevents bundled default scenes that syncToCloud wrote to iCloud
+        // from being re-imported as user scenes, even if DefaultScenes.allIDs
+        // hasn't finished loading yet.
+        var knownIDs = Set(scenes.map(\.id))
+
+        var newScenes: [AnimationScene] = []
+        for url in contents where ["threshanim", "threshanimv"].contains(url.pathExtension) {
+            // Trigger download if the file is only a cloud placeholder.
+            try? fm.startDownloadingUbiquitousItem(at: url)
+
+            guard fm.fileExists(atPath: url.path) else { continue }
+            guard let data = try? Data(contentsOf: url) else { continue }
+            guard let scene = try? sceneDecoder.decode(AnimationScene.self, from: data) else {
+                print("☁️ Skipping undecodable file: \(url.lastPathComponent)")
+                continue
+            }
+            // Guard against two cloud files sharing a UUID (e.g. a renamed copy).
+            guard !knownIDs.contains(scene.id) else { continue }
+
+            newScenes.append(scene)
+            knownIDs.insert(scene.id)   // prevent a duplicate in this same pass
+        }
+
+        guard !newScenes.isEmpty else { return }
+
+        // Bulk-append so userScenes.didSet / rebuildScenes() fires exactly once.
+        userScenes.append(contentsOf: newScenes)
+        saveScenes()
+        print("☁️ Imported \(newScenes.count) scene(s) from iCloud Drive: \(newScenes.map(\.name).joined(separator: ", "))")
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // FILE STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
