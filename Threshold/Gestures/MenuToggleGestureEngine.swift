@@ -80,7 +80,11 @@ final class MenuToggleGestureEngine {
             let fallbackRelease  = max(0.30, settings.menuToggleReleaseThreshold  - 0.06)
             thresholds = (
                 activate: min(primaryThresholds.activate, fallbackActivate),
-                release:  min(primaryThresholds.release,  fallbackRelease)
+                // Use max() for release so the *higher* (more conservative)
+                // threshold wins — a lower release floor is what causes
+                // `state.isActive` to latch because the relaxed hand stays
+                // above it.
+                release:  max(primaryThresholds.release,  fallbackRelease)
             )
         }
 
@@ -164,8 +168,9 @@ final class MenuToggleGestureEngine {
         switch mode {
         case .middleToPalm:
             // No offset — the default threshold is already tuned for middle-to-palm.
-            // Lower release threshold so the finger must fully extend before re-arming.
-            return (activate: baseActivate, release: baseRelease - 0.05)
+            // Lower release threshold so the finger must fully extend before re-arming,
+            // but keep a floor so a relaxed hand (~0.20 raw) doesn't latch.
+            return (activate: baseActivate, release: max(0.30, baseRelease - 0.05))
         case .middleAndRingToPalm:
             return (activate: baseActivate, release: baseRelease)
         case .fist:
@@ -178,7 +183,7 @@ final class MenuToggleGestureEngine {
             return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
         case .ringToPalm:
             // Mirror middle-to-palm tuning for users who prefer ring-only menu open.
-            return (activate: baseActivate, release: baseRelease - 0.05)
+            return (activate: baseActivate, release: max(0.30, baseRelease - 0.05))
         case .middleOrRingToPalm:
             // Easy-open mode: activate with less curl for fast menu recovery.
             // Release floor must stay clearly above a relaxed-hand reading
