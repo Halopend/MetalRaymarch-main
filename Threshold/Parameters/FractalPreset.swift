@@ -84,7 +84,12 @@ struct FractalPreset: Codable, Identifiable {
     // === GRADIENT COLORING SYSTEM (v2.1) ===
     var gradientState: GradientState?
     var lightingSoftness: Float?
+    /// Legacy field — mappings array only. Kept for backward compatibility with builds
+    /// that cannot read `audioReactiveConfig`. New code always uses `audioReactiveConfig`.
     var musicReactiveMappings: [MusicReactiveMapping]?
+    /// Full audio-reactive configuration: master toggle, amount, sensitivities,
+    /// beat punch, triplet gains, and per-target mappings.
+    var audioReactiveConfig: AudioReactiveConfig?
 
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
@@ -100,7 +105,8 @@ struct FractalPreset: Codable, Identifiable {
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
         case gradientState, lightingSoftness
-        case musicReactiveMappings
+        case musicReactiveMappings  // legacy — mappings only
+        case audioReactiveConfig    // canonical — full config
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -191,8 +197,23 @@ struct FractalPreset: Codable, Identifiable {
         // v2.1 gradient coloring system
         gradientState = try container.decodeIfPresent(GradientState.self, forKey: .gradientState)
         lightingSoftness = try container.decodeIfPresent(Float.self, forKey: .lightingSoftness)
+        // Decode legacy mappings-only field (still needed to populate audioReactiveConfig
+        // when reading files written by older builds that predate audioReactiveConfig).
         musicReactiveMappings = try container.decodeIfPresent([MusicReactiveMapping].self, forKey: .musicReactiveMappings)
             .map { MusicReactiveMapping.migrateLegacy($0) }
+
+        // Full config (written by current builds). Fall back to migrating from legacy
+        // musicReactiveMappings so older files regain their mappings without data loss.
+        if let fullConfig = try container.decodeIfPresent(AudioReactiveConfig.self, forKey: .audioReactiveConfig) {
+            audioReactiveConfig = fullConfig
+        } else if let legacyMappings = musicReactiveMappings, !legacyMappings.isEmpty {
+            var migrated = AudioReactiveConfig()
+            migrated.musicReactiveMappings = legacyMappings
+            migrated.fractalAudioReactiveEnabled = true
+            audioReactiveConfig = migrated
+        } else {
+            audioReactiveConfig = nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -252,7 +273,10 @@ struct FractalPreset: Codable, Identifiable {
         // v2.1 gradient coloring system
         try container.encodeIfPresent(gradientState, forKey: .gradientState)
         try container.encodeIfPresent(lightingSoftness, forKey: .lightingSoftness)
-        try container.encodeIfPresent(musicReactiveMappings, forKey: .musicReactiveMappings)
+        // Write full config (canonical) and flat mappings (legacy compat for older builds).
+        try container.encodeIfPresent(audioReactiveConfig, forKey: .audioReactiveConfig)
+        try container.encodeIfPresent(audioReactiveConfig?.musicReactiveMappings ?? musicReactiveMappings,
+                                      forKey: .musicReactiveMappings)
     }
     
     // MARK: - Function Constant Derivation
@@ -395,7 +419,10 @@ struct FractalPreset: Codable, Identifiable {
         preset.safetyBubbleBlend = sb.strength
 
         // ── Audio reactive domain (1 lock acquisition) ──
-        preset.musicReactiveMappings = settings.audioReactiveConfig.musicReactiveMappings
+        let arc = settings.audioReactiveConfig
+        preset.audioReactiveConfig = arc
+        // Keep legacy field in sync so files remain readable by older builds.
+        preset.musicReactiveMappings = arc.musicReactiveMappings
 
         return preset
     }
@@ -528,12 +555,14 @@ struct FractalPreset: Codable, Identifiable {
         if let lightingSoftness = lightingSoftness {
             settings.lightingSoftness = lightingSoftness
         }
-        if let musicReactiveMappings = musicReactiveMappings {
+        if let arc = audioReactiveConfig {
+            // Full config present (files saved by current builds): restore everything.
+            settings.audioReactiveConfig = arc
+        } else if let mappings = musicReactiveMappings, !mappings.isEmpty {
+            // Legacy file (mappings-only): restore mappings and auto-enable.
             var audioConfig = settings.audioReactiveConfig
-            audioConfig.musicReactiveMappings = musicReactiveMappings
-            if !musicReactiveMappings.isEmpty {
-                audioConfig.fractalAudioReactiveEnabled = true
-            }
+            audioConfig.musicReactiveMappings = mappings
+            audioConfig.fractalAudioReactiveEnabled = true
             settings.audioReactiveConfig = audioConfig
         }
         
