@@ -248,14 +248,18 @@ final class AnimationManager {
             object: query,
             queue: .main
         ) { [weak self] _ in
-            self?.handleiCloudQueryUpdate()
+                Task { @MainActor in
+                    self?.handleiCloudQueryUpdate()
+                }
         }
         NotificationCenter.default.addObserver(
             forName: .NSMetadataQueryDidUpdate,
             object: query,
             queue: .main
         ) { [weak self] _ in
-            self?.handleiCloudQueryUpdate()
+                Task { @MainActor in
+                    self?.handleiCloudQueryUpdate()
+                }
         }
 
         query.start()
@@ -286,7 +290,7 @@ final class AnimationManager {
         let fm = FileManager.default
         guard let contents = try? fm.contentsOfDirectory(
             at: animDir,
-            includingPropertiesForKeys: [.isDownloadingKey, .ubiquitousItemDownloadingStatusKey],
+                includingPropertiesForKeys: [.ubiquitousItemDownloadingStatusKey],
             options: .skipsHiddenFiles
         ) else { return }
 
