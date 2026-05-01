@@ -2818,7 +2818,58 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
 
 struct FormatConversionParams {
     float aspectCorrection;  // physicalAspect / screenAspect (< 1.0 means horizontally squished)
+    float rcasStrength;      // RCAS sharpening strength: 0.0 = off, 1.0 = max
+    float pad0;
+    float pad1;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RCAS — Robust Contrast Adaptive Sharpening (AMD FSR 1.0)
+// Applied inline during the MetalFX resolve pass to recover detail lost in the
+// spatial upscale. 5-tap cross, noise-adaptive negative lobe, neighbourhood-
+// clamped to prevent haloing. Zero extra render passes — runs in the existing
+// resolve fragment shader.
+// ─────────────────────────────────────────────────────────────────────────────
+static inline float3 rcasSharpen(
+    texture2d_array<float> tex,
+    float2 uv,
+    float2 rcpSize,   // 1.0 / float2(tex.width, tex.height)
+    uint   eye,
+    float  strength   // 0.0 = off, 1.0 = max adaptive sharpening
+) {
+    constexpr sampler s(filter::nearest, address::clamp_to_edge);
+
+    // 5-tap cross neighbourhood
+    float3 b = tex.sample(s, uv + float2( 0.0,       -rcpSize.y), eye).rgb;
+    float3 d = tex.sample(s, uv + float2(-rcpSize.x,  0.0      ), eye).rgb;
+    float3 e = tex.sample(s, uv,                                   eye).rgb;
+    float3 f = tex.sample(s, uv + float2( rcpSize.x,  0.0      ), eye).rgb;
+    float3 h = tex.sample(s, uv + float2( 0.0,        rcpSize.y), eye).rgb;
+
+    // Luma weights — perceptual (2G + R + B unnormalised, consistent with FSR)
+    const float3 kLuma = float3(0.5, 1.0, 0.5);
+    float bL = dot(b, kLuma), dL = dot(d, kLuma), eL = dot(e, kLuma);
+    float fL = dot(f, kLuma), hL = dot(h, kLuma);
+
+    // Neighbourhood min/max for anti-ringing clamp
+    float3 mn4 = min(min(b, d), min(f, h));
+    float3 mx4 = max(max(b, d), max(f, h));
+
+    // Noise suppression: reduce sharpening in near-flat or high-frequency regions
+    float maxL = max(max(bL, dL), max(fL, hL));
+    float minL = min(min(bL, dL), min(fL, hL));
+    float nz   = abs(0.25 * (bL + dL + fL + hL) - eL) / max(maxL - minL, 1.0 / 255.0);
+    float ns   = saturate(1.0 - nz);  // 1 = smooth region (sharpen more), 0 = noisy (back off)
+
+    // Negative lobe weight, max -0.125 to prevent overshoot / ringing
+    float w = max(-0.125, -0.125 * strength * ns);
+
+    // 5-tap sharp: centre positive, neighbours negative
+    float3 result = (b + d + f + h) * w + e * (1.0 + 4.0 * (-w));
+
+    // Clamp to neighbourhood to prevent haloing
+    return clamp(result, min(mn4, e), max(mx4, e));
+}
 
 struct FormatConversionVertex {
     float4 position [[position]];
@@ -2870,26 +2921,27 @@ vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]
     return out;
 }
 
-// Stereo fragment shader - samples from correct array slice based on eye index
-// CRITICAL: Use nearest-neighbor filtering to preserve MetalFX's intelligent edge reconstruction!
-// MetalFX spatial scaler already did sophisticated upscaling - bilinear would blur the result.
+// Stereo fragment shader — samples from the MetalFX upscaled output and applies
+// RCAS (Robust Contrast Adaptive Sharpening) to recover detail softened by the
+// spatial upscale. Uses 5-tap nearest reads; no bilinear blurring on top.
 fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[stage_in]],
                                                 texture2d_array<float> sourceTexture [[texture(0)]],
                                                 constant FormatConversionParams& params [[buffer(0)]]) {
-    // NEAREST filtering preserves MetalFX edge reconstruction
-    // Bilinear here would undo all the intelligent upscaling work!
-    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
-                                      address::clamp_to_edge);
-    
-    // Sample using normalized UVs - works correctly regardless of source texture resolution
-    // aspectCorrection handles physical vs screen aspect ratio difference
     float2 uv = in.texCoord;
     if (params.aspectCorrection != 1.0) {
         uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
     }
-    
-    float4 color = sourceTexture.sample(textureSampler, uv, in.eyeIndex);
-    return float4(color.rgb, 1.0);
+
+    float2 rcpSize = 1.0 / float2(sourceTexture.get_width(), sourceTexture.get_height());
+
+    float3 color;
+    if (params.rcasStrength > 0.0) {
+        color = rcasSharpen(sourceTexture, uv, rcpSize, in.eyeIndex, params.rcasStrength);
+    } else {
+        constexpr sampler s(filter::nearest, address::clamp_to_edge);
+        color = sourceTexture.sample(s, uv, in.eyeIndex).rgb;
+    }
+    return float4(color, 1.0);
 }
 
 // Non-stereo fragment shader for backward compatibility

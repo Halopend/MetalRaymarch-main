@@ -239,9 +239,13 @@ extension Renderer {
 #if canImport(MetalFX)
 private struct MetalFXResolveParams {
     var aspectCorrection: Float = 1.0
+    /// RCAS sharpening strength for the MetalFX resolve pass.
+    /// 0.0 = no sharpening  1.0 = maximum adaptive sharpening
+    /// Default 0.85 recovers most of the softness from the spatial upscale
+    /// without producing visible haloing or ringing artifacts.
+    var rcasStrength: Float = 0.85
     var pad0: Float = 0.0
     var pad1: Float = 0.0
-    var pad2: Float = 0.0
 }
 
 extension Renderer {

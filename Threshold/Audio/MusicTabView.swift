@@ -904,7 +904,7 @@ struct MusicTabContent: View {
         cache.push(\.trebleSensitivity, value: s.trebleSensitivity)
         cache.push(\.beatSensitivity, value: s.beatSensitivity)
         
-        var mappings = preset.defaultMappings(for: cache.fractalType)
+        let mappings = preset.defaultMappings(for: cache.fractalType)
         cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)
     }

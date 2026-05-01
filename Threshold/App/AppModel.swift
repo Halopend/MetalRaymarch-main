@@ -294,10 +294,12 @@ class AppModel {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self,
-                  let animDir = (notification.object as? URL)?
-                      .appendingPathComponent("Animations", isDirectory: true) else { return }
-            self.animationManager?.startWatchingiCloudAnimations(animDir: animDir)
+            Task { @MainActor in
+                guard let self,
+                      let animDir = (notification.object as? URL)?
+                          .appendingPathComponent("Animations", isDirectory: true) else { return }
+                self.animationManager?.startWatchingiCloudAnimations(animDir: animDir)
+            }
         }
         // Also try immediately in case the container was already resolved.
         if let animDir = iCloudBackup.cloudFolderURL?
