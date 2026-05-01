@@ -2959,6 +2959,41 @@ struct DepthOutput {
     float depth [[depth(any)]];
 };
 
+// Phase 2.7: Merged color + depth resolve. Outputs both attachments from a
+// single fragment invocation so we don't pay the per-tile load/store and
+// command-encoder overhead of two separate render passes.
+struct ColorDepthOutput {
+    float4 color [[color(0)]];
+    float depth  [[depth(any)]];
+};
+
+fragment ColorDepthOutput formatConversionFragmentStereoMerged(FormatConversionVertexOut in [[stage_in]],
+                                                                texture2d_array<float> sourceColor [[texture(0)]],
+                                                                depth2d_array<float> sourceDepth  [[texture(1)]],
+                                                                constant FormatConversionParams& params [[buffer(0)]]) {
+    float2 uv = in.texCoord;
+    if (params.aspectCorrection != 1.0) {
+        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
+    }
+
+    ColorDepthOutput out;
+
+    float2 rcpSize = 1.0 / float2(sourceColor.get_width(), sourceColor.get_height());
+    float3 color;
+    if (params.rcasStrength > 0.0) {
+        color = rcasSharpen(sourceColor, uv, rcpSize, in.eyeIndex, params.rcasStrength);
+    } else {
+        constexpr sampler s(filter::nearest, address::clamp_to_edge);
+        color = sourceColor.sample(s, uv, in.eyeIndex).rgb;
+    }
+    out.color = float4(color, 1.0);
+
+    constexpr sampler depthSampler(mag_filter::nearest, min_filter::nearest,
+                                    address::clamp_to_edge);
+    out.depth = sourceDepth.sample(depthSampler, uv, in.eyeIndex);
+    return out;
+}
+
 // Stereo depth resolve fragment shader.
 // Preserve low-res depth discontinuities instead of averaging foreground and
 // background depths. Blended depth edges make compositor reprojection treat

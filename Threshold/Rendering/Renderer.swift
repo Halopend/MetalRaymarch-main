@@ -152,8 +152,11 @@ actor Renderer {
     var hasLoggedMetalFXLayout = false
     var hasLoggedMetalFXResolve = false
     var hasLoggedMetalFXBlitSizeMismatch = false
+    var hasLoggedMetalFXClamp = false
     var metalFXColorResolvePipeline: MTLRenderPipelineState?
     var metalFXDepthResolvePipeline: MTLRenderPipelineState?
+    // Phase 2.7: Merged color+depth resolve in a single render encoder.
+    var metalFXMergedResolvePipeline: MTLRenderPipelineState?
 #endif
 
     // === RESIDENCY SET (visionOS 2.0+) ===
@@ -318,12 +321,29 @@ actor Renderer {
                 vertexFunctionName: "formatConversionVertexStereo",
                 fragmentFunctionName: "depthUpscaleFragmentStereo"
             )
-            if RENDERER_DEBUG { print("✓ MetalFX resolve pipelines ready (color=bgra8Unorm_srgb/depth=invalid, depth=invalid/depth=depth32Float)") }
+            // Phase 2.7: Merged single-encoder resolve. Optional — if it fails to
+            // build (e.g. driver mismatch) we fall back to the two-encoder path.
+            metalFXMergedResolvePipeline = try? Renderer.buildRenderPipelineWithDevice(
+                device: device,
+                layerRenderer: layerRenderer,
+                rasterSampleCount: rasterSampleCount,
+                mtlVertexDescriptor: postProcessVertexDescriptor,
+                vertexFunctionName: "formatConversionVertexStereo",
+                fragmentFunctionName: "formatConversionFragmentStereoMerged"
+            )
+            if RENDERER_DEBUG { print("✓ MetalFX resolve pipelines ready (color=bgra8Unorm_srgb/depth=invalid, depth=invalid/depth=depth32Float, merged=\(metalFXMergedResolvePipeline != nil ? "ok" : "unavailable"))") }
         } catch {
             if RENDERER_DEBUG { print("⚠️ MetalFX resolve pipeline failed: \(error)") }
             metalFXColorResolvePipeline = nil
             metalFXDepthResolvePipeline = nil
+            metalFXMergedResolvePipeline = nil
         }
+
+        // Phase 1.2: Create the MetalFX fragment→scaler fence eagerly so the
+        // first MetalFX-active frame doesn't depend on lazy init order. The
+        // fence cost is negligible and reuse is safe across frames.
+        metalFXFence = device.makeFence()
+        metalFXFence?.label = "MetalFX Fragment→Scaler"
         #endif
         
         // === BUILD SPECIALIZED PIPELINES FOR QUALITY PRESETS ===
@@ -1238,7 +1258,8 @@ actor Renderer {
                 resolveMetalFXOutputToDrawable(
                     commandBuffer: commandBuffer,
                     metalFX: bundle.manager,
-                    drawable: drawable
+                    drawable: drawable,
+                    resolutionScale: settingsSnapshot.resolutionScale
                 )
             } catch {
                 if RENDERER_DEBUG && !hasLoggedMetalFXFallback {

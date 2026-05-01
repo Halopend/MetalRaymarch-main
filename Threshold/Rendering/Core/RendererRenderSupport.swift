@@ -320,6 +320,14 @@ extension Renderer {
                     hasLoggedFoveationAvailability = true
                 }
             } else {
+                // NOTE: Synthesizing a downscaled rate map per scale bucket was
+                // explored as a perf win, but `MTLRasterizationRateMap` does
+                // not expose its horizontal/vertical sample arrays — we cannot
+                // faithfully reconstruct a smaller version of the system's
+                // gaze-tracked map. A hand-rolled Gaussian falloff would
+                // produce a foveation curve that disagrees with the resolve
+                // pass and adjacent frames, so we drop foveation cleanly here
+                // when scale < 1.0.
                 renderPassDescriptor.rasterizationRateMap = nil
             }
         } else {
@@ -433,7 +441,8 @@ extension Renderer {
     func resolveMetalFXOutputToDrawable(
         commandBuffer: MTLCommandBuffer,
         metalFX: MetalFXManager,
-        drawable: LayerRenderer.Drawable
+        drawable: LayerRenderer.Drawable,
+        resolutionScale: Float
     ) {
         guard layerRenderer.configuration.layout == .layered,
               drawable.colorTextures.count == 1,
@@ -481,11 +490,14 @@ extension Renderer {
             }
         }
 
-        // The resolve viewport and rasterization-rate map already define the
-        // drawable-space mapping. Applying a second UV aspect correction here
-        // squeezes each eye horizontally on some compositor layouts, softening
-        // stereo disparity and making the scene feel flatter.
+        // Phase 2.6: Adaptive RCAS strength. At resolutionScale ≈ 1.0 there is
+        // almost nothing to sharpen, and the 5-tap RCAS branch in the fragment
+        // shader is wasted GPU time — zero it out so the shader's early-out
+        // skips it entirely. Ramp linearly from 0 at scale=0.95 to ~0.85 at
+        // scale=0.33 (matches the previous fixed default at low scale).
+        let upscaleAmount = max(0.0, min(1.0, (0.95 - resolutionScale) / 0.62))
         var params = MetalFXResolveParams()
+        params.rcasStrength = upscaleAmount * 0.85
 
         // Preserve compositor foveation mapping in resolve passes; without this,
         // viewport-space sampling can appear zoomed/cropped per eye.
@@ -506,6 +518,35 @@ extension Renderer {
         colorPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
         colorPassDescriptor.renderTargetArrayLength = canUseArrayRouting ? drawable.views.count : 1
         colorPassDescriptor.rasterizationRateMap = resolveRateMap
+
+        // Phase 2.7: When the merged pipeline is available, write color + depth
+        // from a single fragment in one render encoder. Saves a full encoder
+        // setup, an extra tile-load/store round-trip on the depth attachment,
+        // and the second fullscreen draw.
+        if let mergedPipeline = metalFXMergedResolvePipeline {
+            colorPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
+            colorPassDescriptor.depthAttachment.loadAction = .clear
+            colorPassDescriptor.depthAttachment.storeAction = .store
+            colorPassDescriptor.depthAttachment.clearDepth = 1.0
+
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: colorPassDescriptor) else {
+                blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
+                return
+            }
+            encoder.label = "Resolve MetalFX (Color+Depth merged)"
+            encoder.setRenderPipelineState(mergedPipeline)
+            encoder.setDepthStencilState(depthState)
+            encoder.setViewports(viewports)
+            if drawable.views.count > 1 {
+                encoder.setVertexAmplificationCount(drawable.views.count, viewMappings: &cachedViewMappings)
+            }
+            encoder.setFragmentTexture(outputTexture, index: 0)
+            encoder.setFragmentTexture(depthTexture, index: 1)
+            encoder.setFragmentBytes(&params, length: MemoryLayout<MetalFXResolveParams>.stride, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+            return
+        }
 
         guard let colorEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: colorPassDescriptor) else {
             blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
@@ -561,25 +602,85 @@ extension Renderer {
         let outputWidth = max(1, drawable.colorTextures[0].width)
         let outputHeight = max(1, drawable.colorTextures[0].height)
 
-        let inputWidth = max(1, Int(Float(outputWidth) * settingsSnapshot.resolutionScale))
-        let inputHeight = max(1, Int(Float(outputHeight) * settingsSnapshot.resolutionScale))
+        let drawableColorFormat = drawable.colorTextures[0].pixelFormat
+        let drawableDepthFormat = drawable.depthTextures[0].pixelFormat
 
-        // NOTE: We intentionally do NOT clamp inputWidth/inputHeight up to the
-        // foveation rasterization rate map's physical size here. On visionOS the
-        // physical size is typically close to the full drawable, so clamping
-        // would silently override the user's resolutionScale (making the
-        // Resolution Budget slider a no-op). When the requested input size is
-        // smaller than the physical size, `configureMetalFXRenderTargets` will
-        // omit the rate map for this pass — we lose gaze-tracked foveation for
-        // this frame but the scaler still produces a correctly scaled input.
+        // Phase 1.1: Clamp MetalFX input dimensions to a safe minimum.
+        // MTLFXSpatialScaler rejects (or crashes on) very small inputs and the
+        // app currently exposes resolutionScale down to 0.33, so a small
+        // drawable + low scale can land below the scaler's tolerated range.
+        let rawInputWidth = max(1, Int((Float(outputWidth) * settingsSnapshot.resolutionScale).rounded()))
+        let rawInputHeight = max(1, Int((Float(outputHeight) * settingsSnapshot.resolutionScale).rounded()))
+
+        let shortEdgeMin = MetalFXManager.minimumInputShortEdge
+        let longEdgeMin = MetalFXManager.minimumInputLongEdge
+        let rawShort = min(rawInputWidth, rawInputHeight)
+        // Aspect-preserving scale-up if either edge is below its minimum.
+        let neededShort = max(1, shortEdgeMin)
+        let scaleShort = rawShort < neededShort ? Float(neededShort) / Float(max(1, rawShort)) : 1.0
+        var inputWidth = max(1, Int((Float(rawInputWidth) * scaleShort).rounded()))
+        var inputHeight = max(1, Int((Float(rawInputHeight) * scaleShort).rounded()))
+        let rawLong = max(inputWidth, inputHeight)
+        let neededLong = max(longEdgeMin, neededShort)
+        if rawLong < neededLong {
+            let scaleLong = Float(neededLong) / Float(max(1, rawLong))
+            inputWidth = max(1, Int((Float(inputWidth) * scaleLong).rounded()))
+            inputHeight = max(1, Int((Float(inputHeight) * scaleLong).rounded()))
+        }
+        // Never request an input larger than the output; if clamping pushes us
+        // close to native, fall back to direct rendering — the upscale becomes
+        // a near-1x copy plus RCAS overhead with no quality benefit.
+        inputWidth = min(inputWidth, outputWidth)
+        inputHeight = min(inputHeight, outputHeight)
+
+        // Phase 2.9: Snap input dimensions to 16-px buckets so 1-pixel slider
+        // movements don't trigger texture + scaler rebuilds. The user can't
+        // perceive sub-bucket resolution differences anyway.
+        let bucket = 16
+        if inputWidth >= bucket * 2 {
+            inputWidth = ((inputWidth + bucket / 2) / bucket) * bucket
+        }
+        if inputHeight >= bucket * 2 {
+            inputHeight = ((inputHeight + bucket / 2) / bucket) * bucket
+        }
+        inputWidth = min(inputWidth, outputWidth)
+        inputHeight = min(inputHeight, outputHeight)
+        let widthRatio = Float(inputWidth) / Float(max(1, outputWidth))
+        let heightRatio = Float(inputHeight) / Float(max(1, outputHeight))
+        if min(widthRatio, heightRatio) >= 0.95 {
+            // Effective scale is too close to native after clamping — skip MetalFX.
+            if !hasLoggedMetalFXFallback {
+                hasLoggedMetalFXFallback = true
+                print("⚠️ MetalFX skipped: requested scale=\(settingsSnapshot.resolutionScale) but clamped input \(inputWidth)x\(inputHeight) is ≥ 95% of output \(outputWidth)x\(outputHeight). Rendering direct.")
+            }
+            metalFXManager = nil
+            return nil
+        }
+        if (inputWidth, inputHeight) != (rawInputWidth, rawInputHeight) {
+            // One-shot informational log so we can confirm the clamp is engaging.
+            if !hasLoggedMetalFXClamp {
+                hasLoggedMetalFXClamp = true
+                print("ℹ️ MetalFX input clamped: scale=\(settingsSnapshot.resolutionScale) raw=\(rawInputWidth)x\(rawInputHeight) -> \(inputWidth)x\(inputHeight) (output=\(outputWidth)x\(outputHeight))")
+            }
+        }
+
+        // Phase 1.5: If an existing manager has a stale pixel format (e.g. the
+        // compositor reallocated drawables with a different format), drop it
+        // and rebuild fresh instead of asking `update()` to detect the change
+        // mid-frame.
+        if let existing = metalFXManager,
+           existing.configuration.colorFormat != drawableColorFormat ||
+           existing.configuration.depthFormat != drawableDepthFormat {
+            metalFXManager = nil
+        }
 
         let config = MetalFXManager.Configuration(
             inputWidth: inputWidth,
             inputHeight: inputHeight,
             outputWidth: outputWidth,
             outputHeight: outputHeight,
-            colorFormat: drawable.colorTextures[0].pixelFormat,
-            depthFormat: drawable.depthTextures[0].pixelFormat,
+            colorFormat: drawableColorFormat,
+            depthFormat: drawableDepthFormat,
             scale: settingsSnapshot.resolutionScale
         )
 
@@ -590,10 +691,10 @@ extension Renderer {
                 try metalFXManager?.update(configuration: config, viewCount: viewCount)
             }
         } catch {
-            if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
-                print("⚠️ MetalFX init/update failed: \(error). Falling back to direct rendering.")
-                hasLoggedMetalFXFallback = true
-            }
+            // Production-visible log: we want to see the failing dims even in
+            // release builds, since this path is on the user-reported crash.
+            print("⚠️ MetalFX init/update failed: \(error). Falling back to direct rendering.")
+            hasLoggedMetalFXFallback = true
             metalFXManager = nil
             return nil
         }
@@ -607,8 +708,11 @@ extension Renderer {
         lastMetalFXInputSize = SIMD2(inputWidth, inputHeight)
         lastMetalFXOutputSize = SIMD2(outputWidth, outputHeight)
 
+        // Phase 1.2: fence is now created eagerly in Renderer.init().
+        // Defensive fallback if construction failed there for any reason.
         if metalFXFence == nil {
             metalFXFence = device.makeFence()
+            metalFXFence?.label = "MetalFX Fragment→Scaler (lazy)"
         }
 
         guard let manager = metalFXManager else { return nil }
