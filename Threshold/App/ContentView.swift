@@ -193,6 +193,11 @@ struct ContentView: View {
         ))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
+        // Content visibility: keep the window physically open (preserves world-space position)
+        // but hide content and disable hit-testing when the user gestures the menu closed.
+        .opacity(appModel.isMenuWindowVisible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.18), value: appModel.isMenuWindowVisible)
+        .allowsHitTesting(appModel.isMenuWindowVisible)
         .onHover { hovering in
             // Treat gaze-hover as active UI interaction for robust gesture suppression.
             appModel.setMenuHovering(hovering)

@@ -44,8 +44,19 @@ final class MenuToggleGestureEngine {
             }
         }
 
-        let strength = menuToggleStrength(for: mode, context: context)
-        let thresholds = menuToggleThresholds(for: mode, settings: settings)
+        let primaryStrength = menuToggleStrength(for: mode, context: context)
+        // Middle-finger fallback ensures menu recovery is always possible.
+        // Ring is excluded here because it drives the animation player toggle.
+        let middleFallback = context.rightHand.middleFingerTouchingPalm()
+        let strength = max(primaryStrength, middleFallback)
+
+        let primaryThresholds = menuToggleThresholds(for: mode, settings: settings)
+        let fallbackActivate = max(0.2, settings.menuToggleActivateThreshold - 0.08)
+        let fallbackRelease  = max(0.1, settings.menuToggleReleaseThreshold  - 0.06)
+        let thresholds = (
+            activate: min(primaryThresholds.activate, fallbackActivate),
+            release:  min(primaryThresholds.release,  fallbackRelease)
+        )
 
         #if DEBUG
         debugFrameCounter += 1
@@ -110,12 +121,12 @@ final class MenuToggleGestureEngine {
             let middle = context.rightHand.middleFingerTouchingPalm()
             return max(0, ring - max(0, middle - 0.4))
         case .middleOrRingToPalm:
-            // Easy-open mode: either middle OR ring touching palm can open the menu.
-            // Use selective per-finger strengths to avoid cross-talk from sympathetic curl.
+            // Easy-open mode: either middle OR ring can open the menu, but only the
+            // individually-dominant finger counts — sympathetic co-curl is ignored.
             let middle = context.rightHand.middleFingerTouchingPalm()
             let ring = context.rightHand.ringFingerTouchingPalm()
-            let selectiveMiddle = max(0, middle - max(0, ring - 0.4))
-            let selectiveRing = max(0, ring - max(0, middle - 0.4))
+            let selectiveMiddle = max(0, middle - max(0, ring   - 0.4))
+            let selectiveRing   = max(0, ring   - max(0, middle - 0.4))
             return max(selectiveMiddle, selectiveRing)
         }
     }
@@ -140,11 +151,11 @@ final class MenuToggleGestureEngine {
             // Combined pinch + orientation, moderate thresholds
             return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
         case .ringToPalm:
-            // Mirror middle-to-palm tuning. Selective math already prevents overlap
-            // with the animation-player (middle-to-palm) gesture.
+            // Mirror middle-to-palm tuning for users who prefer ring-only menu open.
             return (activate: baseActivate, release: baseRelease - 0.05)
         case .middleOrRingToPalm:
-            return (activate: baseActivate, release: baseRelease - 0.05)
+            // Easy-open mode should trigger with less curl to make menu recovery fast.
+            return (activate: max(0.2, baseActivate - 0.12), release: max(0.1, baseRelease - 0.10))
         }
     }
 }

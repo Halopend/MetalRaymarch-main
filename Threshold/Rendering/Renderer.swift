@@ -706,9 +706,10 @@ actor Renderer {
             smoothedFPS = updatedFPS
             
             // === UI UPDATE COORDINATION ===
-            // Use UIUpdateCoordinator to prevent UI blocking during heavy fractal rendering
-            // Decouples FPS updates from MainActor to maintain UI responsiveness
-            uiUpdateCoordinator?.scheduleUIUpdate(fps: updatedFPS, currentTime: time)
+            // Use UIUpdateCoordinator to prevent UI blocking during heavy fractal rendering.
+            // Also piggybacks device head height for posture detection (world-space Y, ~2 Hz).
+            let headY = deviceAnchor.map { Float($0.originFromAnchorTransform.columns.3.y) }
+            uiUpdateCoordinator?.scheduleUIUpdate(fps: updatedFPS, headHeightMeters: headY, currentTime: time)
             
             // Periodic FPS console logging (every 2 seconds)
             if RENDERER_DEBUG && time - lastFPSConsoleLogTime > 2.0 {

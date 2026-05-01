@@ -17,8 +17,10 @@ final class UIUpdateCoordinator: Sendable {
     private struct State {
         var lastFPSScheduleTime: TimeInterval = 0
         var lastAnalyticsScheduleTime: TimeInterval = 0
+        var lastHeadHeightScheduleTime: TimeInterval = 0
         var pendingFPSUpdate: Double?
         var pendingAnalyticsFPS: Double?
+        var pendingHeadHeightMeters: Float?
         var hasPendingAnalyticsUpdate = false
         var isMainActorDispatchScheduled = false
     }
@@ -27,14 +29,16 @@ final class UIUpdateCoordinator: Sendable {
         let fps: Double?
         let analyticsFPS: Double?
         let shouldUpdateAnalytics: Bool
+        let headHeightMeters: Float?
     }
 
     private let _state = Mutex(State())
     private let applyPendingWorkHandler: @Sendable @MainActor (PendingUIWork) -> Void
     
     // Rate limiting constants
-    private let fpsUpdateInterval: TimeInterval = 0.5  // 2Hz FPS display
-    private let analyticsInterval: TimeInterval = 0.25 // 4Hz analytics
+    private let fpsUpdateInterval: TimeInterval = 0.5    // 2 Hz FPS display
+    private let analyticsInterval: TimeInterval = 0.25  // 4 Hz analytics
+    private let headHeightInterval: TimeInterval = 0.5  // 2 Hz posture sampling
     
     nonisolated init(appModel: AppModel) {
         self.applyPendingWorkHandler = { [weak appModel] pendingWork in
@@ -42,6 +46,10 @@ final class UIUpdateCoordinator: Sendable {
 
             if let fps = pendingWork.fps {
                 appModel.renderMetrics.fps = fps
+            }
+
+            if let headHeight = pendingWork.headHeightMeters {
+                appModel.headHeightMeters = headHeight
             }
 
             if pendingWork.shouldUpdateAnalytics {
@@ -61,8 +69,8 @@ final class UIUpdateCoordinator: Sendable {
         }
     }
     
-    /// Called from render thread - schedules UI updates without blocking
-    nonisolated func scheduleUIUpdate(fps: Double, currentTime: TimeInterval) {
+    /// Called from render thread — schedules UI updates without blocking.
+    nonisolated func scheduleUIUpdate(fps: Double, headHeightMeters: Float?, currentTime: TimeInterval) {
         let shouldDispatch = _state.withLock { state -> Bool in
             let shouldUpdateFPS = currentTime - state.lastFPSScheduleTime >= fpsUpdateInterval
             let shouldUpdateAnalytics = currentTime - state.lastAnalyticsScheduleTime >= analyticsInterval
@@ -71,6 +79,11 @@ final class UIUpdateCoordinator: Sendable {
                 state.pendingFPSUpdate = fps
                 state.lastFPSScheduleTime = currentTime
             }
+
+            if let h = headHeightMeters, currentTime - state.lastHeadHeightScheduleTime >= headHeightInterval {
+                state.pendingHeadHeightMeters = h
+                state.lastHeadHeightScheduleTime = currentTime
+            }
             
             if shouldUpdateAnalytics {
                 state.pendingAnalyticsFPS = fps
@@ -78,7 +91,7 @@ final class UIUpdateCoordinator: Sendable {
                 state.lastAnalyticsScheduleTime = currentTime
             }
             
-            guard (state.pendingFPSUpdate != nil || state.hasPendingAnalyticsUpdate),
+            guard (state.pendingFPSUpdate != nil || state.hasPendingAnalyticsUpdate || state.pendingHeadHeightMeters != nil),
                   !state.isMainActorDispatchScheduled else {
                 return false
             }
@@ -100,6 +113,7 @@ final class UIUpdateCoordinator: Sendable {
             defer {
                 state.pendingFPSUpdate = nil
                 state.pendingAnalyticsFPS = nil
+                state.pendingHeadHeightMeters = nil
                 state.hasPendingAnalyticsUpdate = false
                 state.isMainActorDispatchScheduled = false
             }
@@ -107,7 +121,8 @@ final class UIUpdateCoordinator: Sendable {
             return PendingUIWork(
                 fps: state.pendingFPSUpdate,
                 analyticsFPS: state.pendingAnalyticsFPS,
-                shouldUpdateAnalytics: state.hasPendingAnalyticsUpdate
+                shouldUpdateAnalytics: state.hasPendingAnalyticsUpdate,
+                headHeightMeters: state.pendingHeadHeightMeters
             )
         }
 

@@ -143,9 +143,17 @@ class AppModel {
     // Animation/Scene playback manager
     var animationManager: AnimationManager?
     
-    // Menu window visibility (toggled by gesture)
-    // We hide content and glass to simulate window close while preserving position/size
+    // Menu window visibility (toggled by gesture).
+    // The physical window is NEVER dismissed after cold start — toggling `isMenuWindowVisible`
+    // controls content opacity and hit-testing so the window keeps its world-space position.
     var isMenuWindowVisible: Bool = true
+
+    /// Head height (metres, world-space Y) sampled from the device anchor.
+    /// Updated at ~2 Hz by UIUpdateCoordinator. Zero means no world-tracking fix yet.
+    var headHeightMeters: Float = 0
+
+    /// Inferred user posture. `.unknown` until world tracking provides a valid height reading.
+    var detectedPosture: UserPosture { UserPosture.detect(headHeightMeters: headHeightMeters) }
 
     // Animation Player window visibility (toggled by gesture / UI button)
     var isAnimationPlayerWindowVisible: Bool = false
@@ -247,7 +255,7 @@ class AppModel {
         // Setup gesture callbacks
         gestureController?.onMenuToggle = { [weak self] in
             print("📋 onMenuToggle callback fired!")
-            self?.openMenuWindowFromGesture()
+            self?.toggleMenuWindow()
         }
         gestureController?.onAnimationPlayerToggle = { [weak self] in
             print("🎬 onAnimationPlayerToggle callback fired!")
@@ -297,57 +305,45 @@ class AppModel {
     /// Callback to dismiss the animation player window (set by App scene)
     var dismissAnimationPlayerWindowHandler: (() -> Void)?
     
-    /// Toggle menu window visibility — dismisses or opens the window for real
+    /// Toggle menu window content visibility.
+    /// The physical window stays in world space to preserve its position;
+    /// only content opacity and hit-testing change.
     func toggleMenuWindow() {
-        if isMenuWindowVisible {
-            isMenuWindowVisible = false
-            dismissMenuWindowHandler?()
-            print("📋 Menu window dismissed")
-        } else {
-            isMenuWindowVisible = true
-            openMenuWindowHandler?()
-            print("📋 Menu window opened")
-        }
+        isMenuWindowVisible.toggle()
+        print("📋 Menu window \(isMenuWindowVisible ? "shown" : "hidden") (position preserved)")
         refreshMenuInteractionState()
     }
 
-    /// Gesture path favors reliability: both middle/ring gestures should make
-    /// opening the main menu easy, so this only opens (no gesture-close).
+    /// Show menu window content via gesture. Does not move the window.
     func openMenuWindowFromGesture() {
         guard !isMenuWindowVisible else {
             refreshMenuInteractionState()
             return
         }
-
         isMenuWindowVisible = true
-        openMenuWindowHandler?()
         refreshMenuInteractionState()
-        print("📋 Menu window opened (gesture)")
+        print("📋 Menu window shown (gesture)")
     }
 
     func pullMenuWindowTowardUser() {
         guard !isMenuWindowVisible else {
             refreshMenuInteractionState()
-            print("📋 Menu window already visible; pull gesture ignored")
             return
         }
-
         isMenuWindowVisible = true
-        openMenuWindowHandler?()
         refreshMenuInteractionState()
-        print("📋 Menu window pulled toward user")
+        print("📋 Menu window shown (pull gesture)")
     }
 
-    /// Dismiss the menu window and clear any lingering interaction state.
-    /// Used when loading a scene so hand gestures are immediately available.
+    /// Hide menu window content during scene load so hand gestures are immediately available.
+    /// The window stays at its world position; only content visibility changes.
     func dismissMenuWindowForSceneLoad() {
         guard isMenuWindowVisible else { return }
         isMenuWindowVisible = false
         isMenuHovering = false
         menuAdjustmentDepth = 0
-        dismissMenuWindowHandler?()
         refreshMenuInteractionState()
-        print("Menu window dismissed for scene load")
+        print("Menu window hidden for scene load (position preserved)")
     }
 
     /// Toggle the Animation Player window visibility (gesture- or UI-driven).
@@ -367,13 +363,11 @@ class AppModel {
         }
     }
     
-    /// Ensure window content is visible - call when exiting immersive mode or on app launch
-    /// Opens the window if it was previously dismissed
+    /// Ensure menu window content is visible — call when exiting immersive mode or on app launch.
     func ensureWindowContentVisible() {
         if !isMenuWindowVisible {
             isMenuWindowVisible = true
-            openMenuWindowHandler?()
-            print("📋 Menu window restored (re-opened)")
+            print("📋 Menu window content shown")
         }
         refreshMenuInteractionState()
     }
@@ -423,16 +417,31 @@ class AppModel {
         return await captureScreenshotHandler?()
     }
 
-    /// One-time migration to keep menu opening easy with either finger.
-    /// Moves old single-finger defaults to the new middle-or-ring mode.
+    /// One-time migration to keep menu opening easy with either finger and
+    /// normalize older menu sensitivity defaults to a faster/easier-open setup.
     private func migrateDistinctWindowGestureDefaultsIfNeeded() {
-        let migrationKey = "gestureDistinctWindowMapping.v2"
+        let migrationKey = "gestureDistinctWindowMapping.v4"
         guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
 
-        // Only coerce known legacy defaults; preserve explicit user choices.
+        // Ensure gesture toggle is enabled so menu recovery remains possible.
+        renderSettings.menuToggleGestureEnabled = true
+
+        // Keep menu recovery easy: either middle OR ring should open the main menu.
         if renderSettings.menuToggleGestureMode == .ringToPalm ||
-            renderSettings.menuToggleGestureMode == .middleToPalm {
+            renderSettings.menuToggleGestureMode == .middleToPalm ||
+            renderSettings.menuToggleGestureMode == .middleAndRingToPalm {
             renderSettings.menuToggleGestureMode = .middleOrRingToPalm
+        }
+
+        // Migrate legacy defaults only; preserve user-tuned values.
+        if abs(renderSettings.menuToggleHoldDuration - 0.10) < 0.0001 {
+            renderSettings.menuToggleHoldDuration = 0.08
+        }
+        if abs(renderSettings.menuToggleActivateThreshold - 0.50) < 0.0001 {
+            renderSettings.menuToggleActivateThreshold = 0.44
+        }
+        if abs(renderSettings.menuToggleReleaseThreshold - 0.30) < 0.0001 {
+            renderSettings.menuToggleReleaseThreshold = 0.24
         }
 
         UserDefaults.standard.set(true, forKey: migrationKey)
