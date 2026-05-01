@@ -45,18 +45,44 @@ final class MenuToggleGestureEngine {
         }
 
         let primaryStrength = menuToggleStrength(for: mode, context: context)
-        // Middle-finger fallback ensures menu recovery is always possible.
-        // Ring is excluded here because it drives the animation player toggle.
-        let middleFallback = context.rightHand.middleFingerTouchingPalm()
-        let strength = max(primaryStrength, middleFallback)
-
         let primaryThresholds = menuToggleThresholds(for: mode, settings: settings)
-        let fallbackActivate = max(0.2, settings.menuToggleActivateThreshold - 0.08)
-        let fallbackRelease  = max(0.1, settings.menuToggleReleaseThreshold  - 0.06)
-        let thresholds = (
-            activate: min(primaryThresholds.activate, fallbackActivate),
-            release:  min(primaryThresholds.release,  fallbackRelease)
-        )
+
+        // Middle-finger fallback ensures menu recovery is always possible from
+        // modes that don't otherwise involve the middle finger. Skip it for
+        // modes that already use middle (otherwise we double-count and bypass
+        // the selective deadzone, which keeps `state.isActive` stuck high
+        // because a relaxed hand reads ~0.2 on the raw middle-touch metric).
+        let mode_usesMiddle: Bool = {
+            switch mode {
+            case .middleToPalm, .middleAndRingToPalm, .middleOrRingToPalm:
+                return true
+            case .fist, .wristTap, .thumbToIndexPalmUp, .ringToPalm:
+                return false
+            }
+        }()
+
+        let strength: Float
+        let thresholds: (activate: Float, release: Float)
+        if mode_usesMiddle {
+            strength = primaryStrength
+            thresholds = primaryThresholds
+        } else {
+            // Apply the same selective deadzone the primary modes use so a
+            // relaxed middle finger doesn't latch `state.isActive` true.
+            let middle = context.rightHand.middleFingerTouchingPalm()
+            let ring = context.rightHand.ringFingerTouchingPalm()
+            let middleFallback = max(0, middle - max(0, ring - 0.4))
+            strength = max(primaryStrength, middleFallback)
+
+            // Floor release at 0.30 so a naturally relaxed middle finger
+            // (~0.20 raw) clearly drops below release between toggles.
+            let fallbackActivate = max(0.30, settings.menuToggleActivateThreshold - 0.08)
+            let fallbackRelease  = max(0.30, settings.menuToggleReleaseThreshold  - 0.06)
+            thresholds = (
+                activate: min(primaryThresholds.activate, fallbackActivate),
+                release:  min(primaryThresholds.release,  fallbackRelease)
+            )
+        }
 
         #if DEBUG
         debugFrameCounter += 1
@@ -154,8 +180,11 @@ final class MenuToggleGestureEngine {
             // Mirror middle-to-palm tuning for users who prefer ring-only menu open.
             return (activate: baseActivate, release: baseRelease - 0.05)
         case .middleOrRingToPalm:
-            // Easy-open mode should trigger with less curl to make menu recovery fast.
-            return (activate: max(0.2, baseActivate - 0.12), release: max(0.1, baseRelease - 0.10))
+            // Easy-open mode: activate with less curl for fast menu recovery.
+            // Release floor must stay clearly above a relaxed-hand reading
+            // (~0.20 on the raw touching-palm metric) so `state.isActive`
+            // doesn't latch true and block subsequent toggles.
+            return (activate: max(0.30, baseActivate - 0.12), release: max(0.25, baseRelease - 0.05))
         }
     }
 }

@@ -10,7 +10,10 @@ import Foundation
 @MainActor
 final class AnimationPlayerToggleGestureEngine {
     private static let activationThreshold: Float = 0.40
-    private static let releaseThreshold: Float = 0.20
+    // Must stay clearly above the ~0.20 reading a naturally-relaxed ring
+    // finger produces, otherwise `state.isActive` latches true forever and
+    // subsequent toggles never fire.
+    private static let releaseThreshold: Float = 0.25
     private static let activationDebounceFrames = 2
 
     var state = MenuToggleGestureState()
