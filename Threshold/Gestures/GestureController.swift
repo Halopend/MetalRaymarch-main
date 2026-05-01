@@ -74,9 +74,9 @@ final class GestureController {
         return FractalDefaultsStore.saveCurrentAsFractalDefaults(from: settings)
     }
     
-    /// When true, parameter-changing gestures (two-hand pinch, single-hand drag) are
-    /// suppressed so that pinching to interact with the SwiftUI menu window does not
-    /// also move through the fractal.  Menu toggle gesture is intentionally kept active.
+    /// When true, hand gestures that would compete with the visible menu window are
+    /// suppressed so pinching and dragging UI controls does not also trigger scene
+    /// manipulation or window-level gesture actions.
     var suppressParameterGestures: Bool = false
     
     // Hand tracking state
@@ -349,6 +349,13 @@ final class GestureController {
     private func processMenuToggleGesture(deltaTime: Float) {
         guard let settings = renderSettings else { return }
 
+        if suppressParameterGestures {
+            menuToggleEngine.state.isActive = false
+            menuToggleEngine.state.holdTimer = 0
+            menuToggleEngine.state.consecutiveFramesAboveActivate = 0
+            return
+        }
+
         guard settings.menuToggleGestureEnabled else {
             menuToggleEngine.state.isActive = false
             menuToggleEngine.state.holdTimer = 0
@@ -400,6 +407,13 @@ final class GestureController {
 
         if windowPullState.cooldown > 0 {
             windowPullState.cooldown = max(0, windowPullState.cooldown - deltaTime)
+        }
+
+        if suppressParameterGestures {
+            windowPullState.isActive = false
+            windowPullState.startPalmPosition = .zero
+            windowPullState.hasTriggered = false
+            return
         }
 
         guard rightHand.isTracked,

@@ -18,6 +18,13 @@ final class MenuToggleGestureEngine {
             state.cooldown = max(0, state.cooldown - context.deltaTime)
         }
 
+        if context.suppressParameterGestures {
+            state.isActive = false
+            state.holdTimer = 0
+            state.consecutiveFramesAboveActivate = 0
+            return []
+        }
+
         guard settings.menuToggleGestureEnabled else {
             state.isActive = false
             state.holdTimer = 0
