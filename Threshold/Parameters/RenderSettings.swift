@@ -171,6 +171,16 @@ final class RenderSettings: @unchecked Sendable {
     private var _gestureMaxStartHandDistance: Float = loadGestureFloat("gestureMaxStartHandDistance", default: GestureDefaults.gestureMaxStartHandDistance)
     private var _gestureMaxActiveHandDistance: Float = loadGestureFloat("gestureMaxActiveHandDistance", default: GestureDefaults.gestureMaxActiveHandDistance)
     private var _translationSensitivity: Float = loadGestureFloat("translationSensitivity", default: GestureDefaults.translationSensitivity)
+
+    // Per-finger tap-to-palm gesture layer
+    private var _perFingerTapGestureEnabled: Bool = loadGestureBool("perFingerTapGestureEnabled", default: GestureDefaults.perFingerTapGestureEnabled)
+    private var _perFingerTapLeftActions: [PerFingerTapAction] = GestureDefaults.loadPerFingerTapActions(keyPrefix: "perFingerTapLeft")
+    private var _perFingerTapRightActions: [PerFingerTapAction] = GestureDefaults.loadPerFingerTapActions(keyPrefix: "perFingerTapRight")
+    private var _perFingerTapActivateThreshold: Float = loadGestureFloat("perFingerTapActivateThreshold", default: GestureDefaults.perFingerTapActivateThreshold)
+    private var _perFingerTapReleaseThreshold: Float = loadGestureFloat("perFingerTapReleaseThreshold", default: GestureDefaults.perFingerTapReleaseThreshold)
+    private var _perFingerTapHoldDuration: Float = loadGestureFloat("perFingerTapHoldDuration", default: GestureDefaults.perFingerTapHoldDuration)
+    private var _perFingerTapCooldown: Float = loadGestureFloat("perFingerTapCooldown", default: GestureDefaults.perFingerTapCooldown)
+
     private var _leftHandedMode: Bool = UserDefaults.standard.bool(forKey: "leftHandedMode")
 
     // === SPRING BLOB NAVIGATION ===
@@ -1073,6 +1083,68 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.2, min(3.0, newValue))
             withLock { _translationSensitivity = clamped }
+            persistGesture()
+        }
+    }
+
+    // MARK: - Per-Finger Tap Gesture Layer
+
+    var perFingerTapGestureEnabled: Bool {
+        get { withLock { _perFingerTapGestureEnabled } }
+        set {
+            withLock { _perFingerTapGestureEnabled = newValue }
+            persistGesture()
+        }
+    }
+
+    var perFingerTapLeftActions: [PerFingerTapAction] {
+        get { withLock { _perFingerTapLeftActions } }
+        set {
+            withLock { _perFingerTapLeftActions = newValue }
+            persistGesture()
+        }
+    }
+
+    var perFingerTapRightActions: [PerFingerTapAction] {
+        get { withLock { _perFingerTapRightActions } }
+        set {
+            withLock { _perFingerTapRightActions = newValue }
+            persistGesture()
+        }
+    }
+
+    var perFingerTapActivateThreshold: Float {
+        get { withLock { _perFingerTapActivateThreshold } }
+        set {
+            let clamped = max(0.2, min(0.95, newValue))
+            withLock { _perFingerTapActivateThreshold = clamped }
+            persistGesture()
+        }
+    }
+
+    var perFingerTapReleaseThreshold: Float {
+        get { withLock { _perFingerTapReleaseThreshold } }
+        set {
+            let clamped = max(0.1, min(0.9, newValue))
+            withLock { _perFingerTapReleaseThreshold = clamped }
+            persistGesture()
+        }
+    }
+
+    var perFingerTapHoldDuration: Float {
+        get { withLock { _perFingerTapHoldDuration } }
+        set {
+            let clamped = max(0.05, min(0.6, newValue))
+            withLock { _perFingerTapHoldDuration = clamped }
+            persistGesture()
+        }
+    }
+
+    var perFingerTapCooldown: Float {
+        get { withLock { _perFingerTapCooldown } }
+        set {
+            let clamped = max(0.1, min(2.5, newValue))
+            withLock { _perFingerTapCooldown = clamped }
             persistGesture()
         }
     }
@@ -2909,6 +2981,13 @@ final class RenderSettings: @unchecked Sendable {
                 c.gestureMaxHandDistance = _gestureMaxHandDistance
                 c.gestureMaxStartHandDistance = _gestureMaxStartHandDistance
                 c.gestureMaxActiveHandDistance = _gestureMaxActiveHandDistance
+                c.perFingerTapGestureEnabled = _perFingerTapGestureEnabled
+                c.perFingerTapLeftActions = _perFingerTapLeftActions
+                c.perFingerTapRightActions = _perFingerTapRightActions
+                c.perFingerTapActivateThreshold = _perFingerTapActivateThreshold
+                c.perFingerTapReleaseThreshold = _perFingerTapReleaseThreshold
+                c.perFingerTapHoldDuration = _perFingerTapHoldDuration
+                c.perFingerTapCooldown = _perFingerTapCooldown
                 return c
             }
         }
@@ -2936,6 +3015,13 @@ final class RenderSettings: @unchecked Sendable {
                 _gestureMaxHandDistance = newValue.gestureMaxHandDistance
                 _gestureMaxStartHandDistance = newValue.gestureMaxStartHandDistance
                 _gestureMaxActiveHandDistance = newValue.gestureMaxActiveHandDistance
+                _perFingerTapGestureEnabled = newValue.perFingerTapGestureEnabled
+                _perFingerTapLeftActions = newValue.perFingerTapLeftActions
+                _perFingerTapRightActions = newValue.perFingerTapRightActions
+                _perFingerTapActivateThreshold = newValue.perFingerTapActivateThreshold
+                _perFingerTapReleaseThreshold = newValue.perFingerTapReleaseThreshold
+                _perFingerTapHoldDuration = newValue.perFingerTapHoldDuration
+                _perFingerTapCooldown = newValue.perFingerTapCooldown
             }
         }
     }

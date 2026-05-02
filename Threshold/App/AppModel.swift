@@ -259,12 +259,7 @@ class AppModel {
         }
         gestureController?.onAnimationPlayerToggle = { [weak self] in
             print("🎬 onAnimationPlayerToggle callback fired!")
-            guard let self else { return }
-            guard self.isMenuWindowVisible else {
-                self.openMenuWindowFromGesture()
-                return
-            }
-            self.toggleAnimationPlayerWindow()
+            self?.toggleAnimationPlayerWindow()
         }
         gestureController?.onMenuWindowPullTowardUser = { [weak self] in
             self?.pullMenuWindowTowardUser()

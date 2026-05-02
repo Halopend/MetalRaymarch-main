@@ -85,34 +85,42 @@ struct HandData {
         return strengths.min() ?? 0
     }
     
-    /// Check if middle finger is touching palm (for menu toggle)
-    func middleFingerTouchingPalm() -> Float {
+    // MARK: - Per-Finger Palm Touch (0…1, 1 = touching)
+
+    private func fingerTouchingPalm(tip: SIMD3<Float>, touchDist: Float, awayDist: Float) -> Float {
         guard simd_length_squared(palmCenter) > 1e-6,
-              simd_length_squared(middleTip) > 1e-6 else { return 0 }
-        
-        let distance = simd_length(middleTip - palmCenter)
-        
-        // Touch threshold (in meters)
-        let touchDist: Float = 0.038  // 3.8cm = touching
-        let awayDist: Float = 0.115   // 11.5cm = clearly away
-        
+              simd_length_squared(tip) > 1e-6 else { return 0 }
+        let distance = simd_length(tip - palmCenter)
         let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
         return simd_clamp(normalized, 0, 1)
     }
 
+    /// Thumb touching palm (thumb tip to palm center).
+    func thumbTouchingPalm() -> Float {
+        // Thumb is shorter and curls inward; tighter thresholds.
+        fingerTouchingPalm(tip: thumbTip, touchDist: 0.035, awayDist: 0.10)
+    }
+
+    /// Index finger touching palm.
+    func indexFingerTouchingPalm() -> Float {
+        fingerTouchingPalm(tip: indexTip, touchDist: 0.038, awayDist: 0.115)
+    }
+
+    /// Check if middle finger is touching palm (for menu toggle)
+    func middleFingerTouchingPalm() -> Float {
+        fingerTouchingPalm(tip: middleTip, touchDist: 0.038, awayDist: 0.115)
+    }
+
     /// Check if ring finger is touching palm (secondary menu-toggle gesture option)
     func ringFingerTouchingPalm() -> Float {
-        guard simd_length_squared(palmCenter) > 1e-6,
-              simd_length_squared(ringTip) > 1e-6 else { return 0 }
-
-        let distance = simd_length(ringTip - palmCenter)
-
         // Ring finger sits slightly farther from palm center than middle finger.
-        let touchDist: Float = 0.045
-        let awayDist: Float = 0.11
+        fingerTouchingPalm(tip: ringTip, touchDist: 0.045, awayDist: 0.11)
+    }
 
-        let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
-        return simd_clamp(normalized, 0, 1)
+    /// Pinky finger touching palm.
+    func pinkyFingerTouchingPalm() -> Float {
+        // Pinky is shortest and closest to palm edge; slightly tighter thresholds.
+        fingerTouchingPalm(tip: pinkyTip, touchDist: 0.032, awayDist: 0.10)
     }
 
     /// Check if the opposite hand's fingertips are near this hand's wrist (wrist tap detection).

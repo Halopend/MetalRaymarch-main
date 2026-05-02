@@ -2013,6 +2013,25 @@ struct ContentView: View {
 
                         Divider().padding(.vertical, 2)
 
+                        // ── Per-Finger Tap (compact) ──
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Per-Finger Tap", isOn: $cache.gesture.perFingerTapGestureEnabled)
+                                .onChange(of: cache.gesture.perFingerTapGestureEnabled) { _, v in
+                                    cache.push(\.perFingerTapGestureEnabled, value: v)
+                                }
+
+                            if cache.gesture.perFingerTapGestureEnabled {
+                                HStack {
+                                    Text("Middle → Menu")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                            }
+                        }
+
+                        Divider().padding(.vertical, 2)
+
                         // ── Gesture Lab (collapsed by default) ──
                         DisclosureGroup {
                             VStack(alignment: .leading, spacing: 8) {

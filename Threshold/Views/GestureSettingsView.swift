@@ -14,6 +14,7 @@ struct GestureSettingsView: View {
 
     // ── Disclosure state (expert sections collapsed by default) ──
     @State private var showMenuToggle = false
+    @State private var showPerFingerTap = false
     @State private var showTwoHandTuning = false
     @State private var showControlPresets = false
     @State private var newPresetName = ""
@@ -206,6 +207,53 @@ struct GestureSettingsView: View {
 
                 Divider().padding(.vertical, 2)
 
+                // ── Per-Finger Tap (collapsed by default) ────────────────
+                DisclosureGroup(isExpanded: $showPerFingerTap) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Enable Per-Finger Tap", isOn: Binding(
+                            get: { cache.gesture.perFingerTapGestureEnabled },
+                            set: { cache.gesture.perFingerTapGestureEnabled = $0; cache.push(\.perFingerTapGestureEnabled, value: $0) }
+                        ))
+
+                        perFingerTapHandSection(handName: "Left Hand", actions: cache.gesture.perFingerTapLeftActions, keyPrefix: "perFingerTapLeft")
+                        perFingerTapHandSection(handName: "Right Hand", actions: cache.gesture.perFingerTapRightActions, keyPrefix: "perFingerTapRight")
+
+                        EffectSliderRow(icon: "hand.tap", label: "Hold Time",
+                            value: Binding(get: { cache.gesture.perFingerTapHoldDuration }, set: { cache.gesture.perFingerTapHoldDuration = $0 }),
+                            range: 0.05...0.6,
+                            enabled: .constant(cache.gesture.perFingerTapGestureEnabled),
+                            onChanged: { cache.push(\.perFingerTapHoldDuration, value: cache.gesture.perFingerTapHoldDuration) },
+                            showToggle: false)
+
+                        EffectSliderRow(icon: "timer", label: "Cooldown",
+                            value: Binding(get: { cache.gesture.perFingerTapCooldown }, set: { cache.gesture.perFingerTapCooldown = $0 }),
+                            range: 0.1...2.5,
+                            enabled: .constant(cache.gesture.perFingerTapGestureEnabled),
+                            onChanged: { cache.push(\.perFingerTapCooldown, value: cache.gesture.perFingerTapCooldown) },
+                            showToggle: false)
+
+                        EffectSliderRow(icon: "bolt.horizontal", label: "Activate Threshold",
+                            value: Binding(get: { cache.gesture.perFingerTapActivateThreshold }, set: { cache.gesture.perFingerTapActivateThreshold = $0 }),
+                            range: 0.2...0.95,
+                            enabled: .constant(cache.gesture.perFingerTapGestureEnabled),
+                            onChanged: { cache.push(\.perFingerTapActivateThreshold, value: cache.gesture.perFingerTapActivateThreshold) },
+                            showToggle: false)
+
+                        EffectSliderRow(icon: "arrow.down.to.line", label: "Release Threshold",
+                            value: Binding(get: { cache.gesture.perFingerTapReleaseThreshold }, set: { cache.gesture.perFingerTapReleaseThreshold = $0 }),
+                            range: 0.1...0.9,
+                            enabled: .constant(cache.gesture.perFingerTapGestureEnabled),
+                            onChanged: { cache.push(\.perFingerTapReleaseThreshold, value: cache.gesture.perFingerTapReleaseThreshold) },
+                            showToggle: false)
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    Label("Per-Finger Tap", systemImage: "hand.point.up.left.fill")
+                        .font(.subheadline.weight(.semibold))
+                }
+
+                Divider().padding(.vertical, 2)
+
                 // ── Two-Hand Gesture Tuning (collapsed by default) ───────
                 DisclosureGroup(isExpanded: $showTwoHandTuning) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -353,6 +401,57 @@ struct GestureSettingsView: View {
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 220)
+        }
+    }
+
+    // MARK: - Per-Finger Tap UI Helpers
+
+    private let perFingerNames = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
+    private let perFingerIcons = ["hand.thumbsup.fill", "1.circle.fill", "2.circle.fill", "3.circle.fill", "4.circle.fill"]
+
+    @ViewBuilder
+    private func perFingerTapHandSection(handName: String, actions: [PerFingerTapAction], keyPrefix: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(handName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+
+            ForEach(0..<5, id: \.self) { finger in
+                let actionBinding = Binding<PerFingerTapAction>(
+                    get: {
+                        if keyPrefix.contains("Left") {
+                            return cache.gesture.perFingerTapLeftActions[finger]
+                        } else {
+                            return cache.gesture.perFingerTapRightActions[finger]
+                        }
+                    },
+                    set: { newValue in
+                        if keyPrefix.contains("Left") {
+                            cache.gesture.perFingerTapLeftActions[finger] = newValue
+                            GestureDefaults.savePerFingerTapActions(cache.gesture.perFingerTapLeftActions, keyPrefix: keyPrefix)
+                            cache.push(\.perFingerTapLeftActions, value: cache.gesture.perFingerTapLeftActions)
+                        } else {
+                            cache.gesture.perFingerTapRightActions[finger] = newValue
+                            GestureDefaults.savePerFingerTapActions(cache.gesture.perFingerTapRightActions, keyPrefix: keyPrefix)
+                            cache.push(\.perFingerTapRightActions, value: cache.gesture.perFingerTapRightActions)
+                        }
+                    }
+                )
+                HStack {
+                    Label(perFingerNames[finger], systemImage: perFingerIcons[finger])
+                        .font(.subheadline)
+                    Spacer()
+                    Picker(perFingerNames[finger], selection: actionBinding) {
+                        ForEach(PerFingerTapAction.allCases, id: \.self) { action in
+                            Label(action.displayName, systemImage: action.icon).tag(action)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 220)
+                    .disabled(!cache.gesture.perFingerTapGestureEnabled)
+                }
+            }
         }
     }
 

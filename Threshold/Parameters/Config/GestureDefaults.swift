@@ -30,6 +30,15 @@ enum GestureDefaults {
     static let menuToggleActivateThreshold: Float = 0.44
     static let menuToggleReleaseThreshold: Float = 0.24
 
+    // MARK: - Per-finger tap-to-palm gesture layer
+    static let perFingerTapGestureEnabled = true
+    static let perFingerTapLeftActions: [PerFingerTapAction] = [.none, .none, .none, .none, .none]
+    static let perFingerTapRightActions: [PerFingerTapAction] = [.none, .none, .toggleMenu, .none, .none]
+    static let perFingerTapActivateThreshold: Float = 0.55
+    static let perFingerTapReleaseThreshold: Float = 0.25
+    static let perFingerTapHoldDuration: Float = 0.08
+    static let perFingerTapCooldown: Float = 0.4
+
     // MARK: - Pinch thresholds
     static let twoHandPinchActivateThreshold: Float = 0.7
     static let twoHandPinchReleaseThreshold: Float = 0.3
@@ -51,6 +60,10 @@ enum GestureDefaults {
     static let menuToggleCooldownRange: ClosedRange<Float> = 0.1...2.5
     static let menuToggleActivateThresholdRange: ClosedRange<Float> = 0.2...0.95
     static let menuToggleReleaseThresholdRange: ClosedRange<Float> = 0.1...0.9
+    static let perFingerTapActivateThresholdRange: ClosedRange<Float> = 0.2...0.95
+    static let perFingerTapReleaseThresholdRange: ClosedRange<Float> = 0.1...0.9
+    static let perFingerTapHoldDurationRange: ClosedRange<Float> = 0.05...0.6
+    static let perFingerTapCooldownRange: ClosedRange<Float> = 0.1...2.5
     static let twoHandPinchActivateThresholdRange: ClosedRange<Float> = 0.2...0.98
     static let twoHandPinchReleaseThresholdRange: ClosedRange<Float> = 0.1...0.95
     static let ringPinchActivateThresholdRange: ClosedRange<Float> = 0.1...0.95
@@ -82,4 +95,29 @@ enum GestureDefaults {
         GestureSlot(hand: .both, finger: .middle).persistenceKey: .core(.minDistance),
         GestureSlot(hand: .both, finger: .ring).persistenceKey: .core(.fractalScale),
     ]
+
+    // MARK: - Persistence helpers for per-finger tap actions
+
+    static func loadPerFingerTapActions(keyPrefix: String) -> [PerFingerTapAction] {
+        var actions: [PerFingerTapAction] = []
+        for finger in 0..<5 {
+            let key = "\(keyPrefix)_\(finger)"
+            if let raw = UserDefaults.standard.object(forKey: key) as? Int32,
+               let action = PerFingerTapAction(rawValue: raw) {
+                actions.append(action)
+            } else {
+                // Fall back to default based on prefix
+                let defaults = keyPrefix.contains("Left") ? perFingerTapLeftActions : perFingerTapRightActions
+                actions.append(defaults[finger])
+            }
+        }
+        return actions
+    }
+
+    static func savePerFingerTapActions(_ actions: [PerFingerTapAction], keyPrefix: String) {
+        for (finger, action) in actions.enumerated() {
+            let key = "\(keyPrefix)_\(finger)"
+            UserDefaults.standard.set(action.rawValue, forKey: key)
+        }
+    }
 }

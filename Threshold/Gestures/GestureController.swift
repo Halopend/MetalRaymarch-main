@@ -32,7 +32,7 @@ final class GestureController {
     private var operationFrameCounter: UInt64 = 0
     private let featureFlags = GestureFeatureFlags()
     private let menuToggleEngine = MenuToggleGestureEngine()
-    private let animationPlayerToggleEngine = AnimationPlayerToggleGestureEngine()
+    private let perFingerTapEngine = PerFingerTapGestureEngine()
     private let arbitrationEngine = GestureArbitrationEngine()
     private let twoHandScalarEngine = TwoHandScalarGestureEngine()
     private let twoPointGrabEngine = TwoPointGrabEngine()
@@ -151,7 +151,7 @@ final class GestureController {
         twoPointGrabEngine.reset()
         singleHandDragEngine.reset(accumulatedPosition: settings.effectiveTargetPosition)
         menuToggleEngine.reset()
-        animationPlayerToggleEngine.reset()
+        perFingerTapEngine.reset()
         windowPullState = WindowPullGestureState()
     }
     
@@ -200,22 +200,41 @@ final class GestureController {
         
         // Process special gestures
         let context = GestureContext(leftHand: leftHand, rightHand: rightHand, leftHandStable: leftHandStable, suppressParameterGestures: suppressParameterGestures, deltaTime: deltaTime, ranges: currentRanges(), frameIndex: operationFrameCounter)
-        var didToggleMenu = false
-        if featureFlags.useMenuToggleEngine, let settings = renderSettings {
-            let ops = menuToggleEngine.process(context: context, settings: settings)
-            if ops.contains(where: { if case .toggleMenu = $0 { return true } else { return false } }) {
-                didToggleMenu = true
-                onMenuToggle?()
-            }
-        } else {
-            processMenuToggleGesture(deltaTime: deltaTime)
+
+        // Sync per-finger tap engine config from settings each frame
+        if let settings = renderSettings {
+            perFingerTapEngine.isEnabled = settings.perFingerTapGestureEnabled
+            perFingerTapEngine.leftHandActions = settings.perFingerTapLeftActions
+            perFingerTapEngine.rightHandActions = settings.perFingerTapRightActions
+            perFingerTapEngine.activateThreshold = settings.perFingerTapActivateThreshold
+            perFingerTapEngine.releaseThreshold = settings.perFingerTapReleaseThreshold
+            perFingerTapEngine.holdDuration = settings.perFingerTapHoldDuration
+            perFingerTapEngine.cooldown = settings.perFingerTapCooldown
         }
 
-        if !didToggleMenu, let settings = renderSettings {
-            let ops = animationPlayerToggleEngine.process(context: context, settings: settings)
-            if ops.contains(where: { if case .toggleAnimationPlayer = $0 { return true } else { return false } }) {
+        // Run per-finger tap engine (handles both menu and animation-player toggles)
+        let tapOps = perFingerTapEngine.process(context: context)
+        var didToggleMenu = false
+        for op in tapOps {
+            switch op {
+            case .toggleMenu:
+                didToggleMenu = true
+                onMenuToggle?()
+            case .toggleAnimationPlayer:
                 onAnimationPlayerToggle?()
+            default:
+                break
             }
+        }
+
+        // Legacy menu-toggle engine (fallback when per-finger tap is disabled or as supplement)
+        if !didToggleMenu, featureFlags.useMenuToggleEngine, let settings = renderSettings {
+            let ops = menuToggleEngine.process(context: context, settings: settings)
+            if ops.contains(where: { if case .toggleMenu = $0 { return true } else { return false } }) {
+                onMenuToggle?()
+            }
+        } else if !didToggleMenu {
+            processMenuToggleGesture(deltaTime: deltaTime)
         }
 
         processWindowPullGesture(deltaTime: deltaTime)

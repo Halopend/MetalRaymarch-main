@@ -34,6 +34,15 @@ struct GestureConfig: Codable, Equatable, Sendable {
     var menuToggleActivateThreshold: Float = GestureDefaults.menuToggleActivateThreshold
     var menuToggleReleaseThreshold: Float = GestureDefaults.menuToggleReleaseThreshold
 
+    // Per-finger tap-to-palm gesture layer
+    var perFingerTapGestureEnabled: Bool = GestureDefaults.perFingerTapGestureEnabled
+    var perFingerTapLeftActions: [PerFingerTapAction] = GestureDefaults.perFingerTapLeftActions
+    var perFingerTapRightActions: [PerFingerTapAction] = GestureDefaults.perFingerTapRightActions
+    var perFingerTapActivateThreshold: Float = GestureDefaults.perFingerTapActivateThreshold
+    var perFingerTapReleaseThreshold: Float = GestureDefaults.perFingerTapReleaseThreshold
+    var perFingerTapHoldDuration: Float = GestureDefaults.perFingerTapHoldDuration
+    var perFingerTapCooldown: Float = GestureDefaults.perFingerTapCooldown
+
     // Two-hand pinch thresholds
     var twoHandPinchActivateThreshold: Float = GestureDefaults.twoHandPinchActivateThreshold
     var twoHandPinchReleaseThreshold: Float = GestureDefaults.twoHandPinchReleaseThreshold
@@ -59,6 +68,10 @@ struct GestureConfig: Codable, Equatable, Sendable {
         menuToggleCooldown = menuToggleCooldown.clamped(to: GestureDefaults.menuToggleCooldownRange)
         menuToggleActivateThreshold = menuToggleActivateThreshold.clamped(to: GestureDefaults.menuToggleActivateThresholdRange)
         menuToggleReleaseThreshold = menuToggleReleaseThreshold.clamped(to: GestureDefaults.menuToggleReleaseThresholdRange)
+        perFingerTapActivateThreshold = perFingerTapActivateThreshold.clamped(to: GestureDefaults.perFingerTapActivateThresholdRange)
+        perFingerTapReleaseThreshold = perFingerTapReleaseThreshold.clamped(to: GestureDefaults.perFingerTapReleaseThresholdRange)
+        perFingerTapHoldDuration = perFingerTapHoldDuration.clamped(to: GestureDefaults.perFingerTapHoldDurationRange)
+        perFingerTapCooldown = perFingerTapCooldown.clamped(to: GestureDefaults.perFingerTapCooldownRange)
         twoHandPinchActivateThreshold = twoHandPinchActivateThreshold.clamped(to: GestureDefaults.twoHandPinchActivateThresholdRange)
         twoHandPinchReleaseThreshold = twoHandPinchReleaseThreshold.clamped(to: GestureDefaults.twoHandPinchReleaseThresholdRange)
         ringPinchActivateThreshold = ringPinchActivateThreshold.clamped(to: GestureDefaults.ringPinchActivateThresholdRange)
