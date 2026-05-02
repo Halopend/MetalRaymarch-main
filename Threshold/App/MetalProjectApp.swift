@@ -54,6 +54,7 @@ struct MetalProjectTestApp: App {
         Window(appModel.menuWindowID, id: appModel.menuWindowID) {
             ContentView()
                 .environment(appModel)
+                .preferredColorScheme(.dark)
                 .onAppear {
                     // Dismiss any secondary windows that may have been restored
                     // by the system from a previous session. Without this, windows
@@ -97,6 +98,7 @@ struct MetalProjectTestApp: App {
         Window("Welcome", id: AppModel.onboardingWindowID) {
             FirstLaunchWindowView()
                 .environment(appModel)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 640, height: 540)
         .windowResizability(.contentSize)
@@ -105,6 +107,7 @@ struct MetalProjectTestApp: App {
         Window("Music Library", id: AppModel.libraryWindowID) {
             MusicLibraryWindow()
                 .environment(appModel)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 500, height: 700)
         .windowResizability(.contentMinSize)
@@ -113,6 +116,7 @@ struct MetalProjectTestApp: App {
         Window("Fractal Browser", id: AppModel.fractalBrowserWindowID) {
             FractalBrowserWindow()
                 .environment(appModel)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 980, height: 700)
         .defaultWindowPlacement { _, context in
@@ -126,6 +130,7 @@ struct MetalProjectTestApp: App {
         Window("Animation Editor", id: AppModel.animationEditorWindowID) {
             AnimationEditorWindowView()
                 .environment(appModel)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1080, height: 760)
         .defaultWindowPlacement { _, context in
@@ -140,6 +145,7 @@ struct MetalProjectTestApp: App {
         Window("Video Player", id: AppModel.animationPlayerWindowID) {
             AnimationPlayerWindowView()
                 .environment(appModel)
+                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 700, height: 182)
         .defaultWindowPlacement { _, context in

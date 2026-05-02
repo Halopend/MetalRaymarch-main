@@ -121,6 +121,7 @@ final class GestureController {
     // Gesture callbacks
     var onMenuToggle: (() -> Void)?
     var onAnimationPlayerToggle: (() -> Void)?
+    var onOpenShapeMenu: (() -> Void)?
     var onMenuWindowPullTowardUser: (() -> Void)?
     
     // Reference to render settings
@@ -195,8 +196,10 @@ final class GestureController {
             twoPointGrabEngine.state.endCooldown = max(0, twoPointGrabEngine.state.endCooldown - deltaTime)
         }
         
+        let menuAndMovementOnly = renderSettings?.menuAndMovementOnly ?? false
+
         // Process all gesture mappings (sets targets on RenderSettings)
-        processGestures()
+        processGestures(menuAndMovementOnly: menuAndMovementOnly)
         
         // Process special gestures
         let context = GestureContext(leftHand: leftHand, rightHand: rightHand, leftHandStable: leftHandStable, suppressParameterGestures: suppressParameterGestures, deltaTime: deltaTime, ranges: currentRanges(), frameIndex: operationFrameCounter)
@@ -204,8 +207,8 @@ final class GestureController {
         // Sync per-finger tap engine config from settings each frame
         if let settings = renderSettings {
             perFingerTapEngine.isEnabled = settings.perFingerTapGestureEnabled
-            perFingerTapEngine.leftHandActions = settings.perFingerTapLeftActions
-            perFingerTapEngine.rightHandActions = settings.perFingerTapRightActions
+            perFingerTapEngine.leftHandActions = filteredPerFingerTapActions(settings.perFingerTapLeftActions, menuAndMovementOnly: menuAndMovementOnly)
+            perFingerTapEngine.rightHandActions = filteredPerFingerTapActions(settings.perFingerTapRightActions, menuAndMovementOnly: menuAndMovementOnly)
             perFingerTapEngine.activateThreshold = settings.perFingerTapActivateThreshold
             perFingerTapEngine.releaseThreshold = settings.perFingerTapReleaseThreshold
             perFingerTapEngine.holdDuration = settings.perFingerTapHoldDuration
@@ -222,6 +225,8 @@ final class GestureController {
                 onMenuToggle?()
             case .toggleAnimationPlayer:
                 onAnimationPlayerToggle?()
+            case .openShapeMenu:
+                onOpenShapeMenu?()
             default:
                 break
             }
@@ -238,6 +243,11 @@ final class GestureController {
         }
 
         processWindowPullGesture(deltaTime: deltaTime)
+    }
+
+    private func filteredPerFingerTapActions(_ actions: [PerFingerTapAction], menuAndMovementOnly: Bool) -> [PerFingerTapAction] {
+        guard menuAndMovementOnly else { return actions }
+        return actions.map { $0.isMenuEssentialAction ? $0 : .none }
     }
     
     @available(visionOS 2.0, *)
@@ -472,7 +482,7 @@ final class GestureController {
     
     // MARK: - Gesture Processing
     
-    private func processGestures() {
+    private func processGestures(menuAndMovementOnly: Bool) {
         guard let settings = renderSettings else { return }
         
         // ── Suppress parameter gestures while the user is interacting with the menu window ──
@@ -493,6 +503,17 @@ final class GestureController {
         // ── 1. BOTH-HAND GESTURE DISPATCH (two-hand pull-apart) ─────────
         for digit in 1...3 {
             let binding = settings.binding(forHand: .both, digit: digit)
+
+            if menuAndMovementOnly && !binding.isMovementBinding {
+                if twoHandStateByDigit[digit]?.isActive == true {
+                    twoHandStateByDigit[digit]?.isActive = false
+                }
+                if digit == 1, grabState.isActive {
+                    grabState.isActive = false
+                    grabState.mapping = nil
+                }
+                continue
+            }
 
             // Runtime conflict guard: skip if any single-hand drag is active for this digit
             guard let finger = FingerDigit(rawValue: digit) else { continue }
@@ -604,6 +625,7 @@ final class GestureController {
                     let binding = settings.binding(for: slot)
                     processSingleHandDrag(slot: slot, hand: handData, binding: binding,
                                          lockedFinger: lockedFinger,
+                                         menuAndMovementOnly: menuAndMovementOnly,
                                          settings: settings, activeDigit: &activeDigit)
                 }
             }
@@ -1015,6 +1037,7 @@ final class GestureController {
         hand: HandData,
         binding: GestureActionBinding,
         lockedFinger: Int?,
+        menuAndMovementOnly: Bool,
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
@@ -1025,6 +1048,11 @@ final class GestureController {
 
         // Skip unassigned slots
         if case .core(.none) = binding { 
+            singleHandState.perSlot[key]?.isActive = false
+            return
+        }
+
+        if menuAndMovementOnly && !binding.isMovementBinding {
             singleHandState.perSlot[key]?.isActive = false
             return
         }

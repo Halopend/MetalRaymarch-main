@@ -34,6 +34,12 @@ struct FirstLaunchWindowView: View {
             #endif
         }
         .frame(minWidth: 580, maxWidth: 660, minHeight: 500, maxHeight: 620)
+        .background(Color.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .glassBackgroundEffect(in: .rect(cornerRadius: 24))
         .onAppear {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
         }
@@ -66,6 +72,11 @@ struct FirstLaunchWindowView: View {
                     icon: "waveform.path.ecg",
                     title: "Audio Reactive",
                     detail: "Connect to Apple Music and watch fractals pulse with the beat."
+                )
+                IntroTipRow(
+                    icon: "arrow.counterclockwise.circle",
+                    title: "Reset + Create",
+                    detail: "Tap Reset to jump back to your saved baseline. Hold Reset to save the current setup as a new reset point or create a named preset."
                 )
             }
             .padding(12)

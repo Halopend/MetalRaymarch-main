@@ -120,6 +120,17 @@ struct GestureSettingsView: View {
                         set: { cache.gesture.useSpringBlob = $0; cache.push(\.useSpringBlob, value: $0) }
                     ))
 
+                    Toggle("Menu + Movement Only", isOn: Binding(
+                        get: { cache.gesture.menuAndMovementOnly },
+                        set: { cache.gesture.menuAndMovementOnly = $0; cache.push(\.menuAndMovementOnly, value: $0) }
+                    ))
+
+                    if cache.gesture.menuAndMovementOnly {
+                        Text("Skips shape and parameter gesture scans, keeping only menu trigger and movement gestures active.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+
                     Toggle("Relative Gestures", isOn: Binding(
                         get: { cache.gesture.useRelativeGestures },
                         set: { cache.gesture.useRelativeGestures = $0; cache.push(\.useRelativeGestures, value: $0) }

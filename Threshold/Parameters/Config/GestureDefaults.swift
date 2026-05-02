@@ -13,6 +13,7 @@ enum GestureDefaults {
 
     // MARK: - Sensitivity & smoothing
     static let gestureSensitivity: Float = 5.0
+    static let menuAndMovementOnly = false
     static let useRelativeGestures = false
     static let extendedGestureRange = false
     static let translationSensitivity: Float = 1.0
@@ -32,7 +33,7 @@ enum GestureDefaults {
 
     // MARK: - Per-finger tap-to-palm gesture layer
     static let perFingerTapGestureEnabled = true
-    static let perFingerTapLeftActions: [PerFingerTapAction] = [.none, .none, .none, .none, .none]
+    static let perFingerTapLeftActions: [PerFingerTapAction] = [.none, .none, .none, .openShapeMenu, .none]
     static let perFingerTapRightActions: [PerFingerTapAction] = [.none, .none, .toggleMenu, .none, .none]
     static let perFingerTapActivateThreshold: Float = 0.55
     static let perFingerTapReleaseThreshold: Float = 0.25

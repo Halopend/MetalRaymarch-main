@@ -154,6 +154,7 @@ struct FractalGridView: View {
                             subtitle: scene.fractalType?.displayName ?? "Any fractal",
                             detail: scene.attachedSong?.title ?? "Visual-only scene",
                             systemImage: scene.attachedSong == nil ? "sparkles.rectangle.stack" : "music.note",
+                            showsFlashingWarning: scene.name.localizedCaseInsensitiveContains("ambient blur"),
                             isSelected: activeSelection == .animation(scene.id),
                             onEdit: { onEditScene?(scene) }
                         ) {
@@ -299,7 +300,7 @@ struct FractalGridView: View {
         }
     }
 
-    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
+    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
@@ -308,9 +309,15 @@ struct FractalGridView: View {
                         .frame(width: 18)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
+                        HStack(spacing: 6) {
+                            Text(title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(2)
+                            if showsFlashingWarning {
+                                FlashingLightIndicator()
+                                    .help("Contains flashing or rapidly changing light.")
+                            }
+                        }
 
                         Text(subtitle)
                             .font(.caption)

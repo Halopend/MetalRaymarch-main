@@ -138,6 +138,17 @@ struct ContentView: View {
         return count
     }
 
+    private var hasShapeMusicMapping: Bool {
+        cache.audioReactive.musicReactiveMappings.contains { mapping in
+            let target = mapping.target.migrated
+            return target == .iterations || target.isFormulaParam
+        }
+    }
+
+    private var hasFlashingMusicVisuals: Bool {
+        cache.audioReactive.musicReactiveMappings.contains(where: \.hasFlashingRisk)
+    }
+
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     private var qualityGoalPreference: QualityGoalPreference {
@@ -192,6 +203,11 @@ struct ContentView: View {
             end: { appModel.endMenuAdjustment() }
         ))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
+        .background(Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         // Content visibility: keep the window physically open (preserves world-space position)
         // but hide content and disable hit-testing when the user gestures the menu closed.
@@ -202,7 +218,15 @@ struct ContentView: View {
             // Treat gaze-hover as active UI interaction for robust gesture suppression.
             appModel.setMenuHovering(hovering)
         }
-        .onAppear { cache.startSync(with: appModel.renderSettings, appModel: appModel) }
+        .onAppear {
+            appModel.openShapeMenuHandler = {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedTab = .fractal
+                    fractalSubTab = .shape
+                }
+            }
+            cache.startSync(with: appModel.renderSettings, appModel: appModel)
+        }
         .onDisappear { cache.stopSync() }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
@@ -645,6 +669,40 @@ struct ContentView: View {
             // Formula-specific parameters (auto-generated from catalog.json)
             FormulaParamsEditor(cache: cache)
 
+            if hasShapeMusicMapping {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Label("Music Shape Control", systemImage: "waveform.path")
+                            .font(.headline)
+                        if hasFlashingMusicVisuals {
+                            FlashingLightIndicator()
+                                .help("Current music mappings can produce flashing or rapidly changing light.")
+                        }
+                        Spacer()
+                    }
+
+                    Text("Global music amount for iteration and shape-parameter mappings.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
+                    EffectSliderRow(icon: "waveform.circle", label: "Music Amount",
+                        value: Binding(
+                            get: { cache.audioReactive.fractalAudioAmount },
+                            set: { newValue in
+                                cache.audioReactive.fractalAudioAmount = newValue
+                                cache.push(\.fractalAudioAmount, value: newValue)
+                            }
+                        ), range: 0...1,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.fractalAudioAmount, value: cache.audioReactive.fractalAudioAmount) },
+                        showToggle: false)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.08)))
+            }
+
             // Scale slider — only visible for Mandelbox (the only fractal whose
             // distance estimator uses this uniform).
             if cache.fractalType == .mandelbox {
@@ -683,13 +741,57 @@ struct ContentView: View {
                         enabled: .constant(true),
                         onChanged: { cache.push(\.safetyBubbleRadius, value: cache.safetyBubble.radius) },
                         showToggle: false)
+                    let selectedBubbleFamily = SafetyBubbleShapePreset.family(for: cache.safetyBubble.shape)
                     HStack {
                         Text("Shape"); Spacer()
-                        Picker("Shape", selection: Binding<Int>(
-                            get: { cache.safetyBubble.shape < 0.5 ? 0 : 1 },
-                            set: { cache.safetyBubble.shape = $0 == 0 ? 0.0 : 1.0; cache.push(\.safetyBubbleShape, value: cache.safetyBubble.shape) }
-                        )) { Text("Sphere").tag(0); Text("Cube").tag(1) }
-                        .pickerStyle(.segmented).frame(maxWidth: 160)
+                        Picker("Shape", selection: Binding<SafetyBubbleShapeFamily>(
+                            get: { selectedBubbleFamily },
+                            set: { family in
+                                let newValue = SafetyBubbleShapePreset.storedValue(for: family, currentValue: cache.safetyBubble.shape)
+                                cache.safetyBubble.shape = newValue
+                                cache.push(\.safetyBubbleShape, value: newValue)
+                            }
+                        )) {
+                            ForEach(SafetyBubbleShapeFamily.allCases) { family in
+                                Text(family.rawValue).tag(family)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 260)
+                    }
+                    if selectedBubbleFamily == .platonic {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Platonic")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                                ForEach(SafetyBubbleShapePreset.platonicOptions) { preset in
+                                    let isSelected = SafetyBubbleShapePreset(storedValue: cache.safetyBubble.shape) == preset
+
+                                    Button {
+                                        cache.safetyBubble.shape = preset.storedValue
+                                        cache.push(\.safetyBubbleShape, value: preset.storedValue)
+                                    } label: {
+                                        Text(preset.displayName)
+                                            .font(.caption.weight(.semibold))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 8)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(isSelected ? Color.black : Color.primary)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .fill(isSelected ? Color.white.opacity(0.88) : Color.white.opacity(0.08))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .strokeBorder(Color.white.opacity(isSelected ? 0.14 : 0.08), lineWidth: 1)
+                                    )
+                                }
+                            }
+                        }
                     }
                     
                     Divider()
@@ -1945,12 +2047,19 @@ struct ContentView: View {
 
                         Toggle("Spring Blob Navigation", isOn: $cache.gesture.useSpringBlob)
                             .onChange(of: cache.gesture.useSpringBlob) { _, v in cache.push(\.useSpringBlob, value: v) }
+                        Toggle("Menu + Movement Only", isOn: $cache.gesture.menuAndMovementOnly)
+                            .onChange(of: cache.gesture.menuAndMovementOnly) { _, v in cache.push(\.menuAndMovementOnly, value: v) }
                         Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
                             .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
                         Toggle("Extended Range", isOn: $cache.gesture.extendedGestureRange)
                             .onChange(of: cache.gesture.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
                         Toggle("Rotation Auto-Snap", isOn: $cache.gesture.rotationAutoSnap)
                             .onChange(of: cache.gesture.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
+                        if cache.gesture.menuAndMovementOnly {
+                            Text("Skips shape and parameter gesture scans, keeping only menu trigger and movement gestures active.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                         if cache.gesture.rotationAutoSnap {
                             EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Breakaway Angle (°)",
                                 value: $cache.gesture.rotationBreakawayDegrees, range: 0...45,
@@ -2158,19 +2267,6 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
-            // SharePlay section
-            if let shareSession = appModel.shareSession {
-                VStack(spacing: 8) {
-                    HStack {
-                        Label("SharePlay", systemImage: "shareplay").font(.headline)
-                        Spacer()
-                    }
-                    SharePlayControlsView(shareSession: shareSession, appModel: appModel)
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
-            }
-
             // Privacy & Analytics section
             VStack(spacing: 8) {
                 HStack {

@@ -340,9 +340,57 @@ struct FractalParams {
     float bubbleStrength;   // Temporal fade (0=off, 1=fully active)
 };
 
+FORCE_INLINE float safetyBubbleCubeDistance(float3 p, float bubbleRadius) {
+    float3 d = abs(p) - float3(bubbleRadius);
+    return length(max(d, 0.0)) + min(max(d.x, max(d.y, d.z)), 0.0);
+}
+
+FORCE_INLINE float safetyBubbleTetrahedralDistance(float3 p, float bubbleRadius) {
+    constexpr float k = 0.5773502691896258f;
+    float d1 = dot(p, float3( k,  k,  k));
+    float d2 = dot(p, float3( k, -k, -k));
+    float d3 = dot(p, float3(-k,  k, -k));
+    float d4 = dot(p, float3(-k, -k,  k));
+    return max(max(d1, d2), max(d3, d4)) - bubbleRadius;
+}
+
+FORCE_INLINE float safetyBubbleNegativeCubeDistance(float3 p, float bubbleRadius) {
+    constexpr float exponent = 0.65f;
+    float3 q = abs(p) / max(bubbleRadius, 1e-4f);
+    float superDistance = pow(pow(q.x, exponent) + pow(q.y, exponent) + pow(q.z, exponent), 1.0f / exponent);
+    return (superDistance - 1.0f) * bubbleRadius;
+}
+
+FORCE_INLINE float safetyBubbleOctahedronDistance(float3 p, float bubbleRadius) {
+    float3 q = abs(p);
+    return (q.x + q.y + q.z - bubbleRadius) * 0.5773502691896258f;
+}
+
+FORCE_INLINE float safetyBubbleIcosahedronDistance(float3 p, float bubbleRadius) {
+    constexpr float phi = 1.618033988749895f;
+    constexpr float invLen = 0.5257311121191336f;
+    float3 q = abs(p);
+    float d1 = dot(q, float3(phi, 1.0f, 0.0f) * invLen);
+    float d2 = dot(q, float3(1.0f, 0.0f, phi) * invLen);
+    float d3 = dot(q, float3(0.0f, phi, 1.0f) * invLen);
+    return max(d1, max(d2, d3)) - bubbleRadius;
+}
+
+FORCE_INLINE float safetyBubbleDodecahedronDistance(float3 p, float bubbleRadius) {
+    constexpr float phi = 1.618033988749895f;
+    constexpr float invPhiLen = 0.5257311121191336f;
+    constexpr float invTriLen = 0.5773502691896258f;
+    float3 q = abs(p);
+    float d1 = dot(q, float3(1.0f, 1.0f, 1.0f) * invTriLen);
+    float d2 = dot(q, float3(0.0f, 1.0f, phi) * invPhiLen);
+    float d3 = dot(q, float3(1.0f, phi, 0.0f) * invPhiLen);
+    float d4 = dot(q, float3(phi, 0.0f, 1.0f) * invPhiLen);
+    return max(max(d1, d2), max(d3, d4)) - bubbleRadius;
+}
+
 // === SAFETY BUBBLE DISTANCE FUNCTION ===
-// Computes distance to safety bubble, morphing between sphere and axis-aligned cube
-// Cube does NOT rotate with view - only translates (provides stable reference frame)
+// Uses the legacy sphere/cube morph for values in 0...1 and discrete solids above that.
+// The bubble stays axis-aligned and only translates with the viewer position.
 FORCE_INLINE float safetyBubbleDistance(float3 pos, float3 bubbleCenter, float bubbleRadius, float bubbleShape) {
     float3 p = pos - bubbleCenter;
     
@@ -351,11 +399,27 @@ FORCE_INLINE float safetyBubbleDistance(float3 pos, float3 bubbleCenter, float b
     
     // Axis-aligned cube distance (Chebyshev distance - max of absolute components)
     // No rotation - cube stays aligned with world axes for stable visual reference
-    float3 d = abs(p) - float3(bubbleRadius);
-    float cubeDist = length(max(d, 0.0)) + min(max(d.x, max(d.y, d.z)), 0.0);
+    float cubeDist = safetyBubbleCubeDistance(p, bubbleRadius);
     
-    // Smooth morph between sphere and cube based on bubbleShape parameter
-    return mix(sphereDist, cubeDist, bubbleShape);
+    if (bubbleShape <= 1.0f) {
+        return mix(sphereDist, cubeDist, clamp(bubbleShape, 0.0f, 1.0f));
+    }
+
+    int discreteShape = int(clamp(bubbleShape + 0.5f, 2.0f, 6.0f));
+    switch (discreteShape) {
+        case 2:
+            return safetyBubbleTetrahedralDistance(p, bubbleRadius);
+        case 3:
+            return safetyBubbleNegativeCubeDistance(p, bubbleRadius);
+        case 4:
+            return safetyBubbleOctahedronDistance(p, bubbleRadius);
+        case 5:
+            return safetyBubbleIcosahedronDistance(p, bubbleRadius);
+        case 6:
+            return safetyBubbleDodecahedronDistance(p, bubbleRadius);
+        default:
+            return cubeDist;
+    }
 }
 
 // === SAFETY BUBBLE CSG APPLICATION ===

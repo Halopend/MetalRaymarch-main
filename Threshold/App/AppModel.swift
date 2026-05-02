@@ -261,6 +261,10 @@ class AppModel {
             print("🎬 onAnimationPlayerToggle callback fired!")
             self?.toggleAnimationPlayerWindow()
         }
+        gestureController?.onOpenShapeMenu = { [weak self] in
+            print("🧭 onOpenShapeMenu callback fired!")
+            self?.openShapeMenuFromGesture()
+        }
         gestureController?.onMenuWindowPullTowardUser = { [weak self] in
             self?.pullMenuWindowTowardUser()
         }
@@ -321,6 +325,9 @@ class AppModel {
 
     /// Callback to dismiss the animation player window (set by App scene)
     var dismissAnimationPlayerWindowHandler: (() -> Void)?
+
+    /// Callback to navigate directly to the Fractal > Shape tab.
+    var openShapeMenuHandler: (() -> Void)?
     
     /// Toggle menu window content visibility.
     /// The physical window stays in world space to preserve its position;
@@ -355,6 +362,16 @@ class AppModel {
         openMenuWindowHandler?()
         refreshMenuInteractionState()
         print("📋 Menu window shown (pull gesture)")
+    }
+
+    func openShapeMenuFromGesture() {
+        if !isMenuWindowVisible {
+            isMenuWindowVisible = true
+            openMenuWindowHandler?()
+        }
+        openShapeMenuHandler?()
+        refreshMenuInteractionState()
+        print("🧭 Shape menu shown (gesture)")
     }
 
     /// Hide menu window content during scene load so hand gestures are immediately available.
@@ -450,7 +467,7 @@ class AppModel {
     /// One-time migration to keep menu opening easy with either finger and
     /// normalize older menu sensitivity defaults to a faster/easier-open setup.
     private func migrateDistinctWindowGestureDefaultsIfNeeded() {
-        let migrationKey = "gestureDistinctWindowMapping.v5"
+        let migrationKey = "gestureDistinctWindowMapping.v6"
         guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
 
         // Ensure gesture toggle is enabled so menu recovery remains possible.
@@ -463,6 +480,11 @@ class AppModel {
         renderSettings.menuToggleHoldDuration = min(renderSettings.menuToggleHoldDuration, GestureDefaults.menuToggleHoldDuration)
         renderSettings.menuToggleActivateThreshold = min(renderSettings.menuToggleActivateThreshold, GestureDefaults.menuToggleActivateThreshold)
         renderSettings.menuToggleReleaseThreshold = min(renderSettings.menuToggleReleaseThreshold, GestureDefaults.menuToggleReleaseThreshold)
+
+        if renderSettings.perFingerTapLeftActions == [.none, .none, .none, .none, .none] {
+            renderSettings.perFingerTapLeftActions = GestureDefaults.perFingerTapLeftActions
+            GestureDefaults.savePerFingerTapActions(renderSettings.perFingerTapLeftActions, keyPrefix: "perFingerTapLeft")
+        }
 
         UserDefaults.standard.set(true, forKey: migrationKey)
     }

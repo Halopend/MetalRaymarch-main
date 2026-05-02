@@ -17,6 +17,7 @@ struct GestureConfig: Codable, Equatable, Sendable {
 
     // Sensitivity & smoothing
     var gestureSensitivity: Float = GestureDefaults.gestureSensitivity
+    var menuAndMovementOnly: Bool = GestureDefaults.menuAndMovementOnly
     var useRelativeGestures: Bool = GestureDefaults.useRelativeGestures
     var extendedGestureRange: Bool = GestureDefaults.extendedGestureRange
     var translationSensitivity: Float = GestureDefaults.translationSensitivity

@@ -87,13 +87,9 @@ final class PerFingerTapGestureEngine {
         }
 
         // Compute tap strength for every finger
-        let strengths: [Float] = [
-            hand.thumbTouchingPalm(),
-            hand.indexFingerTouchingPalm(),
-            hand.middleFingerTouchingPalm(),
-            hand.ringFingerTouchingPalm(),
-            hand.pinkyFingerTouchingPalm(),
-        ]
+        let strengths: [Float] = (0..<5).map { finger in
+            tapStrength(for: finger, hand: hand, action: actions[finger])
+        }
 
         // Find the strongest finger that is above threshold and has a non-.none action
         var bestFinger: Int? = nil
@@ -143,6 +139,26 @@ final class PerFingerTapGestureEngine {
 
         return []
     }
+
+    private func tapStrength(for finger: Int, hand: HandData, action: PerFingerTapAction) -> Float {
+        switch finger {
+        case 0:
+            return hand.thumbTouchingPalm()
+        case 1:
+            return hand.indexFingerTouchingPalm()
+        case 2:
+            return hand.middleFingerTouchingPalm()
+        case 3:
+            if action == .openShapeMenu {
+                return max(hand.ringFingerTouchingPalm(), hand.ringFingerTouchingWrist())
+            }
+            return hand.ringFingerTouchingPalm()
+        case 4:
+            return hand.pinkyFingerTouchingPalm()
+        default:
+            return 0
+        }
+    }
 }
 
 // MARK: - Supporting Types
@@ -151,12 +167,14 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
     case none         = 0
     case toggleMenu   = 1
     case toggleAnimationPlayer = 2
+    case openShapeMenu = 3
 
     var displayName: String {
         switch self {
         case .none:         return "None"
         case .toggleMenu:   return "Toggle Menu"
         case .toggleAnimationPlayer: return "Toggle Animation Player"
+        case .openShapeMenu: return "Open Shape Menu"
         }
     }
 
@@ -165,6 +183,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .none:         return "xmark.circle"
         case .toggleMenu:   return "menucard"
         case .toggleAnimationPlayer: return "film.stack"
+        case .openShapeMenu: return "square.grid.2x2"
         }
     }
 
@@ -173,6 +192,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .none:         return .trackGestureUsage // no-op
         case .toggleMenu:   return .toggleMenu
         case .toggleAnimationPlayer: return .toggleAnimationPlayer
+        case .openShapeMenu: return .openShapeMenu
         }
     }
 }

@@ -138,6 +138,30 @@ struct EffectSliderRow: View {
     }
 }
 
+struct FlashingLightIndicator: View {
+    @State private var isLit = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(isLit ? Color.orange : Color.orange.opacity(0.28))
+                .frame(width: 8, height: 8)
+                .shadow(color: Color.orange.opacity(isLit ? 0.9 : 0.0), radius: isLit ? 6 : 0)
+
+            Circle()
+                .stroke(Color.orange.opacity(isLit ? 0.72 : 0.18), lineWidth: 1)
+                .frame(width: isLit ? 14 : 10, height: isLit ? 14 : 10)
+        }
+        .frame(width: 16, height: 16)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.42).repeatForever(autoreverses: true)) {
+                isLit = true
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - StatBox
 
 struct StatBox: View {

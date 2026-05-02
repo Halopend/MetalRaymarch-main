@@ -132,6 +132,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _rotationSnapWindowDegrees: Float = loadGestureFloat("rotationSnapWindowDegrees", default: GestureDefaults.rotationSnapWindowDegrees)
     private var _rotationBreakawayDegrees: Float = loadGestureFloat("rotationBreakawayDegrees", default: GestureDefaults.rotationBreakawayDegrees)
     private var _gestureSensitivity: Float = loadGestureFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
+    private var _menuAndMovementOnly: Bool = loadGestureBool("menuAndMovementOnly", default: GestureDefaults.menuAndMovementOnly)
     private var _menuToggleGestureEnabled: Bool = loadGestureBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
@@ -872,6 +873,15 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Reduce per-frame gesture work to menu trigger and movement-only bindings.
+    var menuAndMovementOnly: Bool {
+        get { withLock { _menuAndMovementOnly } }
+        set {
+            withLock { _menuAndMovementOnly = newValue }
+            persistGesture()
+        }
+    }
+
     /// Which right-hand gesture toggles the floating menu window.
     var menuToggleGestureMode: MenuToggleGestureMode {
         get { withLock { _menuToggleGestureMode } }
@@ -1238,12 +1248,13 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
-    /// Shape of the safety bubble (0 = sphere, 1 = cube, intermediate = morph)
-    /// Cube does not rotate with view, only translates with position
+    /// Shape of the safety bubble.
+    /// 0...1 preserve the legacy sphere/cube morph, 2...6 select discrete solids.
+    /// The bubble stays axis-aligned and only translates with the viewer position.
     var safetyBubbleShape: Float {
         get { withLock { _safetyBubbleShape } }
         set {
-            withLock { _safetyBubbleShape = max(0.0, min(1.0, newValue)) }
+            withLock { _safetyBubbleShape = max(0.0, min(SafetyBubbleShapePreset.maxStoredValue, newValue)) }
             persistSafetyBubble()
         }
     }
@@ -2961,6 +2972,7 @@ final class RenderSettings: @unchecked Sendable {
                 var c = GestureConfig()
                 c.gestureBindings = _gestureBindings
                 c.gestureSensitivity = _gestureSensitivity
+                c.menuAndMovementOnly = _menuAndMovementOnly
                 c.useRelativeGestures = _useRelativeGestures
                 c.extendedGestureRange = _extendedGestureRange
                 c.translationSensitivity = _translationSensitivity
@@ -2995,6 +3007,7 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 _gestureBindings = newValue.gestureBindings
                 _gestureSensitivity = newValue.gestureSensitivity
+                _menuAndMovementOnly = newValue.menuAndMovementOnly
                 _useRelativeGestures = newValue.useRelativeGestures
                 _extendedGestureRange = newValue.extendedGestureRange
                 _translationSensitivity = newValue.translationSensitivity

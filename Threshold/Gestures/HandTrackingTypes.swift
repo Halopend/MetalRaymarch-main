@@ -117,6 +117,17 @@ struct HandData {
         fingerTouchingPalm(tip: ringTip, touchDist: 0.045, awayDist: 0.11)
     }
 
+    func ringFingerTouchingWrist() -> Float {
+        guard simd_length_squared(wristPosition) > 1e-6,
+              simd_length_squared(ringTip) > 1e-6 else { return 0 }
+
+        let distance = simd_length(ringTip - wristPosition)
+        let touchDist: Float = 0.04
+        let awayDist: Float = 0.11
+        let normalized = 1.0 - ((distance - touchDist) / (awayDist - touchDist))
+        return simd_clamp(normalized, 0, 1)
+    }
+
     /// Pinky finger touching palm.
     func pinkyFingerTouchingPalm() -> Float {
         // Pinky is shortest and closest to palm edge; slightly tighter thresholds.

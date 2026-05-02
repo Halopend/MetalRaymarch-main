@@ -407,6 +407,21 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    var hasFlashingRisk: Bool {
+        switch self.migrated {
+        case .glow, .bloom, .hueSpeed, .saturation:
+            return true
+        case .fractalScale, .colorMix, .iterations,
+             .fog,
+             .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15,
+             .foldingLimit, .sphereRadius:
+            return false
+        }
+    }
+
     // MARK: - Parameter Target ID (fractal-type-aware)
 
     /// Returns the parameter system target ID for routing operations.
@@ -543,6 +558,10 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     /// Default mappings — starts empty. Users add what they want via the + button.
     static func defaultMappings() -> [MusicReactiveMapping] {
         []
+    }
+
+    var hasFlashingRisk: Bool {
+        isEnabled && target.migrated.hasFlashingRisk && abs(amount) > 0.01
     }
 
     // MARK: - Backward-compatible Codable
@@ -717,5 +736,9 @@ enum ReactivityPreset: String, CaseIterable {
     /// Fallback that uses Mandelbox as the default fractal (backward compat).
     var defaultMappings: [MusicReactiveMapping] {
         defaultMappings(for: .mandelbox)
+    }
+
+    var hasFlashingRisk: Bool {
+        defaultMappings.contains(where: \.hasFlashingRisk)
     }
 }

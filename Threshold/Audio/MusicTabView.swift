@@ -33,6 +33,10 @@ struct MusicTabContent: View {
         return cache.audioReactive.musicReactiveMappings.count
     }
 
+    private var hasFlashingVisualMappings: Bool {
+        cache.audioReactive.musicReactiveMappings.contains(where: \.hasFlashingRisk)
+    }
+
     init(cache: UISettingsCache, musicService: MusicService, audioAnalyzer: AudioAnalyzer, renderSettings: RenderSettings) {
         self.cache = cache
         self.musicService = musicService
@@ -126,7 +130,12 @@ struct MusicTabContent: View {
                 Section("Universal") {
                     ForEach(universalTargets, id: \.self) { target in
                         Button { addMapping(target) } label: {
-                            Label(target.displayName, systemImage: target.icon)
+                            HStack(spacing: 8) {
+                                Label(target.displayName, systemImage: target.icon)
+                                if target.hasFlashingRisk {
+                                    FlashingLightIndicator()
+                                }
+                            }
                         }
                     }
                 }
@@ -136,7 +145,12 @@ struct MusicTabContent: View {
                 Section("\(cache.fractalType.displayName) Params") {
                     ForEach(formulaTargets, id: \.self) { target in
                         Button { addMapping(target) } label: {
-                            Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
+                            HStack(spacing: 8) {
+                                Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
+                                if target.hasFlashingRisk {
+                                    FlashingLightIndicator()
+                                }
+                            }
                         }
                     }
                 }
@@ -768,7 +782,7 @@ struct MusicTabContent: View {
                     sliderRow(label: "Amount", value: Binding(
                         get: { cache.audioReactive.fractalAudioAmount },
                         set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
-                    ), range: 0...1)
+                    ), range: 0...1, showsFlashingWarning: hasFlashingVisualMappings)
 
                     sliderRow(label: "Beat", value: Binding(
                         get: { cache.audioReactive.fractalBeatPunch },
@@ -790,7 +804,12 @@ struct MusicTabContent: View {
                                     Button {
                                         applyPreset(preset)
                                     } label: {
-                                        Label(preset.rawValue, systemImage: preset.icon)
+                                        HStack(spacing: 8) {
+                                            Label(preset.rawValue, systemImage: preset.icon)
+                                            if preset.hasFlashingRisk {
+                                                FlashingLightIndicator()
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -823,6 +842,11 @@ struct MusicTabContent: View {
 
                                 Text(mapping.target.displayName(for: cache.fractalType))
                                     .font(.caption.bold())
+
+                                if mapping.hasFlashingRisk {
+                                    FlashingLightIndicator()
+                                        .help("Can produce flashing or rapidly changing light.")
+                                }
 
                                 Spacer()
 
@@ -970,11 +994,17 @@ struct MusicTabContent: View {
 
     // MARK: - Helpers
 
-    private func sliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>) -> some View {
+    private func sliderRow(label: String, value: Binding<Float>, range: ClosedRange<Float>, showsFlashingWarning: Bool = false) -> some View {
         HStack {
-            Text(label)
-                .font(.caption)
-                .frame(width: 72, alignment: .leading)
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.caption)
+                if showsFlashingWarning {
+                    FlashingLightIndicator()
+                        .help("Can produce flashing or rapidly changing light.")
+                }
+            }
+            .frame(width: 96, alignment: .leading)
             Slider(value: value, in: range)
             Text("\(Int(value.wrappedValue * 100))%")
                 .font(.caption.monospacedDigit())

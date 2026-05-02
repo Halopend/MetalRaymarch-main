@@ -67,6 +67,17 @@ enum FingerGestureAction: Int32, CaseIterable, Codable, Hashable {
     }
 }
 
+extension FingerGestureAction {
+    var isMovementGesture: Bool {
+        switch self {
+        case .grab, .translate:
+            return true
+        case .none, .minDistance, .foldingLimit, .sphereRadius, .fractalScale:
+            return false
+        }
+    }
+}
+
 // MARK: - Per-Hand Gesture Binding Model
 
 enum GestureHandMode: String, CaseIterable, Codable, Hashable, Sendable {
@@ -349,6 +360,23 @@ enum GestureActionBinding: Codable, Hashable, Sendable {
             }
             return "\(triplet.fractalType.displayName): \(triplet.display.title)"
         }
+    }
+}
+
+extension GestureActionBinding {
+    var isMovementBinding: Bool {
+        switch self {
+        case .core(let action):
+            return action.isMovementGesture
+        case .parameter, .parameterTriplet:
+            return false
+        }
+    }
+}
+
+extension PerFingerTapAction {
+    var isMenuEssentialAction: Bool {
+        self == .toggleMenu
     }
 }
 
