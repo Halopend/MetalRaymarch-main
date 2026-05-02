@@ -21,6 +21,9 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Debug
     var debugHierarchical: Bool = false
 
+    // Experimental: coherent packet predict-validate raymarch path (Stages 0-3)
+    var coherentPacketEnabled: Bool = false
+
     // MARK: - Validation
 
     mutating func clamp() {

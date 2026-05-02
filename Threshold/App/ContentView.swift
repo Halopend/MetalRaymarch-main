@@ -2502,7 +2502,40 @@ struct ContentView: View {
                     HStack { Image(systemName: isTestAnimationPlaying ? "stop.fill" : "play.fill"); Text(isTestAnimationPlaying ? "Stop" : "Play Test") }
                 }.buttonStyle(.borderedProminent).tint(isTestAnimationPlaying ? .red : themeColor)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-            
+
+            // === EXPERIMENTAL: COHERENT PACKET RAYMARCH (Stages 0-3 prototype) ===
+            // Replaces prevDepth*0.9 warm-start with single-DE-eval safety probe per
+            // pixel; gates shared shadows on local normal coherence. Only takes effect
+            // on the 8x8 adaptive compute path (Renderer Mode = Adaptive Compute).
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "atom").foregroundStyle(themeColor)
+                    Text("Coherent Packet Raymarch")
+                        .font(.headline)
+                    Spacer()
+                    Text("EXPERIMENTAL")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                }
+                Toggle(isOn: Binding(
+                    get: { appModel.renderSettings.coherentPacketEnabled },
+                    set: { appModel.renderSettings.coherentPacketEnabled = $0 }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Predict-validate warm-start")
+                        Text("Single DE-eval safety probe + normal-coherence shadow gate. 8x8 compute path only.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }.tint(themeColor)
+                Text("Layer-of-acceptance overlay shows immediately when this toggle is on (no other debug flag needed): magenta = warm-start hit, green = warm-start tight, red = warm-start rejected, cyan = shadow fallback. Untinted = legacy coarse path. 8x8 compute path only.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+
 #if DEBUG
             VStack(alignment: .leading, spacing: 8) {
                 HStack { Image(systemName: "timer").foregroundStyle(themeColor); Text("Benchmarking").font(.headline) }

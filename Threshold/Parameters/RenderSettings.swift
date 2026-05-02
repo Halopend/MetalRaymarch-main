@@ -119,6 +119,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
+    private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -753,6 +754,18 @@ final class RenderSettings: @unchecked Sendable {
     var debugHierarchical: Bool {
         get { withLock { _debugHierarchical } }
         set { withLock { _debugHierarchical = newValue } }
+    }
+
+    /// Experimental: enable coherent-packet predict-validate raymarch path.
+    /// Replaces the prevDepth*0.9 warm-start heuristic with a single-DE-eval
+    /// safety probe and gates shared shadows on local normal coherence.
+    /// Only takes effect on the 8x8 adaptive compute path (tileSize == 8).
+    var coherentPacketEnabled: Bool {
+        get { withLock { _coherentPacketEnabled } }
+        set {
+            withLock { _coherentPacketEnabled = newValue }
+            UserDefaults.standard.set(newValue, forKey: "coherentPacketEnabled")
+        }
     }
 
     /// Flash intensity for limit feedback (0-1). Set to 1.0 to trigger flash, decays automatically.
@@ -1778,6 +1791,7 @@ final class RenderSettings: @unchecked Sendable {
                 formulaParams: fp,
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
+                coherentPacketEnabled: _coherentPacketEnabled,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -2736,6 +2750,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.resolutionScale = _resolutionScale
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
+                c.coherentPacketEnabled = _coherentPacketEnabled
                 return c
             }
         }
@@ -2748,6 +2763,7 @@ final class RenderSettings: @unchecked Sendable {
                 _resolutionScale = newValue.resolutionScale
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
+                _coherentPacketEnabled = newValue.coherentPacketEnabled
             }
         }
     }

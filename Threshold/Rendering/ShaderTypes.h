@@ -311,7 +311,12 @@ typedef struct
     vector_float2 jitterOffset;  // Sub-pixel jitter in pixels (±0.5 range)
     int accumulationFrame;       // Frame count since last parameter change (0 = first frame)
     int temporalReprojectionEnabled;         // 0 = off (first frame / parameter change), 1 = on
-    float _pad_tile[2];          // Align to 16 bytes
+    // === COHERENT-PACKET EXPERIMENTAL PATH (Stages 0-3 prototype) ===
+    // 0 = legacy adaptiveHierarchical8x8 path (prevDepth*0.9 warm-start, unconditional
+    // shared shadows). 1 = predict-validate-fallback: single-DE-eval safety probe per
+    // pixel, normal-coherence-gated shadow share, layer-of-acceptance debug overlay.
+    int coherentPacketEnabled;
+    float _pad_tile;             // Align to 16 bytes
     
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     

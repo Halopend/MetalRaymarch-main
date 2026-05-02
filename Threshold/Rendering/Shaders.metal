@@ -318,13 +318,8 @@ inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, flo
 }
 
 // === ADAPTIVE LEVEL SELECTION ===
-// Returns: 0 = 8x8 (far), 1 = 4x4 (medium), 2 = 2x2 (near), 3 = per-pixel (surface)
-inline int selectAdaptiveLevel(float coarseT) {
-    if (coarseT > ADAPTIVE_FAR_THRESHOLD || coarseT < 0.0) return 0;  // 8x8
-    if (coarseT > ADAPTIVE_MED_THRESHOLD) return 1;  // 4x4
-    if (coarseT > ADAPTIVE_NEAR_THRESHOLD) return 2;  // 2x2
-    return 3;  // Per-pixel for surface detail
-}
+// (Removed: `selectAdaptiveLevel` — leftover from an abandoned 4-level cascade.
+//  Current renderer uses a flat 8x8 tile dispatch only.)
 
 // visionOS projection outputs z/w in [0, 1] range directly.
 // No transformation needed - just pass through for async timewarp/reprojection.
@@ -1323,204 +1318,12 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 }
 
 // =============================================================================
-// === SIMD GROUP COOPERATIVE RAYMARCHING ===
-// Uses 4 anchor lanes per 32-lane SIMD group (12.5% of lanes) to sample the DE,
-// then broadcasts those samples to derive a conservative lower-bound step for
-// every lane using the DE's 1-Lipschitz property:
-//
-//   d(p_lane) >= d(p_anchor) - |p_lane - p_anchor|
-//
-// Taking the best lower bound from all anchors per lane, then the SIMD-wide
-// minimum across lanes, yields a shared step that is safe for the whole group.
-// This cuts coarse-phase DE traffic from 32 calls to just 4 calls per step while
-// keeping the existing per-pixel fine march and hit shading unchanged.
-// =============================================================================
-
-constant ushort kSIMDAnchorLaneCount = 4;
-constant ushort kSIMDAnchorLanes[kSIMDAnchorLaneCount] = { 0, 7, 24, 31 };
-
-FORCE_INLINE bool isSIMDGroupAnchorLane(uint simdLaneId)
-{
-    return simdLaneId == uint(kSIMDAnchorLanes[0]) ||
-           simdLaneId == uint(kSIMDAnchorLanes[1]) ||
-           simdLaneId == uint(kSIMDAnchorLanes[2]) ||
-           simdLaneId == uint(kSIMDAnchorLanes[3]);
-}
-
-FORCE_INLINE float SIMDGroupConservativeStep(float3 p, float sampledDistance)
-{
-    float bestLowerBound = 0.0f;
-
-    for (ushort i = 0; i < kSIMDAnchorLaneCount; ++i) {
-        ushort anchorLane = kSIMDAnchorLanes[i];
-        float3 anchorP = simd_broadcast(p, anchorLane);
-        float anchorDistance = simd_broadcast(sampledDistance, anchorLane);
-        float candidate = max(anchorDistance - length(p - anchorP), 0.0f);
-        bestLowerBound = max(bestLowerBound, candidate);
-    }
-
-    return simd_min(bestLowerBound);
-}
-
-FORCE_INLINE SceneResult SceneWithCacheSIMDGroup(
-    float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam,
-    float glowIntensity, float foldingLimit, FractalParams params, int iterations,
-    float time, int fractalType, FormulaParams fp, int colorIterations,
-    float boundingSphereRadius, float stepMultiplier, float maxRayDistance,
-    uint simdLaneId)
-{
-    SceneResult result;
-    result.cache = makeEmptyOrbitCache();
-    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
-
-    float dither = interleavedGradientNoise(fragCoord, time) * 0.015;
-    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
-    float t = (isMandelbulb ? 0.005f : 0.05f) + dither;
-
-    // Bounding sphere pre-test (per-thread, rays diverge)
-    if (boundingSphereRadius > 0.0) {
-        float sphereT = rayIntersectBoundingSphere(rO, rD, float3(0.0), boundingSphereRadius);
-        if (sphereT < 0.0) {
-            result.distGlow = float2(kRayMissThreshold + 100.0, 0.0);
-            return result;
-        }
-        t = max(t, sphereT);
-    }
-
-    float glow = 0.0;
-    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
-    int totalBudget = max(int(float(baseMaxSteps) * quality), 4);
-
-    // === PHASE 1: SIMD-COOPERATIVE COARSE MARCH ===
-    // Four anchor lanes sample the DE once per step. Every lane turns those
-    // samples into a conservative lower bound on its own distance using the
-    // DE's Lipschitz-1 property, then the SIMD-wide minimum becomes the shared
-    // step. This keeps all lanes in lockstep while dropping coarse traversal to
-    // 4 DE calls per 32-lane group-step.
-    bool isAnchorLane = isSIMDGroupAnchorLane(simdLaneId);
-    float coarseThreshold = isMandelbulb ? 0.02f : 0.08f;
-    t = simd_min(t);
-    float coarseStepScale = isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier;
-    int coarseBudget = min(totalBudget / 2, 40);
-    int j = 0;
-    for (; j < coarseBudget; j++) {
-        float3 p = fma(rD, float3(t), rO);
-        float sampledH = isAnchorLane
-            ? MapUnified(p, params, foldingLimit, iterations, type, fp)
-            : 0.0f;
-        float groupMinH = SIMDGroupConservativeStep(p, sampledH);
-
-        if (UNLIKELY(groupMinH < coarseThreshold)) break;
-        if (UNLIKELY(t > maxRayDistance)) {
-            result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
-            return result;
-        }
-
-        glow = fma(saturate(0.04f - groupMinH), glowIntensity, glow);
-        t += groupMinH * coarseStepScale;
-    }
-
-    // === PHASE 2: PER-THREAD FINE MARCH ===
-    // All threads now evaluate DE independently for accurate per-pixel hits.
-    int fineBudget = totalBudget - j;
-    for (int k = 0; k < fineBudget; k++) {
-        float threshold = isMandelbulb
-            ? fma(t, 0.0002f, 0.00012f) + (1.0f - quality) * 0.001f
-            : fma(t, 0.0008f, 0.0005f)  + (1.0f - quality) * 0.003f;
-
-        float3 p = fma(rD, float3(t), rO);
-        float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
-
-        if (UNLIKELY(h < threshold)) {
-            OrbitCache hitCache;
-            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, type, fp, colorIterations, hitCache);
-            result.cache = hitCache;
-            result.distGlow = float2(t, saturate(glow * 0.25));
-            return result;
-        }
-
-        if (UNLIKELY(t > maxRayDistance)) break;
-
-        glow = fma(saturate(0.04f - h), glowIntensity, glow);
-        t += h * (isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier);
-    }
-
-    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
-    return result;
-}
-
-// SIMD group cooperative raymarch starting from a known distance (temporal reprojection)
-FORCE_INLINE SceneResult SceneWithCacheFromStartSIMDGroup(
-    float3 rO, float3 rD, float startT, float2 fragCoord, float quality,
-    int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params,
-    int iterations, float time, int fractalType, FormulaParams fp,
-    int colorIterations, float stepMultiplier, uint simdLaneId)
-{
-    SceneResult result;
-    result.cache = makeEmptyOrbitCache();
-    int type = is_function_constant_defined(FC_FRACTAL_TYPE) ? FC_FRACTAL_TYPE : fractalType;
-
-    float dither = interleavedGradientNoise(fragCoord, time) * 0.01;
-    bool isMandelbulb = (type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia);
-    float t = max(isMandelbulb ? 0.002f : 0.01f, startT - 0.3f) + dither;
-
-    float glow = 0.0;
-    const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
-    float stepScale = (startT > 1.0f) ? 0.25f : 0.5f;
-    int totalBudget = max(int(float(baseMaxSteps) * quality * stepScale), 8);
-    float endT = startT + 2.0;
-
-    // SIMD cooperative coarse phase using 4 anchor lanes per SIMD group.
-    bool isAnchorLane = isSIMDGroupAnchorLane(simdLaneId);
-    float coarseThreshold = isMandelbulb ? 0.015f : 0.06f;
-    t = simd_min(t);
-    float coarseStepScale = isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier;
-    int coarseBudget = min(totalBudget / 2, 20);
-    int j = 0;
-    for (; j < coarseBudget; j++) {
-        float3 p = fma(rD, float3(t), rO);
-        float sampledH = isAnchorLane
-            ? MapUnified(p, params, foldingLimit, iterations, type, fp)
-            : 0.0f;
-        float groupMinH = SIMDGroupConservativeStep(p, sampledH);
-
-        if (UNLIKELY(groupMinH < coarseThreshold)) break;
-        if (UNLIKELY(t > endT)) {
-            result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
-            return result;
-        }
-
-        glow = fma(saturate(0.04f - groupMinH), glowIntensity, glow);
-        t += groupMinH * coarseStepScale;
-    }
-
-    // Per-thread fine march
-    int fineBudget = totalBudget - j;
-    for (int k = 0; k < fineBudget; k++) {
-        float threshold = isMandelbulb
-            ? fma(t, 0.00015f, 0.00012f)
-            : fma(t, 0.0006f, 0.0005f);
-        float3 p = fma(rD, float3(t), rO);
-        float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
-
-        if (UNLIKELY(h < threshold)) {
-            OrbitCache hitCache;
-            MapWithOrbitCacheUnified(p, params, foldingLimit, iterations, type, fp, colorIterations, hitCache);
-            result.cache = hitCache;
-            result.distGlow = float2(t, saturate(glow * 0.25));
-            return result;
-        }
-
-        if (UNLIKELY(t > endT)) break;
-
-        glow = fma(saturate(0.04f - h), glowIntensity, glow);
-        t += h * (isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier);
-    }
-
-    result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
-    return result;
-}
-
+// (Removed: SIMD group cooperative raymarcher experiment.
+//  `SceneWithCacheSIMDGroup`, `SceneWithCacheFromStartSIMDGroup`,
+//  `isSIMDGroupAnchorLane`, `SIMDGroupConservativeStep` were defined but never
+//  called. Superseded by the per-pixel `coherentPacketEnabled` warm-start probe
+//  in `adaptiveHierarchical8x8`. Restore from git history if SIMD anchor-lane
+//  cooperative marching is revived.)
 // =============================================================================
 
 // Post effects with color scheme support and dynamic animation
@@ -1737,7 +1540,6 @@ kernel void adaptiveHierarchical8x8(
     uint2 tileId [[threadgroup_position_in_grid]],
     uint2 localId [[thread_position_in_threadgroup]],
     uint localIndex [[thread_index_in_threadgroup]],
-    uint simdLaneId [[thread_index_in_simdgroup]],
     constant TileUniforms& uniforms [[buffer(0)]],
     texture2d_array<float, access::write> outputTexture [[texture(0)]],
     texture2d_array<float, access::read> prevDepthTexture [[texture(1)]],
@@ -1885,6 +1687,69 @@ kernel void adaptiveHierarchical8x8(
             }
         }
     }
+
+    // === COHERENT-PACKET WARM-START SAFETY PROBE (Stage 2) ===
+    // The legacy `prevDepth * 0.9` heuristic assumes DE monotonicity along the ray.
+    // Fractal DEs (Mandelbulb / Mandelbox) are LOCALLY non-monotone: they decrease
+    // into a fold then increase past it, so a fixed 10% backoff happily steps past
+    // disocclusion-exposed surfaces.
+    //
+    // Replacement: a single MapUnified evaluation at the predicted t. Three outcomes:
+    //   • h < hitThreshold    → already on the surface; treat as confirmed hit
+    //                            and skip the fine march entirely (fast path).
+    //   • h > backoffMargin   → safely outside; tighten startT to (t - h), which
+    //                            is GUARANTEED conservative by Lipschitz-1.
+    //   • otherwise            → reject reprojection; fall back to coarse pass.
+    //
+    // Cost: 1 DE eval per pixel for warm-start. Saves the entire coarse search and
+    // potentially the entire fine march. Failure is silent: we just use the legacy
+    // tileStartT path.
+    //
+    // packetLayer is a per-pixel debug tag for the layer-of-acceptance overlay:
+    //   0 = unset / fell through to coarse-tile path
+    //   1 = coherent-packet warm-start ACCEPTED as immediate hit (best case)
+    //   2 = coherent-packet warm-start ACCEPTED as tight startT
+    //   3 = coherent-packet warm-start REJECTED (probe found no surface near prediction)
+    int packetLayer = 0;
+    if (uniforms.coherentPacketEnabled != 0 && reprojectionValid) {
+        float t_pred = reprojectedDepth;
+        bool packetIsMandelbulb = (fractalType == FractalTypeMandelbulb || fractalType == FractalTypeMandelbulbJulia);
+        // Hit threshold mirrors the fine-march acceptance gate so a probe-hit is
+        // bit-for-bit consistent with what SceneWithCacheFromStart would accept.
+        float probeHitThreshold = packetIsMandelbulb
+            ? fma(t_pred, 0.0002f, 0.00012f)
+            : fma(t_pred, 0.0008f, 0.0005f);
+        // Backoff margin: distance below which we DON'T trust (t - h) as a safe
+        // start (we may be inside a fold). Tuned conservatively per fractal.
+        float probeBackoffMargin = packetIsMandelbulb ? 0.004f : 0.012f;
+
+        float3 probeP = marchOrigin + marchDir * t_pred;
+        float h_probe = MapUnified(probeP, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams);
+
+        if (h_probe < probeHitThreshold) {
+            // Surface confirmed at the predicted depth. Don't skip the fine march
+            // entirely — if we did, glow accumulation would be 0 here while neighbor
+            // pixels (green/red layers) accumulate real proximity-glow during their
+            // fine march, producing a visible seam. Instead, start the fine march
+            // just behind the probe so it terminates in ~1-3 steps and shading is
+            // bit-identical to the legacy path.
+            //
+            // Backoff distance: max(probeHitThreshold * 6, 0.5% of t_pred) keeps the
+            // restart safely outside the hit band even with non-monotone DEs.
+            float restartBackoff = max(probeHitThreshold * 6.0f, t_pred * 0.005f);
+            reprojectedStartT = max(0.05f, t_pred - restartBackoff);
+            packetLayer = 1;
+        } else if (h_probe > probeBackoffMargin) {
+            // Safely outside surface. (t - h) is Lipschitz-conservative.
+            reprojectedStartT = max(0.05f, t_pred - h_probe);
+            packetLayer = 2;
+        } else {
+            // Inside the unsafe band — could be a fold. Reject; let coarse pass run.
+            reprojectionValid = false;
+            reprojectedStartT = 0.0;
+            packetLayer = 3;
+        }
+    }
     
     // === SHARED TILE STATE ===
     threadgroup float tileStartT = 0.05f;
@@ -1892,6 +1757,18 @@ kernel void adaptiveHierarchical8x8(
     threadgroup half tg_shaSpot = 0.0h;    // Shared spotlight shadow (1 eval per tile)
     threadgroup half tg_shaSun = 0.0h;     // Shared sun shadow (1 eval per tile)
     threadgroup float3 tg_currentColor[64]; // For neighborhood clamp against history
+    // Coherent-packet Stage 3: anchor's surface frame for normal-coherence gate.
+    // NOTE: threadgroup vars cannot be reliably initialized in their declaration
+    // in Metal — initialize from thread 0 then barrier so all lanes see the value.
+    threadgroup float3 tg_anchorPos;
+    threadgroup float3 tg_anchorNormal;
+    threadgroup int tg_anchorHasHit;
+    if (localIndex == 0) {
+        tg_anchorPos = float3(0.0f);
+        tg_anchorNormal = float3(0.0f, 1.0f, 0.0f);
+        tg_anchorHasHit = 0;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
 
     // === COARSE PASS + EMPTY-SPACE EARLY EXIT ===
     // Thread 0 does a coarse raymarch to find approximate start distance.
@@ -2271,10 +2148,42 @@ kernel void adaptiveHierarchical8x8(
                 
                 tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
                 tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
+                // Publish anchor surface frame for the coherent-packet normal gate.
+                tg_anchorPos = p;
+                tg_anchorNormal = nor;
+                tg_anchorHasHit = 1;
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
             shaSpot = tg_shaSpot;
             shaSun = tg_shaSun;
+
+            // === COHERENT-PACKET SHADOW NORMAL-COHERENCE GATE (Stage 3) ===
+            // The legacy share blindly broadcasts thread 0's shadow to all 63 other
+            // pixels in the tile, which produces blocky terminator banding on the
+            // crinkled fractal surface (normals can flip between adjacent pixels
+            // even when depth is similar). Replacement: lanes accept the broadcast
+            // ONLY if their (n_i, p_i) is locally coherent with the anchor; otherwise
+            // they fall back to a per-pixel Shadow() call. Coherent regions still
+            // get the full sharing speedup; silhouettes pay the per-pixel cost they
+            // would have paid anyway under !shareShadows.
+            if (uniforms.coherentPacketEnabled != 0 && localIndex != 0 && tg_anchorHasHit != 0) {
+                float normalDot = dot(nor, tg_anchorNormal);
+                float dpDist = length(p - tg_anchorPos);
+                // Tile diagonal at unit depth ≈ 8 * 1.41 / min(res). Use adjustedDist
+                // as a screen-space-ish coherence radius cap.
+                float coherenceRadius = max(0.02f, adjustedDist * 0.02f);
+                bool normalsCoherent = normalDot > 0.95f && dpDist < coherenceRadius;
+                if (!normalsCoherent) {
+                    FractalParams shadowParamsLocal = makeFractalParamsFromPrecomputed(
+                        uniforms.precomputedFractal,
+                        uniforms.minDistance,
+                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+                    shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams));
+                    shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams));
+                    // Tag debug overlay layer for shadow fallback (only when not already tagged by warm-start).
+                    if (packetLayer == 0) packetLayer = 4;
+                }
+            }
         } else {
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
@@ -2409,8 +2318,32 @@ kernel void adaptiveHierarchical8x8(
         finalColor = mix(currentColor, previousColor, weightedHistory);
     }
 
-    outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
+    // History texture must NOT contain the debug tint, otherwise TAA washes it
+    // out frame-over-frame and contaminates real geometry. Write history first.
     curColorTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
+
+    // === COHERENT-PACKET LAYER-OF-ACCEPTANCE OVERLAY (Stage 0) ===
+    // Applied AFTER TAA blend so the tint is unambiguous and not attenuated by
+    // history. Engages whenever the experimental toggle is on (independent of
+    // the hierarchical-debug toggle) so it's always visible while testing.
+    //   1 = magenta : warm-start probe HIT (skipped fine march, fastest path)
+    //   2 = green   : warm-start probe accepted as tight startT (Lipschitz-safe)
+    //   3 = red     : warm-start probe REJECTED -> fell back to coarse pass
+    //   4 = cyan    : shadow-share fallback (per-pixel Shadow paid)
+    //   0 = unset   : pixel followed legacy coarse-tile path (no tint)
+    if (uniforms.coherentPacketEnabled != 0) {
+        half3 layerTint = half3(0.0h);
+        half tintMix = 0.0h;
+        if (packetLayer == 1)      { layerTint = half3(1.0h, 0.0h, 1.0h); tintMix = 0.65h; }
+        else if (packetLayer == 2) { layerTint = half3(0.0h, 1.0h, 0.0h); tintMix = 0.45h; }
+        else if (packetLayer == 3) { layerTint = half3(1.0h, 0.0h, 0.0h); tintMix = 0.65h; }
+        else if (packetLayer == 4) { layerTint = half3(0.0h, 1.0h, 1.0h); tintMix = 0.50h; }
+        if (tintMix > 0.0h) {
+            finalColor.rgb = mix(finalColor.rgb, float3(layerTint), float(tintMix));
+        }
+    }
+
+    outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
 }
 
 // === SPRING BLOB NAVIGATION WIDGET ===
@@ -2895,11 +2828,6 @@ static inline float3 rcasSharpen(
     return clamp(result, min(mn4, e), max(mx4, e));
 }
 
-struct FormatConversionVertex {
-    float4 position [[position]];
-    float2 texCoord;
-};
-
 // Full-screen triangle vertex shader - generates vertices procedurally
 // Supports stereo via amplification_id for render_target_array_index
 struct FormatConversionVertexOut {
@@ -2927,24 +2855,6 @@ vertex FormatConversionVertexOut formatConversionVertexStereo(uint vertexID [[ve
     return out;
 }
 
-// Non-stereo version for backward compatibility
-vertex FormatConversionVertex formatConversionVertex(uint vertexID [[vertex_id]]) {
-    FormatConversionVertex out;
-    
-    // Generate full-screen triangle using oversized triangle technique
-    float2 position;
-    position.x = (vertexID == 1) ? 3.0 : -1.0;
-    position.y = (vertexID == 2) ? 3.0 : -1.0;
-    
-    out.position = float4(position, 0.0, 1.0);
-    
-    // Convert clip space to UV coordinates
-    out.texCoord.x = (position.x + 1.0) * 0.5;
-    out.texCoord.y = (1.0 - position.y) * 0.5;  // Flip Y for Metal
-    
-    return out;
-}
-
 // Stereo fragment shader — samples from the MetalFX upscaled output and applies
 // RCAS (Robust Contrast Adaptive Sharpening) to recover detail softened by the
 // spatial upscale. Uses 5-tap nearest reads; no bilinear blurring on top.
@@ -2966,17 +2876,6 @@ fragment float4 formatConversionFragmentStereo(FormatConversionVertexOut in [[st
         color = sourceTexture.sample(s, uv, in.eyeIndex).rgb;
     }
     return float4(color, 1.0);
-}
-
-// Non-stereo fragment shader for backward compatibility
-// Use nearest-neighbor to preserve MetalFX edge reconstruction
-fragment float4 formatConversionFragment(FormatConversionVertex in [[stage_in]],
-                                          texture2d<float> sourceTexture [[texture(0)]]) {
-    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest, 
-                                      address::clamp_to_edge);
-    
-    float4 color = sourceTexture.sample(textureSampler, in.texCoord);
-    return float4(color.rgb, 1.0);
 }
 
 struct DepthOutput {
@@ -3034,21 +2933,5 @@ fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[s
         uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
     }
     out.depth = sourceTexture.sample(textureSampler, uv, in.eyeIndex);
-    return out;
-}
-
-// Non-stereo depth upscale for backward compatibility
-fragment DepthOutput depthUpscaleFragment(FormatConversionVertex in [[stage_in]],
-                                          depth2d<float> sourceTexture [[texture(0)]],
-                                          constant FormatConversionParams& params [[buffer(0)]]) {
-    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest,
-                                      address::clamp_to_edge);
-    
-    DepthOutput out;
-    float2 uv = in.texCoord;
-    if (params.aspectCorrection != 1.0) {
-        uv.x = 0.5 + (uv.x - 0.5) * params.aspectCorrection;
-    }
-    out.depth = sourceTexture.sample(textureSampler, uv);
     return out;
 }
