@@ -7,9 +7,6 @@
 // Far plane (no hit): output.depth = 1e-7 (tiny value = far away for compositor)
 // clearDepth in render passes: 1.0
 //
-// Debug flag for depth visualization (set to 1 to enable)
-#define DEBUG_DEPTH_VISUALIZATION 0
-
 // === COMPILER OPTIMIZATION HINTS ===
 // Force aggressive inlining for hot path functions
 #define FORCE_INLINE __attribute__((always_inline))
@@ -185,11 +182,8 @@ constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
     constant float kSpecularIntensity = 2.0f;       // Specular intensity multiplier
     constant float kAttenPower = 1.5f;              // Light attenuation power
 
-// Quality thresholds
+// Quality threshold
 constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quality
-constant float kMinQualityForNormals = 0.2f;    // Use cheap normals below this
-constant float kMinQualityForSpecular = 0.9f;   // Skip specular below this
-constant float kMinQualityForPostFX = 0.5f;     // Use simple gamma below this
 
 // Temporal accumulation confidence tuning
 constant float kTemporalMaxHistory = 0.96f;      // Cap history to avoid infinite lag
@@ -199,11 +193,6 @@ constant float kTemporalMotionPxLow = 1.0f;       // Motion (px) where history s
 constant float kTemporalMotionPxHigh = 18.0f;     // Motion (px) where history strongly attenuates
 constant float kTemporalLumaLow = 0.04f;         // Luminance delta where confidence starts dropping
 constant float kTemporalLumaHigh = 0.24f;        // Luminance delta where confidence is near zero
-
-// === ADAPTIVE HIERARCHICAL CONSTANTS ===
-constant float ADAPTIVE_FAR_THRESHOLD = 50.0f;   // Use 8x8 tiles beyond this distance
-constant float ADAPTIVE_MED_THRESHOLD = 15.0f;   // Use 4x4 tiles beyond this
-constant float ADAPTIVE_NEAR_THRESHOLD = 4.0f;   // Use 2x2 tiles beyond this
 
 // === FOG COLOR ===
 constant half3 kFogColor = half3(0.01h, 0.015h, 0.02h);
@@ -462,33 +451,6 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     d = applySafetyBubble(d, pos, params);
     return d;
 }
-
-// Half-precision Map — 2× ALU throughput on Apple Silicon.
-// Use for coarse ray marching and shadow rays where hit threshold is large.
-// ~3 digits of precision is sufficient for d > 0.01 thresholds.
-FORCE_INLINE float MapHalf(float3 pos, FractalParams params, float foldingLimit, int iterations)
-{
-    half4 p = half4(half3(pos), 1.0h);
-    half4 p0 = p;
-    
-    half hFold = half(foldingLimit);
-    half4 hScale = half4(params.scale);
-    half hSphRSq = half(params.sphereRadiusSq);
-    half hInvSphRSq = 1.0h / hSphRSq;
-    
-    const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-    
-    for (int i = 0; i < loopCount; i++) {
-        MAP_ITERATION_HALF(p, p0, hFold, hScale, hSphRSq, hInvSphRSq);
-    }
-    
-    // Final distance estimate in float for precision
-    float d = (length(float3(p.xyz)) - params.absScalem1) / float(p.w) - params.absScalePow;
-    
-    d = applySafetyBubble(d, pos, params);
-    return d;
-}
-
 // =============================================================================
 // GEOMETRY-ONLY DISTANCE ESTIMATOR (Inspired by GMT-fractals DE_Dist())
 // =============================================================================
@@ -1525,13 +1487,6 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
     return max(saturate(res), 0.2f);
 }
 
-// === TILE-BASED RAYMARCHING (4x4 pixel groups) ===
-// One DE raymarch per tile, per-pixel normals for smooth shading
-// Reduces DE overhead by ~16x while maintaining surface detail
-
-#define TILE_SIZE 4
-
-
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
 // Three-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
 // Dramatically reduces total Map() evaluations while maintaining quality
@@ -2481,21 +2436,9 @@ inline FragmentOutput fragmentMain(ColorInOut in,
         float depth = encodeDepthFromClip(clipPos);
         output.depth = depth;
 
-        // Debug: visualize depth as grayscale (early return)
-        if (DEBUG_DEPTH_VISUALIZATION) {
-            float depthGray = saturate(depth);
-            output.color = float4(depthGray, depthGray, depthGray, 1.0);
-            return output;
-        }
+        float3 nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
 
-        float3 nor;
-        if (quality > kMinQualityForNormals) {
-            nor = GetNormal(p, ret.x, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
-        } else {
-            nor = normalize(p - marchOrigin);
-        }
-
-        if (quality > 0.4) {
+        {
             // Use precomputed spotlight position and intensity from CPU
             float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);
             float3 spot = spotData.xyz;
@@ -2530,7 +2473,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half ambient = 0.15h + hemisphereAO * 0.1h;
             col = (col * bri * shaSpot) + (col * briSun * shaSun) + (col * ambient);
 
-            if (quality > kMinQualityForSpecular && uniforms.colorScheme.cellShadingEnabled == 0) {
+            if (uniforms.colorScheme.cellShadingEnabled == 0) {
                 float3 V = -marchDir;
                 float NoV = saturate(dot(nor, V));
                 float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
@@ -2544,17 +2487,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             }
             
 
-        } else {
-            // Blended lighting for low-quality path
-            LightingParams lp = computeBlendedLighting(
-                uniforms.colorScheme.vibrance, uniforms.lightingSoftness, 1.0f);
-            float3 sunDir = lp.sunDir;
-            float sunDiffuseScale = lp.sunDiffuseScale;
-            // Classic low-quality used: dot * 0.5 + 0.3
-            // Current uses: dot * sunDiffuseScale * 2.5 + 0.3
-            float diffuseMultiplier = mix(sunDiffuseScale * 2.5f, 0.5f, uniforms.lightingSoftness);
-            half diffuse = quantizeCelLight(half(max(dot(nor, sunDir), 0.0) * diffuseMultiplier + 0.3), uniforms.colorScheme);
-            col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache) * diffuse;
         }
         // Depth already written at start of this block via clipPos
     }
@@ -2562,11 +2494,6 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     {
         // No hit - far plane (tiny depth so compositor treats as far away)
         output.depth = 1e-7;
-
-        if (DEBUG_DEPTH_VISUALIZATION) {
-            output.color = float4(0.0, 0.0, 0.0, 1.0);
-            return output;
-        }
     }
 
     // Apply fog, glow, and clamp using helper functions
@@ -2575,11 +2502,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     col = applyGlow(col, glow);
     col = clampColor(col);
 
-    if (quality > kMinQualityForPostFX) {
-        col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
-    } else {
-        col = powr(max(saturate(col), half3(kPowEpsilonHalf)), half3(uniforms.colorScheme.gamma));
-    }
+    col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
 
     // Spring blob navigation widget (screen-space overlay)
     // texCoord is [0,1] — convert to NDC [-1, 1] for SDF
