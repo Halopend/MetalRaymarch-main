@@ -1322,6 +1322,11 @@ struct ContentView: View {
 
             Spacer()
 
+            if let animationManager = appModel.animationManager {
+                LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                    .disabled(animationManager.isPlaying)
+            }
+
             Picker("Mode", selection: Binding(
                 get: { animateEditButtonsVisible ? 1 : 0 },
                 set: { newValue in

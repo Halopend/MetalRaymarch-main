@@ -199,6 +199,10 @@ private struct AnimationPlayerContent: View {
                             Image(systemName: animationManager.isPlaying ? "pause.fill" : "play.fill")
                         }
                         .font(.title2)
+                        .disabled(animationManager.isRecording)
+
+                        LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                            .disabled(animationManager.isPlaying)
 
                         Menu {
                             Button("0.5x") { animationManager.playbackSpeed = 0.5 }
@@ -1990,6 +1994,44 @@ struct KeyframeEditorView: View {
 
 // MARK: - Playback Controls View
 
+struct LiveSessionRecordingControl: View {
+    @Bindable var animationManager: AnimationManager
+    var compact = false
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            Button {
+                animationManager.toggleRecording()
+            } label: {
+                if compact {
+                    HStack(spacing: 6) {
+                        Image(systemName: animationManager.isRecording ? "stop.fill" : "record.circle")
+                        if animationManager.isRecording {
+                            Text(formatTime(animationManager.recordingElapsed))
+                                .font(.caption.monospacedDigit())
+                        }
+                    }
+                } else {
+                    Label(
+                        animationManager.isRecording ? "Stop \(formatTime(animationManager.recordingElapsed))" : "Record Session",
+                        systemImage: animationManager.isRecording ? "stop.fill" : "record.circle"
+                    )
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(animationManager.isRecording ? .red : .pink)
+            .help(animationManager.isRecording ? "Stop live session recording" : "Record the live session as a scene")
+        }
+    }
+
+    private func formatTime(_ time: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(time.rounded(.down)))
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
 /// Compact playback controls to embed in main UI
 struct AnimationPlaybackControls: View {
     @Bindable var animationManager: AnimationManager
@@ -2062,6 +2104,10 @@ struct AnimationPlaybackControls: View {
                         Image(systemName: animationManager.isPlaying ? "pause.fill" : "play.fill")
                     }
                     .font(.title2)
+                    .disabled(animationManager.isRecording)
+
+                    LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                        .disabled(animationManager.isPlaying)
                     
                     // Speed control
                     Menu {

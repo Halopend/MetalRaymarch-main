@@ -442,29 +442,19 @@ class AppModel {
     /// One-time migration to keep menu opening easy with either finger and
     /// normalize older menu sensitivity defaults to a faster/easier-open setup.
     private func migrateDistinctWindowGestureDefaultsIfNeeded() {
-        let migrationKey = "gestureDistinctWindowMapping.v4"
+        let migrationKey = "gestureDistinctWindowMapping.v5"
         guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
 
         // Ensure gesture toggle is enabled so menu recovery remains possible.
         renderSettings.menuToggleGestureEnabled = true
 
-        // Keep menu recovery easy: either middle OR ring should open the main menu.
-        if renderSettings.menuToggleGestureMode == .ringToPalm ||
-            renderSettings.menuToggleGestureMode == .middleToPalm ||
-            renderSettings.menuToggleGestureMode == .middleAndRingToPalm {
-            renderSettings.menuToggleGestureMode = .middleOrRingToPalm
-        }
+        // Keep menu recovery easy even for installs that persisted an older or
+        // harder-to-perform mode before the current default existed.
+        renderSettings.menuToggleGestureMode = .middleOrRingToPalm
 
-        // Migrate legacy defaults only; preserve user-tuned values.
-        if abs(renderSettings.menuToggleHoldDuration - 0.10) < 0.0001 {
-            renderSettings.menuToggleHoldDuration = 0.08
-        }
-        if abs(renderSettings.menuToggleActivateThreshold - 0.50) < 0.0001 {
-            renderSettings.menuToggleActivateThreshold = 0.44
-        }
-        if abs(renderSettings.menuToggleReleaseThreshold - 0.30) < 0.0001 {
-            renderSettings.menuToggleReleaseThreshold = 0.24
-        }
+        renderSettings.menuToggleHoldDuration = min(renderSettings.menuToggleHoldDuration, GestureDefaults.menuToggleHoldDuration)
+        renderSettings.menuToggleActivateThreshold = min(renderSettings.menuToggleActivateThreshold, GestureDefaults.menuToggleActivateThreshold)
+        renderSettings.menuToggleReleaseThreshold = min(renderSettings.menuToggleReleaseThreshold, GestureDefaults.menuToggleReleaseThreshold)
 
         UserDefaults.standard.set(true, forKey: migrationKey)
     }

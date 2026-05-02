@@ -74,9 +74,9 @@ final class GestureController {
         return FractalDefaultsStore.saveCurrentAsFractalDefaults(from: settings)
     }
     
-    /// When true, hand gestures that would compete with the visible menu window are
-    /// suppressed so pinching and dragging UI controls does not also trigger scene
-    /// manipulation or window-level gesture actions.
+    /// When true, parameter-changing gestures are suppressed so pinching and dragging
+    /// menu controls does not also manipulate the scene. Menu toggle remains active
+    /// so the gesture can still close or recover the menu window.
     var suppressParameterGestures: Bool = false
     
     // Hand tracking state
@@ -200,16 +200,18 @@ final class GestureController {
         
         // Process special gestures
         let context = GestureContext(leftHand: leftHand, rightHand: rightHand, leftHandStable: leftHandStable, suppressParameterGestures: suppressParameterGestures, deltaTime: deltaTime, ranges: currentRanges(), frameIndex: operationFrameCounter)
+        var didToggleMenu = false
         if featureFlags.useMenuToggleEngine, let settings = renderSettings {
             let ops = menuToggleEngine.process(context: context, settings: settings)
             if ops.contains(where: { if case .toggleMenu = $0 { return true } else { return false } }) {
+                didToggleMenu = true
                 onMenuToggle?()
             }
         } else {
             processMenuToggleGesture(deltaTime: deltaTime)
         }
 
-        if let settings = renderSettings {
+        if !didToggleMenu, let settings = renderSettings {
             let ops = animationPlayerToggleEngine.process(context: context, settings: settings)
             if ops.contains(where: { if case .toggleAnimationPlayer = $0 { return true } else { return false } }) {
                 onAnimationPlayerToggle?()
@@ -348,13 +350,6 @@ final class GestureController {
     /// Process right-hand menu toggle gesture with configurable mode and hold duration.
     private func processMenuToggleGesture(deltaTime: Float) {
         guard let settings = renderSettings else { return }
-
-        if suppressParameterGestures {
-            menuToggleEngine.state.isActive = false
-            menuToggleEngine.state.holdTimer = 0
-            menuToggleEngine.state.consecutiveFramesAboveActivate = 0
-            return
-        }
 
         guard settings.menuToggleGestureEnabled else {
             menuToggleEngine.state.isActive = false

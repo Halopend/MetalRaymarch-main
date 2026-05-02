@@ -168,13 +168,13 @@ final class AnimationManager {
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
-    // GESTURE RECORDING
+    // LIVE SESSION RECORDING
     // ═══════════════════════════════════════════════════════════════════════════
     
-    /// Whether we are currently recording gestures
+    /// Whether a live session recording is currently capturing render settings.
     var isRecording: Bool = false
     
-    /// Accumulated timestamped samples during recording
+    /// Accumulated timestamped samples during recording.
     @ObservationIgnored private var recordingSamples: [(time: TimeInterval, keyframe: AnimationKeyframe)] = []
     
     /// When recording started (monotonic clock)
@@ -182,9 +182,13 @@ final class AnimationManager {
     
     /// Background task driving the sampling loop
     @ObservationIgnored private var recordingTask: Task<Void, Never>?
+
+    @ObservationIgnored private var recordingFractalType: FractalModelType?
     
-    /// Sample rate for recording (samples per second)
-    private static let recordingSampleRate: Double = 5.0
+    /// Sample rate for live recording (samples per second).
+    private static let recordingSampleRate: Double = 10.0
+
+    var recordingSampleCount: Int { recordingSamples.count }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // RENDER SETTINGS REFERENCE
@@ -536,6 +540,11 @@ final class AnimationManager {
     
     /// Start playing the current scene
     func play() {
+        guard !isRecording else {
+            print("⚠️ Stop live recording before playback")
+            return
+        }
+
         guard currentScene != nil else {
             print("⚠️ No scene selected for playback")
             return
@@ -1313,24 +1322,28 @@ final class AnimationManager {
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
-    // GESTURE RECORDING
+    // LIVE SESSION RECORDING
     // ═══════════════════════════════════════════════════════════════════════════
     
-    /// Start recording gestures. Samples RenderSettings at 5Hz until stopped.
+    /// Start recording the live session. Samples RenderSettings until stopped.
     func startRecording() {
         guard renderSettings != nil else {
             print("⚠️ Cannot record — no render settings")
             return
         }
+
+        guard !isRecording else { return }
         
         // Stop any playback
         if isPlaying { stop() }
         
         recordingSamples = []
         recordingStartTime = CACurrentMediaTime()
+        recordingFractalType = renderSettings?.fractalType
         isRecording = true
+        UsageAnalytics.shared.trackRecordingUsed()
         
-        print("🔴 Recording started")
+        print("🔴 Live session recording started")
         
         let interval = 1.0 / Self.recordingSampleRate
         recordingTask = Task { [weak self] in
@@ -1356,19 +1369,23 @@ final class AnimationManager {
     /// Returns the created scene, or nil if recording was too short.
     @discardableResult
     func stopRecording() -> AnimationScene? {
+        guard isRecording else { return nil }
+
         recordingTask?.cancel()
         recordingTask = nil
         isRecording = false
         
         let samples = recordingSamples
         recordingSamples = []
+        let recordedFractalType = recordingFractalType
+        recordingFractalType = nil
         
         guard samples.count >= 2 else {
-            print("⚠️ Recording too short — need at least 2 samples")
+            print("⚠️ Live recording too short — need at least 2 samples")
             return nil
         }
         
-        print("🔴 Recording stopped — \(samples.count) samples over \(String(format: "%.1f", samples.last!.time))s")
+        print("🔴 Live session recording stopped — \(samples.count) samples over \(String(format: "%.1f", samples.last!.time))s")
         
         // Simplify: remove samples where nothing changed significantly
         let simplified = simplifySamples(samples)
@@ -1390,10 +1407,10 @@ final class AnimationManager {
         }
         
         // Create the scene
-        var scene = AnimationScene(name: "Recorded \(formattedTimestamp())")
+        var scene = AnimationScene(name: "Live Recording \(formattedTimestamp())")
         scene.keyframes = keyframes
         scene.isLooping = true
-        scene.fractalType = renderSettings?.fractalType
+        scene.fractalType = recordedFractalType ?? renderSettings?.fractalType
         
         // Capture scene-level color grading from current settings
         if let settings = renderSettings {
@@ -1416,8 +1433,18 @@ final class AnimationManager {
         saveScenes()
         currentScene = scene
         
-        print("🎬 Created recorded scene '\(scene.name)' with \(keyframes.count) keyframes, duration \(String(format: "%.1f", scene.totalDuration))s")
+        print("🎬 Created live recording '\(scene.name)' with \(keyframes.count) keyframes, duration \(String(format: "%.1f", scene.totalDuration))s")
         return scene
+    }
+
+    @discardableResult
+    func toggleRecording() -> AnimationScene? {
+        if isRecording {
+            return stopRecording()
+        }
+
+        startRecording()
+        return nil
     }
     
     /// Elapsed recording time for UI display

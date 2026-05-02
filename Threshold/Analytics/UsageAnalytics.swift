@@ -363,6 +363,12 @@ final class UsageAnalytics {
         guard analyticsEnabled else { return }
         usedAnimation = true
     }
+
+    /// Mark that live session recording was used
+    func trackRecordingUsed() {
+        guard analyticsEnabled else { return }
+        usedRecording = true
+    }
     
     /// Track preset load
     func trackPresetLoaded(name: String) {
