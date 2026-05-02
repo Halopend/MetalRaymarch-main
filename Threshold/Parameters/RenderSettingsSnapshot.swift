@@ -14,6 +14,8 @@ struct RenderSettingsSnapshot {
     let colorMix: Float
     let lightingPlay: Bool
     let lightingMode: LightingMode
+    let sphericalInversionMode: SphericalInversionMode
+    let sphericalInversionRadius: Float
     let audioLevel: Float
     let bassLevel: Float
     let midLevel: Float

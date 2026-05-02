@@ -93,6 +93,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _colorMix: Float = 0.5
     private var _lightingPlay: Bool = false         // Play/pause lighting effects
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
+    private var _sphericalInversionMode: SphericalInversionMode = .off
+    private var _sphericalInversionRadius: Float = 2.0
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
     private var _bassLevel: Float = 0.0             // Bass frequency energy (0-1)
     private var _midLevel: Float = 0.0              // Mid frequency energy (0-1)
@@ -384,6 +386,22 @@ final class RenderSettings: @unchecked Sendable {
     var lightingMode: LightingMode {
         get { withLock { _lightingMode } }
         set { withLock { _lightingMode = newValue } }
+    }
+
+    var sphericalInversionMode: SphericalInversionMode {
+        get { withLock { _sphericalInversionMode } }
+        set {
+            withLock { _sphericalInversionMode = newValue }
+            persistDisplay()
+        }
+    }
+
+    var sphericalInversionRadius: Float {
+        get { withLock { _sphericalInversionRadius } }
+        set {
+            withLock { _sphericalInversionRadius = max(0.2, min(12.0, newValue)) }
+            persistDisplay()
+        }
     }
     
     var audioLevel: Float {
@@ -1745,6 +1763,8 @@ final class RenderSettings: @unchecked Sendable {
                 colorMix: _colorMix,
                 lightingPlay: _lightingPlay,
                 lightingMode: _lightingMode,
+                sphericalInversionMode: _sphericalInversionMode,
+                sphericalInversionRadius: _sphericalInversionRadius,
                 audioLevel: _audioLevel,
                 bassLevel: _bassLevel,
                 midLevel: _midLevel,
@@ -2936,6 +2956,8 @@ final class RenderSettings: @unchecked Sendable {
                 c.showMusicShortcuts = _showMusicShortcuts
                 c.lightingPlay = _lightingPlay
                 c.lightingMode = _lightingMode
+                c.sphericalInversionMode = _sphericalInversionMode
+                c.sphericalInversionRadius = _sphericalInversionRadius
                 return c
             }
         }
@@ -2944,6 +2966,8 @@ final class RenderSettings: @unchecked Sendable {
                 _showMusicShortcuts = newValue.showMusicShortcuts
                 _lightingPlay = newValue.lightingPlay
                 _lightingMode = newValue.lightingMode
+                _sphericalInversionMode = newValue.sphericalInversionMode
+                _sphericalInversionRadius = max(0.2, min(12.0, newValue.sphericalInversionRadius))
             }
         }
     }

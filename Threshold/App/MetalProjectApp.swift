@@ -82,8 +82,12 @@ struct MetalProjectTestApp: App {
 
                     if !hasCompletedIntroOnboarding {
                         openWindow(id: AppModel.onboardingWindowID)
+                        appModel.markMenuWindowDismissed()
                         dismissWindow(id: appModel.menuWindowID)
                     }
+                }
+                .onDisappear {
+                    appModel.markMenuWindowDismissed()
                 }
         }
         .defaultSize(width: 1050, height: 600)

@@ -255,6 +255,25 @@ FORCE_INLINE half quantizeCelLight(half value, ColorSchemeParams scheme) {
     return floor(saturate(value) * levels) / max(levels - 1.0h, 1.0h);
 }
 
+FORCE_INLINE float3 sphericalInvertPoint(float3 point, float radius) {
+    float radiusSq = radius * radius;
+    float distSq = max(dot(point, point), 1e-4f);
+    return point * (radiusSq / distSq);
+}
+
+FORCE_INLINE void applySphericalInversionRay(thread float3 &origin, thread float3 &direction, int mode, float radius) {
+    if (mode == 0) { return; }
+    float safeRadius = max(radius, 0.2f);
+    float3 rayTarget = origin + direction * safeRadius;
+    float3 invertedOrigin = sphericalInvertPoint(origin, safeRadius);
+    float3 invertedTarget = sphericalInvertPoint(rayTarget, safeRadius);
+    float3 invertedDirection = invertedTarget - invertedOrigin;
+    if (dot(invertedDirection, invertedDirection) > 1e-8f) {
+        origin = invertedOrigin;
+        direction = normalize(invertedDirection);
+    }
+}
+
 // === LIGHTING BLEND: Classic (soft) ↔ Current (vibrance-driven sharp) ===
 // lightingSoftness: 0 = current vibrance-driven system, 1 = classic fixed lighting
 // This allows smooth blending between the old lighting look and the new one.
@@ -1777,6 +1796,7 @@ kernel void adaptiveHierarchical8x8(
 
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
+    applySphericalInversionRay(marchOrigin, marchDir, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
 
     // Use precomputed fractal params (powr() and divisions done on CPU)
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
@@ -2091,10 +2111,12 @@ kernel void adaptiveHierarchical8x8(
                         : (cView4.w >= 0.0f ? 1e-6f : -1e-6f);
                     float3 cView = cView4.xyz / cViewW;
                     float3 cModelPoint = (uniforms.invViewMatrix * float4(cView, 1.0)).xyz;
-                    float3 cRd = normalize(cModelPoint - marchOrigin);
+                    float3 cOrigin = uniforms.cameraPos;
+                    float3 cRd = normalize(cModelPoint - cOrigin);
+                    applySphericalInversionRay(cOrigin, cRd, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
 
-                    float3 probe1 = marchOrigin + cRd * 2.0;
-                    float3 probe2 = marchOrigin + cRd * 6.0;
+                    float3 probe1 = cOrigin + cRd * 2.0;
+                    float3 probe2 = cOrigin + cRd * 6.0;
                     float d1 = MapContinuousUnified(probe1, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
                     float d2 = MapContinuousUnified(probe2, fractalParams, uniforms.foldingLimit, probeIters, fractalType, uniforms.formulaParams);
                     if (d1 > tileAngularSize1 && d2 > tileAngularSize2) {
@@ -2502,6 +2524,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
+    applySphericalInversionRay(marchOrigin, marchDir, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
 
     // Use precomputed fractal params (powr() and divisions done on CPU)
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
@@ -2682,6 +2705,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
 
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
+    applySphericalInversionRay(marchOrigin, marchDir, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
 
     // Use precomputed fractal params (powr() and divisions done on CPU)
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(

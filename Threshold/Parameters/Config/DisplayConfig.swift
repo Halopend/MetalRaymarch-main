@@ -12,4 +12,6 @@ struct DisplayConfig: Codable, Equatable, Sendable {
     var showMusicShortcuts: Bool = false
     var lightingPlay: Bool = false
     var lightingMode: LightingMode = .animated
+    var sphericalInversionMode: SphericalInversionMode = .off
+    var sphericalInversionRadius: Float = 2.0
 }

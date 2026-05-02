@@ -31,6 +31,18 @@ enum LightingMode: Int32, CaseIterable {
     }
 }
 
+enum SphericalInversionMode: Int32, CaseIterable {
+    case off = 0
+    case outwardIn = 1
+
+    var displayName: String {
+        switch self {
+        case .off: return "Off"
+        case .outwardIn: return "Outward In"
+        }
+    }
+}
+
 // MARK: - Human-Readable Codable
 
 extension LightingMode: Codable {
@@ -60,6 +72,40 @@ extension LightingMode: Codable {
         } else {
             throw DecodingError.dataCorruptedError(
                 in: container, debugDescription: "Invalid LightingMode value")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(codableString)
+    }
+}
+
+extension SphericalInversionMode: Codable {
+    private var codableString: String {
+        switch self {
+        case .off: return "off"
+        case .outwardIn: return "outwardIn"
+        }
+    }
+
+    private static let stringMap: [String: SphericalInversionMode] = {
+        var map: [String: SphericalInversionMode] = [:]
+        for c in SphericalInversionMode.allCases { map[c.codableString] = c }
+        return map
+    }()
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let str = try? container.decode(String.self),
+           let value = Self.stringMap[str] {
+            self = value
+        } else if let raw = try? container.decode(Int32.self),
+                  let value = SphericalInversionMode(rawValue: raw) {
+            self = value
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "Invalid SphericalInversionMode value")
         }
     }
 

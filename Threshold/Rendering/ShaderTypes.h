@@ -228,6 +228,8 @@ typedef struct
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
+    int sphericalInversionMode; // 0=off, 1=outward-in ray inversion
+    float sphericalInversionRadius; // Radius for spherical inversion mode
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
@@ -290,6 +292,8 @@ typedef struct
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
     int fractalType;             // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
+    int sphericalInversionMode;  // 0=off, 1=outward-in ray inversion
+    float sphericalInversionRadius; // Radius for spherical inversion mode
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)

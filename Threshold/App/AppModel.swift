@@ -332,6 +332,9 @@ class AppModel {
     /// only content opacity and hit-testing change.
     func toggleMenuWindow() {
         isMenuWindowVisible.toggle()
+        if isMenuWindowVisible {
+            openMenuWindowHandler?()
+        }
         print("📋 Menu window \(isMenuWindowVisible ? "shown" : "hidden") (position preserved)")
         refreshMenuInteractionState()
     }
@@ -343,6 +346,7 @@ class AppModel {
             return
         }
         isMenuWindowVisible = true
+        openMenuWindowHandler?()
         refreshMenuInteractionState()
         print("📋 Menu window shown (gesture)")
     }
@@ -353,6 +357,7 @@ class AppModel {
             return
         }
         isMenuWindowVisible = true
+        openMenuWindowHandler?()
         refreshMenuInteractionState()
         print("📋 Menu window shown (pull gesture)")
     }
@@ -389,8 +394,16 @@ class AppModel {
     func ensureWindowContentVisible() {
         if !isMenuWindowVisible {
             isMenuWindowVisible = true
+            openMenuWindowHandler?()
             print("📋 Menu window content shown")
         }
+        refreshMenuInteractionState()
+    }
+
+    func markMenuWindowDismissed() {
+        isMenuWindowVisible = false
+        isMenuHovering = false
+        menuAdjustmentDepth = 0
         refreshMenuInteractionState()
     }
 

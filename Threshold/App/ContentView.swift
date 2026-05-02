@@ -1386,6 +1386,7 @@ struct ContentView: View {
                                     animationManager.currentScene = scene
                                     animationManager.play()
                                     openWindow(id: AppModel.animationPlayerWindowID)
+                                    appModel.markMenuWindowDismissed()
                                     dismissWindow(id: appModel.menuWindowID)
                                 }
                             )
@@ -1718,6 +1719,40 @@ struct ContentView: View {
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
                     onChanged: { cache.commitFogEffect() })
+                Divider().padding(.leading, 114)
+                HStack(spacing: 8) {
+                    Image(systemName: "circle.dashed.inset.filled")
+                        .font(.caption)
+                        .frame(width: 16)
+                    Text("Spherical Inversion")
+                        .font(.subheadline)
+                        .frame(width: 135, alignment: .leading)
+                        .lineLimit(1)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { cache.display.sphericalInversionMode },
+                        set: { newValue in
+                            cache.display.sphericalInversionMode = newValue
+                            cache.commitSphericalInversion()
+                        })) {
+                        ForEach(SphericalInversionMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                }
+                .frame(height: 32)
+                if cache.display.sphericalInversionMode != .off {
+                    EffectSliderRow(icon: "circle", label: "Inversion Radius",
+                        value: Binding(get: { cache.display.sphericalInversionRadius }, set: { cache.display.sphericalInversionRadius = $0 }),
+                        range: 0.5...6.0,
+                        enabled: Binding(get: { cache.display.sphericalInversionMode != .off }, set: { isEnabled in
+                            cache.display.sphericalInversionMode = isEnabled ? .outwardIn : .off
+                            cache.commitSphericalInversion()
+                        }),
+                        onChanged: { cache.commitSphericalInversion() })
+                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))

@@ -349,6 +349,12 @@ final class UISettingsCache {
         }
     }
 
+    func commitSphericalInversion() {
+        guard let settings else { return }
+        settings.sphericalInversionMode = display.sphericalInversionMode
+        settings.sphericalInversionRadius = display.sphericalInversionRadius
+    }
+
     func commitGradientCycleEffect() {
         push(\.gradientCycleEffect, value: lighting.gradientCycleEffect)
     }

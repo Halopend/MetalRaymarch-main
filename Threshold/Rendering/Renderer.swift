@@ -1397,6 +1397,8 @@ actor Renderer {
             limitFlash: settingsSnapshot.limitFlash,
             fractalType: settingsSnapshot.fractalType.rawValue,
             lightingSoftness: settingsSnapshot.lightingSoftness,
+            sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
+            sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius

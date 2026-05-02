@@ -165,6 +165,8 @@ extension Renderer {
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
                             fractalType: settingsSnapshot.fractalType.rawValue,
                             lightingSoftness: settingsSnapshot.lightingSoftness,
+                            sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
+                            sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,
