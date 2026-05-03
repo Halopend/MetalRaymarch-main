@@ -11,6 +11,7 @@ import Foundation
 /// animation player, or perform other discrete actions.
 @MainActor
 final class PerFingerTapGestureEngine {
+    private static let menuGestureSafetyDelay: Float = 0.75
 
     // MARK: - Configuration
 
@@ -57,7 +58,7 @@ final class PerFingerTapGestureEngine {
                 state: &leftState
             ))
         } else {
-            leftState.reset()
+            leftState.resetTrackingState()
         }
 
         if context.rightHand.isTracked {
@@ -68,7 +69,7 @@ final class PerFingerTapGestureEngine {
                 state: &rightState
             ))
         } else {
-            rightState.reset()
+            rightState.resetTrackingState()
         }
 
         return ops
@@ -85,6 +86,7 @@ final class PerFingerTapGestureEngine {
         if state.cooldown > 0 {
             state.cooldown = max(0, state.cooldown - state.deltaTime)
         }
+        state.tickMenuSafetyDelay(deltaTime: state.deltaTime)
 
         // Compute tap strength for every finger
         let strengths: [Float] = (0..<5).map { finger in
@@ -96,6 +98,7 @@ final class PerFingerTapGestureEngine {
         var bestStrength: Float = 0
         for finger in 0..<5 {
             guard actions[finger] != .none else { continue }
+            guard !state.isMenuGestureCoolingDown(finger: finger, action: actions[finger]) else { continue }
             let s = strengths[finger]
             let threshold = state.isActive[finger] ? releaseThreshold : activateThreshold
             if s >= threshold, s > bestStrength {
@@ -133,6 +136,11 @@ final class PerFingerTapGestureEngine {
                 state.holdTimer[winningFinger] = 0
                 state.cooldown = cooldown
                 state.consecutiveFrames[winningFinger] = 0
+                state.armMenuSafetyDelayIfNeeded(
+                    finger: winningFinger,
+                    action: actions[winningFinger],
+                    delay: Self.menuGestureSafetyDelay
+                )
                 return [actions[winningFinger].gestureOperation]
             }
         }
@@ -168,6 +176,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
     case toggleMenu   = 1
     case toggleAnimationPlayer = 2
     case openShapeMenu = 3
+    case openRenderMenu = 4
 
     var displayName: String {
         switch self {
@@ -175,6 +184,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .toggleMenu:   return "Toggle Menu"
         case .toggleAnimationPlayer: return "Toggle Animation Player"
         case .openShapeMenu: return "Open Shape Menu"
+        case .openRenderMenu: return "Open Render Menu"
         }
     }
 
@@ -184,6 +194,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .toggleMenu:   return "menucard"
         case .toggleAnimationPlayer: return "film.stack"
         case .openShapeMenu: return "square.grid.2x2"
+        case .openRenderMenu: return "camera.aperture"
         }
     }
 
@@ -193,6 +204,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         case .toggleMenu:   return .toggleMenu
         case .toggleAnimationPlayer: return .toggleAnimationPlayer
         case .openShapeMenu: return .openShapeMenu
+        case .openRenderMenu: return .openRenderMenu
         }
     }
 }
@@ -203,12 +215,34 @@ private struct PerHandTapState {
     var holdTimer: [Float] = Array(repeating: 0, count: 5)
     var cooldown: Float = 0
     var consecutiveFrames: [Int] = Array(repeating: 0, count: 5)
+    var menuSafetyDelay: [Float] = Array(repeating: 0, count: 5)
     var deltaTime: Float = 1.0 / 90.0
 
-    mutating func reset() {
+    mutating func tickMenuSafetyDelay(deltaTime: Float) {
+        for index in menuSafetyDelay.indices {
+            if menuSafetyDelay[index] > 0 {
+                menuSafetyDelay[index] = max(0, menuSafetyDelay[index] - deltaTime)
+            }
+        }
+    }
+
+    func isMenuGestureCoolingDown(finger: Int, action: PerFingerTapAction) -> Bool {
+        action.isMenuEssentialAction && menuSafetyDelay[finger] > 0
+    }
+
+    mutating func armMenuSafetyDelayIfNeeded(finger: Int, action: PerFingerTapAction, delay: Float) {
+        guard action.isMenuEssentialAction else { return }
+        menuSafetyDelay[finger] = delay
+    }
+
+    mutating func resetTrackingState() {
         isActive = Array(repeating: false, count: 5)
         holdTimer = Array(repeating: 0, count: 5)
-        cooldown = 0
         consecutiveFrames = Array(repeating: 0, count: 5)
+    }
+
+    mutating func reset() {
+        resetTrackingState()
+        cooldown = 0
     }
 }

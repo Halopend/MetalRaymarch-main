@@ -3,6 +3,7 @@ import AVKit
 
 struct FirstLaunchWindowView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
@@ -34,15 +35,23 @@ struct FirstLaunchWindowView: View {
             #endif
         }
         .frame(minWidth: 580, maxWidth: 660, minHeight: 500, maxHeight: 620)
-        .background(Color.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                .strokeBorder(windowSurfaceStroke, lineWidth: 1)
         )
         .glassBackgroundEffect(in: .rect(cornerRadius: 24))
         .onAppear {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
         }
+    }
+
+    private var windowSurfaceFill: Color {
+        colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.76)
+    }
+
+    private var windowSurfaceStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
     }
 
     // MARK: - Page 1: Welcome
@@ -98,15 +107,14 @@ struct FirstLaunchWindowView: View {
     private var navigationPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("How to Move Around")
+                Text("Movement and Scale")
                     .font(.title2.weight(.bold))
-                Text("Use your hands to navigate fractal space.")
+                Text("Use your hands to translate, scale, and orbit through fractal space.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
-            // Navigation tutorial video
-            navigationVideoPlayer
+            movementTutorialVideoPlayer
                 .frame(maxWidth: .infinity)
                 .frame(height: 200)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -128,8 +136,8 @@ struct FirstLaunchWindowView: View {
                 )
                 IntroTipRow(
                     icon: "menucard",
-                    title: "Open / Close Menu",
-                    detail: "Use your menu toggle gesture anytime. You can customize it in Settings > General."
+                    title: "Menu Tutorial Next",
+                    detail: "The menu system gets its own walkthrough video next. You can still customize the menu toggle gesture in Settings > General."
                 )
             }
             .padding(12)
@@ -148,32 +156,14 @@ struct FirstLaunchWindowView: View {
         .padding(20)
     }
 
-    // MARK: - Navigation Video Player
+    // MARK: - Tutorial Video Player
 
-    @ViewBuilder
-    private var navigationVideoPlayer: some View {
-        if let videoURL = Bundle.main.url(forResource: "NavigationTutorial", withExtension: "mp4") {
-            let player = AVPlayer(url: videoURL)
-            VideoPlayer(player: player)
-                .onAppear { player.play() }
-                .disabled(true)  // Prevent interaction — just a demo loop
-        } else {
-            // Fallback when video asset is not yet bundled
-            VStack(spacing: 12) {
-                Image(systemName: "hands.sparkles")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
-                Text("Navigation tutorial video")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text("Place NavigationTutorial.mp4 in the bundle to show a walkthrough here.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.secondary.opacity(0.06))
-        }
+    private var movementTutorialVideoPlayer: some View {
+        OnboardingTutorialVideoView(
+            clip: .movementAndScale,
+            missingTitle: "Movement tutorial video",
+            missingDetail: "Add movement_and_scale.mp4 to Resources/OnboardingVideos to show the hand movement walkthrough here."
+        )
     }
 
     // MARK: - Page 3: Analytics Consent
@@ -296,5 +286,101 @@ private struct IntroTipRow: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+private enum OnboardingTutorialClip {
+    case movementAndScale
+    case menuSystem
+
+    var resourceName: String {
+        switch self {
+        case .movementAndScale:
+            return "movement_and_scale"
+        case .menuSystem:
+            return "menu_system"
+        }
+    }
+}
+
+private struct OnboardingTutorialVideoView: View {
+    let clip: OnboardingTutorialClip
+    let missingTitle: String
+    let missingDetail: String
+
+    @StateObject private var controller: OnboardingTutorialVideoController
+
+    init(clip: OnboardingTutorialClip, missingTitle: String, missingDetail: String) {
+        self.clip = clip
+        self.missingTitle = missingTitle
+        self.missingDetail = missingDetail
+        _controller = StateObject(wrappedValue: OnboardingTutorialVideoController(resourceName: clip.resourceName))
+    }
+
+    var body: some View {
+        Group {
+            if controller.isReady {
+                VideoPlayer(player: controller.player)
+                    .disabled(true)
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "hands.sparkles")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.secondary)
+                    Text(missingTitle)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text(missingDetail)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.secondary.opacity(0.06))
+            }
+        }
+        .onAppear {
+            controller.play()
+        }
+        .onDisappear {
+            controller.pause()
+        }
+    }
+}
+
+@MainActor
+private final class OnboardingTutorialVideoController: ObservableObject {
+    let player = AVQueuePlayer()
+
+    private var looper: AVPlayerLooper?
+
+    var isReady: Bool {
+        looper != nil
+    }
+
+    init(resourceName: String) {
+        guard let videoURL = Self.videoURL(for: resourceName) else {
+            return
+        }
+
+        let item = AVPlayerItem(url: videoURL)
+        looper = AVPlayerLooper(player: player, templateItem: item)
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+    }
+
+    func play() {
+        guard isReady else { return }
+        player.play()
+    }
+
+    func pause() {
+        player.pause()
+    }
+
+    private static func videoURL(for resourceName: String) -> URL? {
+        Bundle.main.url(forResource: resourceName, withExtension: "mp4", subdirectory: "Resources/OnboardingVideos")
+            ?? Bundle.main.url(forResource: resourceName, withExtension: "mp4", subdirectory: "OnboardingVideos")
+            ?? Bundle.main.url(forResource: resourceName, withExtension: "mp4")
     }
 }

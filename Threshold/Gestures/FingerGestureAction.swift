@@ -376,7 +376,12 @@ extension GestureActionBinding {
 
 extension PerFingerTapAction {
     var isMenuEssentialAction: Bool {
-        self == .toggleMenu
+        switch self {
+        case .toggleMenu, .openShapeMenu, .openRenderMenu:
+            return true
+        default:
+            return false
+        }
     }
 }
 

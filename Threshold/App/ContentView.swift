@@ -37,6 +37,7 @@ enum SidebarTab: String, CaseIterable {
 }
 
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", render = "Render" }
+enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
 enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
@@ -103,6 +104,7 @@ private enum QualityGoalPreference: Int, CaseIterable {
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     
@@ -110,6 +112,7 @@ struct ContentView: View {
     // Persist last-selected tab and sub-tabs across launches.
     @AppStorage("ContentView.selectedTab") private var selectedTab: SidebarTab = .fractal
     @AppStorage("ContentView.fractalSubTab") private var fractalSubTab: FractalSubTab = .shape
+    @AppStorage("ContentView.shapeInnerTab") private var shapeInnerTab: ShapeInnerTab = .parameters
     @State private var animateEditButtonsVisible = false
     @AppStorage("ContentView.coloringSubTab") private var coloringSubTab: ColoringSubTab = .gradient
     @AppStorage("ContentView.effectsSubTab") private var effectsSubTab: EffectsSubTab = .dynamic
@@ -191,6 +194,7 @@ struct ContentView: View {
         @Bindable var appModel = appModel
         
         let isOpen = appModel.immersiveSpaceState == .open
+        let isShortcutOrnamentVisible = appModel.immersiveSpaceState != .closed && appModel.isMenuWindowVisible
         Group {
             if isOpen {
                 immersiveLayout
@@ -203,10 +207,10 @@ struct ContentView: View {
             end: { appModel.endMenuAdjustment() }
         ))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
-        .background(Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                .strokeBorder(menuSurfaceStroke, lineWidth: 1)
         )
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         // Content visibility: keep the window physically open (preserves world-space position)
@@ -214,6 +218,15 @@ struct ContentView: View {
         .opacity(appModel.isMenuWindowVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.18), value: appModel.isMenuWindowVisible)
         .allowsHitTesting(appModel.isMenuWindowVisible)
+        .ornament(
+            visibility: isShortcutOrnamentVisible ? .visible : .hidden,
+            attachmentAnchor: .scene(.top),
+            contentAlignment: .bottom
+        ) {
+            FractalShortcutWindowView()
+                .environment(appModel)
+                .padding(.bottom, 10)
+        }
         .onHover { hovering in
             // Treat gaze-hover as active UI interaction for robust gesture suppression.
             appModel.setMenuHovering(hovering)
@@ -224,6 +237,18 @@ struct ContentView: View {
                     selectedTab = .fractal
                     fractalSubTab = .shape
                 }
+            }
+            appModel.isShapeMenuActiveHandler = {
+                selectedTab == .fractal && fractalSubTab == .shape
+            }
+            appModel.openRenderMenuHandler = {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedTab = .fractal
+                    fractalSubTab = .render
+                }
+            }
+            appModel.isRenderMenuActiveHandler = {
+                selectedTab == .fractal && fractalSubTab == .render
             }
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
         }
@@ -249,6 +274,14 @@ struct ContentView: View {
             .presentationDetents([.height(220), .height(280)])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private var menuSurfaceFill: Color {
+        colorScheme == .dark ? Color.black.opacity(0.8) : Color.white.opacity(0.72)
+    }
+
+    private var menuSurfaceStroke: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
     }
 
     private func toggleAnimationPlayerWindow() {
@@ -324,8 +357,11 @@ struct ContentView: View {
     // MARK: - Sidebar Column
     
     private var sidebarColumn: some View {
-        VStack(spacing: 4) {
-            ForEach(SidebarTab.allCases, id: \.self) { tab in
+        // The top dock fully owns Music / Visualizations switching, so the
+        // sidebar acts as "reference shelves" only and omits the music tile.
+        let sidebarTabs = SidebarTab.allCases.filter { $0 != .music }
+        return VStack(spacing: 4) {
+            ForEach(sidebarTabs, id: \.self) { tab in
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { selectedTab = tab }
                 } label: {
@@ -411,6 +447,7 @@ struct ContentView: View {
         }
     }
 
+
     private func sidebarCountBadge(_ count: Int, color: Color) -> some View {
         Text("\(count)")
             .font(.system(size: 9, weight: .bold, design: .rounded))
@@ -458,23 +495,25 @@ struct ContentView: View {
     // MARK: - Bottom Bar
     
     private var bottomBar: some View {
-        ZStack {
-            HStack(spacing: 12) {
-                activityTrafficLights
+        HStack(spacing: 12) {
+            activityTrafficLights
 
-                Spacer()
-
-                HoldToSaveResetButton(
-                    onTapReset: resetCurrentFractalSettings,
-                    onHoldReady: {
-                        showSaveDestinationSheet = true
-                    }
-                )
-            }
+            Spacer()
 
             ToggleImmersiveSpaceButton()
                 .fixedSize()
-                .offset(x: -40)
+
+            if let animationManager = appModel.animationManager {
+                LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                    .disabled(animationManager.isPlaying)
+            }
+
+            HoldToSaveResetButton(
+                onTapReset: resetCurrentFractalSettings,
+                onHoldReady: {
+                    showSaveDestinationSheet = true
+                }
+            )
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -601,13 +640,6 @@ struct ContentView: View {
     
     private var fractalTabContent: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $fractalSubTab) {
-                ForEach(FractalSubTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            
             switch fractalSubTab {
             case .browse:
                 FractalGridView(
@@ -633,10 +665,28 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             case .shape:
-                ScrollView(.vertical, showsIndicators: true) {
-                    fractalShapeContent
+                VStack(spacing: 8) {
+                    Picker("Shape Section", selection: $shapeInnerTab) {
+                        ForEach(ShapeInnerTab.allCases, id: \.self) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                    ScrollView(.vertical, showsIndicators: true) {
+                        Group {
+                            switch shapeInnerTab {
+                            case .parameters:
+                                fractalShapeContent
+                            case .formula:
+                                fractalFormulaContent
+                            }
+                        }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                    }
                 }
 
             case .space:
@@ -715,7 +765,27 @@ struct ContentView: View {
             }
         }
     }
-    
+
+    private var fractalFormulaContent: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Label("Fractal Formula", systemImage: "function")
+                    .font(.headline)
+                Spacer()
+                Text(cache.fractalType.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Pick the distance estimator. Switching formulas resets shape parameters to that formula's defaults.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            FractalFormulaGrid(cache: cache, gestureController: appModel.gestureController)
+        }
+    }
+
     @ViewBuilder
     private var fractalSpaceContent: some View {
         let rotationEuler = eulerAngles(from: cache.liveWorldRotation)
@@ -1423,11 +1493,6 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
-
-            if let animationManager = appModel.animationManager {
-                LiveSessionRecordingControl(animationManager: animationManager, compact: true)
-                    .disabled(animationManager.isPlaying)
-            }
 
             Picker("Mode", selection: Binding(
                 get: { animateEditButtonsVisible ? 1 : 0 },

@@ -265,6 +265,10 @@ class AppModel {
             print("🧭 onOpenShapeMenu callback fired!")
             self?.openShapeMenuFromGesture()
         }
+        gestureController?.onOpenRenderMenu = { [weak self] in
+            print("🎛️ onOpenRenderMenu callback fired!")
+            self?.openRenderMenuFromGesture()
+        }
         gestureController?.onMenuWindowPullTowardUser = { [weak self] in
             self?.pullMenuWindowTowardUser()
         }
@@ -328,6 +332,15 @@ class AppModel {
 
     /// Callback to navigate directly to the Fractal > Shape tab.
     var openShapeMenuHandler: (() -> Void)?
+
+    /// Returns true when the Fractal > Shape tab is already active.
+    var isShapeMenuActiveHandler: (() -> Bool)?
+
+    /// Callback to navigate directly to the Fractal > Render tab.
+    var openRenderMenuHandler: (() -> Void)?
+
+    /// Returns true when the Fractal > Render tab is already active.
+    var isRenderMenuActiveHandler: (() -> Bool)?
     
     /// Toggle menu window content visibility.
     /// The physical window stays in world space to preserve its position;
@@ -365,13 +378,19 @@ class AppModel {
     }
 
     func openShapeMenuFromGesture() {
-        if !isMenuWindowVisible {
-            isMenuWindowVisible = true
-            openMenuWindowHandler?()
-        }
-        openShapeMenuHandler?()
-        refreshMenuInteractionState()
-        print("🧭 Shape menu shown (gesture)")
+        toggleFractalMenuFromGesture(
+            isRequestedTabAlreadyOpen: isShapeMenuActiveHandler?() ?? false,
+            openRequestedTab: openShapeMenuHandler,
+            label: "Shape"
+        )
+    }
+
+    func openRenderMenuFromGesture() {
+        toggleFractalMenuFromGesture(
+            isRequestedTabAlreadyOpen: isRenderMenuActiveHandler?() ?? false,
+            openRequestedTab: openRenderMenuHandler,
+            label: "Render"
+        )
     }
 
     /// Hide menu window content during scene load so hand gestures are immediately available.
@@ -459,6 +478,29 @@ class AppModel {
         gestureController?.suppressParameterGestures = interacting
     }
 
+    private func toggleFractalMenuFromGesture(
+        isRequestedTabAlreadyOpen: Bool,
+        openRequestedTab: (() -> Void)?,
+        label: String
+    ) {
+        guard let openRequestedTab else { return }
+
+        if isMenuWindowVisible && isRequestedTabAlreadyOpen {
+            markMenuWindowDismissed()
+            print("🧭 \(label) menu closed (gesture)")
+            return
+        }
+
+        if !isMenuWindowVisible {
+            isMenuWindowVisible = true
+            openMenuWindowHandler?()
+        }
+
+        openRequestedTab()
+        refreshMenuInteractionState()
+        print("🧭 \(label) menu shown (gesture)")
+    }
+
     /// Capture a screenshot for preset thumbnails
     func captureScreenshot() async -> Data? {
         return await captureScreenshotHandler?()
@@ -467,7 +509,7 @@ class AppModel {
     /// One-time migration to keep menu opening easy with either finger and
     /// normalize older menu sensitivity defaults to a faster/easier-open setup.
     private func migrateDistinctWindowGestureDefaultsIfNeeded() {
-        let migrationKey = "gestureDistinctWindowMapping.v6"
+        let migrationKey = "gestureDistinctWindowMapping.v7"
         guard UserDefaults.standard.bool(forKey: migrationKey) == false else { return }
 
         // Ensure gesture toggle is enabled so menu recovery remains possible.
@@ -481,7 +523,9 @@ class AppModel {
         renderSettings.menuToggleActivateThreshold = min(renderSettings.menuToggleActivateThreshold, GestureDefaults.menuToggleActivateThreshold)
         renderSettings.menuToggleReleaseThreshold = min(renderSettings.menuToggleReleaseThreshold, GestureDefaults.menuToggleReleaseThreshold)
 
-        if renderSettings.perFingerTapLeftActions == [.none, .none, .none, .none, .none] {
+        let priorLeftDefault: [PerFingerTapAction] = [.none, .none, .none, .openShapeMenu, .none]
+        if renderSettings.perFingerTapLeftActions == [.none, .none, .none, .none, .none]
+            || renderSettings.perFingerTapLeftActions == priorLeftDefault {
             renderSettings.perFingerTapLeftActions = GestureDefaults.perFingerTapLeftActions
             GestureDefaults.savePerFingerTapActions(renderSettings.perFingerTapLeftActions, keyPrefix: "perFingerTapLeft")
         }

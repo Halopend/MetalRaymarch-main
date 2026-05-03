@@ -2,52 +2,23 @@
 //  FractalGridView.swift
 //  Threshold
 //
-//  Grid-based fractal type selector — dedicated "Formulas" tab.
+//  Browse surface for scene discovery and recall.
 //
 
 import SwiftUI
 
 private enum FractalBrowseInnerTab: String, CaseIterable {
-    case formulas = "Formulas"
-    case staticScenes = "Static"
+    case jumpingOff = "Jumping Off"
+    case musicReactive = "Music Reactive"
     case animated = "Animated"
 }
 
-private enum FractalSceneSelection: Equatable {
-    case none
-    case animation(UUID)
-    case staticPreset(UUID)
-}
+/// Category-ordered list of selectable formulas, used by both the Browse and
+/// Shape tabs.
+enum FractalFormulaOrder {
+    static let categoryOrder = ["Box Folds", "Power / Quaternion", "Hybrid Folds", "Kaleidoscopic IFS"]
 
-struct FractalGridView: View {
-    var cache: UISettingsCache
-    let gestureController: GestureController?
-    let animationManager: AnimationManager?
-    let presetManager: PresetManager?
-    var onEditScene: ((AnimationScene) -> Void)? = nil
-    var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
-    var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
-    @AppStorage("FractalGridView.innerTab") private var innerTab: FractalBrowseInnerTab = .formulas
-    @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
-
-    private let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: 3)
-    private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
-    private static let categoryOrder = ["Box Folds", "Power / Quaternion", "Hybrid Folds", "Kaleidoscopic IFS"]
-
-    /// Formula types sorted by category order first, then display name.
-    private let orderedTypes: [FractalModelType] = Self.cachedOrderedTypes
-
-    private static let cachedOrderedTypes = Self.makeOrderedTypes()
-
-    private var selectedStaticSceneID: UUID? {
-        get {
-            guard let selectedStaticSceneIDRaw else { return nil }
-            return UUID(uuidString: selectedStaticSceneIDRaw)
-        }
-        nonmutating set {
-            selectedStaticSceneIDRaw = newValue?.uuidString
-        }
-    }
+    static let orderedTypes: [FractalModelType] = makeOrderedTypes()
 
     private static func makeOrderedTypes() -> [FractalModelType] {
         let selectable = FractalModelType.selectableCases
@@ -67,12 +38,52 @@ struct FractalGridView: View {
                 }
             }
     }
+}
+
+private enum FractalSceneSelection: Equatable {
+    case none
+    case animation(UUID)
+    case staticPreset(UUID)
+}
+
+struct FractalGridView: View {
+    private static let jumpingOffNameOverrides: Set<String> = [
+        "mandel box flower",
+        "replace that",
+        "the lovely bones",
+        "definitely aliens",
+        "ladybug two",
+        "ring around the rosie",
+        "a space ring odyssey"
+    ]
+
+    var cache: UISettingsCache
+    let gestureController: GestureController?
+    let animationManager: AnimationManager?
+    let presetManager: PresetManager?
+    var onEditScene: ((AnimationScene) -> Void)? = nil
+    var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
+    var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
+    @AppStorage("FractalGridView.innerTab") private var innerTab: FractalBrowseInnerTab = .jumpingOff
+    @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
+    private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
+
+    private var selectedStaticSceneID: UUID? {
+        get {
+            guard let selectedStaticSceneIDRaw else { return nil }
+            return UUID(uuidString: selectedStaticSceneIDRaw)
+        }
+        nonmutating set {
+            selectedStaticSceneIDRaw = newValue?.uuidString
+        }
+    }
+
 
     var body: some View {
         let hasScenes = animationManager?.scenes.isEmpty == false
         // If the persisted tab is "animated" but there are no animation scenes,
-        // gracefully fall back to formulas without overwriting the stored choice.
-        let selectedTab: FractalBrowseInnerTab = (innerTab == .animated && !hasScenes) ? .formulas : innerTab
+        // gracefully fall back to Jumping Off without overwriting the stored choice.
+        let selectedTab: FractalBrowseInnerTab = (innerTab == .animated && !hasScenes) ? .jumpingOff : innerTab
 
         VStack(spacing: 10) {
             Picker("Browse", selection: $innerTab) {
@@ -87,39 +98,19 @@ struct FractalGridView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     switch selectedTab {
-                    case .formulas:
-                        VStack(alignment: .leading, spacing: 10) {
-                            browserHeader(
-                                title: "Fractal Formulas",
-                                systemImage: "square.grid.2x2",
-                                description: "Choose a formula from the same card browser used for scenes.",
-                                current: cache.fractalType.displayName,
-                                accentColor: .pink
-                            )
-
-                            LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(orderedTypes, id: \.self) { type in
-                                    FractalGridCell(
-                                        type: type,
-                                        isSelected: type == cache.fractalType
-                                    ) {
-                                        cache.fractalType = type
-                                        cache.pushFractalType(type, gestureController: gestureController)
-                                    }
-                                }
-                            }
+                    case .jumpingOff:
+                        if let animationManager {
+                            jumpingOffScenesGrid(animationManager)
                         }
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.pink.opacity(0.08)))
+
+                    case .musicReactive:
+                        if let animationManager {
+                            musicReactiveScenesGrid(animationManager)
+                        }
 
                     case .animated:
                         if let animationManager {
                             animatedScenesGrid(animationManager)
-                        }
-
-                    case .staticScenes:
-                        if let animationManager {
-                            staticScenesGrid(animationManager)
                         }
                     }
                 }
@@ -139,7 +130,7 @@ struct FractalGridView: View {
             browserHeader(
                 title: "Animated Scenes",
                 systemImage: "sparkles.rectangle.stack",
-                description: "Keyframed animations and music-attached scenes.",
+                description: "Keyframed motion studies and full visual sequences.",
                 current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
                 accentColor: .purple
             )
@@ -169,21 +160,21 @@ struct FractalGridView: View {
     }
 
     @ViewBuilder
-    private func staticScenesGrid(_ animationManager: AnimationManager) -> some View {
-        let staticScenePresets = filteredStaticPresets()
+    private func jumpingOffScenesGrid(_ animationManager: AnimationManager) -> some View {
+        let staticScenePresets = jumpingOffPresets()
         let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
 
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
-                title: "Static Scenes",
+                title: "Jumping Off",
                 systemImage: "photo.on.rectangle.angled",
-                description: "Saved still presets — tap to load instantly.",
+                description: "Static starting points for exploring a region of the fractal.",
                 current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
                 accentColor: .teal
             )
 
             if staticScenePresets.isEmpty {
-                emptySectionLabel("No static scenes saved")
+                emptySectionLabel("No jumping-off scenes saved")
             } else {
                 LazyVGrid(columns: sceneColumns, spacing: 12) {
                     ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
@@ -191,7 +182,7 @@ struct FractalGridView: View {
                             title: preset.name,
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
-                            systemImage: (preset.musicReactiveMappings?.isEmpty == false) ? "music.note" : "photo",
+                            systemImage: "photo",
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
                         ) {
@@ -205,10 +196,71 @@ struct FractalGridView: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.teal.opacity(0.08)))
     }
 
+    @ViewBuilder
+    private func musicReactiveScenesGrid(_ animationManager: AnimationManager) -> some View {
+        let staticScenePresets = musicReactivePresets()
+        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+
+        VStack(alignment: .leading, spacing: 10) {
+            browserHeader(
+                title: "Music Reactive",
+                systemImage: "music.note",
+                description: "Honed-in presets with reactive mappings ready to drive the scene from audio.",
+                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
+                accentColor: .indigo
+            )
+
+            if staticScenePresets.isEmpty {
+                emptySectionLabel("No music-reactive presets saved")
+            } else {
+                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                    ForEach(Array(staticScenePresets.enumerated()), id: \.offset) { _, preset in
+                        sceneCard(
+                            title: preset.name,
+                            subtitle: preset.fractalType.displayName,
+                            detail: staticSceneDetail(for: preset),
+                            systemImage: "music.note",
+                            isSelected: activeSelection == .staticPreset(preset.id),
+                            onEdit: nil
+                        ) {
+                            selectStaticScenePreset(preset, using: animationManager)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.indigo.opacity(0.08)))
+    }
+
     private func filteredStaticPresets() -> [FractalPreset] {
         (presetManager?.presets ?? []).filter { preset in
             // Skip transient utility entries if they ever leak into the shared preset list.
             preset.name != "__lastState__"
+        }
+    }
+
+    private func isJumpingOffPreset(_ preset: FractalPreset) -> Bool {
+        let normalizedName = preset.name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if Self.jumpingOffNameOverrides.contains(normalizedName) {
+            return true
+        }
+
+        return preset.musicReactiveMappings?.isEmpty ?? true
+    }
+
+    private func jumpingOffPresets() -> [FractalPreset] {
+        filteredStaticPresets().filter { preset in
+            isJumpingOffPreset(preset)
+        }
+    }
+
+    private func musicReactivePresets() -> [FractalPreset] {
+        filteredStaticPresets().filter { preset in
+            !isJumpingOffPreset(preset)
         }
     }
 
@@ -267,9 +319,9 @@ struct FractalGridView: View {
 
     private func staticSceneDetail(for preset: FractalPreset) -> String {
         if preset.musicReactiveMappings?.isEmpty == false {
-            return "Static music-reactive scene"
+            return "Music-reactive preset"
         }
-        return "Static scene preset"
+        return "Static starting scene"
     }
 
     private func browserHeader(title: String, systemImage: String, description: String, current: String, accentColor: Color) -> some View {
@@ -362,7 +414,7 @@ struct FractalGridView: View {
 
 // MARK: - Grid Cell
 
-private struct FractalGridCell: View {
+struct FractalGridCell: View {
     let type: FractalModelType
     let isSelected: Bool
     let action: () -> Void
@@ -414,5 +466,31 @@ private struct FractalGridCell: View {
         .buttonStyle(.plain)
         .accessibilityLabel(type.displayName)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+// MARK: - Formula Grid
+
+/// Reusable formula picker grid. Used both inside the Browse tab's Formulas
+/// section and inside the Shape tab's Formula sub-tab.
+struct FractalFormulaGrid: View {
+    var cache: UISettingsCache
+    let gestureController: GestureController?
+
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: 3)
+    private let orderedTypes: [FractalModelType] = FractalFormulaOrder.orderedTypes
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(orderedTypes, id: \.self) { type in
+                FractalGridCell(
+                    type: type,
+                    isSelected: type == cache.fractalType
+                ) {
+                    cache.fractalType = type
+                    cache.pushFractalType(type, gestureController: gestureController)
+                }
+            }
+        }
     }
 }

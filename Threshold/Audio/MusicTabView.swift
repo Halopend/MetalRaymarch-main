@@ -27,6 +27,7 @@ struct MusicTabContent: View {
 
     @State private var viewModel: MusicTabViewModel
     @AppStorage("MusicTabContent.innerTab") private var innerTab: MusicInnerTab = .music
+    @State private var isShowingVisualizationAddPopover = false
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
@@ -35,6 +36,10 @@ struct MusicTabContent: View {
 
     private var hasFlashingVisualMappings: Bool {
         cache.audioReactive.musicReactiveMappings.contains(where: \.hasFlashingRisk)
+    }
+
+    private var canAddVisualizationMapping: Bool {
+        cache.audioReactive.fractalAudioReactiveEnabled && !availableMappingTargetsToAdd.isEmpty
     }
 
     init(cache: UISettingsCache, musicService: MusicService, audioAnalyzer: AudioAnalyzer, renderSettings: RenderSettings) {
@@ -47,63 +52,52 @@ struct MusicTabContent: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Picker("Section", selection: $innerTab) {
-                    ForEach(MusicInnerTab.allCases, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
+            Group {
+                switch innerTab {
+                case .music:
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(spacing: 10) {
+                            serviceToggle
+
+                            nowPlayingCard
+
+                            if let commandErrorMessage = viewModel.commandErrorMessage {
+                                Text(commandErrorMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            connectionsSection
+
+                            if viewModel.hasMultipleConnectedProviders {
+                                servicePrioritySection
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                     }
-                }
-                .pickerStyle(.segmented)
 
-                if innerTab == .visualizations {
-                    visualizationAddButton
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .animation(.snappy(duration: 0.24, extraBounce: 0.12), value: innerTab)
-
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 10) {
-                    switch innerTab {
-                    case .music:
-                        // Service toggle / picker
-                        serviceToggle
-
-                        // Unified Now Playing
-                        nowPlayingCard
-
-                        // Open Library button (pops into its own window)
-                        if let commandErrorMessage = viewModel.commandErrorMessage {
-                            Text(commandErrorMessage)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-
-                        // Service connections (settings)
-                        connectionsSection
-
-                        // Fallback priority ordering
-                        if viewModel.hasMultipleConnectedProviders {
-                            servicePrioritySection
-                        }
-
-                    case .visualizations:
+                case .visualizations:
+                    VStack(spacing: 10) {
                         visualizationHeaderSection
 
-                        // Audio Reactivity (the main event)
-                        reactivitySection
-
-                        // Level meters
-                        levelMeters
+                        ScrollView(.vertical, showsIndicators: true) {
+                            VStack(spacing: 10) {
+                                reactivitySection
+                                levelMeters
+                            }
+                            .padding(.bottom, 10)
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var reactToMusicBinding: Binding<Bool> {
@@ -121,84 +115,161 @@ struct MusicTabContent: View {
     }
 
     private var visualizationAddButton: some View {
-        Menu {
-            let available = availableMappingTargetsToAdd
-            let universalTargets = available.filter { !$0.isFormulaParam }
-            let formulaTargets = available.filter { $0.isFormulaParam }
+        Button {
+            isShowingVisualizationAddPopover = true
+        } label: {
+            Label("Add Control", systemImage: "plus.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(canAddVisualizationMapping ? .blue : .secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill((canAddVisualizationMapping ? Color.blue : Color.secondary).opacity(0.12))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke((canAddVisualizationMapping ? Color.blue : Color.secondary).opacity(0.22), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canAddVisualizationMapping)
+        .opacity(canAddVisualizationMapping ? 1.0 : 0.72)
+        .popover(isPresented: $isShowingVisualizationAddPopover, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+            visualizationAddPopoverContent
+        }
+    }
 
-            if !universalTargets.isEmpty {
-                Section("Universal") {
-                    ForEach(universalTargets, id: \.self) { target in
-                        Button { addMapping(target) } label: {
-                            HStack(spacing: 8) {
-                                Label(target.displayName, systemImage: target.icon)
-                                if target.hasFlashingRisk {
-                                    FlashingLightIndicator()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    private var visualizationAddPopoverContent: some View {
+        let available = availableMappingTargetsToAdd
+        let formulaTargets = available.filter { $0.isFormulaParam }
+        let universalTargets = available.filter { !$0.isFormulaParam }
 
-            if !formulaTargets.isEmpty {
-                Section("\(cache.fractalType.displayName) Params") {
-                    ForEach(formulaTargets, id: \.self) { target in
-                        Button { addMapping(target) } label: {
-                            HStack(spacing: 8) {
-                                Label(target.displayName(for: cache.fractalType), systemImage: target.icon(for: cache.fractalType))
-                                if target.hasFlashingRisk {
-                                    FlashingLightIndicator()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Add Music Control")
+                .font(.headline)
 
             if available.isEmpty {
                 Text("All targets added")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                if !formulaTargets.isEmpty {
+                    addTargetSection(
+                        title: "\(cache.fractalType.displayName) Params",
+                        targets: formulaTargets,
+                        label: { target in
+                            target.displayName(for: cache.fractalType)
+                        },
+                        icon: { target in
+                            target.icon(for: cache.fractalType)
+                        }
+                    )
+                }
+
+                if !universalTargets.isEmpty {
+                    addTargetSection(
+                        title: "Universal",
+                        targets: universalTargets,
+                        label: { target in
+                            target.displayName
+                        },
+                        icon: { target in
+                            target.icon
+                        }
+                    )
+                }
             }
-        } label: {
-            Image(systemName: "plus")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.blue)
-                .frame(width: 32, height: 32)
-                .background(Circle().fill(Color.blue.opacity(0.14)))
-                .overlay(Circle().stroke(Color.blue.opacity(0.30), lineWidth: 1))
         }
-        .buttonStyle(.plain)
-        .disabled(!cache.audioReactive.fractalAudioReactiveEnabled || availableMappingTargetsToAdd.isEmpty)
-        .opacity((!cache.audioReactive.fractalAudioReactiveEnabled || availableMappingTargetsToAdd.isEmpty) ? 0.45 : 1.0)
+        .padding(14)
+        .frame(minWidth: 280, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func addTargetSection(
+        title: String,
+        targets: [MusicReactiveTarget],
+        label: @escaping (MusicReactiveTarget) -> String,
+        icon: @escaping (MusicReactiveTarget) -> String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(targets, id: \.self) { target in
+                Button {
+                    addMapping(target)
+                    isShowingVisualizationAddPopover = false
+                } label: {
+                    HStack(spacing: 8) {
+                        Label(label(target), systemImage: icon(target))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if target.hasFlashingRisk {
+                            FlashingLightIndicator()
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private var visualizationHeaderSection: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Music Reactive Visuals")
-                    .font(.subheadline.bold())
-                Text("Toggle and map audio-driven modulation")
-                    .font(.caption2)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Music Reactive Visuals")
+                        .font(.subheadline.bold())
+                    Text("Toggle and map audio-driven modulation")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .layoutPriority(1)
+
+                Spacer(minLength: 0)
+
+                visualizationAddButton
+            }
+
+            HStack(spacing: 10) {
+                Label("React to Music", systemImage: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform" : "waveform.slash")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+
+                Toggle("React to Music", isOn: reactToMusicBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+
+                HStack(spacing: 6) {
+                    Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
+                        .font(.caption)
+                    Text("\(activeMusicPermutationCount)")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                }
+                .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.14)))
+
+                Spacer(minLength: 0)
             }
 
-            Spacer()
-
-            Toggle("React to Music", isOn: reactToMusicBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-
-            HStack(spacing: 6) {
-                Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
-                    .font(.caption)
-                Text("\(activeMusicPermutationCount)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
+            if !cache.audioReactive.fractalAudioReactiveEnabled {
+                Text("Enable React to Music to add parameter mappings.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if availableMappingTargetsToAdd.isEmpty {
+                Text("All available parameters are already mapped.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Capsule().fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.14)))
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
@@ -833,73 +904,80 @@ struct MusicTabContent: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
-                        VStack(spacing: 4) {
-                            HStack(spacing: 8) {
-                                Image(systemName: mapping.target.icon(for: cache.fractalType))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(spacing: 8) {
+                            ForEach(Array(cache.audioReactive.musicReactiveMappings.enumerated()), id: \.element.id) { index, mapping in
+                                VStack(spacing: 4) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: mapping.target.icon(for: cache.fractalType))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
 
-                                Text(mapping.target.displayName(for: cache.fractalType))
-                                    .font(.caption.bold())
+                                        Text(mapping.target.displayName(for: cache.fractalType))
+                                            .font(.caption.bold())
 
-                                if mapping.hasFlashingRisk {
-                                    FlashingLightIndicator()
-                                        .help("Can produce flashing or rapidly changing light.")
+                                        if mapping.hasFlashingRisk {
+                                            FlashingLightIndicator()
+                                                .help("Can produce flashing or rapidly changing light.")
+                                        }
+
+                                        Spacer()
+
+                                        Button { removeMapping(at: index) } label: {
+                                            Image(systemName: "trash")
+                                                .font(.caption2)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(.secondary)
+                                    }
+
+                                    Picker("Source", selection: Binding(
+                                        get: { mappingAt(index)?.source ?? .composite },
+                                        set: { newValue in updateMapping(index) { $0.source = newValue } }
+                                    )) {
+                                        ForEach(MusicReactiveSource.allCases, id: \.self) { source in
+                                            Text(source.displayName).tag(source)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+
+                                    Picker("Curve", selection: Binding(
+                                        get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
+                                        set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
+                                    )) {
+                                        ForEach(ResponseCurve.allCases, id: \.self) { curve in
+                                            Label(curve.displayName, systemImage: curve.icon).tag(curve)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+
+                                    if (mappingAt(index)?.responseCurve ?? .sinusoidal) == .hybrid {
+                                        sliderRow(label: "Hybrid", value: Binding(
+                                            get: { mappingAt(index)?.hybridCombo ?? 0.35 },
+                                            set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
+                                        ), range: 0...1)
+                                    }
+
+                                    sliderRow(label: "Intensity", value: Binding(
+                                        get: { mappingAt(index)?.amount ?? 1.0 },
+                                        set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
+                                    ), range: 0...3)
+
+                                    sliderRow(label: "Smooth", value: Binding(
+                                        get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
+                                        set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
+                                    ), range: 0...2)
                                 }
-
-                                Spacer()
-
-                                Button { removeMapping(at: index) } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption2)
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.secondary)
+                                .padding(6)
+                                .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
                             }
-
-                            Picker("Source", selection: Binding(
-                                get: { mappingAt(index)?.source ?? .composite },
-                                set: { newValue in updateMapping(index) { $0.source = newValue } }
-                            )) {
-                                ForEach(MusicReactiveSource.allCases, id: \.self) { source in
-                                    Text(source.displayName).tag(source)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            Picker("Curve", selection: Binding(
-                                get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
-                                set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
-                            )) {
-                                ForEach(ResponseCurve.allCases, id: \.self) { curve in
-                                    Label(curve.displayName, systemImage: curve.icon).tag(curve)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            if (mappingAt(index)?.responseCurve ?? .sinusoidal) == .hybrid {
-                                sliderRow(label: "Hybrid", value: Binding(
-                                    get: { mappingAt(index)?.hybridCombo ?? 0.35 },
-                                    set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
-                                ), range: 0...1)
-                            }
-
-                            sliderRow(label: "Intensity", value: Binding(
-                                get: { mappingAt(index)?.amount ?? 1.0 },
-                                set: { newValue in updateMapping(index) { $0.amount = newValue; $0.sanitizeInPlace() } }
-                            ), range: 0...3)
-
-                            sliderRow(label: "Smooth", value: Binding(
-                                get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
-                                set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
-                            ), range: 0...2)
                         }
-                        .padding(6)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+                        .frame(maxWidth: .infinity, alignment: .top)
                     }
+                    .frame(minHeight: 260, maxHeight: .infinity, alignment: .top)
                 }
                 .padding(10)
+                .frame(maxHeight: .infinity, alignment: .top)
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
             } else {
                 Text("Enable React to Music above to start visualization mappings.")
