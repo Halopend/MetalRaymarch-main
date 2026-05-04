@@ -9,6 +9,7 @@ struct FirstLaunchWindowView: View {
 
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
     @State private var shareAnalytics = UsageAnalytics.shared.analyticsEnabled
+    @State private var communityDisplayName = UsageAnalytics.shared.communityDisplayName
     @State private var showAnalyticsDetail = false
     @State private var currentPage = 0
 
@@ -43,6 +44,7 @@ struct FirstLaunchWindowView: View {
         .glassBackgroundEffect(in: .rect(cornerRadius: 24))
         .onAppear {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
+            communityDisplayName = UsageAnalytics.shared.communityDisplayName
         }
     }
 
@@ -171,9 +173,9 @@ struct FirstLaunchWindowView: View {
     private var analyticsPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Anonymous Usage Data")
+                Text("Share with the Community")
                     .font(.title2.weight(.bold))
-                Text("Your choice — off by default.")
+                Text("Optional, off by default, and no sign-up required.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -181,35 +183,55 @@ struct FirstLaunchWindowView: View {
             // Prominent opt-in card
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    Image(systemName: "shield.lefthalf.filled")
+                    Image(systemName: "person.3.fill")
                         .font(.title3)
                         .foregroundStyle(.blue)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Help Improve Threshold")
+                        Text("Contribute to Future Community Collections")
                             .font(.headline)
-                        Text("Share anonymous usage stats to help us prioritize features and improve performance.")
+                        Text("Share a community name and let us consider your favorite setups for future featured collections.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Toggle("Send anonymous usage data", isOn: $shareAnalytics)
-                    .tint(.blue)
-
-                // What we collect / don't collect
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("What's shared:", systemImage: "checkmark.circle")
+                    Text("User Name")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("• Which fractals and color schemes are popular\n• Average performance (FPS) per device\n• Which features are used (gestures, audio, SharePlay)\n• Preset parameter averages (no personal content)")
+
+                    TextField("Choose a user name", text: $communityDisplayName)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled(true)
+
+                    Text("Choosing a user name does not create an account. It only gives us a name to credit if we feature one of your setups later.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Toggle("Share with the community", isOn: $shareAnalytics)
+                    .tint(.blue)
+                    .disabled(communityDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !shareAnalytics)
+
+                if communityDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Choose a user name to enable community sharing.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("What you're opting into:", systemImage: "checkmark.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• Your chosen user name can be used for attribution\n• Aggregated usage stats still help us improve performance and features")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
 
-                    Label("Never shared:", systemImage: "xmark.circle")
+                    Label("What this does not do:", systemImage: "xmark.circle")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
-                    Text("• No names, emails, or Apple IDs\n• No location or IP address\n• No photos, recordings, or personal files\n• No data sold to third parties")
+                    Text("• No account is created\n• No Apple ID, email, or location is required\n• No photos, recordings, or personal files are uploaded\n• You can leave this off and use Threshold normally")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -228,7 +250,7 @@ struct FirstLaunchWindowView: View {
                 .buttonStyle(.plain)
 
                 if showAnalyticsDetail {
-                    Text("Data is stored in Apple's CloudKit public database under your app's iCloud container. Each upload is a timestamped snapshot of aggregated session metrics — no user identifier is attached. You can toggle this off anytime in Settings > General.")
+                    Text("Threshold stores aggregated session metrics in Apple's CloudKit public database to help steer future releases. Your community name is stored locally on this device so you can opt into future attributed sharing without creating an account. You can change this anytime in Settings > General.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(8)
@@ -242,7 +264,7 @@ struct FirstLaunchWindowView: View {
                     .strokeBorder(Color.blue.opacity(0.15), lineWidth: 1)
             )
 
-            Text("You can change this anytime in Settings > General.")
+            Text("You can skip this, start using Threshold immediately, and change it later in Settings > General.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
@@ -260,6 +282,7 @@ struct FirstLaunchWindowView: View {
     }
 
     private func completeOnboarding() {
+        UsageAnalytics.shared.communityDisplayName = communityDisplayName
         UsageAnalytics.shared.analyticsEnabled = shareAnalytics
         hasCompletedIntroOnboarding = true
         openWindow(id: appModel.menuWindowID)

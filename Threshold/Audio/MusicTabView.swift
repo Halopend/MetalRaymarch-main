@@ -12,7 +12,7 @@ import SwiftUI
 
 // MARK: - Music Tab Content
 
-private enum MusicInnerTab: String, CaseIterable {
+enum MusicPanelTab: String, CaseIterable {
     case music = "Music"
     case visualizations = "Visualizations"
 }
@@ -26,8 +26,19 @@ struct MusicTabContent: View {
     private let renderSettings: RenderSettings
 
     @State private var viewModel: MusicTabViewModel
-    @AppStorage("MusicTabContent.innerTab") private var innerTab: MusicInnerTab = .music
+    var tabSelection: Binding<MusicPanelTab>? = nil
+    @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
     @State private var isShowingVisualizationAddPopover = false
+
+    private var effectiveTabSelection: Binding<MusicPanelTab> {
+        Binding(
+            get: { tabSelection?.wrappedValue ?? storedTabSelection },
+            set: { newValue in
+                storedTabSelection = newValue
+                tabSelection?.wrappedValue = newValue
+            }
+        )
+    }
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
@@ -53,7 +64,7 @@ struct MusicTabContent: View {
     var body: some View {
         VStack(spacing: 10) {
             Group {
-                switch innerTab {
+                switch effectiveTabSelection.wrappedValue {
                 case .music:
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 10) {

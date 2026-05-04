@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-private enum FractalBrowseInnerTab: String, CaseIterable {
+enum FractalBrowseTab: String, CaseIterable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
@@ -64,9 +64,20 @@ struct FractalGridView: View {
     var onEditScene: ((AnimationScene) -> Void)? = nil
     var onLoadAnimationScene: ((AnimationScene) -> Void)? = nil
     var onLoadStaticScene: ((FractalPreset) -> Void)? = nil
-    @AppStorage("FractalGridView.innerTab") private var innerTab: FractalBrowseInnerTab = .jumpingOff
+    var tabSelection: Binding<FractalBrowseTab>? = nil
+    @AppStorage("FractalGridView.innerTab") private var storedTabSelection: FractalBrowseTab = .jumpingOff
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
     private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
+
+    private var effectiveTabSelection: Binding<FractalBrowseTab> {
+        Binding(
+            get: { tabSelection?.wrappedValue ?? storedTabSelection },
+            set: { newValue in
+                storedTabSelection = newValue
+                tabSelection?.wrappedValue = newValue
+            }
+        )
+    }
 
     private var selectedStaticSceneID: UUID? {
         get {
@@ -83,11 +94,12 @@ struct FractalGridView: View {
         let hasScenes = animationManager?.scenes.isEmpty == false
         // If the persisted tab is "animated" but there are no animation scenes,
         // gracefully fall back to Jumping Off without overwriting the stored choice.
-        let selectedTab: FractalBrowseInnerTab = (innerTab == .animated && !hasScenes) ? .jumpingOff : innerTab
+        let currentTab = effectiveTabSelection.wrappedValue
+        let selectedTab: FractalBrowseTab = (currentTab == .animated && !hasScenes) ? .jumpingOff : currentTab
 
         VStack(spacing: 10) {
-            Picker("Browse", selection: $innerTab) {
-                ForEach(FractalBrowseInnerTab.allCases, id: \.self) { tab in
+            Picker("Browse", selection: effectiveTabSelection) {
+                ForEach(FractalBrowseTab.allCases, id: \.self) { tab in
                     Text(tab.rawValue).tag(tab)
                 }
             }

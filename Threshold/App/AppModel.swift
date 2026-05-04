@@ -144,9 +144,12 @@ class AppModel {
     var animationManager: AnimationManager?
     
     // Menu window visibility (toggled by gesture).
-    // The physical window is NEVER dismissed after cold start — toggling `isMenuWindowVisible`
-    // controls content opacity and hit-testing so the window keeps its world-space position.
+    // The window is physically dismissed when closed; visionOS currently preserves
+    // its placement when reopened, which keeps the user's chosen location intact.
     var isMenuWindowVisible: Bool = true
+
+    @ObservationIgnored private let menuWindowRetoggleGuardInterval: CFTimeInterval = 0.45
+    @ObservationIgnored private var lastMenuWindowOpenedAt: CFTimeInterval = 0
 
     /// Head height (metres, world-space Y) sampled from the device anchor.
     /// Updated at ~2 Hz by UIUpdateCoordinator. Zero means no world-tracking fix yet.
@@ -342,28 +345,28 @@ class AppModel {
     /// Returns true when the Fractal > Render tab is already active.
     var isRenderMenuActiveHandler: (() -> Bool)?
     
-    /// Toggle menu window content visibility.
-    /// The physical window stays in world space to preserve its position;
-    /// only content opacity and hit-testing change.
+    /// Toggle menu window visibility.
+    /// Closing dismisses the actual window; opening reuses the system-restored placement.
     func toggleMenuWindow() {
-        isMenuWindowVisible.toggle()
         if isMenuWindowVisible {
-            openMenuWindowHandler?()
+            guard canCloseMenuWindowNow() else {
+                refreshMenuInteractionState()
+                print("📋 Ignored immediate menu close after open")
+                return
+            }
+            closeMenuWindow(reason: "toggle")
+        } else {
+            showMenuWindow(reason: "toggle")
         }
-        print("📋 Menu window \(isMenuWindowVisible ? "shown" : "hidden") (position preserved)")
-        refreshMenuInteractionState()
     }
 
-    /// Show menu window content via gesture. Does not move the window.
+    /// Show the menu window via gesture. Does not reposition the restored window.
     func openMenuWindowFromGesture() {
         guard !isMenuWindowVisible else {
             refreshMenuInteractionState()
             return
         }
-        isMenuWindowVisible = true
-        openMenuWindowHandler?()
-        refreshMenuInteractionState()
-        print("📋 Menu window shown (gesture)")
+        showMenuWindow(reason: "gesture")
     }
 
     func pullMenuWindowTowardUser() {
@@ -371,10 +374,7 @@ class AppModel {
             refreshMenuInteractionState()
             return
         }
-        isMenuWindowVisible = true
-        openMenuWindowHandler?()
-        refreshMenuInteractionState()
-        print("📋 Menu window shown (pull gesture)")
+        showMenuWindow(reason: "pull gesture")
     }
 
     func openShapeMenuFromGesture() {
@@ -393,15 +393,10 @@ class AppModel {
         )
     }
 
-    /// Hide menu window content during scene load so hand gestures are immediately available.
-    /// The window stays at its world position; only content visibility changes.
+    /// Dismiss the menu window during scene load so hand gestures are immediately available.
     func dismissMenuWindowForSceneLoad() {
         guard isMenuWindowVisible else { return }
-        isMenuWindowVisible = false
-        isMenuHovering = false
-        menuAdjustmentDepth = 0
-        refreshMenuInteractionState()
-        print("Menu window hidden for scene load (position preserved)")
+        closeMenuWindow(reason: "scene load", bypassGuard: true)
     }
 
     /// Toggle the Animation Player window visibility (gesture- or UI-driven).
@@ -424,9 +419,8 @@ class AppModel {
     /// Ensure menu window content is visible — call when exiting immersive mode or on app launch.
     func ensureWindowContentVisible() {
         if !isMenuWindowVisible {
-            isMenuWindowVisible = true
-            openMenuWindowHandler?()
-            print("📋 Menu window content shown")
+            showMenuWindow(reason: "ensure visible")
+            return
         }
         refreshMenuInteractionState()
     }
@@ -478,6 +472,37 @@ class AppModel {
         gestureController?.suppressParameterGestures = interacting
     }
 
+    private func canCloseMenuWindowNow() -> Bool {
+        CACurrentMediaTime() - lastMenuWindowOpenedAt >= menuWindowRetoggleGuardInterval
+    }
+
+    private func showMenuWindow(reason: String) {
+        isMenuWindowVisible = true
+        lastMenuWindowOpenedAt = CACurrentMediaTime()
+        openMenuWindowHandler?()
+        refreshMenuInteractionState()
+        print("📋 Menu window shown (\(reason))")
+    }
+
+    private func closeMenuWindow(reason: String, bypassGuard: Bool = false) {
+        guard isMenuWindowVisible else {
+            refreshMenuInteractionState()
+            return
+        }
+        guard bypassGuard || canCloseMenuWindowNow() else {
+            refreshMenuInteractionState()
+            print("📋 Ignored immediate menu close after open")
+            return
+        }
+
+        isMenuWindowVisible = false
+        isMenuHovering = false
+        menuAdjustmentDepth = 0
+        dismissMenuWindowHandler?()
+        refreshMenuInteractionState()
+        print("📋 Menu window dismissed (\(reason))")
+    }
+
     private func toggleFractalMenuFromGesture(
         isRequestedTabAlreadyOpen: Bool,
         openRequestedTab: (() -> Void)?,
@@ -486,14 +511,12 @@ class AppModel {
         guard let openRequestedTab else { return }
 
         if isMenuWindowVisible && isRequestedTabAlreadyOpen {
-            markMenuWindowDismissed()
-            print("🧭 \(label) menu closed (gesture)")
+            closeMenuWindow(reason: "\(label) gesture")
             return
         }
 
         if !isMenuWindowVisible {
-            isMenuWindowVisible = true
-            openMenuWindowHandler?()
+            showMenuWindow(reason: "\(label) gesture")
         }
 
         openRequestedTab()

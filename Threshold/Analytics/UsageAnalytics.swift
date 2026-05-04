@@ -181,6 +181,9 @@ final class UsageAnalytics {
     
     // Persistence key
     private let pendingUploadsKey = "PendingUsageSnapshots"
+    private let communityDisplayNameKey = "CommunityDisplayName"
+
+    private var storedCommunityDisplayName: String
     
     var analyticsEnabled: Bool {
         didSet {
@@ -192,10 +195,39 @@ final class UsageAnalytics {
             }
         }
     }
+
+    var communityDisplayName: String {
+        get { storedCommunityDisplayName }
+        set {
+            let normalized = Self.normalizedCommunityDisplayName(newValue)
+            guard storedCommunityDisplayName != normalized else { return }
+            storedCommunityDisplayName = normalized
+
+            if normalized.isEmpty {
+                UserDefaults.standard.removeObject(forKey: communityDisplayNameKey)
+                if analyticsEnabled {
+                    analyticsEnabled = false
+                }
+            } else {
+                UserDefaults.standard.set(normalized, forKey: communityDisplayNameKey)
+            }
+        }
+    }
+
+    var canEnableCommunitySharing: Bool {
+        !storedCommunityDisplayName.isEmpty
+    }
     
     private init() {
         // Default to disabled — user must explicitly opt in
         self.analyticsEnabled = UserDefaults.standard.object(forKey: "AnalyticsEnabled") as? Bool ?? false
+        self.storedCommunityDisplayName = Self.normalizedCommunityDisplayName(
+            UserDefaults.standard.string(forKey: communityDisplayNameKey) ?? ""
+        )
+
+        if storedCommunityDisplayName.isEmpty {
+            self.analyticsEnabled = false
+        }
         
         // Try to upload any pending snapshots from previous sessions when opted in.
         if analyticsEnabled {
@@ -203,6 +235,10 @@ final class UsageAnalytics {
                 await uploadPendingSnapshots()
             }
         }
+    }
+
+    private static func normalizedCommunityDisplayName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func distributionPercentages(_ source: [String: TimeInterval], duration: TimeInterval) -> [String: Float] {

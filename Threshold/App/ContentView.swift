@@ -36,6 +36,97 @@ enum SidebarTab: String, CaseIterable {
     }
 }
 
+enum TopDockTab: String, CaseIterable {
+    case explore = "Explore"
+    case shape = "Shape"
+    case visualizations = "Visualizations"
+    case music = "Music"
+
+    var icon: String {
+        switch self {
+        case .explore: return "sparkles.rectangle.stack"
+        case .shape: return "cube.transparent"
+        case .visualizations: return "paintbrush.pointed.fill"
+        case .music: return "music.note"
+        }
+    }
+}
+
+enum ExploreRailSection: String, CaseIterable {
+    case jumpingOff = "Jumping Off"
+    case musicReactive = "Music Reactive"
+    case animated = "Animated"
+
+    var icon: String {
+        switch self {
+        case .jumpingOff: return "photo.on.rectangle.angled"
+        case .musicReactive: return "waveform"
+        case .animated: return "film.stack"
+        }
+    }
+
+    var browseTab: FractalBrowseTab {
+        switch self {
+        case .jumpingOff: return .jumpingOff
+        case .musicReactive: return .musicReactive
+        case .animated: return .animated
+        }
+    }
+}
+
+enum ShapeRailSection: String, CaseIterable {
+    case parameters = "Parameters"
+    case formula = "Formula"
+    case space = "Space"
+    case performance = "Performance"
+
+    var icon: String {
+        switch self {
+        case .parameters: return "slider.horizontal.3"
+        case .formula: return "function"
+        case .space: return "rotate.3d"
+        case .performance: return "speedometer"
+        }
+    }
+}
+
+enum VisualizationsRailSection: String, CaseIterable {
+    case color = "Color"
+    case mapping = "Mapping"
+    case grading = "Grading"
+    case motion = "Motion"
+    case atmosphere = "Atmosphere"
+
+    var icon: String {
+        switch self {
+        case .color: return "paintpalette.fill"
+        case .mapping: return "target"
+        case .grading: return "camera.filters"
+        case .motion: return "sparkles"
+        case .atmosphere: return "cloud.fog.fill"
+        }
+    }
+}
+
+enum MusicRailSection: String, CaseIterable {
+    case playback = "Playback"
+    case reactivity = "Reactivity"
+
+    var icon: String {
+        switch self {
+        case .playback: return "play.circle.fill"
+        case .reactivity: return "waveform.path.ecg"
+        }
+    }
+
+    var musicPanelTab: MusicPanelTab {
+        switch self {
+        case .playback: return .music
+        case .reactivity: return .visualizations
+        }
+    }
+}
+
 enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shape", space = "Space", render = "Render" }
 enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
@@ -109,13 +200,20 @@ struct ContentView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     
     @State private var cache = UISettingsCache()
+    @AppStorage("ContentView.topDockTab") private var topDockTab: TopDockTab = .explore
+    @AppStorage("ContentView.exploreRailSection") private var exploreRailSection: ExploreRailSection = .jumpingOff
+    @AppStorage("ContentView.shapeRailSection") private var shapeRailSection: ShapeRailSection = .parameters
+    @AppStorage("ContentView.visualizationsRailSection") private var visualizationsRailSection: VisualizationsRailSection = .color
+    @AppStorage("ContentView.musicRailSection") private var musicRailSection: MusicRailSection = .playback
     // Persist last-selected tab and sub-tabs across launches.
     @AppStorage("ContentView.selectedTab") private var selectedTab: SidebarTab = .fractal
+    @AppStorage("FractalGridView.innerTab") private var fractalBrowseTab: FractalBrowseTab = .jumpingOff
     @AppStorage("ContentView.fractalSubTab") private var fractalSubTab: FractalSubTab = .shape
     @AppStorage("ContentView.shapeInnerTab") private var shapeInnerTab: ShapeInnerTab = .parameters
     @State private var animateEditButtonsVisible = false
     @AppStorage("ContentView.coloringSubTab") private var coloringSubTab: ColoringSubTab = .gradient
     @AppStorage("ContentView.effectsSubTab") private var effectsSubTab: EffectsSubTab = .dynamic
+    @AppStorage("MusicTabContent.innerTab") private var musicPanelTab: MusicPanelTab = .music
     @AppStorage("ContentView.settingsSubTab") private var settingsSubTab: SettingsSubTab = .general
     @State private var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
@@ -198,8 +296,7 @@ struct ContentView: View {
         Group {
             if isOpen {
                 immersiveLayout
-            } else {
-                preImmersiveLayout
+                    activateShapeSection(.parameters)
             }
         }
         .environment(\.menuAdjustmentActions, MenuAdjustmentActions(
@@ -207,19 +304,26 @@ struct ContentView: View {
             end: { appModel.endMenuAdjustment() }
         ))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
-        .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
+                    activateShapeSection(.performance)
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(menuSurfaceStroke, lineWidth: 1)
         )
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         // Content visibility: keep the window physically open (preserves world-space position)
         // but hide content and disable hit-testing when the user gestures the menu closed.
+            syncNavigationChromeFromLegacySelection()
         .opacity(appModel.isMenuWindowVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.18), value: appModel.isMenuWindowVisible)
         .allowsHitTesting(appModel.isMenuWindowVisible)
         .ornament(
             visibility: isShortcutOrnamentVisible ? .visible : .hidden,
+        .onChange(of: selectedTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: fractalSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: shapeInnerTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: fractalBrowseTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: coloringSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelection() }
             attachmentAnchor: .scene(.top),
             contentAlignment: .bottom
         ) {
@@ -332,9 +436,13 @@ struct ContentView: View {
     
     private var immersiveLayout: some View {
         VStack(spacing: 0) {
+            topDockBar
+
+            Divider()
+
             HStack(spacing: 0) {
-                // ── LEFT: Sidebar ──
-                sidebarColumn
+                // ── LEFT: Context Rail ──
+                sectionRail
                 
                 Divider()
                 
@@ -354,41 +462,106 @@ struct ContentView: View {
         .frame(minWidth: 980, minHeight: 576)
     }
     
-    // MARK: - Sidebar Column
-    
-    private var sidebarColumn: some View {
-        // The top dock fully owns Music / Visualizations switching, so the
-        // sidebar acts as "reference shelves" only and omits the music tile.
-        let sidebarTabs = SidebarTab.allCases.filter { $0 != .music }
-        return VStack(spacing: 4) {
-            ForEach(sidebarTabs, id: \.self) { tab in
+    // MARK: - Top Dock
+
+    private var topDockBar: some View {
+        HStack(spacing: 10) {
+            ForEach(TopDockTab.allCases, id: \.self) { tab in
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { selectedTab = tab }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        activateTopDock(tab)
+                    }
                 } label: {
-                    VStack(spacing: 4) {
+                    HStack(spacing: 8) {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: tab.icon)
-                                .font(.system(size: 18))
-                                .frame(width: 28, height: 22)
-                            sidebarBadge(for: tab)
+                                .font(.system(size: 15, weight: .semibold))
+                            topDockBadge(for: tab)
                         }
                         Text(tab.rawValue)
-                            .font(.caption2)
+                            .font(.subheadline.weight(.semibold))
                     }
-                    .frame(width: 64, height: 54)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(selectedTab == tab ? Color.blue.opacity(0.25) : Color.clear)
+                        Capsule()
+                            .fill(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? Color.blue.opacity(0.18) : Color.clear)
                     )
-                    .foregroundStyle(selectedTab == tab ? .primary : .secondary)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.14), lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(tab.rawValue)
-                .accessibilityValue(sidebarAccessibilityValue(for: tab))
-                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+                .foregroundStyle(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? .primary : .secondary)
+                .accessibilityAddTraits(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? .isSelected : [])
             }
 
             Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Context Rail
+
+    private var sectionRail: some View {
+        VStack(spacing: 8) {
+            switch topDockTab {
+            case .explore:
+                ForEach(ExploreRailSection.allCases, id: \.self) { section in
+                    railButton(
+                        title: section.rawValue,
+                        systemImage: section.icon,
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .explore && exploreRailSection == section
+                    ) {
+                        activateExploreSection(section)
+                    }
+                }
+            case .shape:
+                ForEach(ShapeRailSection.allCases, id: \.self) { section in
+                    railButton(
+                        title: section.rawValue,
+                        systemImage: section.icon,
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .shape && shapeRailSection == section
+                    ) {
+                        activateShapeSection(section)
+                    }
+                }
+            case .visualizations:
+                ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
+                    railButton(
+                        title: section.rawValue,
+                        systemImage: section.icon,
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section
+                    ) {
+                        activateVisualizationsSection(section)
+                    }
+                }
+            case .music:
+                ForEach(MusicRailSection.allCases, id: \.self) { section in
+                    railButton(
+                        title: section.rawValue,
+                        systemImage: section.icon,
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section
+                    ) {
+                        activateMusicSection(section)
+                    }
+                }
+            }
+
+            Spacer()
+
+            Divider()
+                .padding(.vertical, 4)
+
+            railButton(title: "Gestures", systemImage: SidebarTab.gestures.icon, isSelected: selectedTab == .gestures) {
+                selectedTab = .gestures
+            }
+
+            railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
+                selectedTab = .settings
+            }
 
             Button {
                 if didLongPressPlayerButton {
@@ -397,10 +570,10 @@ struct ContentView: View {
                 }
                 toggleAnimationPlayerWindow()
             } label: {
-                VStack(spacing: 4) {
+                HStack(spacing: 10) {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: appModel.isAnimationPlayerWindowVisible ? "film.stack.fill" : "film.stack")
-                            .font(.system(size: 18))
+                            .font(.system(size: 15, weight: .semibold))
 
                         if isAnimationPlaying {
                             Image(systemName: "play.fill")
@@ -412,15 +585,24 @@ struct ContentView: View {
                                 .accessibilityHidden(true)
                         }
                     }
-                    Text("Player")
-                        .font(.caption2)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Player")
+                            .font(.footnote.weight(.semibold))
+                        Text("Video controls")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Spacer(minLength: 0)
                 }
-                .frame(width: 64, height: 54)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.secondary.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.secondary.opacity(0.08))
                 )
-                .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
             .help("Open or close Video Player")
@@ -428,27 +610,59 @@ struct ContentView: View {
                 didLongPressPlayerButton = true
                 withAnimation(.easeInOut(duration: 0.2)) {
                     selectedTab = .animate
+                    topDockTab = .explore
+                    exploreRailSection = .animated
                 }
             }
         }
+        .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .frame(width: 72)
+        .frame(width: 170)
     }
 
     @ViewBuilder
-    private func sidebarBadge(for tab: SidebarTab) -> some View {
+    private func topDockBadge(for tab: TopDockTab) -> some View {
         switch tab {
-        case .effects where activeDynamicEffectCount > 0:
-            sidebarCountBadge(activeDynamicEffectCount, color: .pink)
+        case .visualizations where activeDynamicEffectCount > 0:
+            countBadge(activeDynamicEffectCount, color: .pink)
         case .music where activeMusicPermutationCount > 0:
-            sidebarCountBadge(activeMusicPermutationCount, color: .green)
+            countBadge(activeMusicPermutationCount, color: .green)
         default:
             EmptyView()
         }
     }
 
+    private func railButton(title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 18)
 
-    private func sidebarCountBadge(_ count: Int, color: Color) -> some View {
+                Text(title)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func countBadge(_ count: Int, color: Color) -> some View {
         Text("\(count)")
             .font(.system(size: 9, weight: .bold, design: .rounded))
             .monospacedDigit()
@@ -460,14 +674,112 @@ struct ContentView: View {
             .accessibilityHidden(true)
     }
 
-    private func sidebarAccessibilityValue(for tab: SidebarTab) -> String {
+    private func activateTopDock(_ tab: TopDockTab) {
         switch tab {
-        case .effects where activeDynamicEffectCount > 0:
-            return "\(activeDynamicEffectCount) dynamic effects active"
-        case .music where activeMusicPermutationCount > 0:
-            return "\(activeMusicPermutationCount) music permutations active"
-        default:
-            return ""
+        case .explore:
+            activateExploreSection(exploreRailSection)
+        case .shape:
+            activateShapeSection(shapeRailSection)
+        case .visualizations:
+            activateVisualizationsSection(visualizationsRailSection)
+        case .music:
+            activateMusicSection(musicRailSection)
+        }
+    }
+
+    private func activateExploreSection(_ section: ExploreRailSection) {
+        topDockTab = .explore
+        exploreRailSection = section
+        selectedTab = .fractal
+        fractalSubTab = .browse
+        fractalBrowseTab = section.browseTab
+    }
+
+    private func activateShapeSection(_ section: ShapeRailSection) {
+        topDockTab = .shape
+        shapeRailSection = section
+        selectedTab = .fractal
+        switch section {
+        case .parameters:
+            fractalSubTab = .shape
+            shapeInnerTab = .parameters
+        case .formula:
+            fractalSubTab = .shape
+            shapeInnerTab = .formula
+        case .space:
+            fractalSubTab = .space
+        case .performance:
+            fractalSubTab = .render
+        }
+    }
+
+    private func activateVisualizationsSection(_ section: VisualizationsRailSection) {
+        topDockTab = .visualizations
+        visualizationsRailSection = section
+        switch section {
+        case .color:
+            selectedTab = .coloring
+            coloringSubTab = .gradient
+        case .mapping:
+            selectedTab = .coloring
+            coloringSubTab = .mapping
+        case .grading:
+            selectedTab = .coloring
+            coloringSubTab = .grading
+        case .motion:
+            selectedTab = .effects
+            effectsSubTab = .dynamic
+        case .atmosphere:
+            selectedTab = .effects
+            effectsSubTab = .static
+        }
+    }
+
+    private func activateMusicSection(_ section: MusicRailSection) {
+        topDockTab = .music
+        musicRailSection = section
+        selectedTab = .music
+        musicPanelTab = section.musicPanelTab
+    }
+
+    private func syncNavigationChromeFromLegacySelection() {
+        switch selectedTab {
+        case .fractal:
+            switch fractalSubTab {
+            case .browse:
+                topDockTab = .explore
+                exploreRailSection = ExploreRailSection.allCases.first(where: { $0.browseTab == fractalBrowseTab }) ?? .jumpingOff
+            case .shape:
+                topDockTab = .shape
+                shapeRailSection = shapeInnerTab == .formula ? .formula : .parameters
+            case .space:
+                topDockTab = .shape
+                shapeRailSection = .space
+            case .render:
+                topDockTab = .shape
+                shapeRailSection = .performance
+            }
+        case .animate:
+            topDockTab = .explore
+            exploreRailSection = .animated
+        case .coloring:
+            topDockTab = .visualizations
+            switch coloringSubTab {
+            case .gradient:
+                visualizationsRailSection = .color
+            case .mapping:
+                visualizationsRailSection = .mapping
+            case .grading:
+                visualizationsRailSection = .grading
+            }
+        case .effects:
+            topDockTab = .visualizations
+            visualizationsRailSection = effectsSubTab == .dynamic ? .motion : .atmosphere
+        case .music:
+            topDockTab = .music
+            musicRailSection = musicPanelTab == .visualizations ? .reactivity : .playback
+        case .gestures, .settings:
+            break
         }
     }
     
@@ -483,7 +795,7 @@ struct ContentView: View {
                 case .animate:  animateTabContent
                 case .coloring: coloringTabContent
                 case .effects:  effectsTabContent
-                case .music:    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings)
+                case .music:    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
                 case .gestures: gesturesTabContent
                 case .settings: settingsTabContent
                 }
@@ -647,6 +959,7 @@ struct ContentView: View {
                     gestureController: appModel.gestureController,
                     animationManager: appModel.animationManager,
                     presetManager: appModel.presetManager,
+                    tabSelection: $fractalBrowseTab,
                     onEditScene: openAnimationEditor,
                     onLoadAnimationScene: { _ in
                         appModel.dismissMenuWindowForSceneLoad()
@@ -885,6 +1198,8 @@ struct ContentView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
 
+            sphericalInversionSection
+
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {
                 HStack {
@@ -971,6 +1286,46 @@ struct ContentView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
         }
+    }
+
+    private var sphericalInversionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Spherical Inversion", systemImage: "circle.dashed.inset.filled")
+                    .font(.headline)
+                Spacer()
+            }
+
+            Text("Warp space around a radius before the fractal is sampled. Useful for folded-inside-out spatial compositions.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Picker("Spherical Inversion", selection: Binding(
+                get: { cache.display.sphericalInversionMode },
+                set: { newValue in
+                    cache.display.sphericalInversionMode = newValue
+                    cache.commitSphericalInversion()
+                }
+            )) {
+                ForEach(SphericalInversionMode.allCases, id: \.rawValue) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if cache.display.sphericalInversionMode != .off {
+                EffectSliderRow(icon: "circle", label: "Inversion Radius",
+                    value: Binding(get: { cache.display.sphericalInversionRadius }, set: { cache.display.sphericalInversionRadius = $0 }),
+                    range: 0.5...6.0,
+                    enabled: Binding(get: { cache.display.sphericalInversionMode != .off }, set: { isEnabled in
+                        cache.display.sphericalInversionMode = isEnabled ? .outwardIn : .off
+                        cache.commitSphericalInversion()
+                    }),
+                    onChanged: { cache.commitSphericalInversion() })
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
     }
     
     private var fractalQualityContent: some View {
@@ -1886,40 +2241,6 @@ struct ContentView: View {
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
                     onChanged: { cache.commitFogEffect() })
-                Divider().padding(.leading, 114)
-                HStack(spacing: 8) {
-                    Image(systemName: "circle.dashed.inset.filled")
-                        .font(.caption)
-                        .frame(width: 16)
-                    Text("Spherical Inversion")
-                        .font(.subheadline)
-                        .frame(width: 135, alignment: .leading)
-                        .lineLimit(1)
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { cache.display.sphericalInversionMode },
-                        set: { newValue in
-                            cache.display.sphericalInversionMode = newValue
-                            cache.commitSphericalInversion()
-                        })) {
-                        ForEach(SphericalInversionMode.allCases, id: \.rawValue) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
-                }
-                .frame(height: 32)
-                if cache.display.sphericalInversionMode != .off {
-                    EffectSliderRow(icon: "circle", label: "Inversion Radius",
-                        value: Binding(get: { cache.display.sphericalInversionRadius }, set: { cache.display.sphericalInversionRadius = $0 }),
-                        range: 0.5...6.0,
-                        enabled: Binding(get: { cache.display.sphericalInversionMode != .off }, set: { isEnabled in
-                            cache.display.sphericalInversionMode = isEnabled ? .outwardIn : .off
-                            cache.commitSphericalInversion()
-                        }),
-                        onChanged: { cache.commitSphericalInversion() })
-                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
@@ -2332,17 +2653,51 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
-            // Privacy & Analytics section
-            VStack(spacing: 8) {
+            // Community sharing section
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("Privacy", systemImage: "shield.lefthalf.filled").font(.headline)
+                    Label("Community Sharing", systemImage: "person.3.fill").font(.headline)
                     Spacer()
                 }
-                Toggle("Send anonymous usage data", isOn: Binding(
+
+                Text("Optional. Share your setups with the Threshold community without creating an account.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("User Name")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    TextField("Choose a user name", text: Binding(
+                        get: { UsageAnalytics.shared.communityDisplayName },
+                        set: { UsageAnalytics.shared.communityDisplayName = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled(true)
+
+                    Text("This is only a display name for future community credits. It does not create an account or sign you up for anything.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Toggle("Share with the community", isOn: Binding(
                     get: { UsageAnalytics.shared.analyticsEnabled },
                     set: { UsageAnalytics.shared.analyticsEnabled = $0 }
                 ))
-                Text("Shares aggregated stats (popular fractals, average FPS, feature usage) to help improve Threshold. No personal information, Apple ID, or location is ever collected.")
+                .disabled(!UsageAnalytics.shared.canEnableCommunitySharing && !UsageAnalytics.shared.analyticsEnabled)
+
+                if !UsageAnalytics.shared.canEnableCommunitySharing {
+                    Text("Choose a user name to enable community sharing.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+
+                Text("By opting in, you are letting us review your settings so they may be added to the community later on your behalf and may appear in original or altered form.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                Text("You can use Threshold normally without sharing anything, and you can change this later in Settings.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
