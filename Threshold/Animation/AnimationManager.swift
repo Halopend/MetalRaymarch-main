@@ -42,27 +42,49 @@ final class AnimationManager {
     @ObservationIgnored private var pendingSaveHidden = false
     @ObservationIgnored private var pendingSaveOverrides = false
     @ObservationIgnored private var saveCoalesceTask: Task<Void, Never>?
+    @ObservationIgnored private var sceneRebuildBatchDepth = 0
+    @ObservationIgnored private var pendingSceneRebuild = false
     
     /// User-created scenes (persisted to disk)
     private(set) var userScenes: [AnimationScene] = [] {
-        didSet { rebuildScenes() }
+        didSet { sceneInputsDidChange() }
     }
     
     /// Default scene IDs the user has hidden (persisted via UserDefaults)
     private(set) var hiddenDefaultSceneIDs: Set<UUID> = [] {
-        didSet { pendingSaveHidden = true; scheduleSaveFlush(); rebuildScenes() }
+        didSet { pendingSaveHidden = true; scheduleSaveFlush(); sceneInputsDidChange() }
     }
     
     /// User-edited copies of default scenes (persisted alongside user scenes).
     /// Key = default scene ID → Value = the user's edited version.
     /// When present, this overlay replaces the built-in original in the list.
     private(set) var editedDefaultOverrides: [UUID: AnimationScene] = [:] {
-        didSet { pendingSaveOverrides = true; scheduleSaveFlush(); rebuildScenes() }
+        didSet { pendingSaveOverrides = true; scheduleSaveFlush(); sceneInputsDidChange() }
     }
     
     /// The merged list exposed to the UI: visible defaults (possibly overridden) + user scenes.
     /// Cached — rebuilt automatically when underlying data changes.
     private(set) var scenes: [AnimationScene] = []
+
+    private func sceneInputsDidChange() {
+        guard sceneRebuildBatchDepth == 0 else {
+            pendingSceneRebuild = true
+            return
+        }
+        rebuildScenes()
+    }
+
+    private func withSceneRebuildBatch(flushAfter updates: () -> Void) {
+        sceneRebuildBatchDepth += 1
+        defer {
+            sceneRebuildBatchDepth -= 1
+            if sceneRebuildBatchDepth == 0, pendingSceneRebuild {
+                pendingSceneRebuild = false
+                rebuildScenes()
+            }
+        }
+        updates()
+    }
     
     private func rebuildScenes() {
         var result: [AnimationScene] = []
@@ -436,8 +458,10 @@ final class AnimationManager {
     func deleteScene(_ scene: AnimationScene) {
         if DefaultScenes.isDefault(scene.id) {
             // Hide the default; also discard any edited overlay
-            hiddenDefaultSceneIDs.insert(scene.id)
-            editedDefaultOverrides.removeValue(forKey: scene.id)
+            withSceneRebuildBatch {
+                hiddenDefaultSceneIDs.insert(scene.id)
+                editedDefaultOverrides.removeValue(forKey: scene.id)
+            }
             print("👁️‍🗨️ Hid default scene '\(scene.name)'")
         } else {
             userScenes.removeAll { $0.id == scene.id }
@@ -1256,34 +1280,36 @@ final class AnimationManager {
     // ═══════════════════════════════════════════════════════════════════════════
     
     private func loadScenes() {
-        // Load user scenes
-        if FileManager.default.fileExists(atPath: scenesFileURL.path) {
-            do {
-                let data = try Data(contentsOf: scenesFileURL)
-                userScenes = try sceneDecoder.decode([AnimationScene].self, from: data)
-                print("📂 Loaded \(userScenes.count) user scenes")
-            } catch {
-                print("❌ Failed to load scenes: \(error)")
+        withSceneRebuildBatch {
+            // Load user scenes
+            if FileManager.default.fileExists(atPath: scenesFileURL.path) {
+                do {
+                    let data = try Data(contentsOf: scenesFileURL)
+                    userScenes = try sceneDecoder.decode([AnimationScene].self, from: data)
+                    print("📂 Loaded \(userScenes.count) user scenes")
+                } catch {
+                    print("❌ Failed to load scenes: \(error)")
+                }
+            } else {
+                print("📂 No saved user scenes found")
             }
-        } else {
-            print("📂 No saved user scenes found")
-        }
-        
-        // Load hidden default IDs
-        if let ids = UserDefaults.standard.array(forKey: "hiddenDefaultSceneIDs") as? [String] {
-            hiddenDefaultSceneIDs = Set(ids.compactMap { UUID(uuidString: $0) })
-        }
-        
-        // Load edited default overrides
-        if let data = UserDefaults.standard.data(forKey: "editedDefaultOverrides") {
-            do {
-                let overrides = try sceneDecoder.decode([AnimationScene].self, from: data)
-                editedDefaultOverrides = Dictionary(uniqueKeysWithValues: overrides.map { ($0.id, $0) })
-            } catch {
-                print("❌ Failed to load default overrides: \(error)")
+
+            // Load hidden default IDs
+            if let ids = UserDefaults.standard.array(forKey: "hiddenDefaultSceneIDs") as? [String] {
+                hiddenDefaultSceneIDs = Set(ids.compactMap { UUID(uuidString: $0) })
+            }
+
+            // Load edited default overrides
+            if let data = UserDefaults.standard.data(forKey: "editedDefaultOverrides") {
+                do {
+                    let overrides = try sceneDecoder.decode([AnimationScene].self, from: data)
+                    editedDefaultOverrides = Dictionary(uniqueKeysWithValues: overrides.map { ($0.id, $0) })
+                } catch {
+                    print("❌ Failed to load default overrides: \(error)")
+                }
             }
         }
-        
+
         print("📂 Defaults: \(DefaultScenes.allIDs.count) built-in, \(hiddenDefaultSceneIDs.count) hidden, \(editedDefaultOverrides.count) edited")
     }
     

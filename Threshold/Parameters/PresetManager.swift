@@ -14,6 +14,7 @@ import Foundation
 @Observable
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
+    private static let bundledPresets = loadBundledPresets()
     private let presetsKey = "FractalPresets"
     private let maxBackupCount: Int? = nil  // nil = unlimited retention
     private var pendingSaveTask: Task<Void, Never>?
@@ -67,11 +68,10 @@ class PresetManager {
     }
 
     private func mergedPresets(local localPresets: [FractalPreset]) -> [FractalPreset] {
-        let bundled = Self.loadBundledPresets()
         var mergedByName: [String: FractalPreset] = [:]
 
         // Seed with bundled presets, then let local presets override by name.
-        for preset in bundled {
+        for preset in Self.bundledPresets {
             mergedByName[preset.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = preset
         }
         for preset in localPresets {
@@ -384,7 +384,7 @@ extension PresetManager {
     /// Loaded from Bright_Preset.threshscene; falls back to a minimal inline
     /// preset if the bundle file is somehow missing.
     static func brightPreset() -> FractalPreset {
-        if let preset = loadBundledPresets().first(where: { $0.name == "Bright Preset" || $0.name == "Bright_Preset" }) {
+        if let preset = bundledPresets.first(where: { $0.name == "Bright Preset" || $0.name == "Bright_Preset" }) {
             return preset
         }
         // Minimal inline fallback (should never be reached)

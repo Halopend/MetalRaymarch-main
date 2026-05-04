@@ -147,7 +147,7 @@ extension Renderer {
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(for: fractalType),
-            fractalTypeRawValue: fractalType.rawValue,
+            fractalTypeRawValue: Int(fractalType.rawValue),
             iterations: iterations,
             raySteps: raySteps,
             qualityMode: Int(qualityMode),
@@ -292,7 +292,7 @@ extension Renderer {
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(for: fractalType),
-            fractalTypeRawValue: fractalType.rawValue,
+            fractalTypeRawValue: Int(fractalType.rawValue),
             iterations: iterations,
             raySteps: raySteps,
             qualityMode: qualityMode,
@@ -416,7 +416,7 @@ extension Renderer {
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(for: fractalType),
-            fractalTypeRawValue: fractalType.rawValue,
+            fractalTypeRawValue: Int(fractalType.rawValue),
             iterations: iterations,
             raySteps: raySteps,
             qualityMode: qualityMode,
@@ -544,7 +544,7 @@ extension Renderer {
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
         let keyContext = ComputePipelineKeyContext(
             prefix: customCacheKeyPrefix(for: fractalType),
-            fractalTypeRawValue: fractalType.rawValue,
+            fractalTypeRawValue: Int(fractalType.rawValue),
             fractalIterations: fractalIterations,
             maxRaySteps: maxRaySteps,
             powerKey: powerKey
