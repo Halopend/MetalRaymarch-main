@@ -203,4 +203,64 @@ final class FormulaCatalog: @unchecked Sendable {
     private func setParam(_ fp: inout FormulaParams, index: Int, value: Float) {
         Self.setParam(&fp, index: index, value: value)
     }
+
+    // MARK: - Ephemeral (custom) formula registration
+
+    /// Register a formula descriptor at runtime under `FractalModelType.custom`.
+    /// Replaces any previously-registered ephemeral formula. Thread-safe.
+    func registerEphemeral(_ formula: EmbeddedFormula) {
+        let descriptor = FormulaDescriptor(
+            id: formula.id,
+            name: formula.name,
+            fractalType: FractalModelType.custom.rawValue,
+            category: formula.category ?? "Custom",
+            description: formula.formulaDescription ?? "",
+            params: formula.params,
+            author: formula.author
+        )
+        // Mutate caches under serial access. `FormulaCatalog` is otherwise read-only
+        // after `init`, so we just synchronize through a private NSLock.
+        Self.ephemeralLock.lock()
+        defer { Self.ephemeralLock.unlock() }
+
+        // Drop any previous custom registration first.
+        unregisterEphemeralLocked()
+
+        formulas.append(descriptor)
+        byType[descriptor.fractalType] = descriptor
+        byId[descriptor.id] = descriptor
+        byCategory[descriptor.category, default: []].append(descriptor)
+        if !categories.contains(descriptor.category) {
+            categories.append(descriptor.category)
+        }
+        ephemeralCustomId = descriptor.id
+        ephemeralCategory = descriptor.category
+    }
+
+    /// Remove the active ephemeral formula registration, if any.
+    func unregisterEphemeral() {
+        Self.ephemeralLock.lock()
+        defer { Self.ephemeralLock.unlock() }
+        unregisterEphemeralLocked()
+    }
+
+    private func unregisterEphemeralLocked() {
+        guard let id = ephemeralCustomId else { return }
+        if let cat = ephemeralCategory {
+            byCategory[cat]?.removeAll { $0.id == id }
+            if byCategory[cat]?.isEmpty == true {
+                byCategory.removeValue(forKey: cat)
+                categories.removeAll { $0 == cat }
+            }
+        }
+        formulas.removeAll { $0.id == id }
+        byId.removeValue(forKey: id)
+        byType.removeValue(forKey: FractalModelType.custom.rawValue)
+        ephemeralCustomId = nil
+        ephemeralCategory = nil
+    }
+
+    private static let ephemeralLock = NSLock()
+    private var ephemeralCustomId: String?
+    private var ephemeralCategory: String?
 }

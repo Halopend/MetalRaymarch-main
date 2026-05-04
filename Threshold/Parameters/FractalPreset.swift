@@ -91,6 +91,12 @@ struct FractalPreset: Codable, Identifiable {
     /// beat punch, triplet gains, and per-target mappings.
     var audioReactiveConfig: AudioReactiveConfig?
 
+    /// Optional embedded distance estimator + parameter metadata.
+    /// When present, the preset is self-contained: the renderer compiles the embedded
+    /// Metal source at load time and renders via `FractalModelType.custom` instead of
+    /// a built-in formula. Older app versions ignore this field.
+    var embeddedFormula: EmbeddedFormula?
+
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
@@ -107,6 +113,7 @@ struct FractalPreset: Codable, Identifiable {
         case gradientState, lightingSoftness
         case musicReactiveMappings  // legacy — mappings only
         case audioReactiveConfig    // canonical — full config
+        case embeddedFormula        // optional self-contained DE shader payload
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -214,6 +221,13 @@ struct FractalPreset: Codable, Identifiable {
         } else {
             audioReactiveConfig = nil
         }
+
+        if let formula = try container.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedFormula) {
+            try formula.validate()
+            embeddedFormula = formula
+        } else {
+            embeddedFormula = nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -277,6 +291,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(audioReactiveConfig, forKey: .audioReactiveConfig)
         try container.encodeIfPresent(audioReactiveConfig?.musicReactiveMappings ?? musicReactiveMappings,
                                       forKey: .musicReactiveMappings)
+        try container.encodeIfPresent(embeddedFormula, forKey: .embeddedFormula)
     }
     
     // MARK: - Function Constant Derivation
@@ -348,7 +363,7 @@ struct FractalPreset: Codable, Identifiable {
     }
     
     /// Create a preset from current render settings
-    static func fromSettings(_ settings: RenderSettings, name: String, id: UUID = UUID(), createdAt: Date = Date(), thumbnailData: Data? = nil) -> FractalPreset {
+    static func fromSettings(_ settings: RenderSettings, name: String, id: UUID = UUID(), createdAt: Date = Date(), thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil) -> FractalPreset {
         var preset = FractalPreset(id: id, name: name, createdAt: createdAt, thumbnailData: thumbnailData)
 
         // ── Geometry domain (1 lock acquisition) ──
@@ -423,6 +438,9 @@ struct FractalPreset: Codable, Identifiable {
         preset.audioReactiveConfig = arc
         // Keep legacy field in sync so files remain readable by older builds.
         preset.musicReactiveMappings = arc.musicReactiveMappings
+        if preset.fractalType == .custom {
+            preset.embeddedFormula = embeddedFormula
+        }
 
         return preset
     }

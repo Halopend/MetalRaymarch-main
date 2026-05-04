@@ -11,11 +11,20 @@ extension Renderer {
                                               vertexFunctionName: String = "vertexShader",
                                               fragmentFunctionName: String = "fragmentShader",
                                               usesVertexAmplification: Bool = true,
-                                              functionConstants: MTLFunctionConstantValues? = nil) throws -> MTLRenderPipelineState {
-        /// Build a render state pipeline object
+                                              functionConstants: MTLFunctionConstantValues? = nil,
+                                              library: MTLLibrary? = nil) throws -> MTLRenderPipelineState {
+        /// Build a render state pipeline object. When `library` is non-nil, all
+        /// `makeFunction` calls target it (used for runtime-compiled `.threshfx`
+        /// formulas). Otherwise the bundled `default.metallib` is used and cached.
 
-        let library = _cachedLibrary ?? device.makeDefaultLibrary()
-        if _cachedLibrary == nil { _cachedLibrary = library }
+        let resolvedLibrary: MTLLibrary?
+        if let library {
+            resolvedLibrary = library
+        } else {
+            resolvedLibrary = _cachedLibrary ?? device.makeDefaultLibrary()
+            if _cachedLibrary == nil { _cachedLibrary = resolvedLibrary }
+        }
+        let library = resolvedLibrary
 
         let vertexFunction = library?.makeFunction(name: vertexFunctionName)
 
@@ -210,7 +219,8 @@ extension Renderer {
                                          mtlVertexDescriptor: MTLVertexDescriptor,
                                          config: FunctionConstantConfig,
                                          colorFormat: MTLPixelFormat? = nil,
-                                         fragmentFunctionName: String = "fragmentShader") throws -> MTLRenderPipelineState {
+                                         fragmentFunctionName: String = "fragmentShader",
+                                         library: MTLLibrary? = nil) throws -> MTLRenderPipelineState {
         return try buildRenderPipelineWithDevice(
             device: device,
             layerRenderer: layerRenderer,
@@ -218,7 +228,8 @@ extension Renderer {
             mtlVertexDescriptor: mtlVertexDescriptor,
             colorFormat: colorFormat,
             fragmentFunctionName: fragmentFunctionName,
-            functionConstants: config.toMTLConstants()
+            functionConstants: config.toMTLConstants(),
+            library: library
         )
     }
 }

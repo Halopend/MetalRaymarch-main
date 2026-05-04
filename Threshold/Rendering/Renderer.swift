@@ -537,6 +537,11 @@ actor Renderer {
                 appModel.triggerProfilerHandler = {
                     renderer.triggerProfiler()
                 }
+
+                // Setup custom-shader (.threshfx) activation handler.
+                appModel.activateEmbeddedFormulaHandler = { formula in
+                    try await renderer.activateEmbeddedFormula(formula)
+                }
             }
             
             await renderer.startARSession()

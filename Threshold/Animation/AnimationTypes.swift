@@ -729,7 +729,13 @@ struct AnimationScene: Codable, Identifiable, Equatable {
     /// `songFadeOutDuration`: ramp down shape-stream velocity before reaching the offset window.
     var songFadeOutDuration: TimeInterval?
     var songFadeOutOffset: TimeInterval?
-    
+
+    /// Optional embedded distance estimator + parameter metadata.
+    /// When present, the scene is self-contained: the renderer compiles the embedded
+    /// Metal source at load time and renders via `FractalModelType.custom` instead of
+    /// a built-in formula. Older app versions ignore this field.
+    var embeddedFormula: EmbeddedFormula?
+
     /// Total duration of the scene (sum of all keyframe durations)
     var totalDuration: TimeInterval {
         keyframes.reduce(0) { $0 + $1.duration }
@@ -802,6 +808,12 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         playbackSpeedOverride = try c.decodeIfPresent(Double.self, forKey: .playbackSpeedOverride)
         songFadeOutDuration   = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutDuration)
         songFadeOutOffset     = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutOffset)
+        if let formula = try c.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedFormula) {
+            try formula.validate()
+            embeddedFormula = formula
+        } else {
+            embeddedFormula = nil
+        }
     }
     
     /// Add a keyframe from current settings

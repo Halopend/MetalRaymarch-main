@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "formula": {
+    "schemaVersion": 1,
+    "id": "com.puppypower.threshold.sample.spherefold",
+    "name": "Sphere Fold (Sample)",
+    "category": "Custom",
+    "author": "Threshold Sample",
+    "description": "Simple sphere-fold + scale recursion. Demonstrates the .threshfx custom formula path. Two parameters: scale and minimum radius squared.",
+    "functionStem": "SampleSphereFold",
+    "metalSource": "FORCE_INLINE float DE_SampleSphereFold(float3 pos, FormulaParams fp, float3x3 rot,\n                                  int iterations, int colorIterations,\n                                  thread OrbitData& orbit) {\n    float scale = max(fp.params[0], 0.1f);\n    float minR2 = max(fp.params[1], 1e-4f);\n    float fixedR2 = max(fp.params[2], minR2);\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float3 p = pos;\n    float dr = 1.0f;\n    float trap = 1e20f;\n    int trapIter = 0;\n    float3 trapPos = pos;\n    int trapIterations = min(max(colorIterations, 0), iterations);\n\n    int i = 0;\n    for (; i < iterations; ++i) {\n        if (hasRotation) p = rot * p;\n        p = clamp(p, -1.0f, 1.0f) * 2.0f - p;\n        float r2 = dot(p, p);\n        if (r2 < minR2) {\n            float k = fixedR2 / minR2;\n            p *= k; dr *= k;\n        } else if (r2 < fixedR2) {\n            float k = fixedR2 / r2;\n            p *= k; dr *= k;\n        }\n        p = p * scale;\n        dr = dr * scale + 1.0f;\n        if (i < trapIterations) {\n            float r2t = dot(p, p);\n            if (r2t < trap) { trap = r2t; trapIter = i; trapPos = p; }\n        }\n    }\n    orbit.trap = trap;\n    orbit.trapIteration = trapIter;\n    orbit.trapPosition = trapPos;\n    orbit.finalP = p;\n    orbit.iterationsUsed = i;\n    return 0.5f * length(p) / max(abs(dr), 1e-6f);\n}\n\nFORCE_INLINE float DE_SampleSphereFold_Dist(float3 pos, FormulaParams fp, float3x3 rot, int iterations) {\n    float scale = max(fp.params[0], 0.1f);\n    float minR2 = max(fp.params[1], 1e-4f);\n    float fixedR2 = max(fp.params[2], minR2);\n    bool hasRotation = hasRot1Precomputed(fp);\n\n    float3 p = pos;\n    float dr = 1.0f;\n    for (int i = 0; i < iterations; ++i) {\n        if (hasRotation) p = rot * p;\n        p = clamp(p, -1.0f, 1.0f) * 2.0f - p;\n        float r2 = dot(p, p);\n        if (r2 < minR2) { float k = fixedR2 / minR2; p *= k; dr *= k; }\n        else if (r2 < fixedR2) { float k = fixedR2 / r2; p *= k; dr *= k; }\n        p = p * scale;\n        dr = dr * scale + 1.0f;\n    }\n    return 0.5f * length(p) / max(abs(dr), 1e-6f);\n}\n",
+    "params": [
+      { "index": 0, "name": "Scale",     "default": 2.0,  "min": 0.5,  "max": 4.0,  "step": 0.01 },
+      { "index": 1, "name": "Min R²",    "default": 0.25, "min": 0.01, "max": 1.0,  "step": 0.01 },
+      { "index": 2, "name": "Fixed R²",  "default": 1.0,  "min": 0.5,  "max": 2.0,  "step": 0.01 }
+    ],
+    "defaultIterations": 10,
+    "defaultColorIterations": 8,
+    "supportedEffectTags": ["safetyBubble"]
+  }
+}

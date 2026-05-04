@@ -190,8 +190,8 @@ class PresetManager {
     }
     
     /// Save current settings as a new preset
-    func savePreset(name: String, settings: RenderSettings, thumbnailData: Data? = nil) {
-        let preset = FractalPreset.fromSettings(settings, name: name, thumbnailData: thumbnailData)
+    func savePreset(name: String, settings: RenderSettings, thumbnailData: Data? = nil, embeddedFormula: EmbeddedFormula? = nil) {
+        let preset = FractalPreset.fromSettings(settings, name: name, thumbnailData: thumbnailData, embeddedFormula: embeddedFormula)
         presets.insert(preset, at: 0) // Add to beginning (newest first)
         scheduleSavePresets()
         
@@ -410,8 +410,8 @@ extension PresetManager {
     }
     
     /// Save current settings as "last state" for restore on next launch
-    func saveLastState(from settings: RenderSettings) {
-        let preset = FractalPreset.fromSettings(settings, name: "__lastState__")
+    func saveLastState(from settings: RenderSettings, embeddedFormula: EmbeddedFormula? = nil) {
+        let preset = FractalPreset.fromSettings(settings, name: "__lastState__", embeddedFormula: embeddedFormula)
         
         do {
             let encoder = JSONEncoder()

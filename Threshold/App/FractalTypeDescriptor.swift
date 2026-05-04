@@ -135,9 +135,12 @@ enum FractalTypeRegistry {
         TheliPseudoKleinianDescriptor(),
         KleinianDescriptor(),
         BoxSphereFolderDescriptor(),
+        // Placeholder so `.custom` always resolves; real metadata is supplied
+        // at scene-load time via `registerCustom(_:)`.
+        CustomFractalDescriptor.placeholder,
     ]
 
-    private static let descriptors: [Int32: any FractalTypeDescriptor] = {
+    private static let staticDescriptors: [Int32: any FractalTypeDescriptor] = {
         var d: [Int32: any FractalTypeDescriptor] = [:]
         for desc in allDescriptors { d[desc.rawValue] = desc }
         #if DEBUG
@@ -149,11 +152,36 @@ enum FractalTypeRegistry {
         return d
     }()
 
+    /// Lock-protected overlay for ephemeral descriptors (currently only `.custom`).
+    private static let overlayLock = NSLock()
+    nonisolated(unsafe) private static var overlay: [Int32: any FractalTypeDescriptor] = [:]
+
     static func descriptor(for type: FractalModelType) -> FractalTypeDescriptor {
-        guard let desc = descriptors[type.rawValue] else {
+        overlayLock.lock()
+        let dynamic = overlay[type.rawValue]
+        overlayLock.unlock()
+        if let dynamic { return dynamic }
+        guard let desc = staticDescriptors[type.rawValue] else {
             preconditionFailure("FractalTypeRegistry: no descriptor for \(type) (rawValue \(type.rawValue))")
         }
         return desc
+    }
+
+    /// Register a runtime descriptor built from an embedded formula. Replaces any
+    /// previously-active `.custom` descriptor.
+    static func registerCustom(_ formula: EmbeddedFormula) {
+        let desc = CustomFractalDescriptor(formula: formula)
+        overlayLock.lock()
+        overlay[FractalModelType.custom.rawValue] = desc
+        overlayLock.unlock()
+    }
+
+    /// Remove the active `.custom` descriptor; subsequent lookups fall back to
+    /// the placeholder.
+    static func unregisterCustom() {
+        overlayLock.lock()
+        overlay.removeValue(forKey: FractalModelType.custom.rawValue)
+        overlayLock.unlock()
     }
 }
 
@@ -439,3 +467,52 @@ private struct BoxSphereFolderDescriptor: FractalTypeDescriptor {
     }
 }
 
+
+// MARK: - Custom (runtime-compiled embedded formula)
+
+/// Descriptor for the single active embedded formula loaded from a `.threshfx`
+/// payload (or embedded inside a `.threshanim` / `.threshscene` file).
+/// Built dynamically by `FractalTypeRegistry.registerCustom(_:)`.
+///
+/// Until a real formula is registered, the registry holds `placeholder`, which
+/// keeps lookups safe but reports `isSelectableInUI = false` so the picker hides it.
+struct CustomFractalDescriptor: FractalTypeDescriptor {
+    let rawValue: Int32 = 1000
+    let icon = "scroll"
+    let codableString = "custom"
+    let supportedCoreGestureActions = standardCoreGestureActions
+    var supportedEffectTags: Set<EffectTag> { Self.universalEffectTags }
+
+    let displayName: String
+    let category: String
+    let isSelectableInUI: Bool
+    private let formula: EmbeddedFormula?
+
+    init(formula: EmbeddedFormula) {
+        self.formula = formula
+        self.displayName = formula.name
+        self.category = formula.category ?? "Custom"
+        self.isSelectableInUI = true
+    }
+
+    private init() {
+        self.formula = nil
+        self.displayName = "Custom Formula"
+        self.category = "Custom"
+        self.isSelectableInUI = false
+    }
+
+    /// Empty descriptor used until an embedded formula is registered.
+    static let placeholder = CustomFractalDescriptor()
+
+    func defaultFormulaParams() -> FormulaParams {
+        var fp = Self.baseFormulaParams()
+        if let formula {
+            for p in formula.params {
+                FormulaCatalog.setParam(&fp, index: p.index, value: p.`default`)
+            }
+        }
+        FormulaCatalog.normalizeRotationFlags(&fp)
+        return fp
+    }
+}

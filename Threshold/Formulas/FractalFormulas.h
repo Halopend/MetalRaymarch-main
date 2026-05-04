@@ -63,6 +63,7 @@ FORCE_INLINE float FractalDE_Dispatch(float3 pos, int fractalType, FormulaParams
             return DE_BoxSphereFolder_Dist(pos, fp, fp.rotMatrix1, iterations);
         case FractalTypeMandelboxSphereProjection:
             return DE_MandelboxSphereProjection_Dist(pos, fp, fp.rotMatrix1, iterations);
+        // __CUSTOM_DISPATCH_DIST__
         default:
             return 1e10f; // Unknown type — far away
     }
@@ -94,6 +95,7 @@ FORCE_INLINE float FractalDE_WithOrbit(float3 pos, int fractalType, FormulaParam
             return DE_BoxSphereFolder(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
         case FractalTypeMandelboxSphereProjection:
             return DE_MandelboxSphereProjection(pos, fp, fp.rotMatrix1, iterations, colorIterations, orbit);
+        // __CUSTOM_DISPATCH_ORBIT__
         default:
             orbit.trap = 1e20f;
             orbit.trapIteration = 0;

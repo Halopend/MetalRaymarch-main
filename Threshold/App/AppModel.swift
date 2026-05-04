@@ -155,7 +155,9 @@ class AppModel {
     var pendingExternalImport: ExternalFileImportRequest?
     @ObservationIgnored private var externalPreviewRestorePreset: FractalPreset?
     @ObservationIgnored private var externalPreviewRestoreScene: AnimationScene?
+    @ObservationIgnored private var externalPreviewRestoreEmbeddedFormula: EmbeddedFormula?
     @ObservationIgnored private var externalPreviewCapturedScene = false
+    @ObservationIgnored private var externalPreviewCapturedEmbeddedFormula = false
     @ObservationIgnored private var activeExternalPreviewID: UUID?
 
     // Animation/Scene playback manager
@@ -192,6 +194,21 @@ class AppModel {
     // Pipeline preparation for specific iteration/ray step values (set by Renderer)
     // Called when sliders change to pre-compile the needed pipeline
     var preparePipelineForValuesHandler: ((Int, Int) async -> Void)?
+
+    // Embedded-formula activation handler (set by Renderer).
+    // When non-nil, AppModel can ask the renderer to compile + install a custom
+    // MTLLibrary for a `.threshfx` formula. Pass `nil` to detach.
+    var activateEmbeddedFormulaHandler: ((EmbeddedFormula?) async throws -> Void)?
+
+    /// Full payload for the formula currently installed in the renderer.
+    /// Stored so preview cancellation and save/export paths can restore the
+    /// previous custom formula rather than only its hash.
+    @ObservationIgnored var activeEmbeddedFormula: EmbeddedFormula?
+
+    /// The formula currently installed in the renderer (if any). Used to avoid
+    /// redundant recompilation when the same formula is referenced multiple times
+    /// across previews/imports.
+    @ObservationIgnored var activeEmbeddedFormulaHash: String?
     
     /// Prepare the shader pipeline for specific iteration and ray step values
     /// Call this when slider values change to avoid compilation hitches
@@ -335,7 +352,7 @@ class AppModel {
     
     /// Save current state for restore on next launch
     func saveLastState() {
-        presetManager.saveLastState(from: renderSettings)
+        presetManager.saveLastState(from: renderSettings, embeddedFormula: activeEmbeddedFormula)
         SettingsPersistence.saveAll(from: renderSettings)
     }
 
@@ -380,6 +397,20 @@ class AppModel {
                 errorReporter.report(.animation(.importFailed("Could not read \(url.lastPathComponent).")))
             }
 
+        case "threshfx":
+            do {
+                let container = try EmbeddedFormulaContainer.decode(fromContainerAt: url)
+                let preset = AppModel.makeCustomPreset(from: container.formula)
+                pendingExternalImport = ExternalFileImportRequest(
+                    fileName: url.lastPathComponent,
+                    fileExtension: "threshfx",
+                    payload: .preset(preset)
+                )
+                ensureWindowContentVisible()
+            } catch {
+                errorReporter.report(.preset(.importFailed("Could not read \(url.lastPathComponent): \(error.localizedDescription)")))
+            }
+
         default:
             errorReporter.report(.preset(.importFailed("Unsupported Threshold file: \(url.lastPathComponent).")))
         }
@@ -394,8 +425,17 @@ class AppModel {
         switch request.payload {
         case .preset(let preset):
             if externalPreviewRestorePreset == nil {
-                externalPreviewRestorePreset = FractalPreset.fromSettings(renderSettings, name: "__externalPreviewRestore__")
+                externalPreviewRestorePreset = FractalPreset.fromSettings(
+                    renderSettings,
+                    name: "__externalPreviewRestore__",
+                    embeddedFormula: activeEmbeddedFormula
+                )
             }
+            if !externalPreviewCapturedEmbeddedFormula {
+                externalPreviewRestoreEmbeddedFormula = activeEmbeddedFormula
+                externalPreviewCapturedEmbeddedFormula = true
+            }
+            installEmbeddedFormulaIfNeeded(preset.embeddedFormula)
             Task { await preparePipelineHandler?(preset) }
             preset.apply(to: renderSettings, resetEnvironment: true)
             gestureController?.syncWithSettings()
@@ -406,6 +446,11 @@ class AppModel {
                 externalPreviewRestoreScene = animationManager?.currentScene
                 externalPreviewCapturedScene = true
             }
+            if !externalPreviewCapturedEmbeddedFormula {
+                externalPreviewRestoreEmbeddedFormula = activeEmbeddedFormula
+                externalPreviewCapturedEmbeddedFormula = true
+            }
+            installEmbeddedFormulaIfNeeded(scene.embeddedFormula)
             animationManager?.currentScene = scene
         }
     }
@@ -413,6 +458,11 @@ class AppModel {
     func importExternalFile(_ request: ExternalFileImportRequest) {
         switch request.payload {
         case .preset(let preset):
+            if let formula = preset.embeddedFormula {
+                installEmbeddedFormulaIfNeeded(formula)
+            } else {
+                uninstallEmbeddedFormula()
+            }
             let importedPreset = presetManager.importPreset(preset)
             Task { await preparePipelineHandler?(importedPreset) }
             presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
@@ -421,6 +471,11 @@ class AppModel {
             NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
 
         case .animation(let scene):
+            if let formula = scene.embeddedFormula {
+                installEmbeddedFormulaIfNeeded(formula)
+            } else {
+                uninstallEmbeddedFormula()
+            }
             let importedScene = animationManager?.importScene(scene)
             animationManager?.currentScene = importedScene
         }
@@ -441,6 +496,13 @@ class AppModel {
 
     private func clearExternalPreview(restorePreviewedState: Bool) {
         if restorePreviewedState {
+            if externalPreviewCapturedEmbeddedFormula {
+                if let formula = externalPreviewRestoreEmbeddedFormula {
+                    installEmbeddedFormulaIfNeeded(formula)
+                } else {
+                    uninstallEmbeddedFormula()
+                }
+            }
             if let preset = externalPreviewRestorePreset {
                 preset.apply(to: renderSettings, resetEnvironment: true)
                 gestureController?.syncWithSettings()
@@ -453,7 +515,9 @@ class AppModel {
 
         externalPreviewRestorePreset = nil
         externalPreviewRestoreScene = nil
+        externalPreviewRestoreEmbeddedFormula = nil
         externalPreviewCapturedScene = false
+        externalPreviewCapturedEmbeddedFormula = false
         activeExternalPreviewID = nil
     }
     

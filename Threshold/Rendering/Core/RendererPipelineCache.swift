@@ -59,7 +59,8 @@ extension Renderer {
     /// Gets or builds a specialized pipeline for a given preset.
     /// Uses the unified pipelineCache to avoid redundant compilation.
     func getPipeline(forPreset preset: FractalPreset, useQuadShared: Bool = false) -> MTLRenderPipelineState {
-        let cacheKey = preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
+        let prefix = customCacheKeyPrefix(for: preset.fractalType)
+        let cacheKey = prefix + preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
 
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -77,7 +78,8 @@ extension Renderer {
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
-                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
+                library: renderingLibrary(for: preset.fractalType)
             )
             pipelineCache[cacheKey] = pipeline  // Store in unified cache
             if RENDERER_DEBUG { print("✅ [ShaderCompilation] SUCCESS: Built pipeline [\(cacheKey)]") }
@@ -101,7 +103,8 @@ extension Renderer {
         let neon = (appModel.renderSettings.gradientPreset?.isNeonMode ?? false) ? 1 : 0
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        let prefix = customCacheKeyPrefix(for: fractalType)
+        let cacheKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
 
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -131,7 +134,8 @@ extension Renderer {
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
-                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
+                library: renderingLibrary(for: fractalType)
             )
             pipelineCache[cacheKey] = pipeline
             if RENDERER_DEBUG { print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)") }
@@ -162,6 +166,12 @@ extension Renderer {
         if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Starting preset pipeline precompilation for \(presets.count) presets...") }
 
         for preset in presets {
+            if preset.fractalType == .custom {
+                if RENDERER_DEBUG {
+                    print("  ⏭️  Skipping \(preset.name) - custom presets require an activated embedded formula")
+                }
+                continue
+            }
             let key = preset.pipelineCacheKey
             guard !compiledKeys.contains(key) else {
                 if RENDERER_DEBUG { print("  ⏭️  Skipping \(preset.name) - duplicate config [\(key)]") }
@@ -230,7 +240,8 @@ extension Renderer {
         // Build unified cache key (only on parameter change)
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        let prefix = customCacheKeyPrefix(for: fractalType)
+        let cacheKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
         if RENDERER_DEBUG,
            fractalType == .mandelbulb,
            mandelbulbPower != lastSelectPower {
@@ -279,7 +290,7 @@ extension Renderer {
             )
 
             // 3. Try FT-specific neon=off quality-preset fallback.
-            let fallbackKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+            let fallbackKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
             if let pipeline = pipelineCache[fallbackKey] {
                 if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
                     print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: \(cacheKey))")
@@ -289,7 +300,7 @@ extension Renderer {
             }
             else {
                 // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
-                let sharedExactKey = "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                let sharedExactKey = prefix + "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
                 if let pipeline = pipelineCache[sharedExactKey] {
                     if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
                         print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
@@ -299,7 +310,7 @@ extension Renderer {
                 }
                 // 5. Try shared neon=off quality key
                 else {
-                    let sharedFallbackKey = "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                    let sharedFallbackKey = prefix + "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
                     if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
                         if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
                             print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
@@ -345,7 +356,8 @@ extension Renderer {
         )
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-        let cacheKey = "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        let prefix = customCacheKeyPrefix(for: fractalType)
+        let cacheKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
 
         // Already cached
         if pipelineCache[cacheKey] != nil { return }
@@ -373,7 +385,8 @@ extension Renderer {
                 rasterSampleCount: rasterSampleCount,
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
-                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+                fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
+                library: renderingLibrary(for: fractalType)
             )
             pipelineCache[cacheKey] = pipeline
             if RENDERER_DEBUG { print("✅ [Pipeline] Built on-demand: \(cacheKey)") }
@@ -463,6 +476,7 @@ extension Renderer {
             return nil
         }()
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
+        let prefix = customCacheKeyPrefix(for: fractalType)
 
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower,
@@ -471,7 +485,7 @@ extension Renderer {
             return cached
         }
 
-        let exactKey = "FT\(fractalType.rawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
+        let exactKey = prefix + "FT\(fractalType.rawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
 
         // 1. Exact match — FC values match precomputed absScalePow
         if let pipeline = computePipelineCache[exactKey] {
@@ -488,7 +502,7 @@ extension Renderer {
             return pipeline
         }
 
-        let sharedKey = "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
+        let sharedKey = prefix + "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
         if let pipeline = computePipelineCache[sharedKey] {
             recordPipelineTelemetry(computeHit: true)
             if RENDERER_DEBUG && lastComputePipelineKey != sharedKey {
@@ -591,6 +605,10 @@ extension Renderer {
         let rasterSampleCount = self.rasterSampleCount
         nonisolated(unsafe) let vertexDescriptor = self.mtlVertexDescriptor
         let fragmentName = useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader"
+        // Snapshot the active custom library at enqueue time so the eventual
+        // build matches the cache key prefix. `MTLLibrary` is thread-safe.
+        let customLibrary: MTLLibrary? =
+            cacheKey.hasPrefix("CX") ? customShaderLibrary : nil
 
         Task.detached(priority: .utility) { [weak self] in
             do {
@@ -600,7 +618,8 @@ extension Renderer {
                     rasterSampleCount: rasterSampleCount,
                     mtlVertexDescriptor: vertexDescriptor,
                     config: config,
-                    fragmentFunctionName: fragmentName
+                    fragmentFunctionName: fragmentName,
+                    library: customLibrary
                 )
                 await self?.insertBuiltRenderPipeline(pipeline, forKey: cacheKey)
             } catch {
@@ -627,10 +646,11 @@ extension Renderer {
         pendingComputePipelineBuildKeys.insert(cacheKey)
 
         let device = self.device
-        // Resolve (or create & cache) the default library on the actor so
-        // makeDefaultLibrary() isn't called concurrently by multiple tasks.
+        // Resolve the appropriate library: custom library for `.custom`, else default.
         let library: MTLLibrary?
-        if let cached = cachedDefaultLibrary {
+        if cacheKey.hasPrefix("CX"), let custom = customShaderLibrary {
+            library = custom
+        } else if let cached = cachedDefaultLibrary {
             library = cached
         } else if let fresh = device.makeDefaultLibrary() {
             cachedDefaultLibrary = fresh

@@ -444,7 +444,8 @@ struct ContentView: View {
         appModel.presetManager.savePreset(
             name: finalName,
             settings: appModel.renderSettings,
-            thumbnailData: includeGeneratedPreview ? generatedPresetPreviewData(named: finalName) : nil
+            thumbnailData: includeGeneratedPreview ? generatedPresetPreviewData(named: finalName) : nil,
+            embeddedFormula: appModel.activeEmbeddedFormula
         )
     }
 
@@ -905,25 +906,27 @@ struct ContentView: View {
     // MARK: - Bottom Bar
     
     private var bottomBar: some View {
-        HStack(spacing: 12) {
-            activityTrafficLights
+        ZStack {
+            HStack(spacing: 12) {
+                activityTrafficLights
 
-            Spacer()
+                Spacer()
+
+                if let animationManager = appModel.animationManager {
+                    LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                        .disabled(animationManager.isPlaying)
+                }
+
+                HoldToSaveResetButton(
+                    onTapReset: resetCurrentFractalSettings,
+                    onHoldReady: {
+                        showSaveDestinationSheet = true
+                    }
+                )
+            }
 
             ToggleImmersiveSpaceButton()
                 .fixedSize()
-
-            if let animationManager = appModel.animationManager {
-                LiveSessionRecordingControl(animationManager: animationManager, compact: true)
-                    .disabled(animationManager.isPlaying)
-            }
-
-            HoldToSaveResetButton(
-                onTapReset: resetCurrentFractalSettings,
-                onHoldReady: {
-                    showSaveDestinationSheet = true
-                }
-            )
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -3023,7 +3026,11 @@ struct ContentView: View {
 
                 HStack(spacing: 10) {
                     Button {
-                        let preset = FractalPreset.fromSettings(appModel.renderSettings, name: "Export")
+                        let preset = FractalPreset.fromSettings(
+                            appModel.renderSettings,
+                            name: "Export",
+                            embeddedFormula: appModel.activeEmbeddedFormula
+                        )
                         if let url = appModel.presetManager.exportPreset(preset) {
                             exportShareURL = url
                             showExportShare = true
@@ -3039,7 +3046,11 @@ struct ContentView: View {
                 let hasMusicMappings = !(appModel.renderSettings.musicReactiveMappings.isEmpty)
                 if hasMusicMappings {
                     Button {
-                        var preset = FractalPreset.fromSettings(appModel.renderSettings, name: "Music Export")
+                        var preset = FractalPreset.fromSettings(
+                            appModel.renderSettings,
+                            name: "Music Export",
+                            embeddedFormula: appModel.activeEmbeddedFormula
+                        )
                         preset.musicReactiveMappings = appModel.renderSettings.musicReactiveMappings
                         if let url = appModel.presetManager.exportPreset(preset) {
                             exportShareURL = url

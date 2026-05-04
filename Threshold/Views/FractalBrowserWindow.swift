@@ -538,6 +538,8 @@ struct FractalBrowserWindow: View {
             return "z_{n+1} = fold(z_n) + c"
         case .boxSphereFolder:
             return "p_{n+1} = fold_box_sphere(p_n) + c"
+        case .custom:
+            return nil
         }
     }
 

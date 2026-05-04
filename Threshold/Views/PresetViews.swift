@@ -236,6 +236,7 @@ struct SavePresetSheet: View {
 // MARK: - Presets List View
 struct PresetsListView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var appModel
     
     let presetManager: PresetManager
     let settings: RenderSettings
@@ -319,7 +320,12 @@ struct PresetsListView: View {
                     presetManager: presetManager,
                     thumbnailData: currentThumbnailData
                 ) { name in
-                    presetManager.savePreset(name: name, settings: settings, thumbnailData: currentThumbnailData)
+                    presetManager.savePreset(
+                        name: name,
+                        settings: settings,
+                        thumbnailData: currentThumbnailData,
+                        embeddedFormula: appModel.activeEmbeddedFormula
+                    )
                 }
             }
             .sheet(item: $shareItem) { item in
@@ -481,6 +487,8 @@ struct PresetsListView: View {
 
 // MARK: - Compact Preset Button (for main UI)
 struct PresetButton: View {
+    @Environment(AppModel.self) private var appModel
+
     let presetManager: PresetManager
     let settings: RenderSettings
     var animationManager: AnimationManager? = nil
@@ -533,7 +541,12 @@ struct PresetButton: View {
                 presetManager: presetManager,
                 thumbnailData: capturedThumbnail
             ) { name in
-                presetManager.savePreset(name: name, settings: settings, thumbnailData: capturedThumbnail)
+                presetManager.savePreset(
+                    name: name,
+                    settings: settings,
+                    thumbnailData: capturedThumbnail,
+                    embeddedFormula: appModel.activeEmbeddedFormula
+                )
             }
             .presentationDetents([.medium])
         }

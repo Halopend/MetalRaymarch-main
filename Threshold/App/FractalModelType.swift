@@ -20,6 +20,10 @@ enum FractalModelType: Int32, CaseIterable {
     case kleinian              = 17
     case boxSphereFolder         = 20
     case mandelboxSphereProjection = 21
+    /// Sentinel for runtime-compiled DE shaders (.threshfx). Mirrors
+    /// `FractalTypeCustom` in ShaderTypes.h. The single active embedded formula
+    /// is registered with `FractalTypeRegistry` and `FormulaCatalog` at load time.
+    case custom                  = 1000
     
     /// Descriptor from the registry — all metadata is defined there.
     var descriptor: FractalTypeDescriptor { FractalTypeRegistry.descriptor(for: self) }

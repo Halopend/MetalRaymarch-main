@@ -75,6 +75,10 @@ typedef NS_ENUM(EnumBackingType, FractalType)
     FractalTypeKleinian              = 17,
     FractalTypeBoxSphereFolder         = 20,
     FractalTypeMandelboxSphereProjection = 21,
+    // Sentinel for runtime-compiled custom DE formulas (.threshfx).
+    // The static dispatch in FractalFormulas.h returns far for this value;
+    // custom rendering uses a separately-compiled MTLLibrary.
+    FractalTypeCustom                  = 1000,
 };
 
 // === FORMULA PARAMETERS ===
