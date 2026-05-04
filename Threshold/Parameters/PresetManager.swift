@@ -265,6 +265,34 @@ class PresetManager {
             return nil
         }
     }
+
+    func decodePreset(from url: URL) throws -> FractalPreset {
+        let data = try Data(contentsOf: url)
+        return try presetDecoder.decode(FractalPreset.self, from: data)
+    }
+
+    @discardableResult
+    func importPreset(_ preset: FractalPreset) -> FractalPreset {
+        if let existingIndex = presets.firstIndex(where: { $0.id == preset.id }) {
+            presets[existingIndex] = preset
+        } else {
+            presets.insert(preset, at: 0)
+        }
+        savePresets()
+        FractalPreset.clearThumbnailCache(for: preset.id)
+        UsageAnalytics.shared.trackPresetSaved(preset: preset)
+        return preset
+    }
+
+    @discardableResult
+    func importPreset(from url: URL) -> FractalPreset? {
+        do {
+            return importPreset(try decodePreset(from: url))
+        } catch {
+            print("Failed to import preset from \(url.lastPathComponent): \(error)")
+            return nil
+        }
+    }
     
 }
 

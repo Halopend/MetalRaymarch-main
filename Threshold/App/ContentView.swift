@@ -394,6 +394,23 @@ struct ContentView: View {
             .presentationDetents([.height(300), .height(360)])
             .presentationDragIndicator(.visible)
         }
+        .sheet(item: $appModel.pendingExternalImport) { request in
+            ExternalFileImportSheet(
+                request: request,
+                onPreview: {
+                    previewExternalFile(request)
+                },
+                onImport: {
+                    importExternalFile(request)
+                },
+                onCancel: {
+                    cancelExternalFileImport(request)
+                }
+            )
+            .presentationDetents([.height(390), .height(460)])
+            .presentationDragIndicator(.hidden)
+            .interactiveDismissDisabled()
+        }
     }
 
     private var menuSurfaceFill: Color {
@@ -438,6 +455,37 @@ struct ContentView: View {
             gradientState: appModel.renderSettings.gradientState,
             lightingPreset: appModel.renderSettings.lightingPreset
         )
+    }
+
+    private func previewExternalFile(_ request: ExternalFileImportRequest) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            routeExternalFile(request)
+        }
+        appModel.previewExternalImport(request)
+        cache.loadFromSettings()
+    }
+
+    private func importExternalFile(_ request: ExternalFileImportRequest) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            routeExternalFile(request)
+        }
+        appModel.importExternalFile(request)
+        cache.loadFromSettings()
+    }
+
+    private func cancelExternalFileImport(_ request: ExternalFileImportRequest) {
+        appModel.cancelExternalImport(request)
+        cache.loadFromSettings()
+    }
+
+    private func routeExternalFile(_ request: ExternalFileImportRequest) {
+        switch request.payload {
+        case .preset:
+            activateExploreSection(request.fileExtension == "threshmp" ? .musicReactive : .jumpingOff)
+        case .animation:
+            selectedTab = .animate
+            syncNavigationChromeFromLegacySelection()
+        }
     }
     
     // MARK: - Pre-Immersive Layout
@@ -3592,6 +3640,173 @@ private struct SaveDestinationSheet: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ExternalFileImportSheet: View {
+    let request: ExternalFileImportRequest
+    let onPreview: () -> Void
+    let onImport: () -> Void
+    let onCancel: () -> Void
+
+    private var fileKind: String {
+        switch request.payload {
+        case .preset: return request.fileExtension == "threshmp" ? "Music Preset" : "Fractal Scene"
+        case .animation: return request.fileExtension == "threshanimv" ? "Music Video Animation" : "Animation"
+        }
+    }
+
+    private var accentColor: Color {
+        switch request.payload {
+        case .preset: return request.fileExtension == "threshmp" ? .blue : .purple
+        case .animation: return .green
+        }
+    }
+
+    private var iconName: String {
+        switch request.payload {
+        case .preset: return request.fileExtension == "threshmp" ? "music.note.list" : "cube.transparent"
+        case .animation: return request.fileExtension == "threshanimv" ? "music.note.tv" : "film.stack"
+        }
+    }
+
+    private var title: String {
+        switch request.payload {
+        case .preset(let preset): return preset.name
+        case .animation(let scene): return scene.name
+        }
+    }
+
+    private var subtitle: String {
+        switch request.payload {
+        case .preset(let preset): return preset.fractalType.displayName
+        case .animation(let scene):
+            let duration = Self.durationFormatter.string(from: scene.totalDuration) ?? String(format: "%.1fs", scene.totalDuration)
+            return "\(scene.keyframes.count) keyframes, \(duration)"
+        }
+    }
+
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.unitsStyle = .abbreviated
+        formatter.maximumUnitCount = 2
+        return formatter
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .frame(width: 52, height: 52)
+                    .background(Circle().fill(accentColor.opacity(0.14)))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Open Threshold File")
+                        .font(.headline)
+                    Text(request.fileName)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(2)
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Text(fileKind)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(accentColor.opacity(0.13)))
+                }
+
+                VStack(spacing: 7) {
+                    ForEach(detailRows, id: \.0) { label, value in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            Text(value)
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.07)))
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(accentColor.opacity(0.07)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(accentColor.opacity(0.18), lineWidth: 1)
+            )
+
+            HStack(spacing: 10) {
+                Button(role: .cancel) {
+                    onCancel()
+                } label: {
+                    Label("Cancel", systemImage: "xmark")
+                }
+
+                Spacer()
+
+                Button {
+                    onPreview()
+                } label: {
+                    Label("Preview", systemImage: "eye")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    onImport()
+                } label: {
+                    Label("Import", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accentColor)
+            }
+        }
+        .padding(18)
+        .frame(width: 440)
+    }
+
+    private var detailRows: [(String, String)] {
+        switch request.payload {
+        case .preset(let preset):
+            let musicEnabled = preset.audioReactiveConfig?.fractalAudioReactiveEnabled ?? !(preset.musicReactiveMappings?.isEmpty ?? true)
+            return [
+                ("Format", ".\(request.fileExtension)"),
+                ("Iterations", "\(preset.fractalIterations)"),
+                ("Ray Steps", "\(preset.maxRaySteps)"),
+                ("Music Reactive", musicEnabled ? "Yes" : "No")
+            ]
+        case .animation(let scene):
+            return [
+                ("Format", ".\(request.fileExtension)"),
+                ("Looping", scene.isLooping ? "Yes" : "No"),
+                ("Fractal", scene.fractalType?.displayName ?? "Scene default"),
+                ("Song", scene.attachedSong.map { "\($0.title) - \($0.artist)" } ?? "None")
+            ]
+        }
     }
 }
 

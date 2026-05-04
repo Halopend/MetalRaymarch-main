@@ -86,6 +86,9 @@ struct MetalProjectTestApp: App {
                         dismissWindow(id: appModel.menuWindowID)
                     }
                 }
+                .onOpenURL { url in
+                    appModel.openExternalFile(url)
+                }
                 .onDisappear {
                     appModel.markMenuWindowDismissed()
                 }

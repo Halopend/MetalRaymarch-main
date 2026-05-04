@@ -470,44 +470,22 @@ struct MusicTabContent: View {
                 .frame(maxWidth: .infinity)
 
                 if viewModel.hasConnectedProvider {
-                    VStack(spacing: 8) {
-                        Button {
-                            openWindow(id: AppModel.libraryWindowID)
-                        } label: {
-                            HStack {
-                                Label("Change Song", systemImage: "music.note.list")
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Image(systemName: "arrow.up.right.square")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.4)))
+                    Button {
+                        openWindow(id: AppModel.libraryWindowID)
+                    } label: {
+                        HStack {
+                            Label("Change Song", systemImage: "music.note.list")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
-
-                        HStack(spacing: 8) {
-                            Button {
-                                viewModel.nextTrack()
-                            } label: {
-                                Label("Next Song", systemImage: "forward.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-
-                            Button {
-                                openWindow(id: AppModel.libraryWindowID)
-                            } label: {
-                                Label("Playlists", systemImage: "music.note.list")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.4)))
                     }
+                    .buttonStyle(.plain)
                 }
             } else {
                 // Empty state

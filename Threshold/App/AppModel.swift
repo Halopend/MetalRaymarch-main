@@ -28,6 +28,18 @@ final class HandTrackingState {
     var rightHandTracked: Bool = false
 }
 
+enum ExternalFileImportPayload {
+    case preset(FractalPreset)
+    case animation(AnimationScene)
+}
+
+struct ExternalFileImportRequest: Identifiable {
+    let id = UUID()
+    let fileName: String
+    let fileExtension: String
+    let payload: ExternalFileImportPayload
+}
+
 @MainActor
 @Observable
 class AppModel {
@@ -139,6 +151,12 @@ class AppModel {
 
     // Error reporting for transient banners
     let errorReporter = ErrorReporter()
+
+    var pendingExternalImport: ExternalFileImportRequest?
+    @ObservationIgnored private var externalPreviewRestorePreset: FractalPreset?
+    @ObservationIgnored private var externalPreviewRestoreScene: AnimationScene?
+    @ObservationIgnored private var externalPreviewCapturedScene = false
+    @ObservationIgnored private var activeExternalPreviewID: UUID?
 
     // Animation/Scene playback manager
     var animationManager: AnimationManager?
@@ -319,6 +337,124 @@ class AppModel {
     func saveLastState() {
         presetManager.saveLastState(from: renderSettings)
         SettingsPersistence.saveAll(from: renderSettings)
+    }
+
+    func openExternalFile(_ url: URL) {
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        clearExternalPreview(restorePreviewedState: true)
+        pendingExternalImport = nil
+
+        switch url.pathExtension.lowercased() {
+        case "threshscene", "threshmp":
+            do {
+                let preset = try presetManager.decodePreset(from: url)
+                pendingExternalImport = ExternalFileImportRequest(
+                    fileName: url.lastPathComponent,
+                    fileExtension: url.pathExtension.lowercased(),
+                    payload: .preset(preset)
+                )
+                ensureWindowContentVisible()
+            } catch {
+                errorReporter.report(.preset(.importFailed("Could not read \(url.lastPathComponent).")))
+            }
+
+        case "threshanim", "threshanimv":
+            do {
+                guard let scene = try animationManager?.decodeScene(from: url) else {
+                    errorReporter.report(.animation(.importFailed("Animation manager is unavailable.")))
+                    return
+                }
+                pendingExternalImport = ExternalFileImportRequest(
+                    fileName: url.lastPathComponent,
+                    fileExtension: url.pathExtension.lowercased(),
+                    payload: .animation(scene)
+                )
+                ensureWindowContentVisible()
+            } catch {
+                errorReporter.report(.animation(.importFailed("Could not read \(url.lastPathComponent).")))
+            }
+
+        default:
+            errorReporter.report(.preset(.importFailed("Unsupported Threshold file: \(url.lastPathComponent).")))
+        }
+    }
+
+    func previewExternalImport(_ request: ExternalFileImportRequest) {
+        if activeExternalPreviewID != request.id {
+            clearExternalPreview(restorePreviewedState: true)
+            activeExternalPreviewID = request.id
+        }
+
+        switch request.payload {
+        case .preset(let preset):
+            if externalPreviewRestorePreset == nil {
+                externalPreviewRestorePreset = FractalPreset.fromSettings(renderSettings, name: "__externalPreviewRestore__")
+            }
+            Task { await preparePipelineHandler?(preset) }
+            preset.apply(to: renderSettings, resetEnvironment: true)
+            gestureController?.syncWithSettings()
+            NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+
+        case .animation(let scene):
+            if !externalPreviewCapturedScene {
+                externalPreviewRestoreScene = animationManager?.currentScene
+                externalPreviewCapturedScene = true
+            }
+            animationManager?.currentScene = scene
+        }
+    }
+
+    func importExternalFile(_ request: ExternalFileImportRequest) {
+        switch request.payload {
+        case .preset(let preset):
+            let importedPreset = presetManager.importPreset(preset)
+            Task { await preparePipelineHandler?(importedPreset) }
+            presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
+            gestureController?.syncWithSettings()
+            saveLastState()
+            NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+
+        case .animation(let scene):
+            let importedScene = animationManager?.importScene(scene)
+            animationManager?.currentScene = importedScene
+        }
+
+        clearExternalPreview(restorePreviewedState: false)
+        pendingExternalImport = nil
+        ensureWindowContentVisible()
+    }
+
+    func cancelExternalImport(_ request: ExternalFileImportRequest) {
+        if activeExternalPreviewID == request.id {
+            clearExternalPreview(restorePreviewedState: true)
+        }
+        if pendingExternalImport?.id == request.id {
+            pendingExternalImport = nil
+        }
+    }
+
+    private func clearExternalPreview(restorePreviewedState: Bool) {
+        if restorePreviewedState {
+            if let preset = externalPreviewRestorePreset {
+                preset.apply(to: renderSettings, resetEnvironment: true)
+                gestureController?.syncWithSettings()
+                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+            }
+            if externalPreviewCapturedScene {
+                animationManager?.currentScene = externalPreviewRestoreScene
+            }
+        }
+
+        externalPreviewRestorePreset = nil
+        externalPreviewRestoreScene = nil
+        externalPreviewCapturedScene = false
+        activeExternalPreviewID = nil
     }
     
     /// Callback to open the menu window (set by App scene)

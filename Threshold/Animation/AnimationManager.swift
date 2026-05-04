@@ -330,6 +330,38 @@ final class AnimationManager {
         print("☁️ Imported \(newScenes.count) scene(s) from iCloud Drive: \(newScenes.map(\.name).joined(separator: ", "))")
     }
 
+    @discardableResult
+    func importScene(from url: URL) -> AnimationScene? {
+        do {
+            return importScene(try decodeScene(from: url))
+        } catch {
+            print("❌ Failed to import scene from \(url.lastPathComponent): \(error)")
+            return nil
+        }
+    }
+
+    func decodeScene(from url: URL) throws -> AnimationScene {
+        let data = try Data(contentsOf: url)
+        return try sceneDecoder.decode(AnimationScene.self, from: data)
+    }
+
+    @discardableResult
+    func importScene(_ scene: AnimationScene) -> AnimationScene {
+        if let existingUserIndex = userScenes.firstIndex(where: { $0.id == scene.id }) {
+            userScenes[existingUserIndex] = scene
+            saveScenes()
+            return scene
+        }
+
+        if let existingScene = scenes.first(where: { $0.id == scene.id }) {
+            return existingScene
+        }
+
+        userScenes.append(scene)
+        saveScenes()
+        return scene
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // FILE STORAGE
     // ═══════════════════════════════════════════════════════════════════════════
