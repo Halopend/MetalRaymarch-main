@@ -1213,7 +1213,6 @@ enum DefaultScenes {
     
     /// Stable UUID so we can always identify the built-in scene across launches.
     static let ambientBlurID = UUID(uuidString: "57C9BF90-9C33-44FB-A81F-6811FDE1746A")!
-    static let blackLightPartyID = UUID(uuidString: "00000000-0003-0000-0000-000000000003")!
     static let boxSphereFolderID = UUID(uuidString: "00000000-0004-0000-0000-000000000004")!
     static let shadesID = UUID(uuidString: "00000000-000C-0000-0000-00000000000C")!
     
