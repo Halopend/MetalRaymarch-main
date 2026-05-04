@@ -74,7 +74,7 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexColorIterations     = 9,  // int: Loop unrolling for ColourWithScheme
     FCIndexShareShadows        = 10, // bool: Share shadows (set in shader)
     FCIndexShadowsEnabled      = 11, // bool: Toggle shadow computation
-    FCIndexVisualizerEnabled   = 12, // bool: Toggle audio visualizer
+    FCIndexMandelbulbPower     = 12, // int: Bake Mandelbulb power for fastPowR optimization
 };
 
 // Fractal type selection
@@ -509,6 +509,10 @@ struct OrbitData {
 
 #ifndef FractalFormulas_h
 #define FractalFormulas_h
+
+#ifndef FORCE_INLINE
+#define FORCE_INLINE inline
+#endif
 
 // ---------------------------------------------------------------------------
 // Common constants, helpers, OrbitData

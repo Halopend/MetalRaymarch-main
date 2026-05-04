@@ -451,11 +451,22 @@ class AppModel {
                 externalPreviewRestoreEmbeddedFormula = activeEmbeddedFormula
                 externalPreviewCapturedEmbeddedFormula = true
             }
-            installEmbeddedFormulaIfNeeded(preset.embeddedFormula)
-            Task { await preparePipelineHandler?(preset) }
-            preset.apply(to: renderSettings, resetEnvironment: true)
-            gestureController?.syncWithSettings()
-            NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+            guard let formula = preset.embeddedFormula else {
+                installEmbeddedFormulaIfNeeded(nil)
+                Task { await preparePipelineHandler?(preset) }
+                preset.apply(to: renderSettings, resetEnvironment: true)
+                gestureController?.syncWithSettings()
+                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+                return
+            }
+            Task { @MainActor in
+                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
+                guard activated, activeExternalPreviewID == request.id else { return }
+                Task { await preparePipelineHandler?(preset) }
+                preset.apply(to: renderSettings, resetEnvironment: true)
+                gestureController?.syncWithSettings()
+                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+            }
 
         case .animation(let scene):
             if !externalPreviewCapturedScene {
@@ -466,39 +477,71 @@ class AppModel {
                 externalPreviewRestoreEmbeddedFormula = activeEmbeddedFormula
                 externalPreviewCapturedEmbeddedFormula = true
             }
-            installEmbeddedFormulaIfNeeded(scene.embeddedFormula)
-            animationManager?.currentScene = scene
+            guard let formula = scene.embeddedFormula else {
+                installEmbeddedFormulaIfNeeded(nil)
+                animationManager?.currentScene = scene
+                return
+            }
+            Task { @MainActor in
+                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
+                guard activated, activeExternalPreviewID == request.id else { return }
+                animationManager?.currentScene = scene
+            }
         }
     }
 
     func importExternalFile(_ request: ExternalFileImportRequest) {
         switch request.payload {
         case .preset(let preset):
-            if let formula = preset.embeddedFormula {
-                installEmbeddedFormulaIfNeeded(formula)
-            } else {
+            guard let formula = preset.embeddedFormula else {
                 uninstallEmbeddedFormula()
+                let importedPreset = presetManager.importPreset(preset)
+                Task { await preparePipelineHandler?(importedPreset) }
+                presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
+                gestureController?.syncWithSettings()
+                saveLastState()
+                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+                clearExternalPreview(restorePreviewedState: false)
+                pendingExternalImport = nil
+                ensureWindowContentVisible()
+                return
             }
-            let importedPreset = presetManager.importPreset(preset)
-            Task { await preparePipelineHandler?(importedPreset) }
-            presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
-            gestureController?.syncWithSettings()
-            saveLastState()
-            NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+            Task { @MainActor in
+                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
+                guard activated else { return }
+                let importedPreset = presetManager.importPreset(preset)
+                Task { await preparePipelineHandler?(importedPreset) }
+                presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
+                gestureController?.syncWithSettings()
+                saveLastState()
+                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+                clearExternalPreview(restorePreviewedState: false)
+                pendingExternalImport = nil
+                ensureWindowContentVisible()
+            }
+            return
 
         case .animation(let scene):
-            if let formula = scene.embeddedFormula {
-                installEmbeddedFormulaIfNeeded(formula)
-            } else {
+            guard let formula = scene.embeddedFormula else {
                 uninstallEmbeddedFormula()
+                let importedScene = animationManager?.importScene(scene)
+                animationManager?.currentScene = importedScene
+                clearExternalPreview(restorePreviewedState: false)
+                pendingExternalImport = nil
+                ensureWindowContentVisible()
+                return
             }
-            let importedScene = animationManager?.importScene(scene)
-            animationManager?.currentScene = importedScene
+            Task { @MainActor in
+                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
+                guard activated else { return }
+                let importedScene = animationManager?.importScene(scene)
+                animationManager?.currentScene = importedScene
+                clearExternalPreview(restorePreviewedState: false)
+                pendingExternalImport = nil
+                ensureWindowContentVisible()
+            }
+            return
         }
-
-        clearExternalPreview(restorePreviewedState: false)
-        pendingExternalImport = nil
-        ensureWindowContentVisible()
     }
 
     func cancelExternalImport(_ request: ExternalFileImportRequest) {

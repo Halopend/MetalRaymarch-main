@@ -21,6 +21,10 @@
 #ifndef FractalFormulas_h
 #define FractalFormulas_h
 
+#ifndef FORCE_INLINE
+#define FORCE_INLINE inline
+#endif
+
 // ---------------------------------------------------------------------------
 // Common constants, helpers, OrbitData
 // ---------------------------------------------------------------------------

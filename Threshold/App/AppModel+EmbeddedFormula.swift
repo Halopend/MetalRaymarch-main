@@ -63,6 +63,16 @@ extension AppModel {
         }
     }
 
+    @discardableResult
+    func activateEmbeddedFormulaForSceneLoad(_ formula: EmbeddedFormula?) async -> Bool {
+        if let formula {
+            return await installEmbeddedFormulaIfNeededAndWait(formula)
+        }
+
+        uninstallEmbeddedFormula()
+        return true
+    }
+
     /// Detach the active custom formula and restore default rendering paths.
     func uninstallEmbeddedFormula() {
         guard activeEmbeddedFormulaHash != nil else { return }

@@ -103,6 +103,11 @@ extension Renderer {
     func getPipeline(forPreset preset: FractalPreset, useQuadShared: Bool = false) -> MTLRenderPipelineState {
         let prefix = customCacheKeyPrefix(for: preset.fractalType)
         let cacheKey = prefix + preset.pipelineCacheKey + (useQuadShared ? "_QS" : "")
+        let library = preset.fractalType == .custom ? renderingLibrary(for: preset.fractalType) : nil
+
+        if preset.fractalType == .custom, library == nil {
+            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+        }
 
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -121,7 +126,7 @@ extension Renderer {
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
                 fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
-                library: renderingLibrary(for: preset.fractalType)
+                library: library
             )
             pipelineCache[cacheKey] = pipeline  // Store in unified cache
             if RENDERER_DEBUG { print("✅ [ShaderCompilation] SUCCESS: Built pipeline [\(cacheKey)]") }
@@ -138,6 +143,12 @@ extension Renderer {
         // Build cache key matching the preset format
         let colorIters = appModel.renderSettings.colorIterations  // Direct read (own lock) — avoids full snapshot
         let fractalType = appModel.renderSettings.fractalType
+        let library = fractalType == .custom ? renderingLibrary(for: fractalType) : nil
+
+        if fractalType == .custom, library == nil {
+            return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+        }
+
         let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: appModel.renderSettings.formulaParams
@@ -185,7 +196,7 @@ extension Renderer {
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
                 fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
-                library: renderingLibrary(for: fractalType)
+                library: library
             )
             pipelineCache[cacheKey] = pipeline
             if RENDERER_DEBUG { print("✅ [ShaderCompilation] Ready: FT=\(fractalType.rawValue) FI=\(iterations) RS=\(raySteps)") }
@@ -345,6 +356,22 @@ extension Renderer {
             )
 
             if fractalType == .custom {
+                guard let library = renderingLibrary(for: fractalType) else {
+                    print("⚠️ [CustomScene] Missing active custom shader library for render pipeline build")
+                    isSpecialized = false
+                    result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
+                    lastSelectIter = iterations
+                    lastSelectRS = raySteps
+                    lastSelectQS = useQuadShared
+                    lastSelectNeon = neonMode
+                    lastSelectFT = fractalType.rawValue
+                    lastSelectPower = mandelbulbPower
+                    lastSelectCustomHash = activeCustomHash
+                    lastSelectedPipeline = result
+                    lastSelectedIsSpecialized = false
+                    appModel.isUsingSpecializedPipeline = false
+                    return result
+                }
                 do {
                     let pipeline = try Renderer.buildSpecializedPipeline(
                         device: device,
@@ -353,7 +380,7 @@ extension Renderer {
                         mtlVertexDescriptor: mtlVertexDescriptor,
                         config: exactConfig,
                         fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
-                        library: renderingLibrary(for: fractalType)
+                        library: library
                     )
                     pipelineCache[cacheKey] = pipeline
                     lastLoggedPipelineKey = cacheKey
@@ -442,6 +469,9 @@ extension Renderer {
     func ensurePipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool) {
         let fractalType = appModel.renderSettings.fractalType
+        if fractalType == .custom, renderingLibrary(for: fractalType) == nil {
+            return
+        }
         let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: appModel.renderSettings.formulaParams
@@ -477,6 +507,11 @@ extension Renderer {
             colorIterations: 8,  // Color iterations are fixed for consistent coloring
             mandelbulbPower: mandelbulbPower
         )
+        let library = fractalType == .custom ? renderingLibrary(for: fractalType) : nil
+
+        if fractalType == .custom, library == nil {
+            return
+        }
 
         do {
             let pipeline = try Renderer.buildSpecializedPipeline(
@@ -486,7 +521,7 @@ extension Renderer {
                 mtlVertexDescriptor: mtlVertexDescriptor,
                 config: config,
                 fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
-                library: renderingLibrary(for: fractalType)
+                library: library
             )
             pipelineCache[cacheKey] = pipeline
             if RENDERER_DEBUG { print("✅ [Pipeline] Built on-demand: \(cacheKey)") }
