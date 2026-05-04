@@ -316,7 +316,7 @@ struct MusicTabContent: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Reactive")
+                    Text("Audio Reactive")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 

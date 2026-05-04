@@ -106,6 +106,15 @@ enum VisualizationsRailSection: String, CaseIterable {
     case atmosphere = "Atmosphere"
     case reactive = "Reactive"
 
+    var title: String {
+        switch self {
+        case .reactive:
+            return "Audio Reactive"
+        default:
+            return rawValue
+        }
+    }
+
     var icon: String {
         switch self {
         case .color: return "paintpalette.fill"
@@ -173,12 +182,12 @@ private enum PinnedRailControl: String, CaseIterable {
         case .shapeFormula: return ShapeRailSection.formula.rawValue
         case .shapeSpace: return ShapeRailSection.space.rawValue
         case .shapePerformance: return ShapeRailSection.performance.rawValue
-        case .visualizationsColor: return VisualizationsRailSection.color.rawValue
-        case .visualizationsMapping: return VisualizationsRailSection.mapping.rawValue
-        case .visualizationsGrading: return VisualizationsRailSection.grading.rawValue
-        case .visualizationsMotion: return VisualizationsRailSection.motion.rawValue
-        case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.rawValue
-        case .visualizationsReactive: return VisualizationsRailSection.reactive.rawValue
+        case .visualizationsColor: return VisualizationsRailSection.color.title
+        case .visualizationsMapping: return VisualizationsRailSection.mapping.title
+        case .visualizationsGrading: return VisualizationsRailSection.grading.title
+        case .visualizationsMotion: return VisualizationsRailSection.motion.title
+        case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.title
+        case .visualizationsReactive: return VisualizationsRailSection.reactive.title
         case .musicPlayback: return MusicRailSection.playback.rawValue
         case .musicSongs: return MusicRailSection.songs.rawValue
         case .musicPlaylists: return MusicRailSection.playlists.rawValue
@@ -560,11 +569,13 @@ struct ContentView: View {
     // MARK: - Pre-Immersive Layout
     
     private var preImmersiveLayout: some View {
-        VStack(spacing: 16) {
+        let isTransitioning = appModel.immersiveSpaceState == .inTransition
+
+        return VStack(spacing: 16) {
             Text("Threshold")
                 .font(.title2.bold())
             ToggleImmersiveSpaceButton()
-            if appModel.immersiveSpaceState == .inTransition {
+            if isTransitioning {
                 VStack(spacing: 8) {
                     ProgressView()
                     Text("Compiling shaders — first launch may take a moment…")
@@ -575,7 +586,7 @@ struct ContentView: View {
             }
         }
         .padding(30)
-        .frame(minWidth: 320, minHeight: 180)
+        .frame(minWidth: 300, idealWidth: 300, maxWidth: isTransitioning ? 360 : 300, minHeight: 180)
     }
     
     // MARK: - Immersive Layout (Sidebar + Content)
@@ -662,7 +673,7 @@ struct ContentView: View {
         VStack(spacing: 8) {
             switch topDockTab {
             case .explore:
-                ForEach(ExploreRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                ForEach(ExploreRailSection.allCases, id: \.self) { section in
                     railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
@@ -673,7 +684,7 @@ struct ContentView: View {
                     }
                 }
             case .shape:
-                ForEach(ShapeRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                ForEach(ShapeRailSection.allCases, id: \.self) { section in
                     railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
@@ -684,9 +695,9 @@ struct ContentView: View {
                     }
                 }
             case .visualizations:
-                ForEach(VisualizationsRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
                     railButton(
-                        title: section.rawValue,
+                        title: section.title,
                         systemImage: section.icon,
                         isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section,
                         pinControl: pinnedRailControl(for: section)
@@ -695,7 +706,7 @@ struct ContentView: View {
                     }
                 }
             case .music:
-                ForEach(MusicRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                ForEach(MusicRailSection.allCases, id: \.self) { section in
                     railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
@@ -716,24 +727,30 @@ struct ContentView: View {
                 selectedTab = .gestures
             }
 
-            railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
-                selectedTab = .settings
-            }
-
             if !pinnedRailControls.isEmpty {
                 Divider()
                     .padding(.vertical, 4)
 
-                ForEach(pinnedRailControls, id: \.self) { control in
-                    railButton(
-                        title: control.title,
-                        systemImage: control.icon,
-                        isSelected: isPinnedRailControlSelected(control),
-                        pinControl: control
-                    ) {
-                        activatePinnedRailControl(control)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(pinnedRailControls, id: \.self) { control in
+                        pinnedRailButton(
+                            title: control.title,
+                            systemImage: control.icon,
+                            isSelected: isPinnedRailControlSelected(control),
+                            pinControl: control
+                        ) {
+                            activatePinnedRailControl(control)
+                        }
                     }
                 }
+            }
+
+            railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
+                selectedTab = .settings
             }
         }
         .padding(.horizontal, 10)
@@ -791,6 +808,41 @@ struct ContentView: View {
             LongPressGesture(minimumDuration: 0.55, maximumDistance: 24)
                 .onEnded { _ in
                     guard let pinControl else { return }
+                    didLongPressPinnedRailControl = pinControl
+                    togglePinnedRailControl(pinControl)
+                }
+        )
+    }
+
+    private func pinnedRailButton(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl, action: @escaping () -> Void) -> some View {
+        Button {
+            if didLongPressPinnedRailControl == pinControl {
+                didLongPressPinnedRailControl = nil
+                return
+            }
+            action()
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 38)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isSelected ? Color.blue.opacity(0.18) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(isSelected ? Color.blue.opacity(0.22) : Color.secondary.opacity(0.10), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.55, maximumDistance: 24)
+                .onEnded { _ in
                     didLongPressPinnedRailControl = pinControl
                     togglePinnedRailControl(pinControl)
                 }

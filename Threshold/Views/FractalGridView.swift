@@ -113,7 +113,8 @@ struct FractalGridView: View {
 
     var body: some View {
         let allScenes = animationManager?.scenes ?? []
-        let hasScenes = !allScenes.isEmpty
+        let filteredScenes = allScenes.filter { $0.keyframes.count < 2 }
+        let hasScenes = !filteredScenes.isEmpty
         let hasAnimatedScenes = allScenes.contains { $0.keyframes.count >= 2 }
         let currentTab = effectiveTabSelection.wrappedValue
         let selectedTab = resolvedTabSelection(
@@ -158,14 +159,22 @@ struct FractalGridView: View {
     private func animatedScenesGrid(_ animationManager: AnimationManager) -> some View {
         let animatedScenes = animatedScenes(in: animationManager)
         let staticScenePresets = filteredStaticPresets()
-        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+        let activeSelection = currentSceneSelection(
+            currentScene: animationManager.currentScene,
+            visibleAnimationScenes: animatedScenes,
+            staticScenePresets: staticScenePresets
+        )
 
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Animated Scenes",
                 systemImage: "sparkles.rectangle.stack",
                 description: "Keyframed motion studies and full visual sequences.",
-                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
+                current: currentSceneSelectionLabel(
+                    selection: activeSelection,
+                    visibleAnimationScenes: animatedScenes,
+                    staticScenePresets: staticScenePresets
+                ),
                 accentColor: .purple
             )
 
@@ -195,23 +204,32 @@ struct FractalGridView: View {
 
     @ViewBuilder
     private func scenesGrid(_ animationManager: AnimationManager) -> some View {
+        let visibleScenes = nonAnimatedScenes(in: animationManager)
         let staticScenePresets = filteredStaticPresets()
-        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+        let activeSelection = currentSceneSelection(
+            currentScene: animationManager.currentScene,
+            visibleAnimationScenes: visibleScenes,
+            staticScenePresets: staticScenePresets
+        )
 
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Scenes",
                 systemImage: "square.stack.3d.up",
-                description: "The full merged list of built-in, edited, and user-created scenes.",
-                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
+                description: "Saved non-animated scenes and single-state setups.",
+                current: currentSceneSelectionLabel(
+                    selection: activeSelection,
+                    visibleAnimationScenes: visibleScenes,
+                    staticScenePresets: staticScenePresets
+                ),
                 accentColor: .orange
             )
 
-            if animationManager.scenes.isEmpty {
+            if visibleScenes.isEmpty {
                 emptySectionLabel("No scenes yet")
             } else {
                 LazyVGrid(columns: sceneColumns, spacing: 12) {
-                    ForEach(Array(animationManager.scenes.enumerated()), id: \.offset) { _, scene in
+                    ForEach(Array(visibleScenes.enumerated()), id: \.offset) { _, scene in
                         sceneCard(
                             title: scene.name,
                             subtitle: scene.fractalType?.displayName ?? "Any fractal",
@@ -234,14 +252,22 @@ struct FractalGridView: View {
     @ViewBuilder
     private func jumpingOffScenesGrid(_ animationManager: AnimationManager) -> some View {
         let staticScenePresets = jumpingOffPresets()
-        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+        let activeSelection = currentSceneSelection(
+            currentScene: animationManager.currentScene,
+            visibleAnimationScenes: [],
+            staticScenePresets: staticScenePresets
+        )
 
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Jumping Off",
                 systemImage: "photo.on.rectangle.angled",
                 description: "Static starting points for exploring a region of the fractal.",
-                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
+                current: currentSceneSelectionLabel(
+                    selection: activeSelection,
+                    visibleAnimationScenes: [],
+                    staticScenePresets: staticScenePresets
+                ),
                 accentColor: .teal
             )
 
@@ -272,14 +298,22 @@ struct FractalGridView: View {
     @ViewBuilder
     private func musicReactiveScenesGrid(_ animationManager: AnimationManager) -> some View {
         let staticScenePresets = musicReactivePresets()
-        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+        let activeSelection = currentSceneSelection(
+            currentScene: animationManager.currentScene,
+            visibleAnimationScenes: [],
+            staticScenePresets: staticScenePresets
+        )
 
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Music Reactive",
                 systemImage: "music.note",
                 description: "Honed-in presets with reactive mappings ready to drive the scene from audio.",
-                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
+                current: currentSceneSelectionLabel(
+                    selection: activeSelection,
+                    visibleAnimationScenes: [],
+                    staticScenePresets: staticScenePresets
+                ),
                 accentColor: .indigo
             )
 
@@ -353,6 +387,10 @@ struct FractalGridView: View {
         animationManager.scenes.filter { $0.keyframes.count >= 2 }
     }
 
+    private func nonAnimatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
+        animationManager.scenes.filter { $0.keyframes.count < 2 }
+    }
+
     private func emptySectionLabel(_ text: String) -> some View {
         Text(text)
             .font(.caption)
@@ -360,8 +398,13 @@ struct FractalGridView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 6)
     }
-    private func currentSceneSelection(using animationManager: AnimationManager, staticScenePresets: [FractalPreset]) -> FractalSceneSelection {
-        if let sceneID = animationManager.currentScene?.id {
+    private func currentSceneSelection(
+        currentScene: AnimationScene?,
+        visibleAnimationScenes: [AnimationScene],
+        staticScenePresets: [FractalPreset]
+    ) -> FractalSceneSelection {
+        if let sceneID = currentScene?.id,
+           visibleAnimationScenes.contains(where: { $0.id == sceneID }) {
             return .animation(sceneID)
         }
 
@@ -372,13 +415,16 @@ struct FractalGridView: View {
         return .staticPreset(staticID)
     }
 
-    private func currentSceneSelectionLabel(selection: FractalSceneSelection, animationManager: AnimationManager, staticScenePresets: [FractalPreset]) -> String {
+    private func currentSceneSelectionLabel(
+        selection: FractalSceneSelection,
+        visibleAnimationScenes: [AnimationScene],
+        staticScenePresets: [FractalPreset]
+    ) -> String {
         switch selection {
         case .none:
             return "Choose a scene"
         case .animation(let sceneID):
-            return animationManager.scenes.first(where: { $0.id == sceneID })?.name
-                ?? animationManager.currentScene?.name
+            return visibleAnimationScenes.first(where: { $0.id == sceneID })?.name
                 ?? "Scene"
         case .staticPreset(let presetID):
             return staticScenePresets.first(where: { $0.id == presetID })?.name
