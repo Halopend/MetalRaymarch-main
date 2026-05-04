@@ -440,16 +440,17 @@ extension PresetManager {
         }
     }
     
-    /// Restore last state to settings if available
-    /// Returns true if state was restored, false if no saved state exists
-    /// When no saved state exists, loads the default "Metallic Pink" preset
+    /// Restore last state to settings if available.
+    /// Returns the applied preset so callers can restore auxiliary state
+    /// (for example embedded custom formulas) alongside render settings.
+    /// When no saved state exists, loads and returns the default bright preset.
     @discardableResult
-    func restoreLastState(to settings: RenderSettings) -> Bool {
+    func restoreLastState(to settings: RenderSettings) -> FractalPreset? {
         guard FileManager.default.fileExists(atPath: lastStateFileURL.path) else {
             print("ℹ️ No last state found - loading Bright Preset default")
             let defaultPreset = PresetManager.brightPreset()
             defaultPreset.apply(to: settings)
-            return true
+            return defaultPreset
         }
         
         do {
@@ -459,10 +460,10 @@ extension PresetManager {
             let preset = try decoder.decode(FractalPreset.self, from: data)
             preset.apply(to: settings)
             print("✅ Last state restored")
-            return true
+            return preset
         } catch {
             print("Failed to restore last state: \(error)")
-            return false
+            return nil
         }
     }
     

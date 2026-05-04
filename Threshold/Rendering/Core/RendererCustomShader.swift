@@ -24,14 +24,30 @@ extension Renderer {
     /// `.threshfx` is loaded). Backed by `Renderer._customShaderLibraryStorage`
     /// to avoid stored-property limits on extensions.
     var customShaderLibrary: MTLLibrary? {
-        get { Renderer.customShaderState.library }
-        set { Renderer.customShaderState.library = newValue }
+        get { Renderer.customShaderState.currentLibrary() }
+        set { Renderer.customShaderState.update(library: newValue, hash: customShaderHash) }
     }
 
     /// `EmbeddedFormula.shortHash` for the active library, or `nil` when none.
     var customShaderHash: String? {
-        get { Renderer.customShaderState.hash }
-        set { Renderer.customShaderState.hash = newValue }
+        get { Renderer.customShaderState.currentHash() }
+        set { Renderer.customShaderState.update(library: customShaderLibrary, hash: newValue) }
+    }
+
+    nonisolated static func activateEmbeddedFormulaDirect(device: MTLDevice, formula: EmbeddedFormula?) async throws {
+        guard let formula else {
+            customShaderState.update(library: nil, hash: nil)
+            return
+        }
+
+        if customShaderState.currentHash() == formula.shortHash,
+           customShaderState.currentLibrary() != nil {
+            return
+        }
+
+        let compiler = customShaderState.compiler(for: device)
+        let library = try await compiler.library(for: formula)
+        customShaderState.update(library: library, hash: formula.shortHash)
     }
 
     /// Cache-key prefix to apply when looking up pipelines for the active
@@ -108,8 +124,10 @@ extension Renderer {
         // Reset fast-path so a stale cached pointer doesn't get returned.
         lastSelectedPipeline = nil
         lastSelectIter = -1
+        lastSelectCustomHash = nil
         lastSelectedComputePipeline = nil
         lastComputeFI = -1
+        lastComputeCustomHash = nil
 
         if RENDERER_DEBUG && (renderEvicted + computeEvicted) > 0 {
             print("🧹 [CustomShader] Evicted \(renderEvicted) render + \(computeEvicted) compute pipelines")
@@ -119,10 +137,7 @@ extension Renderer {
     // MARK: - Helpers
 
     private func ensureCompiler() -> CustomShaderCompiler {
-        if let c = Renderer.customShaderState.compiler { return c }
-        let c = CustomShaderCompiler(device: device)
-        Renderer.customShaderState.compiler = c
-        return c
+        Renderer.customShaderState.compiler(for: device)
     }
 
     // MARK: - Storage
@@ -131,9 +146,38 @@ extension Renderer {
     /// declaration so extensions can vend computed accessors. Access is
     /// already serialized by the `Renderer` actor.
     final class CustomShaderState: @unchecked Sendable {
-        var library: MTLLibrary?
-        var hash: String?
-        var compiler: CustomShaderCompiler?
+        private let lock = NSLock()
+        private var library: MTLLibrary?
+        private var hash: String?
+        private var compiler: CustomShaderCompiler?
+
+        func currentLibrary() -> MTLLibrary? {
+            lock.lock()
+            defer { lock.unlock() }
+            return library
+        }
+
+        func currentHash() -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return hash
+        }
+
+        func update(library: MTLLibrary?, hash: String?) {
+            lock.lock()
+            self.library = library
+            self.hash = hash
+            lock.unlock()
+        }
+
+        func compiler(for device: MTLDevice) -> CustomShaderCompiler {
+            lock.lock()
+            defer { lock.unlock() }
+            if let compiler { return compiler }
+            let compiler = CustomShaderCompiler(device: device)
+            self.compiler = compiler
+            return compiler
+        }
     }
 
     /// Single per-process holder. The `Renderer` is the sole owner of the live

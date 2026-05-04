@@ -195,7 +195,22 @@ class AppModel {
     // Embedded-formula activation handler (set by Renderer).
     // When non-nil, AppModel can ask the renderer to compile + install a custom
     // MTLLibrary for a `.threshfx` formula. Pass `nil` to detach.
-    var activateEmbeddedFormulaHandler: ((EmbeddedFormula?) async throws -> Void)?
+    var activateEmbeddedFormulaHandler: ((EmbeddedFormula?) async throws -> Void)? {
+        didSet {
+            guard let handler = activateEmbeddedFormulaHandler else { return }
+            let formula = activeEmbeddedFormula
+            Task { @MainActor in
+                do {
+                    try await handler(formula)
+                } catch {
+                    self.errorReporter.report(.preset(.importFailed(
+                        "Failed to compile custom shader: \(error.localizedDescription)"
+                    )))
+                    self.uninstallEmbeddedFormula()
+                }
+            }
+        }
+    }
 
     /// Full payload for the formula currently installed in the renderer.
     /// Stored so preview cancellation and save/export paths can restore the
@@ -312,8 +327,13 @@ class AppModel {
         // Add built-in presets if this is first launch
         presetManager.addBuiltInPresetsIfNeeded()
         
-        // Restore last state if available
-        presetManager.restoreLastState(to: renderSettings)
+        // Restore last state if available.
+        // If the restored preset carries an embedded formula, install it so
+        // custom scenes survive app relaunch.
+        if let restoredPreset = presetManager.restoreLastState(to: renderSettings),
+           let formula = restoredPreset.embeddedFormula {
+            installEmbeddedFormulaIfNeeded(formula)
+        }
         
         // Restore domain config structs (new persistence format, overlays legacy per-key values)
         SettingsPersistence.restoreAll(into: renderSettings)

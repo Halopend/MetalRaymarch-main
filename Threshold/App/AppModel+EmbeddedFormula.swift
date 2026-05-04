@@ -11,38 +11,55 @@ import simd
 
 @MainActor
 extension AppModel {
-    /// Install a custom formula at runtime: register with FormulaCatalog +
-    /// FractalTypeRegistry, then ask the renderer to compile and swap in the
-    /// MTLLibrary. No-op when `formula` is nil or already active.
-    func installEmbeddedFormulaIfNeeded(_ formula: EmbeddedFormula?) {
-        guard let formula else { return }
+    /// Install a custom formula and wait for renderer activation to complete.
+    /// Returns `true` on success and `false` when validation/compilation fails.
+    @discardableResult
+    func installEmbeddedFormulaIfNeededAndWait(_ formula: EmbeddedFormula?) async -> Bool {
+        guard let formula else { return true }
+
+        print("🧪 [CustomScene] Activating formula '\(formula.name)' (hash=\(formula.shortHash))")
+
         do {
             try formula.validate()
         } catch {
             errorReporter.report(.preset(.importFailed(
                 "Failed to validate custom shader: \(error.localizedDescription)"
             )))
-            return
+            return false
         }
+
         let hash = formula.shortHash
-        if activeEmbeddedFormulaHash == hash { return }
+        if activeEmbeddedFormulaHash != hash {
+            FormulaCatalog.shared.registerEphemeral(formula)
+            FractalTypeRegistry.registerCustom(formula)
+            activeEmbeddedFormula = formula
+            activeEmbeddedFormulaHash = hash
+        }
 
-        FormulaCatalog.shared.registerEphemeral(formula)
-        FractalTypeRegistry.registerCustom(formula)
-        activeEmbeddedFormula = formula
-        activeEmbeddedFormulaHash = hash
-
-        // Snapshot for the detached task so we don't capture `self` across actor.
         let handler = activateEmbeddedFormulaHandler
+        if handler == nil {
+            print("⚠️ [CustomScene] Renderer activation handler is not ready yet")
+        }
+        do {
+            try await handler?(formula)
+            print("✅ [CustomScene] Formula active: '\(formula.name)'")
+            return true
+        } catch {
+            print("❌ [CustomScene] Formula compile failed: \(error)")
+            errorReporter.report(.preset(.importFailed(
+                "Failed to compile custom shader: \(error.localizedDescription)"
+            )))
+            uninstallEmbeddedFormula()
+            return false
+        }
+    }
+
+    /// Install a custom formula at runtime: register with FormulaCatalog +
+    /// FractalTypeRegistry, then ask the renderer to compile and swap in the
+    /// MTLLibrary. No-op when `formula` is nil or already active.
+    func installEmbeddedFormulaIfNeeded(_ formula: EmbeddedFormula?) {
         Task { @MainActor in
-            do {
-                try await handler?(formula)
-            } catch {
-                self.errorReporter.report(.preset(.importFailed(
-                    "Failed to compile custom shader: \(error.localizedDescription)"
-                )))
-                self.uninstallEmbeddedFormula()
-            }
+            _ = await self.installEmbeddedFormulaIfNeededAndWait(formula)
         }
     }
 

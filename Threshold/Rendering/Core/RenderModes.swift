@@ -57,22 +57,33 @@ extension LightingMode: Codable {
 
     private static let stringMap: [String: LightingMode] = {
         var map: [String: LightingMode] = [:]
-        for c in LightingMode.allCases { map[c.codableString] = c }
+        for c in LightingMode.allCases {
+            map[c.codableString] = c
+            map[c.codableString.lowercased()] = c
+        }
+        // Backward compatibility for older scene files.
+        map["static"] = .staticLight
         return map
     }()
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let str = try? container.decode(String.self),
-           let value = Self.stringMap[str] {
-            self = value
-        } else if let raw = try? container.decode(Int32.self),
-                  let value = LightingMode(rawValue: raw) {
-            self = value
-        } else {
-            throw DecodingError.dataCorruptedError(
-                in: container, debugDescription: "Invalid LightingMode value")
+        if let str = try? container.decode(String.self) {
+            let key = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value = Self.stringMap[key] ?? Self.stringMap[key.lowercased()] {
+                self = value
+                return
+            }
         }
+
+        if let raw = try? container.decode(Int32.self),
+           let value = LightingMode(rawValue: raw) {
+            self = value
+            return
+        }
+
+        throw DecodingError.dataCorruptedError(
+            in: container, debugDescription: "Invalid LightingMode value")
     }
 
     func encode(to encoder: Encoder) throws {

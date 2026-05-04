@@ -264,6 +264,7 @@ extension Renderer {
     func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
                         neonMode: Bool = false) -> MTLRenderPipelineState {
         let fractalType = appModel.renderSettings.fractalType
+        let activeCustomHash = fractalType == .custom ? customShaderHash : nil
         let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: appModel.renderSettings.formulaParams
@@ -281,6 +282,7 @@ extension Renderer {
            useQuadShared == lastSelectQS &&
            neonMode == lastSelectNeon &&
            fractalType.rawValue == lastSelectFT &&
+           activeCustomHash == lastSelectCustomHash &&
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
             recordPipelineTelemetry(renderHit: true)
             appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
@@ -341,11 +343,42 @@ extension Renderer {
                 colorIterations: Int32(colorIters),
                 mandelbulbPower: mandelbulbPower
             )
-            enqueueBackgroundPipelineBuild(
-                cacheKey: cacheKey,
-                config: exactConfig,
-                useQuadShared: useQuadShared
-            )
+
+            if fractalType == .custom {
+                do {
+                    let pipeline = try Renderer.buildSpecializedPipeline(
+                        device: device,
+                        layerRenderer: layerRenderer,
+                        rasterSampleCount: rasterSampleCount,
+                        mtlVertexDescriptor: mtlVertexDescriptor,
+                        config: exactConfig,
+                        fragmentFunctionName: useQuadShared ? "fragmentShaderQuadShared" : "fragmentShader",
+                        library: renderingLibrary(for: fractalType)
+                    )
+                    pipelineCache[cacheKey] = pipeline
+                    lastLoggedPipelineKey = cacheKey
+                    result = pipeline
+                    lastSelectIter = iterations
+                    lastSelectRS = raySteps
+                    lastSelectQS = useQuadShared
+                    lastSelectNeon = neonMode
+                    lastSelectFT = fractalType.rawValue
+                    lastSelectPower = mandelbulbPower
+                    lastSelectCustomHash = activeCustomHash
+                    lastSelectedPipeline = result
+                    lastSelectedIsSpecialized = true
+                    appModel.isUsingSpecializedPipeline = true
+                    return result
+                } catch {
+                    print("❌ [CustomScene] Exact render pipeline build failed: \(error)")
+                }
+            } else {
+                enqueueBackgroundPipelineBuild(
+                    cacheKey: cacheKey,
+                    config: exactConfig,
+                    useQuadShared: useQuadShared
+                )
+            }
 
             // 3. Try FT-specific neon=off quality-preset fallback.
             let fallbackKey = keyContext.exactKey(neonEnabled: false)
@@ -396,6 +429,7 @@ extension Renderer {
         lastSelectNeon = neonMode
         lastSelectFT = fractalType.rawValue
         lastSelectPower = mandelbulbPower
+        lastSelectCustomHash = activeCustomHash
         lastSelectedPipeline = result
         lastSelectedIsSpecialized = isSpecialized
         appModel.isUsingSpecializedPipeline = isSpecialized
@@ -528,6 +562,7 @@ extension Renderer {
     /// 5. Falls back to generic (no function constants) pipeline — shader uses runtime params
     func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
         let fractalType = appModel.renderSettings.fractalType
+        let activeCustomHash = fractalType == .custom ? customShaderHash : nil
         // Extract Mandelbulb integer power for compile-time specialization
         let mbPowerRaw = fractalType == .mandelbulb
             ? FormulaCatalog.getParam(appModel.renderSettings.formulaParams, index: 0)
@@ -551,7 +586,7 @@ extension Renderer {
         )
 
         // Fast-path: parameters unchanged since last call
-        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower,
+        if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && activeCustomHash == lastComputeCustomHash && mbPowerInt == lastComputePower,
            let cached = lastSelectedComputePipeline {
             recordPipelineTelemetry(computeHit: true)
             return cached
@@ -570,6 +605,7 @@ extension Renderer {
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
             lastComputePower = mbPowerInt
+            lastComputeCustomHash = activeCustomHash
             lastSelectedComputePipeline = pipeline
             return pipeline
         }
@@ -585,6 +621,7 @@ extension Renderer {
             lastComputeFI = fractalIterations
             lastComputeRS = maxRaySteps
             lastComputePower = mbPowerInt
+            lastComputeCustomHash = activeCustomHash
             lastSelectedComputePipeline = pipeline
             return pipeline
         }
@@ -595,6 +632,29 @@ extension Renderer {
         //    render actor when the user picks a new fractal type or iteration
         //    count. Metal compute-pipeline construction is thread-safe, so we
         //    hop off the actor to build and back on to insert.
+        if fractalType == .custom,
+           let library = renderingLibrary(for: fractalType),
+           let pipeline = Renderer.buildComputePipeline(
+                device: device,
+                library: library,
+                kernelName: "adaptiveHierarchical8x8",
+                fractalType: Int32(fractalType.rawValue),
+                fractalIterations: Int32(fractalIterations),
+                shadowIterations: Int32(max(fractalIterations - 2, 2)),
+                maxRaySteps: Int32(maxRaySteps),
+                mandelbulbPower: mbPowerInt
+           ) {
+            computePipelineCache[exactKey] = pipeline
+            lastComputeFT = fractalType.rawValue
+            lastComputeFI = fractalIterations
+            lastComputeRS = maxRaySteps
+            lastComputePower = mbPowerInt
+            lastComputeCustomHash = activeCustomHash
+            lastSelectedComputePipeline = pipeline
+            lastComputePipelineKey = exactKey
+            return pipeline
+        }
+
         enqueueBackgroundComputePipelineBuild(
             cacheKey: exactKey,
             fractalType: Int32(fractalType.rawValue),
@@ -616,6 +676,7 @@ extension Renderer {
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
         lastComputePower = mbPowerInt
+        lastComputeCustomHash = activeCustomHash
         lastSelectedComputePipeline = fallback
         return fallback
     }

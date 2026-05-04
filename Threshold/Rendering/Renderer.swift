@@ -56,6 +56,7 @@ actor Renderer {
     var lastComputeFI: Int = -1
     var lastComputeRS: Int = -1
     var lastComputePower: Int32?
+    var lastComputeCustomHash: String?
     var lastSelectedComputePipeline: MTLComputePipelineState?
 
     // === UI UPDATE COORDINATION ===
@@ -540,7 +541,7 @@ actor Renderer {
 
                 // Setup custom-shader (.threshfx) activation handler.
                 appModel.activateEmbeddedFormulaHandler = { formula in
-                    try await renderer.activateEmbeddedFormula(formula)
+                    try await Renderer.activateEmbeddedFormulaDirect(device: renderer.device, formula: formula)
                 }
             }
             
@@ -599,6 +600,7 @@ actor Renderer {
     var lastSelectNeon: Bool = false
     var lastSelectFT: Int32 = -1
     var lastSelectPower: Int32?
+    var lastSelectCustomHash: String?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     

@@ -49,6 +49,26 @@ enum CustomShaderCompilerError: Error, CustomStringConvertible {
 /// renderer queue.
 actor CustomShaderCompiler {
 
+    private static let shaderFormulaIncludeMarker = "#include \"../Formulas/FractalFormulas.h\""
+
+    private static let shaderSections: (preamble: String, body: String) = {
+        let source = EmbeddedMetalSources.shadersMetal
+        guard let includeRange = source.range(of: shaderFormulaIncludeMarker) else {
+            return (stripLocalIncludes(source), "")
+        }
+
+        let preamble = String(source[..<includeRange.lowerBound])
+        var bodyStart = includeRange.upperBound
+        if bodyStart < source.endIndex, source[bodyStart] == "\r" {
+            bodyStart = source.index(after: bodyStart)
+        }
+        if bodyStart < source.endIndex, source[bodyStart] == "\n" {
+            bodyStart = source.index(after: bodyStart)
+        }
+        let body = String(source[bodyStart...])
+        return (stripLocalIncludes(preamble), stripLocalIncludes(body))
+    }()
+
     private static let synthesizedSourcePrefix: String = {
         var pieces: [String] = []
         pieces.reserveCapacity(15)
@@ -58,6 +78,10 @@ actor CustomShaderCompiler {
         pieces.append("#include <metal_stdlib>")
         pieces.append("#include <simd/simd.h>")
         pieces.append("using namespace metal;")
+
+        // Shader macros + function constants must come before built-in formula
+        // headers because those headers reference FORCE_INLINE and FC_* values.
+        pieces.append(shaderSections.preamble)
 
         // Type declarations + helpers.
         pieces.append(stripLocalIncludes(EmbeddedMetalSources.shaderTypesH))
@@ -84,7 +108,7 @@ actor CustomShaderCompiler {
     }()
 
     private static let strippedDispatchTemplate = stripLocalIncludes(EmbeddedMetalSources.fractalFormulasH)
-    private static let synthesizedSourceSuffix = stripLocalIncludes(EmbeddedMetalSources.shadersMetal)
+    private static let synthesizedSourceSuffix = shaderSections.body
 
     private let device: MTLDevice
     private var libraryCache: [String: MTLLibrary] = [:]

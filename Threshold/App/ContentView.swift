@@ -1163,10 +1163,11 @@ struct ContentView: View {
     private var bottomBar: some View {
         HStack(spacing: 12) {
             activityTrafficLights
-                .frame(maxWidth: .infinity, alignment: .leading)
 
             ToggleImmersiveSpaceButton()
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(minWidth: 260, alignment: .leading)
+
+            Spacer(minLength: 12)
 
             HStack(spacing: 12) {
                 if let animationManager = appModel.animationManager {
@@ -1321,14 +1322,23 @@ struct ContentView: View {
                         appModel.dismissMenuWindowForSceneLoad()
                     },
                     onLoadStaticScene: { preset in
-                        Task { await appModel.preparePipelineHandler?(preset) }
-                        appModel.presetManager.loadPreset(
-                            preset,
-                            into: appModel.renderSettings,
-                            resetEnvironment: true
-                        )
-                        appModel.gestureController?.syncWithSettings()
-                        cache.loadFromSettings()
+                        Task { @MainActor in
+                            if let formula = preset.embeddedFormula {
+                                let installed = await appModel.installEmbeddedFormulaIfNeededAndWait(formula)
+                                guard installed else { return }
+                            } else {
+                                appModel.uninstallEmbeddedFormula()
+                            }
+
+                            Task { await appModel.preparePipelineHandler?(preset) }
+                            appModel.presetManager.loadPreset(
+                                preset,
+                                into: appModel.renderSettings,
+                                resetEnvironment: true
+                            )
+                            appModel.gestureController?.syncWithSettings()
+                            cache.loadFromSettings()
+                        }
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
