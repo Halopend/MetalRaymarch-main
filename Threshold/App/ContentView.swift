@@ -289,6 +289,7 @@ struct ContentView: View {
     @AppStorage("ContentView.shapeRailSection") private var shapeRailSection: ShapeRailSection = .parameters
     @AppStorage("ContentView.visualizationsRailSection") private var visualizationsRailSection: VisualizationsRailSection = .color
     @AppStorage("ContentView.musicRailSection") private var musicRailSection: MusicRailSection = .playback
+    @AppStorage("ContentView.skipOuterNavigationSync") private var skipOuterNavigationSync = false
     // Persist last-selected tab and sub-tabs across launches.
     @AppStorage("ContentView.selectedTab") private var selectedTab: SidebarTab = .fractal
     @AppStorage("FractalGridView.innerTab") private var fractalBrowseTab: FractalBrowseTab = .jumpingOff
@@ -438,13 +439,13 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
-        .onChange(of: selectedTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: fractalSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: shapeInnerTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: fractalBrowseTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: coloringSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: selectedTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: fractalSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: shapeInnerTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: fractalBrowseTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: coloringSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .sheet(isPresented: $showSaveDestinationSheet) {
             SaveDestinationSheet(
                 onSave: { choice, customName in
@@ -817,6 +818,11 @@ struct ContentView: View {
             .background(Capsule().fill(color))
             .offset(x: 9, y: -7)
             .accessibilityHidden(true)
+    }
+
+    private func syncNavigationChromeFromLegacySelectionIfNeeded() {
+        guard !skipOuterNavigationSync else { return }
+        syncNavigationChromeFromLegacySelection()
     }
 
     private func activateTopDock(_ tab: TopDockTab) {

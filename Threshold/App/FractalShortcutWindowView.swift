@@ -4,6 +4,7 @@ struct FractalShortcutWindowView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.colorScheme) private var colorScheme
 
+    @AppStorage("ContentView.skipOuterNavigationSync") private var skipOuterNavigationSync = false
     @AppStorage("ContentView.selectedTab") private var selectedTab: SidebarTab = .fractal
     @AppStorage("ContentView.fractalSubTab") private var fractalSubTab: FractalSubTab = .shape
     @AppStorage("MusicTabContent.innerTab") private var musicInnerTabRaw: String = "Music"
@@ -14,25 +15,27 @@ struct FractalShortcutWindowView: View {
                 Button {
                     appModel.ensureWindowContentVisible()
                     withAnimation(.easeInOut(duration: 0.18)) {
-                        switch item {
-                        case .browse:
-                            selectedTab = .fractal
-                            fractalSubTab = .browse
-                        case .shape:
-                            selectedTab = .fractal
-                            fractalSubTab = .shape
-                        case .space:
-                            selectedTab = .fractal
-                            fractalSubTab = .space
-                        case .render:
-                            selectedTab = .fractal
-                            fractalSubTab = .render
-                        case .music:
-                            selectedTab = .music
-                            musicInnerTabRaw = "Music"
-                        case .visualizations:
-                            selectedTab = .music
-                            musicInnerTabRaw = "Visualizations"
+                        performContentOnlyNavigation {
+                            switch item {
+                            case .browse:
+                                selectedTab = .fractal
+                                fractalSubTab = .browse
+                            case .shape:
+                                selectedTab = .fractal
+                                fractalSubTab = .shape
+                            case .space:
+                                selectedTab = .fractal
+                                fractalSubTab = .space
+                            case .render:
+                                selectedTab = .fractal
+                                fractalSubTab = .render
+                            case .music:
+                                selectedTab = .music
+                                musicInnerTabRaw = "Music"
+                            case .visualizations:
+                                selectedTab = .music
+                                musicInnerTabRaw = "Visualizations"
+                            }
                         }
                     }
                 } label: {
@@ -68,6 +71,16 @@ struct FractalShortcutWindowView: View {
         )
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         .frame(minWidth: 520, maxWidth: 640)
+    }
+
+    private func performContentOnlyNavigation(_ updates: () -> Void) {
+        skipOuterNavigationSync = true
+        updates()
+        Task { @MainActor in
+            await Task.yield()
+            await Task.yield()
+            skipOuterNavigationSync = false
+        }
     }
 
     private var windowSurfaceFill: Color {
