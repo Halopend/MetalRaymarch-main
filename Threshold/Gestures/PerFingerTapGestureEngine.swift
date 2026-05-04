@@ -7,8 +7,8 @@ import Foundation
 /// tap wins.  The engine supports both left and right hands independently.
 ///
 /// This replaces the monolithic menu-toggle gesture with a configurable layer
-/// where any finger on either hand can be mapped to toggle the menu, open the
-/// animation player, or perform other discrete actions.
+/// where any finger on either hand can be mapped to toggle the menu, control
+/// playback, or perform other discrete actions.
 @MainActor
 final class PerFingerTapGestureEngine {
     private static let menuGestureSafetyDelay: Float = 0.75
@@ -182,7 +182,7 @@ enum PerFingerTapAction: Int32, CaseIterable, Codable, Hashable, Sendable {
         switch self {
         case .none:         return "None"
         case .toggleMenu:   return "Toggle Menu"
-        case .toggleAnimationPlayer: return "Toggle Animation Player"
+        case .toggleAnimationPlayer: return "Toggle Video Playback"
         case .openShapeMenu: return "Open Shape Menu"
         case .openRenderMenu: return "Open Render Menu"
         }

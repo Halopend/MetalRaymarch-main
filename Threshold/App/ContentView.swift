@@ -61,12 +61,14 @@ enum ExploreRailSection: String, CaseIterable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
+    case scenes = "Scenes"
 
     var icon: String {
         switch self {
         case .jumpingOff: return "photo.on.rectangle.angled"
         case .musicReactive: return "waveform"
         case .animated: return "film.stack"
+        case .scenes: return "square.stack.3d.up"
         }
     }
 
@@ -75,6 +77,7 @@ enum ExploreRailSection: String, CaseIterable {
         case .jumpingOff: return .jumpingOff
         case .musicReactive: return .musicReactive
         case .animated: return .animated
+        case .scenes: return .scenes
         }
     }
 }
@@ -136,6 +139,73 @@ enum MusicRailSection: String, CaseIterable {
         case .songs:     return .songs
         case .playlists: return .playlists
         case .albums:    return .albums
+        }
+    }
+}
+
+private enum PinnedRailControl: String, CaseIterable {
+    case exploreJumpingOff
+    case exploreMusicReactive
+    case exploreAnimated
+    case exploreScenes
+    case shapeParameters
+    case shapeFormula
+    case shapeSpace
+    case shapePerformance
+    case visualizationsColor
+    case visualizationsMapping
+    case visualizationsGrading
+    case visualizationsMotion
+    case visualizationsAtmosphere
+    case visualizationsReactive
+    case musicPlayback
+    case musicSongs
+    case musicPlaylists
+    case musicAlbums
+
+    var title: String {
+        switch self {
+        case .exploreJumpingOff: return ExploreRailSection.jumpingOff.rawValue
+        case .exploreMusicReactive: return ExploreRailSection.musicReactive.rawValue
+        case .exploreAnimated: return ExploreRailSection.animated.rawValue
+        case .exploreScenes: return ExploreRailSection.scenes.rawValue
+        case .shapeParameters: return ShapeRailSection.parameters.rawValue
+        case .shapeFormula: return ShapeRailSection.formula.rawValue
+        case .shapeSpace: return ShapeRailSection.space.rawValue
+        case .shapePerformance: return ShapeRailSection.performance.rawValue
+        case .visualizationsColor: return VisualizationsRailSection.color.rawValue
+        case .visualizationsMapping: return VisualizationsRailSection.mapping.rawValue
+        case .visualizationsGrading: return VisualizationsRailSection.grading.rawValue
+        case .visualizationsMotion: return VisualizationsRailSection.motion.rawValue
+        case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.rawValue
+        case .visualizationsReactive: return VisualizationsRailSection.reactive.rawValue
+        case .musicPlayback: return MusicRailSection.playback.rawValue
+        case .musicSongs: return MusicRailSection.songs.rawValue
+        case .musicPlaylists: return MusicRailSection.playlists.rawValue
+        case .musicAlbums: return MusicRailSection.albums.rawValue
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .exploreJumpingOff: return ExploreRailSection.jumpingOff.icon
+        case .exploreMusicReactive: return ExploreRailSection.musicReactive.icon
+        case .exploreAnimated: return ExploreRailSection.animated.icon
+        case .exploreScenes: return ExploreRailSection.scenes.icon
+        case .shapeParameters: return ShapeRailSection.parameters.icon
+        case .shapeFormula: return ShapeRailSection.formula.icon
+        case .shapeSpace: return ShapeRailSection.space.icon
+        case .shapePerformance: return ShapeRailSection.performance.icon
+        case .visualizationsColor: return VisualizationsRailSection.color.icon
+        case .visualizationsMapping: return VisualizationsRailSection.mapping.icon
+        case .visualizationsGrading: return VisualizationsRailSection.grading.icon
+        case .visualizationsMotion: return VisualizationsRailSection.motion.icon
+        case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.icon
+        case .visualizationsReactive: return VisualizationsRailSection.reactive.icon
+        case .musicPlayback: return MusicRailSection.playback.icon
+        case .musicSongs: return MusicRailSection.songs.icon
+        case .musicPlaylists: return MusicRailSection.playlists.icon
+        case .musicAlbums: return MusicRailSection.albums.icon
         }
     }
 }
@@ -229,9 +299,9 @@ struct ContentView: View {
     @AppStorage("ContentView.effectsSubTab") private var effectsSubTab: EffectsSubTab = .dynamic
     @AppStorage("MusicTabContent.innerTab") private var musicPanelTab: MusicPanelTab = .music
     @AppStorage("ContentView.settingsSubTab") private var settingsSubTab: SettingsSubTab = .general
+    @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State private var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
-    @State private var didLongPressPlayerButton = false
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
@@ -421,10 +491,6 @@ struct ContentView: View {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
     }
 
-    private func toggleAnimationPlayerWindow() {
-        appModel.toggleAnimationPlayerWindow()
-    }
-
     private func resetCurrentFractalSettings() {
         appModel.gestureController?.applyFractalDefaults()
         cache.loadFromSettings()
@@ -595,42 +661,68 @@ struct ContentView: View {
             switch topDockTab {
             case .explore:
                 ForEach(ExploreRailSection.allCases, id: \.self) { section in
-                    railButton(
+                    railRow(
                         title: section.rawValue,
                         systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .explore && exploreRailSection == section
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .explore && exploreRailSection == section,
+                        pinControl: pinnedRailControl(for: section)
                     ) {
                         activateExploreSection(section)
                     }
                 }
             case .shape:
                 ForEach(ShapeRailSection.allCases, id: \.self) { section in
-                    railButton(
+                    railRow(
                         title: section.rawValue,
                         systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .shape && shapeRailSection == section
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .shape && shapeRailSection == section,
+                        pinControl: pinnedRailControl(for: section)
                     ) {
                         activateShapeSection(section)
                     }
                 }
             case .visualizations:
                 ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
-                    railButton(
+                    railRow(
                         title: section.rawValue,
                         systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section,
+                        pinControl: pinnedRailControl(for: section)
                     ) {
                         activateVisualizationsSection(section)
                     }
                 }
             case .music:
                 ForEach(MusicRailSection.allCases, id: \.self) { section in
-                    railButton(
+                    railRow(
                         title: section.rawValue,
                         systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section
+                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section,
+                        pinControl: pinnedRailControl(for: section)
                     ) {
                         activateMusicSection(section)
+                    }
+                }
+            }
+
+            if !visiblePinnedRailControls.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+
+                Text("Pinned")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+
+                ForEach(visiblePinnedRailControls, id: \.self) { control in
+                    railRow(
+                        title: control.title,
+                        systemImage: control.icon,
+                        isSelected: isPinnedRailControlSelected(control),
+                        pinControl: control
+                    ) {
+                        activatePinnedRailControl(control)
                     }
                 }
             }
@@ -646,58 +738,6 @@ struct ContentView: View {
 
             railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
                 selectedTab = .settings
-            }
-
-            Button {
-                if didLongPressPlayerButton {
-                    didLongPressPlayerButton = false
-                    return
-                }
-                toggleAnimationPlayerWindow()
-            } label: {
-                HStack(spacing: 10) {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: appModel.isAnimationPlayerWindowVisible ? "film.stack.fill" : "film.stack")
-                            .font(.system(size: 15, weight: .semibold))
-
-                        if isAnimationPlaying {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 15, height: 15)
-                                .background(Circle().fill(Color.green))
-                                .offset(x: 9, y: -7)
-                                .accessibilityHidden(true)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Player")
-                            .font(.footnote.weight(.semibold))
-                        Text("Video controls")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.secondary.opacity(0.08))
-                )
-            }
-            .buttonStyle(.plain)
-            .help("Open or close Video Player")
-            .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 24) {
-                didLongPressPlayerButton = true
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    selectedTab = .animate
-                    topDockTab = .explore
-                    exploreRailSection = .animated
-                }
             }
         }
         .padding(.horizontal, 10)
@@ -745,6 +785,68 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? .primary : .secondary)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var pinnedRailControls: [PinnedRailControl] {
+        get {
+            pinnedRailControlsRaw
+                .split(separator: ",")
+                .compactMap { PinnedRailControl(rawValue: String($0)) }
+        }
+        nonmutating set {
+            pinnedRailControlsRaw = newValue.map(\.rawValue).joined(separator: ",")
+        }
+    }
+
+    private var currentRailControls: [PinnedRailControl] {
+        switch topDockTab {
+        case .explore:
+            return ExploreRailSection.allCases.map(pinnedRailControl(for:))
+        case .shape:
+            return ShapeRailSection.allCases.map(pinnedRailControl(for:))
+        case .visualizations:
+            return VisualizationsRailSection.allCases.map(pinnedRailControl(for:))
+        case .music:
+            return MusicRailSection.allCases.map(pinnedRailControl(for:))
+        }
+    }
+
+    private var visiblePinnedRailControls: [PinnedRailControl] {
+        pinnedRailControls.filter { !currentRailControls.contains($0) }
+    }
+
+    private func railRow(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl? = nil, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            railButton(title: title, systemImage: systemImage, isSelected: isSelected, action: action)
+
+            if let pinControl {
+                pinToggleButton(for: pinControl)
+            }
+        }
+    }
+
+    private func pinToggleButton(for control: PinnedRailControl) -> some View {
+        let isPinned = pinnedRailControls.contains(control)
+
+        return Button {
+            togglePinnedRailControl(control)
+        } label: {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isPinned ? Color.blue.opacity(0.16) : Color.secondary.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(isPinned ? Color.blue.opacity(0.24) : Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isPinned ? Color.blue : Color.secondary)
+        .help(isPinned ? "Remove from permanent fixture" : "Pin to permanent fixture")
+        .accessibilityLabel(isPinned ? "Unpin \(control.title)" : "Pin \(control.title)")
     }
 
     private func countBadge(_ count: Int, color: Color) -> some View {
@@ -830,6 +932,138 @@ struct ContentView: View {
         musicPanelTab = section.musicPanelTab
     }
 
+    private func togglePinnedRailControl(_ control: PinnedRailControl) {
+        var controls = pinnedRailControls
+        if let index = controls.firstIndex(of: control) {
+            controls.remove(at: index)
+        } else {
+            controls.append(control)
+        }
+        pinnedRailControls = controls
+    }
+
+    private func isPinnedRailControlSelected(_ control: PinnedRailControl) -> Bool {
+        switch control {
+        case .exploreJumpingOff:
+            return topDockTab == .explore && exploreRailSection == .jumpingOff && selectedTab != .gestures && selectedTab != .settings
+        case .exploreMusicReactive:
+            return topDockTab == .explore && exploreRailSection == .musicReactive && selectedTab != .gestures && selectedTab != .settings
+        case .exploreAnimated:
+            return topDockTab == .explore && exploreRailSection == .animated && selectedTab != .gestures && selectedTab != .settings
+        case .exploreScenes:
+            return topDockTab == .explore && exploreRailSection == .scenes && selectedTab != .gestures && selectedTab != .settings
+        case .shapeParameters:
+            return topDockTab == .shape && shapeRailSection == .parameters && selectedTab != .gestures && selectedTab != .settings
+        case .shapeFormula:
+            return topDockTab == .shape && shapeRailSection == .formula && selectedTab != .gestures && selectedTab != .settings
+        case .shapeSpace:
+            return topDockTab == .shape && shapeRailSection == .space && selectedTab != .gestures && selectedTab != .settings
+        case .shapePerformance:
+            return topDockTab == .shape && shapeRailSection == .performance && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsColor:
+            return topDockTab == .visualizations && visualizationsRailSection == .color && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsMapping:
+            return topDockTab == .visualizations && visualizationsRailSection == .mapping && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsGrading:
+            return topDockTab == .visualizations && visualizationsRailSection == .grading && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsMotion:
+            return topDockTab == .visualizations && visualizationsRailSection == .motion && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsAtmosphere:
+            return topDockTab == .visualizations && visualizationsRailSection == .atmosphere && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsReactive:
+            return topDockTab == .visualizations && visualizationsRailSection == .reactive && selectedTab != .gestures && selectedTab != .settings
+        case .musicPlayback:
+            return topDockTab == .music && musicRailSection == .playback && selectedTab != .gestures && selectedTab != .settings
+        case .musicSongs:
+            return topDockTab == .music && musicRailSection == .songs && selectedTab != .gestures && selectedTab != .settings
+        case .musicPlaylists:
+            return topDockTab == .music && musicRailSection == .playlists && selectedTab != .gestures && selectedTab != .settings
+        case .musicAlbums:
+            return topDockTab == .music && musicRailSection == .albums && selectedTab != .gestures && selectedTab != .settings
+        }
+    }
+
+    private func activatePinnedRailControl(_ control: PinnedRailControl) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            switch control {
+            case .exploreJumpingOff:
+                activateExploreSection(.jumpingOff)
+            case .exploreMusicReactive:
+                activateExploreSection(.musicReactive)
+            case .exploreAnimated:
+                activateExploreSection(.animated)
+            case .exploreScenes:
+                activateExploreSection(.scenes)
+            case .shapeParameters:
+                activateShapeSection(.parameters)
+            case .shapeFormula:
+                activateShapeSection(.formula)
+            case .shapeSpace:
+                activateShapeSection(.space)
+            case .shapePerformance:
+                activateShapeSection(.performance)
+            case .visualizationsColor:
+                activateVisualizationsSection(.color)
+            case .visualizationsMapping:
+                activateVisualizationsSection(.mapping)
+            case .visualizationsGrading:
+                activateVisualizationsSection(.grading)
+            case .visualizationsMotion:
+                activateVisualizationsSection(.motion)
+            case .visualizationsAtmosphere:
+                activateVisualizationsSection(.atmosphere)
+            case .visualizationsReactive:
+                activateVisualizationsSection(.reactive)
+            case .musicPlayback:
+                activateMusicSection(.playback)
+            case .musicSongs:
+                activateMusicSection(.songs)
+            case .musicPlaylists:
+                activateMusicSection(.playlists)
+            case .musicAlbums:
+                activateMusicSection(.albums)
+            }
+        }
+    }
+
+    private func pinnedRailControl(for section: ExploreRailSection) -> PinnedRailControl {
+        switch section {
+        case .jumpingOff: return .exploreJumpingOff
+        case .musicReactive: return .exploreMusicReactive
+        case .animated: return .exploreAnimated
+        case .scenes: return .exploreScenes
+        }
+    }
+
+    private func pinnedRailControl(for section: ShapeRailSection) -> PinnedRailControl {
+        switch section {
+        case .parameters: return .shapeParameters
+        case .formula: return .shapeFormula
+        case .space: return .shapeSpace
+        case .performance: return .shapePerformance
+        }
+    }
+
+    private func pinnedRailControl(for section: VisualizationsRailSection) -> PinnedRailControl {
+        switch section {
+        case .color: return .visualizationsColor
+        case .mapping: return .visualizationsMapping
+        case .grading: return .visualizationsGrading
+        case .motion: return .visualizationsMotion
+        case .atmosphere: return .visualizationsAtmosphere
+        case .reactive: return .visualizationsReactive
+        }
+    }
+
+    private func pinnedRailControl(for section: MusicRailSection) -> PinnedRailControl {
+        switch section {
+        case .playback: return .musicPlayback
+        case .songs: return .musicSongs
+        case .playlists: return .musicPlaylists
+        case .albums: return .musicAlbums
+        }
+    }
+
     private func syncNavigationChromeFromLegacySelection() {
         switch selectedTab {
         case .fractal:
@@ -849,7 +1083,7 @@ struct ContentView: View {
             }
         case .animate:
             topDockTab = .explore
-            exploreRailSection = .animated
+            exploreRailSection = .scenes
         case .coloring:
             topDockTab = .visualizations
             switch coloringSubTab {
@@ -906,12 +1140,14 @@ struct ContentView: View {
     // MARK: - Bottom Bar
     
     private var bottomBar: some View {
-        ZStack {
+        HStack(spacing: 12) {
+            activityTrafficLights
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            ToggleImmersiveSpaceButton()
+                .frame(maxWidth: .infinity, alignment: .center)
+
             HStack(spacing: 12) {
-                activityTrafficLights
-
-                Spacer()
-
                 if let animationManager = appModel.animationManager {
                     LiveSessionRecordingControl(animationManager: animationManager, compact: true)
                         .disabled(animationManager.isPlaying)
@@ -924,9 +1160,7 @@ struct ContentView: View {
                     }
                 )
             }
-
-            ToggleImmersiveSpaceButton()
-                .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -950,20 +1184,12 @@ struct ContentView: View {
                 count: activeDynamicEffectCount > 0 ? activeDynamicEffectCount : nil,
                 action: toggleDynamicEffectsActive
             )
-            ActivityLightButton(
-                title: "Video",
-                systemImage: "play.fill",
-                color: .green,
-                isActive: isAnimationPlaying,
-                count: nil,
-                action: toggleAnimationPlaybackActive
-            )
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Capsule().fill(Color.secondary.opacity(0.08)))
         .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1))
-        .help("Quick toggles for music permutations, dynamic color, and video")
+        .help("Quick toggles for music permutations and dynamic color")
     }
 
     private func toggleMusicPermutationsActive() {
@@ -1986,7 +2212,6 @@ struct ContentView: View {
                                 onPlay: animateEditButtonsVisible ? nil : {
                                     animationManager.currentScene = scene
                                     animationManager.play()
-                                    openWindow(id: AppModel.animationPlayerWindowID)
                                     appModel.markMenuWindowDismissed()
                                     dismissWindow(id: appModel.menuWindowID)
                                 }

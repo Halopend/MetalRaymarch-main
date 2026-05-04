@@ -11,6 +11,7 @@ enum FractalBrowseTab: String, CaseIterable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
+    case scenes = "Scenes"
 }
 
 /// Category-ordered list of selectable formulas, used by both the Browse and
@@ -111,11 +112,15 @@ struct FractalGridView: View {
 
 
     var body: some View {
-        let hasScenes = animationManager?.scenes.isEmpty == false
-        // If the persisted tab is "animated" but there are no animation scenes,
-        // gracefully fall back to Jumping Off without overwriting the stored choice.
+        let allScenes = animationManager?.scenes ?? []
+        let hasScenes = !allScenes.isEmpty
+        let hasAnimatedScenes = allScenes.contains { $0.keyframes.count >= 2 }
         let currentTab = effectiveTabSelection.wrappedValue
-        let selectedTab: FractalBrowseTab = (currentTab == .animated && !hasScenes) ? .jumpingOff : currentTab
+        let selectedTab = resolvedTabSelection(
+            currentTab: currentTab,
+            hasScenes: hasScenes,
+            hasAnimatedScenes: hasAnimatedScenes
+        )
 
         VStack(spacing: 10) {
             ScrollView(.vertical, showsIndicators: true) {
@@ -135,6 +140,11 @@ struct FractalGridView: View {
                         if let animationManager {
                             animatedScenesGrid(animationManager)
                         }
+
+                    case .scenes:
+                        if let animationManager {
+                            scenesGrid(animationManager)
+                        }
                     }
                 }
                 .padding(.horizontal, 12)
@@ -146,6 +156,7 @@ struct FractalGridView: View {
 
     @ViewBuilder
     private func animatedScenesGrid(_ animationManager: AnimationManager) -> some View {
+        let animatedScenes = animatedScenes(in: animationManager)
         let staticScenePresets = filteredStaticPresets()
         let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
 
@@ -158,11 +169,11 @@ struct FractalGridView: View {
                 accentColor: .purple
             )
 
-            if animationManager.scenes.isEmpty {
+            if animatedScenes.isEmpty {
                 emptySectionLabel("No animated scenes yet")
             } else {
                 LazyVGrid(columns: sceneColumns, spacing: 12) {
-                    ForEach(Array(animationManager.scenes.enumerated()), id: \.offset) { _, scene in
+                    ForEach(Array(animatedScenes.enumerated()), id: \.offset) { _, scene in
                         sceneCard(
                             title: scene.name,
                             subtitle: scene.fractalType?.displayName ?? "Any fractal",
@@ -180,6 +191,44 @@ struct FractalGridView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.08)))
+    }
+
+    @ViewBuilder
+    private func scenesGrid(_ animationManager: AnimationManager) -> some View {
+        let staticScenePresets = filteredStaticPresets()
+        let activeSelection = currentSceneSelection(using: animationManager, staticScenePresets: staticScenePresets)
+
+        VStack(alignment: .leading, spacing: 10) {
+            browserHeader(
+                title: "Scenes",
+                systemImage: "square.stack.3d.up",
+                description: "The full merged list of built-in, edited, and user-created scenes.",
+                current: currentSceneSelectionLabel(selection: activeSelection, animationManager: animationManager, staticScenePresets: staticScenePresets),
+                accentColor: .orange
+            )
+
+            if animationManager.scenes.isEmpty {
+                emptySectionLabel("No scenes yet")
+            } else {
+                LazyVGrid(columns: sceneColumns, spacing: 12) {
+                    ForEach(Array(animationManager.scenes.enumerated()), id: \.offset) { _, scene in
+                        sceneCard(
+                            title: scene.name,
+                            subtitle: scene.fractalType?.displayName ?? "Any fractal",
+                            detail: scene.attachedSong?.title ?? "Visual-only scene",
+                            systemImage: scene.attachedSong == nil ? "square.stack.3d.up" : "music.note",
+                            showsFlashingWarning: scene.name.localizedCaseInsensitiveContains("ambient blur"),
+                            isSelected: activeSelection == .animation(scene.id),
+                            onEdit: { onEditScene?(scene) }
+                        ) {
+                            selectScene(scene, using: animationManager)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.08)))
     }
 
     @ViewBuilder
@@ -287,6 +336,21 @@ struct FractalGridView: View {
         filteredStaticPresets().filter { preset in
             !isJumpingOffPreset(preset)
         }
+    }
+
+    private func resolvedTabSelection(currentTab: FractalBrowseTab, hasScenes: Bool, hasAnimatedScenes: Bool) -> FractalBrowseTab {
+        switch currentTab {
+        case .scenes where !hasScenes:
+            return .jumpingOff
+        case .animated where !hasAnimatedScenes:
+            return hasScenes ? .scenes : .jumpingOff
+        default:
+            return currentTab
+        }
+    }
+
+    private func animatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
+        animationManager.scenes.filter { $0.keyframes.count >= 2 }
     }
 
     private func emptySectionLabel(_ text: String) -> some View {

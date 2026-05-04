@@ -61,7 +61,6 @@ struct MetalProjectTestApp: App {
                     dismissWindow(id: AppModel.libraryWindowID)
                     dismissWindow(id: AppModel.fractalBrowserWindowID)
                     dismissWindow(id: AppModel.animationEditorWindowID)
-                    dismissWindow(id: AppModel.animationPlayerWindowID)
                     dismissWindow(id: AppModel.onboardingWindowID)
 
                     // Set up handler for gesture-based window control
@@ -71,13 +70,6 @@ struct MetalProjectTestApp: App {
                     // Set up handler to dismiss the menu window for real
                     appModel.dismissMenuWindowHandler = { [dismissWindow] in
                         dismissWindow(id: appModel.menuWindowID)
-                    }
-                    // Animation Player window (gesture: right ring finger to palm)
-                    appModel.openAnimationPlayerWindowHandler = {
-                        openWindow(id: AppModel.animationPlayerWindowID)
-                    }
-                    appModel.dismissAnimationPlayerWindowHandler = { [dismissWindow] in
-                        dismissWindow(id: AppModel.animationPlayerWindowID)
                     }
 
                     if !hasCompletedIntroOnboarding {
@@ -138,21 +130,6 @@ struct MetalProjectTestApp: App {
             return WindowPlacement(nil)
         }
         .windowResizability(.contentMinSize)
-
-        // Animation Player pop-out window (positioned below main menu)
-        Window("Video Player", id: AppModel.animationPlayerWindowID) {
-            AnimationPlayerWindowView()
-                .environment(appModel)
-        }
-        .defaultSize(width: 700, height: 182)
-        .defaultWindowPlacement { _, context in
-            if let anchorWindow = context.windows.first(where: { $0.id == appModel.menuWindowID }) ?? context.windows.first {
-                return WindowPlacement(.below(anchorWindow))
-            }
-            return WindowPlacement(nil)
-        }
-        .windowResizability(.contentMinSize)
-
         ImmersiveSpace(id: appModel.immersiveSpaceID) {
             CompositorLayer(configuration: ContentStageConfiguration()) { @MainActor layerRenderer in
                 Renderer.startRenderLoop(layerRenderer, appModel: appModel)

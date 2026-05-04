@@ -178,9 +178,6 @@ class AppModel {
     /// Inferred user posture. `.unknown` until world tracking provides a valid height reading.
     var detectedPosture: UserPosture { UserPosture.detect(headHeightMeters: headHeightMeters) }
 
-    // Animation Player window visibility (toggled by gesture / UI button)
-    var isAnimationPlayerWindowVisible: Bool = false
-
     @ObservationIgnored private var isMenuHovering: Bool = false
     @ObservationIgnored private var menuAdjustmentDepth: Int = 0
     
@@ -296,8 +293,7 @@ class AppModel {
             self?.toggleMenuWindow()
         }
         gestureController?.onAnimationPlayerToggle = { [weak self] in
-            print("🎬 onAnimationPlayerToggle callback fired!")
-            self?.toggleAnimationPlayerWindow()
+            self?.toggleAnimationPlayback()
         }
         gestureController?.onOpenShapeMenu = { [weak self] in
             print("🧭 onOpenShapeMenu callback fired!")
@@ -527,12 +523,6 @@ class AppModel {
     /// Callback to dismiss the menu window (set by App scene)
     var dismissMenuWindowHandler: (() -> Void)?
 
-    /// Callback to open the animation player window (set by App scene)
-    var openAnimationPlayerWindowHandler: (() -> Void)?
-
-    /// Callback to dismiss the animation player window (set by App scene)
-    var dismissAnimationPlayerWindowHandler: (() -> Void)?
-
     /// Callback to navigate directly to the Fractal > Shape tab.
     var openShapeMenuHandler: (() -> Void)?
 
@@ -599,21 +589,26 @@ class AppModel {
         closeMenuWindow(reason: "scene load", bypassGuard: true)
     }
 
-    /// Toggle the Animation Player window visibility (gesture- or UI-driven).
-    func toggleAnimationPlayerWindow() {
-        if isAnimationPlayerWindowVisible {
-            isAnimationPlayerWindowVisible = false
-            dismissAnimationPlayerWindowHandler?()
-            print("🎬 Animation Player window dismissed")
-        } else {
-            // If no scene is selected, default to the first scene so the player has content.
-            if let manager = animationManager, manager.currentScene == nil {
-                manager.currentScene = manager.scenes.first
-            }
-            isAnimationPlayerWindowVisible = true
-            openAnimationPlayerWindowHandler?()
-            print("🎬 Animation Player window opened")
+    /// Toggle scene playback without opening a separate player window.
+    func toggleAnimationPlayback() {
+        guard let manager = animationManager else { return }
+
+        if manager.isPlaying {
+            manager.stop()
+            return
         }
+
+        if manager.currentScene?.keyframes.count ?? 0 < 2 {
+            manager.currentScene = manager.scenes.first { $0.keyframes.count >= 2 }
+        }
+
+        guard manager.currentScene != nil else { return }
+        manager.play()
+    }
+
+    /// Legacy gesture hook retained so existing finger-tap mappings keep working.
+    func toggleAnimationPlayerWindow() {
+        toggleAnimationPlayback()
     }
     
     /// Ensure menu window content is visible — call when exiting immersive mode or on app launch.
