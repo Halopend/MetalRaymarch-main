@@ -1,6 +1,48 @@
 @preconcurrency import CompositorServices
 import Metal
 
+private struct RenderPipelineKeyContext {
+    let exactStem: String
+    let sharedStem: String
+    let suffix: String
+
+    init(prefix: String,
+         fractalTypeRawValue: Int,
+         iterations: Int,
+         raySteps: Int,
+         qualityMode: Int,
+         powerKey: String,
+         useQuadShared: Bool) {
+        exactStem = prefix + "FT\(fractalTypeRawValue)_FI\(iterations)_RS\(raySteps)_N"
+        sharedStem = prefix + "FI\(iterations)_RS\(raySteps)_N"
+        suffix = "_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+    }
+
+    @inline(__always)
+    func exactKey(neonEnabled: Bool) -> String {
+        exactStem + (neonEnabled ? "1" : "0") + suffix
+    }
+
+    @inline(__always)
+    func sharedKey(neonEnabled: Bool) -> String {
+        sharedStem + (neonEnabled ? "1" : "0") + suffix
+    }
+}
+
+private struct ComputePipelineKeyContext {
+    let exactKey: String
+    let sharedKey: String
+
+    init(prefix: String,
+         fractalTypeRawValue: Int,
+         fractalIterations: Int,
+         maxRaySteps: Int,
+         powerKey: String) {
+        exactKey = prefix + "FT\(fractalTypeRawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
+        sharedKey = prefix + "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
+    }
+}
+
 extension Renderer {
     @inline(__always)
     fileprivate func recordPipelineTelemetry(renderHit: Bool? = nil,
@@ -103,8 +145,16 @@ extension Renderer {
         let neon = (appModel.renderSettings.gradientPreset?.isNeonMode ?? false) ? 1 : 0
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-        let prefix = customCacheKeyPrefix(for: fractalType)
-        let cacheKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neon)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        let keyContext = RenderPipelineKeyContext(
+            prefix: customCacheKeyPrefix(for: fractalType),
+            fractalTypeRawValue: fractalType.rawValue,
+            iterations: iterations,
+            raySteps: raySteps,
+            qualityMode: Int(qualityMode),
+            powerKey: powerKey,
+            useQuadShared: useQuadShared
+        )
+        let cacheKey = keyContext.exactKey(neonEnabled: neon == 1)
 
         // Check unified cache first
         if let cached = pipelineCache[cacheKey] {
@@ -240,8 +290,16 @@ extension Renderer {
         // Build unified cache key (only on parameter change)
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-        let prefix = customCacheKeyPrefix(for: fractalType)
-        let cacheKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        let keyContext = RenderPipelineKeyContext(
+            prefix: customCacheKeyPrefix(for: fractalType),
+            fractalTypeRawValue: fractalType.rawValue,
+            iterations: iterations,
+            raySteps: raySteps,
+            qualityMode: qualityMode,
+            powerKey: powerKey,
+            useQuadShared: useQuadShared
+        )
+        let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
         if RENDERER_DEBUG,
            fractalType == .mandelbulb,
            mandelbulbPower != lastSelectPower {
@@ -290,7 +348,7 @@ extension Renderer {
             )
 
             // 3. Try FT-specific neon=off quality-preset fallback.
-            let fallbackKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+            let fallbackKey = keyContext.exactKey(neonEnabled: false)
             if let pipeline = pipelineCache[fallbackKey] {
                 if RENDERER_DEBUG && lastLoggedPipelineKey != fallbackKey {
                     print("🎯 [Pipeline] Using quality-preset fallback: \(fallbackKey) (requested: \(cacheKey))")
@@ -300,7 +358,7 @@ extension Renderer {
             }
             else {
                 // 4. Try shared quality key (built at startup without FC_FRACTAL_TYPE)
-                let sharedExactKey = prefix + "FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                let sharedExactKey = keyContext.sharedKey(neonEnabled: neonMode)
                 if let pipeline = pipelineCache[sharedExactKey] {
                     if RENDERER_DEBUG && lastLoggedPipelineKey != sharedExactKey {
                         print("🎯 [Pipeline] Using shared quality pipeline: \(sharedExactKey) for FT=\(fractalType.rawValue)")
@@ -310,7 +368,7 @@ extension Renderer {
                 }
                 // 5. Try shared neon=off quality key
                 else {
-                    let sharedFallbackKey = prefix + "FI\(iterations)_RS\(raySteps)_N0_Q\(qualityMode)" + (useQuadShared ? "_QS" : "")
+                    let sharedFallbackKey = keyContext.sharedKey(neonEnabled: false)
                     if sharedFallbackKey != sharedExactKey, let pipeline = pipelineCache[sharedFallbackKey] {
                         if RENDERER_DEBUG && lastLoggedPipelineKey != sharedFallbackKey {
                             print("🎯 [Pipeline] Using shared neon-off quality pipeline: \(sharedFallbackKey) for FT=\(fractalType.rawValue)")
@@ -356,8 +414,16 @@ extension Renderer {
         )
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
-        let prefix = customCacheKeyPrefix(for: fractalType)
-        let cacheKey = prefix + "FT\(fractalType.rawValue)_FI\(iterations)_RS\(raySteps)_N\(neonMode ? 1 : 0)_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        let keyContext = RenderPipelineKeyContext(
+            prefix: customCacheKeyPrefix(for: fractalType),
+            fractalTypeRawValue: fractalType.rawValue,
+            iterations: iterations,
+            raySteps: raySteps,
+            qualityMode: qualityMode,
+            powerKey: powerKey,
+            useQuadShared: useQuadShared
+        )
+        let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
 
         // Already cached
         if pipelineCache[cacheKey] != nil { return }
@@ -476,7 +542,13 @@ extension Renderer {
             return nil
         }()
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
-        let prefix = customCacheKeyPrefix(for: fractalType)
+        let keyContext = ComputePipelineKeyContext(
+            prefix: customCacheKeyPrefix(for: fractalType),
+            fractalTypeRawValue: fractalType.rawValue,
+            fractalIterations: fractalIterations,
+            maxRaySteps: maxRaySteps,
+            powerKey: powerKey
+        )
 
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && mbPowerInt == lastComputePower,
@@ -485,7 +557,7 @@ extension Renderer {
             return cached
         }
 
-        let exactKey = prefix + "FT\(fractalType.rawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
+        let exactKey = keyContext.exactKey
 
         // 1. Exact match — FC values match precomputed absScalePow
         if let pipeline = computePipelineCache[exactKey] {
@@ -502,7 +574,7 @@ extension Renderer {
             return pipeline
         }
 
-        let sharedKey = prefix + "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
+        let sharedKey = keyContext.sharedKey
         if let pipeline = computePipelineCache[sharedKey] {
             recordPipelineTelemetry(computeHit: true)
             if RENDERER_DEBUG && lastComputePipelineKey != sharedKey {

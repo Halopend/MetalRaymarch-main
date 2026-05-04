@@ -49,6 +49,43 @@ enum CustomShaderCompilerError: Error, CustomStringConvertible {
 /// renderer queue.
 actor CustomShaderCompiler {
 
+    private static let synthesizedSourcePrefix: String = {
+        var pieces: [String] = []
+        pieces.reserveCapacity(15)
+
+        // Standard prelude. Header guards in metal_stdlib / simd already protect
+        // against the duplicate include emitted later by Shaders.metal's preamble.
+        pieces.append("#include <metal_stdlib>")
+        pieces.append("#include <simd/simd.h>")
+        pieces.append("using namespace metal;")
+
+        // Type declarations + helpers.
+        pieces.append(stripLocalIncludes(EmbeddedMetalSources.shaderTypesH))
+        pieces.append(stripLocalIncludes(EmbeddedMetalSources.fractalFormulaCommonH))
+
+        // Built-in formula headers — Shaders.metal still references their dispatch
+        // arms even though only the custom case runs on this pipeline.
+        let builtIns: [String] = [
+            EmbeddedMetalSources.mandelbulbH,
+            EmbeddedMetalSources.mengerH,
+            EmbeddedMetalSources.quaternionJuliaH,
+            EmbeddedMetalSources.octahedronH,
+            EmbeddedMetalSources.mengerSphereH,
+            EmbeddedMetalSources.theliPseudoKleinianH,
+            EmbeddedMetalSources.kleinianH,
+            EmbeddedMetalSources.boxSphereFolderH,
+            EmbeddedMetalSources.mandelboxSphereProjectionH,
+        ]
+        for body in builtIns {
+            pieces.append(stripLocalIncludes(body))
+        }
+
+        return pieces.joined(separator: "\n\n")
+    }()
+
+    private static let strippedDispatchTemplate = stripLocalIncludes(EmbeddedMetalSources.fractalFormulasH)
+    private static let synthesizedSourceSuffix = stripLocalIncludes(EmbeddedMetalSources.shadersMetal)
+
     private let device: MTLDevice
     private var libraryCache: [String: MTLLibrary] = [:]
 
@@ -106,38 +143,12 @@ actor CustomShaderCompiler {
     /// self-contained string suitable for `device.makeLibrary(source:)`.
     static func synthesizeSource(for formula: EmbeddedFormula) throws -> String {
         var pieces: [String] = []
-        pieces.reserveCapacity(20)
+        pieces.reserveCapacity(7)
 
         pieces.append("// === Custom DE shader (auto-synthesized at runtime) ===")
         pieces.append("// Embedded formula: \(formula.id) — \(formula.name)")
         pieces.append("// sourceHash = \(formula.shortHash)")
-
-        // Standard prelude. Header guards in metal_stdlib / simd already protect
-        // against the duplicate include emitted later by Shaders.metal's preamble.
-        pieces.append("#include <metal_stdlib>")
-        pieces.append("#include <simd/simd.h>")
-        pieces.append("using namespace metal;")
-
-        // Type declarations + helpers.
-        pieces.append(stripLocalIncludes(EmbeddedMetalSources.shaderTypesH))
-        pieces.append(stripLocalIncludes(EmbeddedMetalSources.fractalFormulaCommonH))
-
-        // Built-in formula headers — Shaders.metal still references their dispatch
-        // arms even though only the custom case runs on this pipeline.
-        let builtIns: [String] = [
-            EmbeddedMetalSources.mandelbulbH,
-            EmbeddedMetalSources.mengerH,
-            EmbeddedMetalSources.quaternionJuliaH,
-            EmbeddedMetalSources.octahedronH,
-            EmbeddedMetalSources.mengerSphereH,
-            EmbeddedMetalSources.theliPseudoKleinianH,
-            EmbeddedMetalSources.kleinianH,
-            EmbeddedMetalSources.boxSphereFolderH,
-            EmbeddedMetalSources.mandelboxSphereProjectionH,
-        ]
-        for body in builtIns {
-            pieces.append(stripLocalIncludes(body))
-        }
+        pieces.append(Self.synthesizedSourcePrefix)
 
         // User's DE source — defines DE_<stem> + DE_<stem>_Dist. Wrapped in a
         // banner so any compile error includes a clear marker in the diagnostic
@@ -148,13 +159,13 @@ actor CustomShaderCompiler {
 
         // FractalFormulas.h with the custom dispatch arms injected.
         let dispatchH = try injectCustomDispatch(
-            stripLocalIncludes(EmbeddedMetalSources.fractalFormulasH),
+            Self.strippedDispatchTemplate,
             stem: formula.functionStem
         )
         pieces.append(dispatchH)
 
         // Render kernels + helpers.
-        pieces.append(stripLocalIncludes(EmbeddedMetalSources.shadersMetal))
+        pieces.append(Self.synthesizedSourceSuffix)
 
         return pieces.joined(separator: "\n\n")
     }

@@ -302,6 +302,7 @@ struct ContentView: View {
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State private var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
+    @State private var didLongPressPinnedRailControl: PinnedRailControl?
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
@@ -660,8 +661,8 @@ struct ContentView: View {
         VStack(spacing: 8) {
             switch topDockTab {
             case .explore:
-                ForEach(ExploreRailSection.allCases, id: \.self) { section in
-                    railRow(
+                ForEach(ExploreRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                    railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
                         isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .explore && exploreRailSection == section,
@@ -671,8 +672,8 @@ struct ContentView: View {
                     }
                 }
             case .shape:
-                ForEach(ShapeRailSection.allCases, id: \.self) { section in
-                    railRow(
+                ForEach(ShapeRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                    railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
                         isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .shape && shapeRailSection == section,
@@ -682,8 +683,8 @@ struct ContentView: View {
                     }
                 }
             case .visualizations:
-                ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
-                    railRow(
+                ForEach(VisualizationsRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                    railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
                         isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section,
@@ -693,36 +694,14 @@ struct ContentView: View {
                     }
                 }
             case .music:
-                ForEach(MusicRailSection.allCases, id: \.self) { section in
-                    railRow(
+                ForEach(MusicRailSection.allCases.filter { !pinnedRailControls.contains(pinnedRailControl(for: $0)) }, id: \.self) { section in
+                    railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
                         isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section,
                         pinControl: pinnedRailControl(for: section)
                     ) {
                         activateMusicSection(section)
-                    }
-                }
-            }
-
-            if !visiblePinnedRailControls.isEmpty {
-                Divider()
-                    .padding(.vertical, 4)
-
-                Text("Pinned")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-
-                ForEach(visiblePinnedRailControls, id: \.self) { control in
-                    railRow(
-                        title: control.title,
-                        systemImage: control.icon,
-                        isSelected: isPinnedRailControlSelected(control),
-                        pinControl: control
-                    ) {
-                        activatePinnedRailControl(control)
                     }
                 }
             }
@@ -738,6 +717,22 @@ struct ContentView: View {
 
             railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
                 selectedTab = .settings
+            }
+
+            if !pinnedRailControls.isEmpty {
+                Divider()
+                    .padding(.vertical, 4)
+
+                ForEach(pinnedRailControls, id: \.self) { control in
+                    railButton(
+                        title: control.title,
+                        systemImage: control.icon,
+                        isSelected: isPinnedRailControlSelected(control),
+                        pinControl: control
+                    ) {
+                        activatePinnedRailControl(control)
+                    }
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -757,8 +752,14 @@ struct ContentView: View {
         }
     }
 
-    private func railButton(title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func railButton(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl? = nil, action: @escaping () -> Void) -> some View {
+        Button {
+            if didLongPressPinnedRailControl == pinControl {
+                didLongPressPinnedRailControl = nil
+                return
+            }
+            action()
+        } label: {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .semibold))
@@ -785,6 +786,14 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? .primary : .secondary)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.55, maximumDistance: 24)
+                .onEnded { _ in
+                    guard let pinControl else { return }
+                    didLongPressPinnedRailControl = pinControl
+                    togglePinnedRailControl(pinControl)
+                }
+        )
     }
 
     private var pinnedRailControls: [PinnedRailControl] {
@@ -796,57 +805,6 @@ struct ContentView: View {
         nonmutating set {
             pinnedRailControlsRaw = newValue.map(\.rawValue).joined(separator: ",")
         }
-    }
-
-    private var currentRailControls: [PinnedRailControl] {
-        switch topDockTab {
-        case .explore:
-            return ExploreRailSection.allCases.map(pinnedRailControl(for:))
-        case .shape:
-            return ShapeRailSection.allCases.map(pinnedRailControl(for:))
-        case .visualizations:
-            return VisualizationsRailSection.allCases.map(pinnedRailControl(for:))
-        case .music:
-            return MusicRailSection.allCases.map(pinnedRailControl(for:))
-        }
-    }
-
-    private var visiblePinnedRailControls: [PinnedRailControl] {
-        pinnedRailControls.filter { !currentRailControls.contains($0) }
-    }
-
-    private func railRow(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl? = nil, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 6) {
-            railButton(title: title, systemImage: systemImage, isSelected: isSelected, action: action)
-
-            if let pinControl {
-                pinToggleButton(for: pinControl)
-            }
-        }
-    }
-
-    private func pinToggleButton(for control: PinnedRailControl) -> some View {
-        let isPinned = pinnedRailControls.contains(control)
-
-        return Button {
-            togglePinnedRailControl(control)
-        } label: {
-            Image(systemName: isPinned ? "pin.fill" : "pin")
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: 30, height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(isPinned ? Color.blue.opacity(0.16) : Color.secondary.opacity(0.08))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(isPinned ? Color.blue.opacity(0.24) : Color.secondary.opacity(0.12), lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isPinned ? Color.blue : Color.secondary)
-        .help(isPinned ? "Remove from permanent fixture" : "Pin to permanent fixture")
-        .accessibilityLabel(isPinned ? "Unpin \(control.title)" : "Pin \(control.title)")
     }
 
     private func countBadge(_ count: Int, color: Color) -> some View {
@@ -1183,6 +1141,14 @@ struct ContentView: View {
                 isActive: activeDynamicEffectCount > 0,
                 count: activeDynamicEffectCount > 0 ? activeDynamicEffectCount : nil,
                 action: toggleDynamicEffectsActive
+            )
+            ActivityLightButton(
+                title: "Playback",
+                systemImage: isAnimationPlaying ? "pause.fill" : "play.fill",
+                color: .orange,
+                isActive: isAnimationPlaying,
+                count: nil,
+                action: toggleAnimationPlaybackActive
             )
         }
         .padding(.horizontal, 8)
