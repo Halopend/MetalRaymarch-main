@@ -69,6 +69,26 @@ struct FractalGridView: View {
     @SceneStorage("FractalGridView.selectedStaticSceneID") private var selectedStaticSceneIDRaw: String?
     private let sceneColumns = Array(repeating: GridItem(.flexible(minimum: 150), spacing: 12), count: 4)
 
+    init(
+        cache: UISettingsCache,
+        gestureController: GestureController?,
+        animationManager: AnimationManager?,
+        presetManager: PresetManager?,
+        tabSelection: Binding<FractalBrowseTab>? = nil,
+        onEditScene: ((AnimationScene) -> Void)? = nil,
+        onLoadAnimationScene: ((AnimationScene) -> Void)? = nil,
+        onLoadStaticScene: ((FractalPreset) -> Void)? = nil
+    ) {
+        self.cache = cache
+        self.gestureController = gestureController
+        self.animationManager = animationManager
+        self.presetManager = presetManager
+        self.tabSelection = tabSelection
+        self.onEditScene = onEditScene
+        self.onLoadAnimationScene = onLoadAnimationScene
+        self.onLoadStaticScene = onLoadStaticScene
+    }
+
     private var effectiveTabSelection: Binding<FractalBrowseTab> {
         Binding(
             get: { tabSelection?.wrappedValue ?? storedTabSelection },
@@ -98,15 +118,6 @@ struct FractalGridView: View {
         let selectedTab: FractalBrowseTab = (currentTab == .animated && !hasScenes) ? .jumpingOff : currentTab
 
         VStack(spacing: 10) {
-            Picker("Browse", selection: effectiveTabSelection) {
-                ForEach(FractalBrowseTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     switch selectedTab {
@@ -195,6 +206,7 @@ struct FractalGridView: View {
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
                             systemImage: "photo",
+                            thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
                         ) {
@@ -232,6 +244,7 @@ struct FractalGridView: View {
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
                             systemImage: "music.note",
+                            thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
                         ) {
@@ -364,13 +377,11 @@ struct FractalGridView: View {
         }
     }
 
-    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
+    private func sceneCard(title: String, subtitle: String, detail: String, systemImage: String, thumbnailData: Data? = nil, showsFlashingWarning: Bool = false, isSelected: Bool, onEdit: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: systemImage)
-                        .font(.subheadline)
-                        .frame(width: 18)
+                    sceneCardIcon(systemImage: systemImage, thumbnailData: thumbnailData)
 
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
@@ -422,6 +433,36 @@ struct FractalGridView: View {
         )
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
+
+    @ViewBuilder
+    private func sceneCardIcon(systemImage: String, thumbnailData: Data?) -> some View {
+        if let thumbnailData,
+           let image = FractalPreset(id: UUID(), name: "Preview", thumbnailData: thumbnailData).thumbnailImage {
+            #if os(visionOS) || os(iOS)
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 40, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.22), lineWidth: 1))
+            #elseif os(macOS)
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 40, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.22), lineWidth: 1))
+            #else
+            Image(systemName: systemImage)
+                .font(.subheadline)
+                .frame(width: 18)
+            #endif
+        } else {
+            Image(systemName: systemImage)
+                .font(.subheadline)
+                .frame(width: 18)
+        }
+    }
 }
 
 // MARK: - Grid Cell
@@ -431,48 +472,49 @@ struct FractalGridCell: View {
     let isSelected: Bool
     let action: () -> Void
 
+    private var formulaAuthor: String? {
+        FormulaCatalog.shared.descriptor(for: type)?.author
+    }
+
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
                     Image(systemName: type.icon)
-                        .font(.subheadline)
-                        .frame(width: 18)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(type.displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-
-                        Text(type.category)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(
-                                Capsule()
-                                    .fill(Color.secondary.opacity(0.12))
-                            )
+                        .font(.caption)
+                        .frame(width: 14)
+                        .foregroundStyle(isSelected ? Color.blue : .secondary)
+                    Text(type.displayName)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
                     }
                 }
-
-                Spacer(minLength: 0)
-
-                if isSelected {
-                    Label("Selected", systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.blue)
+                Text(type.category)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                if let author = formulaAuthor {
+                    Text(author)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.secondary.opacity(0.6))
+                        .lineLimit(1)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
-            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? Color.blue.opacity(0.2) : Color.white.opacity(0.06))
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.blue.opacity(0.18) : Color.white.opacity(0.05))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isSelected ? Color.blue.opacity(0.55) : Color.secondary.opacity(0.15), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.12), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -489,11 +531,11 @@ struct FractalFormulaGrid: View {
     var cache: UISettingsCache
     let gestureController: GestureController?
 
-    private let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: 3)
+    private let columns = Array(repeating: GridItem(.flexible(minimum: 120), spacing: 8), count: 3)
     private let orderedTypes: [FractalModelType] = FractalFormulaOrder.orderedTypes
 
     var body: some View {
-        LazyVGrid(columns: columns, spacing: 12) {
+        LazyVGrid(columns: columns, spacing: 8) {
             ForEach(orderedTypes, id: \.self) { type in
                 FractalGridCell(
                     type: type,

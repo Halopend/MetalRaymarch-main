@@ -236,7 +236,7 @@ class PresetManager {
     /// Load a preset's settings
     func loadPreset(_ preset: FractalPreset,
                     into settings: RenderSettings,
-                    includePerformance: Bool = false,
+                    includePerformance: Bool = true,
                     resetEnvironment: Bool = false) {
         preset.apply(to: settings,
                      includePerformance: includePerformance,

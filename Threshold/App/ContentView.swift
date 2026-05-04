@@ -8,6 +8,11 @@
 
 import SwiftUI
 import RealityKit
+#if os(visionOS) || os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -136,6 +141,7 @@ enum SettingsSubTab: String, CaseIterable { case general = "General", exportShar
 private enum SaveChoice: String, CaseIterable {
     case resetLocation = "Reset Location"
     case presetCustomName = "Preset - Custom Name"
+    case presetWithPreview = "Preset + Preview"
 }
 
 enum RendererModeOption: String, CaseIterable {
@@ -290,13 +296,15 @@ struct ContentView: View {
     
     var body: some View {
         @Bindable var appModel = appModel
-        
+
         let isOpen = appModel.immersiveSpaceState == .open
         let isShortcutOrnamentVisible = appModel.immersiveSpaceState != .closed && appModel.isMenuWindowVisible
+
         Group {
             if isOpen {
                 immersiveLayout
-                    activateShapeSection(.parameters)
+            } else {
+                preImmersiveLayout
             }
         }
         .environment(\.menuAdjustmentActions, MenuAdjustmentActions(
@@ -304,31 +312,23 @@ struct ContentView: View {
             end: { appModel.endMenuAdjustment() }
         ))
         .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
-                    activateShapeSection(.performance)
+        .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(menuSurfaceStroke, lineWidth: 1)
         )
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
         // Content visibility: keep the window physically open (preserves world-space position)
         // but hide content and disable hit-testing when the user gestures the menu closed.
-            syncNavigationChromeFromLegacySelection()
         .opacity(appModel.isMenuWindowVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.18), value: appModel.isMenuWindowVisible)
         .allowsHitTesting(appModel.isMenuWindowVisible)
         .ornament(
             visibility: isShortcutOrnamentVisible ? .visible : .hidden,
-        .onChange(of: selectedTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: fractalSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: shapeInnerTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: fractalBrowseTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: coloringSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
-        .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelection() }
             attachmentAnchor: .scene(.top),
             contentAlignment: .bottom
         ) {
-            FractalShortcutWindowView()
-                .environment(appModel)
+            topDockOrnament
                 .padding(.bottom, 10)
         }
         .onHover { hovering in
@@ -338,8 +338,7 @@ struct ContentView: View {
         .onAppear {
             appModel.openShapeMenuHandler = {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    selectedTab = .fractal
-                    fractalSubTab = .shape
+                    activateShapeSection(.parameters)
                 }
             }
             appModel.isShapeMenuActiveHandler = {
@@ -347,19 +346,26 @@ struct ContentView: View {
             }
             appModel.openRenderMenuHandler = {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    selectedTab = .fractal
-                    fractalSubTab = .render
+                    activateShapeSection(.performance)
                 }
             }
             appModel.isRenderMenuActiveHandler = {
                 selectedTab == .fractal && fractalSubTab == .render
             }
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
+            syncNavigationChromeFromLegacySelection()
         }
         .onDisappear { cache.stopSync() }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
+        .onChange(of: selectedTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: fractalSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: shapeInnerTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: fractalBrowseTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: coloringSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelection() }
+        .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelection() }
         .sheet(isPresented: $showSaveDestinationSheet) {
             SaveDestinationSheet(
                 onSave: { choice, customName in
@@ -368,6 +374,8 @@ struct ContentView: View {
                         saveCurrentAsResetDefaults()
                     case .presetCustomName:
                         saveCurrentAsPreset(named: customName)
+                    case .presetWithPreview:
+                        saveCurrentAsPreset(named: customName, includeGeneratedPreview: true)
                     }
                     showSaveDestinationSheet = false
                 },
@@ -375,7 +383,7 @@ struct ContentView: View {
                     showSaveDestinationSheet = false
                 }
             )
-            .presentationDetents([.height(220), .height(280)])
+            .presentationDetents([.height(300), .height(360)])
             .presentationDragIndicator(.visible)
         }
     }
@@ -402,13 +410,26 @@ struct ContentView: View {
         cache.loadFromSettings()
     }
 
-    private func saveCurrentAsPreset(named providedName: String? = nil) {
+    private func saveCurrentAsPreset(named providedName: String? = nil, includeGeneratedPreview: Bool = false) {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         let autoName = "Preset \(formatter.string(from: Date()))"
         let presetName = providedName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = (presetName?.isEmpty == false) ? presetName! : autoName
-        appModel.presetManager.savePreset(name: finalName, settings: appModel.renderSettings)
+        appModel.presetManager.savePreset(
+            name: finalName,
+            settings: appModel.renderSettings,
+            thumbnailData: includeGeneratedPreview ? generatedPresetPreviewData(named: finalName) : nil
+        )
+    }
+
+    private func generatedPresetPreviewData(named name: String) -> Data? {
+        PresetPreviewGenerator.makePNGData(
+            name: name,
+            fractalType: appModel.renderSettings.fractalType,
+            gradientState: appModel.renderSettings.gradientState,
+            lightingPreset: appModel.renderSettings.lightingPreset
+        )
     }
     
     // MARK: - Pre-Immersive Layout
@@ -436,10 +457,6 @@ struct ContentView: View {
     
     private var immersiveLayout: some View {
         VStack(spacing: 0) {
-            topDockBar
-
-            Divider()
-
             HStack(spacing: 0) {
                 // ── LEFT: Context Rail ──
                 sectionRail
@@ -496,11 +513,22 @@ struct ContentView: View {
                 .foregroundStyle(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? .primary : .secondary)
                 .accessibilityAddTraits(topDockTab == tab && selectedTab != .gestures && selectedTab != .settings ? .isSelected : [])
             }
-
-            Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+    }
+
+    private var topDockOrnament: some View {
+        topDockBar
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.black.opacity(colorScheme == .dark ? 0.82 : 0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.14), lineWidth: 1)
+            )
+            .glassBackgroundEffect(in: .rect(cornerRadius: 18))
     }
 
     // MARK: - Context Rail
@@ -978,28 +1006,17 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             case .shape:
-                VStack(spacing: 8) {
-                    Picker("Shape Section", selection: $shapeInnerTab) {
-                        ForEach(ShapeInnerTab.allCases, id: \.self) { tab in
-                            Text(tab.rawValue).tag(tab)
+                ScrollView(.vertical, showsIndicators: true) {
+                    Group {
+                        switch shapeInnerTab {
+                        case .parameters:
+                            fractalShapeContent
+                        case .formula:
+                            fractalFormulaContent
                         }
                     }
-                    .pickerStyle(.segmented)
                     .padding(.horizontal, 16)
-                    .padding(.top, 8)
-
-                    ScrollView(.vertical, showsIndicators: true) {
-                        Group {
-                            switch shapeInnerTab {
-                            case .parameters:
-                                fractalShapeContent
-                            case .formula:
-                                fractalFormulaContent
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                    }
+                    .padding(.vertical, 8)
                 }
 
             case .space:
@@ -1551,17 +1568,6 @@ struct ContentView: View {
                     .disabled(cache.quality.tileSize == 8)
                 }
 
-                if cache.quality.tileSize != 8 && cache.quality.resolutionScale < 0.999 {
-                    Label(
-                        effectiveDirectBudgetPreference == .framerate
-                        ? "Beta: output may look distorted at aggressive Framerate Budgets."
-                        : "Beta: output may look distorted at lower Detail Budgets.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
                 if cache.quality.tileSize == 8 {
                     Text(effectiveDirectBudgetUnavailableText)
                         .font(.caption2)
@@ -1936,12 +1942,6 @@ struct ContentView: View {
     
     private var coloringTabContent: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $coloringSubTab) {
-                ForEach(ColoringSubTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
                     switch coloringSubTab {
@@ -1982,27 +1982,6 @@ struct ContentView: View {
                     GradientStopsPopover(cache: $cache)
                 }
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.4), lineWidth: 1))
-            Text("Presets").font(.subheadline).foregroundColor(.secondary)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-                ForEach(GradientPreset.allCases, id: \.rawValue) { preset in
-                    let isSelected = cache.color.gradientState.gradientPreset == preset
-                    Button { cache.applyGradientPreset(preset) } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: preset.icon).font(.caption)
-                            Text(preset.displayName).font(.caption2).lineLimit(1)
-                            if isSelected {
-                                Label("Selected", systemImage: "checkmark.circle.fill")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.blue)
-                            }
-                        }.frame(maxWidth: .infinity).padding(.vertical, 4)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(isSelected ? .blue : .secondary)
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                }
-            }
-            
             // ── Saved Custom Gradients ──
             HStack {
                 Text("Saved").font(.subheadline).foregroundColor(.secondary)
@@ -2011,7 +1990,6 @@ struct ContentView: View {
                     Text("\(cache.gradientLibrary.savedCustomGradients.count)").font(.caption2).foregroundStyle(.tertiary)
                 }
             }
-            .padding(.top, 4)
             if cache.gradientLibrary.savedCustomGradients.isEmpty {
                 Text("Edit a gradient and tap Save to build your library.")
                     .font(.caption)
@@ -2068,6 +2046,29 @@ struct ContentView: View {
                 }
             }
             
+            // ── Presets ──
+            Text("Presets").font(.subheadline).foregroundColor(.secondary)
+                .padding(.top, 4)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                ForEach(GradientPreset.allCases, id: \.rawValue) { preset in
+                    let isSelected = cache.color.gradientState.gradientPreset == preset
+                    Button { cache.applyGradientPreset(preset) } label: {
+                        VStack(spacing: 3) {
+                            Image(systemName: preset.icon).font(.caption)
+                            Text(preset.displayName).font(.caption2).lineLimit(1)
+                            if isSelected {
+                                Label("Selected", systemImage: "checkmark.circle.fill")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.blue)
+                            }
+                        }.frame(maxWidth: .infinity).padding(.vertical, 4)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(isSelected ? .blue : .secondary)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+
             // ── Save / Edit Buttons ──
             HStack(spacing: 8) {
                 Button { showStopsPopover = true } label: {
@@ -2099,10 +2100,58 @@ struct ContentView: View {
             HStack {
                 Label("Mapping Mode", systemImage: "target").font(.headline)
                 Spacer()
-                Picker("Mapping", selection: $cache.color.gradientState.gradient.mappingMode) {
-                    ForEach(ColorMappingMode.allCases, id: \.rawValue) { Text($0.displayName).tag($0) }
-                }.pickerStyle(.menu).frame(maxWidth: 140)
-                .onChange(of: cache.color.gradientState.gradient.mappingMode) { _, v in cache.push(\.colorMappingMode, value: v) }
+                Text(cache.color.gradientState.gradient.mappingMode.displayName)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Capsule().fill(Color.blue.opacity(0.12)))
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(minimum: 100), spacing: 8), GridItem(.flexible(minimum: 100), spacing: 8), GridItem(.flexible(minimum: 100), spacing: 8)], spacing: 8) {
+                ForEach(ColorMappingMode.allCases, id: \.rawValue) { mode in
+                    let isSelected = cache.color.gradientState.gradient.mappingMode == mode
+                    Button {
+                        cache.color.gradientState.gradient.mappingMode = mode
+                        cache.push(\.colorMappingMode, value: mode)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 5) {
+                                Image(systemName: mappingModeIcon(mode))
+                                    .font(.caption)
+                                    .frame(width: 14)
+                                    .foregroundStyle(isSelected ? Color.blue : .secondary)
+                                Text(mode.displayName)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                if isSelected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                            Text(mappingModeDescription(mode))
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(isSelected ? Color.blue.opacity(0.18) : Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(isSelected ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.12), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(mode.displayName)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
             }
 
             // Gradient transform controls
@@ -2148,7 +2197,29 @@ struct ContentView: View {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
         }
     }
-    
+
+    private func mappingModeIcon(_ mode: ColorMappingMode) -> String {
+        switch mode {
+        case .orbitTrap:  return "scope"
+        case .iterations: return "number.circle"
+        case .zDepth:     return "arrow.forward.to.line"
+        case .angle:      return "rotate.right"
+        case .normal:     return "arrow.up.right.circle"
+        case .blended:    return "blendmode"
+        }
+    }
+
+    private func mappingModeDescription(_ mode: ColorMappingMode) -> String {
+        switch mode {
+        case .orbitTrap:  return "Distance to orbit trap"
+        case .iterations: return "Normalized iteration count"
+        case .zDepth:     return "Camera depth"
+        case .angle:      return "Polar trap angle"
+        case .normal:     return "Surface normal"
+        case .blended:    return "Trap + iteration mix"
+        }
+    }
+
     private var coloringGradingContent: some View {
         VStack(spacing: 12) {
             Label("Color Grading", systemImage: "camera.filters").font(.headline)
@@ -2202,12 +2273,6 @@ struct ContentView: View {
     
     private var effectsTabContent: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $effectsSubTab) {
-                ForEach(EffectsSubTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
                     switch effectsSubTab {
@@ -2632,22 +2697,41 @@ struct ContentView: View {
     
     private var settingsTabContent: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $settingsSubTab) {
-                ForEach(SettingsSubTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
-                    switch settingsSubTab {
-                    case .general:     settingsGeneralContent
-                    case .exportShare: settingsExportContent
-                    case .devTools:    settingsAdvancedContent
+                    settingsSectionBlock(
+                        title: SettingsSubTab.general.rawValue,
+                        systemImage: "gearshape.2.fill"
+                    ) {
+                        settingsGeneralContent
+                    }
+
+                    settingsSectionBlock(
+                        title: SettingsSubTab.exportShare.rawValue,
+                        systemImage: "square.and.arrow.up.fill"
+                    ) {
+                        settingsExportContent
+                    }
+
+                    settingsSectionBlock(
+                        title: SettingsSubTab.devTools.rawValue,
+                        systemImage: "wrench.and.screwdriver.fill"
+                    ) {
+                        settingsAdvancedContent
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
             }
+        }
+    }
+
+    private func settingsSectionBlock<Content: View>(title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            content()
         }
     }
     
@@ -3273,6 +3357,116 @@ private struct ActivityLightButton: View {
     }
 }
 
+private enum PresetPreviewGenerator {
+    @MainActor
+    static func makePNGData(
+        name: String,
+        fractalType: FractalModelType,
+        gradientState: GradientState,
+        lightingPreset: LightingPreset
+    ) -> Data? {
+        let content = PresetPreviewCard(
+            name: name,
+            fractalType: fractalType,
+            gradientState: gradientState,
+            lightingPreset: lightingPreset
+        )
+        .frame(width: 512, height: 320)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+
+        #if os(visionOS) || os(iOS)
+        return renderer.uiImage?.pngData()
+        #elseif os(macOS)
+        guard let image = renderer.nsImage,
+              let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData) else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+        #else
+        return nil
+        #endif
+    }
+}
+
+private struct PresetPreviewCard: View {
+    let name: String
+    let fractalType: FractalModelType
+    let gradientState: GradientState
+    let lightingPreset: LightingPreset
+
+    private var gradientStops: [Gradient.Stop] {
+        let stops = gradientState.gradient.stops
+        guard !stops.isEmpty else {
+            return [
+                .init(color: .blue, location: 0),
+                .init(color: .purple, location: 1)
+            ]
+        }
+
+        return stops.map { stop in
+            Gradient.Stop(
+                color: Color(
+                    red: Double(max(0, min(1, stop.color.x))),
+                    green: Double(max(0, min(1, stop.color.y))),
+                    blue: Double(max(0, min(1, stop.color.z)))
+                ),
+                location: CGFloat(max(0, min(1, stop.position)))
+            )
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                gradient: Gradient(stops: gradientStops),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            RadialGradient(
+                colors: [.white.opacity(0.42), .clear],
+                center: .center,
+                startRadius: 20,
+                endRadius: 260
+            )
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top) {
+                    Image(systemName: fractalType.icon)
+                        .font(.system(size: 44, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 64, height: 64)
+                        .background(Circle().fill(.black.opacity(0.22)))
+
+                    Spacer()
+
+                    Text(lightingPreset.displayName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(.black.opacity(0.24)))
+                }
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(name)
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    Text(fractalType.displayName)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.86))
+                        .lineLimit(1)
+                }
+            }
+            .padding(26)
+        }
+    }
+}
+
 private struct SaveDestinationSheet: View {
     let onSave: (SaveChoice, String?) -> Void
     let onCancel: () -> Void
@@ -3281,7 +3475,7 @@ private struct SaveDestinationSheet: View {
     @State private var manualPresetName = ""
 
     private var canSave: Bool {
-        if choice != .presetCustomName { return true }
+        if choice != .presetCustomName && choice != .presetWithPreview { return true }
         return !manualPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -3309,9 +3503,16 @@ private struct SaveDestinationSheet: View {
                     subtitle: "Save with a name you enter.",
                     systemImage: "character.cursor.ibeam"
                 )
+
+                saveChoiceButton(
+                    choice: .presetWithPreview,
+                    title: "Save + Convert Preview",
+                    subtitle: "Save a named preset with a generated image.",
+                    systemImage: "photo.badge.plus"
+                )
             }
 
-            if choice == .presetCustomName {
+            if choice == .presetCustomName || choice == .presetWithPreview {
                 TextField("Preset name", text: $manualPresetName)
                     .textFieldStyle(.roundedBorder)
             }

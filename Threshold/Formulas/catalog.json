@@ -7,6 +7,7 @@
       "fractalType": 0,
       "category": "Box Folds",
       "description": "Classic Mandelbox — box fold + sphere fold geometry.",
+      "author": "Tom Lowe",
       "params": [
         {
           "index": 0,
@@ -43,6 +44,7 @@
       "fractalType": 21,
       "category": "Box Folds",
       "description": "Mandelbox variant with radial projection applied after sphere fold.",
+      "author": "Tom Lowe",
       "params": [
         {
           "index": 0,
@@ -100,6 +102,7 @@
       "fractalType": 1,
       "category": "Power / Quaternion",
       "description": "Power-based 3D Mandelbrot. Higher powers produce more lobes.",
+      "author": "Daniel White & Paul Nylander",
       "params": [
         {
           "index": 0,
@@ -141,6 +144,7 @@
       "fractalType": 5,
       "category": "Power / Quaternion",
       "description": "Julia-mode Mandelbulb with fixed C constant for symmetric bulb forms.",
+      "author": "Daniel White & Paul Nylander",
       "params": [
         {
           "index": 0,
@@ -216,6 +220,7 @@
       "fractalType": 2,
       "category": "Kaleidoscopic IFS",
       "description": "Classic Menger sponge — recursive box with cross-shaped holes.",
+      "author": "Karl Menger",
       "params": [
         {
           "index": 0,
@@ -257,6 +262,7 @@
       "fractalType": 6,
       "category": "Power / Quaternion",
       "description": "4D quaternion Julia set sliced in 3D.",
+      "author": "Alan Norton",
       "params": [
         {
           "index": 0,
@@ -306,6 +312,7 @@
       "fractalType": 11,
       "category": "Kaleidoscopic IFS",
       "description": "Octahedron IFS — abs folds with scale + offset.",
+      "author": "Knighty",
       "params": [
         {
           "index": 0,
@@ -347,6 +354,7 @@
       "fractalType": 14,
       "category": "Kaleidoscopic IFS",
       "description": "Menger Sphere — menger folds with optional spherification.",
+      "author": "Knighty",
       "params": [
         {
           "index": 0,
@@ -397,6 +405,7 @@
       "fractalType": 15,
       "category": "Hybrid Folds",
       "description": "Scale-1 Julia-box fold combined with a Menger-style base shape.",
+      "author": "Theli-at",
       "params": [
         {
           "index": 0,
@@ -534,6 +543,7 @@
       "fractalType": 17,
       "category": "Hybrid Folds",
       "description": "Knighty's Pseudo Kleinian — box fold + sphere inversion with cylindrical cross-section.",
+      "author": "Knighty",
       "params": [
         {
           "index": 0,
@@ -607,6 +617,7 @@
       "fractalType": 20,
       "category": "Hybrid Folds",
       "description": "Abs-fold + sphere inversion with tunable clamp range and scale — compact IFS variant.",
+      "author": "Fractalforums community",
       "params": [
         {
           "index": 0,

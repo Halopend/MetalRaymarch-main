@@ -32,6 +32,8 @@ struct FormulaDescriptor: Codable, Identifiable {
     let category: String
     let description: String
     let params: [FormulaParamDescriptor]
+    /// Name(s) of the mathematician or artist who originated or popularized this formula.
+    var author: String?
 }
 
 private struct CatalogRoot: Codable {

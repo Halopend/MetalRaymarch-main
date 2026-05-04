@@ -428,7 +428,7 @@ struct FractalPreset: Codable, Identifiable {
     }
     
     /// Apply this preset to render settings
-    func apply(to settings: RenderSettings, includePerformance: Bool = false, resetEnvironment: Bool = false) {
+    func apply(to settings: RenderSettings, includePerformance: Bool = true, resetEnvironment: Bool = false) {
         if resetEnvironment {
             settings.audioReactiveConfig = AudioReactiveConfig()
         }

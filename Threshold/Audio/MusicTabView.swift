@@ -53,11 +53,18 @@ struct MusicTabContent: View {
         cache.audioReactive.fractalAudioReactiveEnabled && !availableMappingTargetsToAdd.isEmpty
     }
 
-    init(cache: UISettingsCache, musicService: MusicService, audioAnalyzer: AudioAnalyzer, renderSettings: RenderSettings) {
+    init(
+        cache: UISettingsCache,
+        musicService: MusicService,
+        audioAnalyzer: AudioAnalyzer,
+        renderSettings: RenderSettings,
+        tabSelection: Binding<MusicPanelTab>? = nil
+    ) {
         self.cache = cache
         self.musicService = musicService
         self.audioAnalyzer = audioAnalyzer
         self.renderSettings = renderSettings
+        self.tabSelection = tabSelection
         _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
     }
 
@@ -245,31 +252,7 @@ struct MusicTabContent: View {
 
                 Spacer(minLength: 0)
 
-                visualizationAddButton
-            }
-
-            HStack(spacing: 10) {
-                Label("React to Music", systemImage: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform" : "waveform.slash")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Toggle("React to Music", isOn: reactToMusicBinding)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-
-                HStack(spacing: 6) {
-                    Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
-                        .font(.caption)
-                    Text("\(activeMusicPermutationCount)")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                }
-                .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.14)))
-
-                Spacer(minLength: 0)
+                visualizationControlTile
             }
 
             if !cache.audioReactive.fractalAudioReactiveEnabled {
@@ -284,6 +267,50 @@ struct MusicTabContent: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
+    }
+
+    private var visualizationControlTile: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reactive")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
+                            .font(.caption)
+                        Text("\(activeMusicPermutationCount)")
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                    }
+                    .foregroundStyle(cache.audioReactive.fractalAudioReactiveEnabled ? .blue : .secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Toggle("React to Music", isOn: reactToMusicBinding)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
+
+            Spacer(minLength: 0)
+
+            if cache.audioReactive.fractalAudioReactiveEnabled {
+                visualizationAddButton
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(12)
+        .frame(width: 148, height: 112, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.18), lineWidth: 1)
+        )
     }
 
 
