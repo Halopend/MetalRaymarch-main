@@ -3,18 +3,9 @@ import SwiftUI
 @MainActor
 @Observable
 final class MusicTabViewModel {
-    enum LibraryScope: String, CaseIterable {
-        case songs = "Songs"
-        case playlists = "Playlists"
-        case albums = "Albums"
-    }
-
     let musicService: MusicService
 
-    var showLibrary = false
-    var libraryScope: LibraryScope = .songs
     var librarySearch = ""
-    var libraryShuffle = false
     var musicPresetName = ""
     var musicPresets: [MusicReactivePreset]
     var commandErrorMessage: String?
@@ -95,11 +86,11 @@ final class MusicTabViewModel {
     }
 
     func playPlaylist(_ playlist: UnifiedPlaylist) {
-        runLibraryCommand { self.musicService.playPlaylist(playlist, shuffle: self.libraryShuffle) }
+        runLibraryCommand { self.musicService.playPlaylist(playlist, shuffle: false) }
     }
 
     func playAlbum(_ album: UnifiedAlbum) {
-        runLibraryCommand { self.musicService.playAlbum(album, shuffle: self.libraryShuffle) }
+        runLibraryCommand { self.musicService.playAlbum(album, shuffle: false) }
     }
 
     // MARK: - Library Filtering

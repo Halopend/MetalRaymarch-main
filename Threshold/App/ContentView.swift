@@ -101,6 +101,7 @@ enum VisualizationsRailSection: String, CaseIterable {
     case grading = "Grading"
     case motion = "Motion"
     case atmosphere = "Atmosphere"
+    case reactive = "Reactive"
 
     var icon: String {
         switch self {
@@ -109,25 +110,32 @@ enum VisualizationsRailSection: String, CaseIterable {
         case .grading: return "camera.filters"
         case .motion: return "sparkles"
         case .atmosphere: return "cloud.fog.fill"
+        case .reactive: return "waveform.path.ecg"
         }
     }
 }
 
 enum MusicRailSection: String, CaseIterable {
     case playback = "Playback"
-    case reactivity = "Reactivity"
+    case songs = "Songs"
+    case playlists = "Playlists"
+    case albums = "Albums"
 
     var icon: String {
         switch self {
-        case .playback: return "play.circle.fill"
-        case .reactivity: return "waveform.path.ecg"
+        case .playback:  return "play.circle.fill"
+        case .songs:     return "music.note"
+        case .playlists: return "music.note.list"
+        case .albums:    return "square.stack"
         }
     }
 
     var musicPanelTab: MusicPanelTab {
         switch self {
-        case .playback: return .music
-        case .reactivity: return .visualizations
+        case .playback:  return .music
+        case .songs:     return .songs
+        case .playlists: return .playlists
+        case .albums:    return .albums
         }
     }
 }
@@ -760,6 +768,9 @@ struct ContentView: View {
         case .atmosphere:
             selectedTab = .effects
             effectsSubTab = .static
+        case .reactive:
+            selectedTab = .music
+            musicPanelTab = .visualizations
         }
     }
 
@@ -804,8 +815,19 @@ struct ContentView: View {
             topDockTab = .visualizations
             visualizationsRailSection = effectsSubTab == .dynamic ? .motion : .atmosphere
         case .music:
-            topDockTab = .music
-            musicRailSection = musicPanelTab == .visualizations ? .reactivity : .playback
+            if musicPanelTab == .visualizations {
+                topDockTab = .visualizations
+                visualizationsRailSection = .reactive
+            } else {
+                topDockTab = .music
+                switch musicPanelTab {
+                case .music:       musicRailSection = .playback
+                case .songs:       musicRailSection = .songs
+                case .playlists:   musicRailSection = .playlists
+                case .albums:      musicRailSection = .albums
+                case .visualizations: musicRailSection = .playback
+                }
+            }
         case .gestures, .settings:
             break
         }

@@ -14,6 +14,9 @@ import SwiftUI
 
 enum MusicPanelTab: String, CaseIterable {
     case music = "Music"
+    case songs = "Songs"
+    case playlists = "Playlists"
+    case albums = "Albums"
     case visualizations = "Visualizations"
 }
 
@@ -95,6 +98,15 @@ struct MusicTabContent: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                     }
+
+                case .songs:
+                    librarySongsSection
+
+                case .playlists:
+                    libraryPlaylistsSection
+
+                case .albums:
+                    libraryAlbumsSection
 
                 case .visualizations:
                     VStack(spacing: 10) {
@@ -240,15 +252,17 @@ struct MusicTabContent: View {
 
     private var visualizationHeaderSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Music Reactive Visuals")
-                        .font(.subheadline.bold())
-                    Text("Toggle and map audio-driven modulation")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            Text("Music Reactive Visuals")
+                .font(.subheadline.bold())
+            Text("Toggle and map audio-driven modulation")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .bottom, spacing: 10) {
+                // Quick Mix — only visible when reactive is on
+                if cache.audioReactive.fractalAudioReactiveEnabled {
+                    quickMixTile
                 }
-                .layoutPriority(1)
 
                 Spacer(minLength: 0)
 
@@ -267,6 +281,35 @@ struct MusicTabContent: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
+    }
+
+    private var quickMixTile: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Quick Mix")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            sliderRow(label: "Amount", value: Binding(
+                get: { cache.audioReactive.fractalAudioAmount },
+                set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
+            ), range: 0...1, showsFlashingWarning: hasFlashingVisualMappings)
+
+            sliderRow(label: "Beat", value: Binding(
+                get: { cache.audioReactive.fractalBeatPunch },
+                set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
+            ), range: 0...1)
+        }
+        .padding(12)
+        .frame(height: 112, alignment: .topLeading)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.blue.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.blue.opacity(0.18), lineWidth: 1)
+        )
     }
 
     private var visualizationControlTile: some View {
@@ -312,17 +355,6 @@ struct MusicTabContent: View {
                 .strokeBorder((cache.audioReactive.fractalAudioReactiveEnabled ? Color.blue : Color.secondary).opacity(0.18), lineWidth: 1)
         )
     }
-
-
-
-    private var libraryScopeBinding: Binding<MusicTabViewModel.LibraryScope> {
-        Binding(get: { viewModel.libraryScope }, set: { viewModel.libraryScope = $0 })
-    }
-
-    private var libraryShuffleBinding: Binding<Bool> {
-        Binding(get: { viewModel.libraryShuffle }, set: { viewModel.libraryShuffle = $0 })
-    }
-
     private var librarySearchBinding: Binding<String> {
         Binding(get: { viewModel.librarySearch }, set: { viewModel.librarySearch = $0 })
     }
@@ -359,28 +391,6 @@ struct MusicTabContent: View {
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
             }
         }
-    }
-
-    // MARK: - Open Library Button
-
-    private var openLibraryButton: some View {
-        Button {
-            openWindow(id: AppModel.libraryWindowID)
-        } label: {
-            HStack {
-                Image(systemName: "music.note.list")
-                    .font(.subheadline)
-                Text("Open Library")
-                    .font(.subheadline.bold())
-                Spacer()
-                Image(systemName: "arrow.up.right.square")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Unified Now Playing
@@ -695,98 +705,167 @@ struct MusicTabContent: View {
 
     // MARK: - Unified Library Browser
 
-    private var librarySection: some View {
-        let music = musicService
-        let activeServiceName = music.activeProvider?.displayName ?? "Library"
-        return VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { viewModel.showLibrary.toggle() }
-            } label: {
-                HStack {
-                    Image(systemName: "music.note.list")
-                        .font(.caption)
-                    Text("\(activeServiceName) Library")
-                        .font(.subheadline.bold())
-                    Spacer()
-                    Image(systemName: viewModel.showLibrary ? "chevron.up" : "chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
+    // MARK: - Inline Library Sections
 
-            if viewModel.showLibrary {
-                libraryBrowser
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-    }
-
-    private var libraryBrowser: some View {
+    private var librarySongsSection: some View {
         let music = musicService
         let activeID = music.activeProvider?.serviceID
-        return VStack(spacing: 8) {
-            HStack {
-                Picker("", selection: libraryScopeBinding) {
-                    ForEach(MusicTabViewModel.LibraryScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-
-                if viewModel.libraryScope != .songs {
-                    Toggle("", isOn: libraryShuffleBinding)
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                }
-
-                Button {
-                    viewModel.refreshLibrary()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            TextField("Search…", text: librarySearchBinding)
-                .textFieldStyle(.roundedBorder)
-
-            if music.isLibraryLoading(for: activeID) {
-                ProgressView("Loading…")
-                    .font(.caption)
-            } else {
-                if let err = music.libraryError(for: activeID) {
-                    Text(err).font(.caption).foregroundStyle(.red)
-                }
-
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        switch viewModel.libraryScope {
-                        case .songs:
-                            ForEach(Array(viewModel.filteredSongs(for: activeID).prefix(100)), id: \.id) { track in
-                                unifiedSongRow(track)
-                            }
-                        case .playlists:
-                            ForEach(Array(viewModel.filteredPlaylists(for: activeID).prefix(100)), id: \.id) { pl in
-                                unifiedPlaylistRow(pl)
-                            }
-                        case .albums:
-                            ForEach(Array(viewModel.filteredAlbums(for: activeID).prefix(100)), id: \.id) { album in
-                                unifiedAlbumRow(album)
-                            }
-                        }
-                    }
-                }
-                .frame(maxHeight: 220)
+        let songs = viewModel.filteredSongs(for: activeID)
+        return libraryPane(
+            title: "Songs",
+            systemImage: "music.note",
+            accent: music.activeProvider?.accentColor ?? .blue,
+            isLoading: music.isLibraryLoading(for: activeID),
+            errorMessage: music.libraryError(for: activeID),
+            isEmpty: songs.isEmpty,
+            emptyTitle: "No Songs",
+            emptySystemImage: "music.note",
+            emptyDescription: "No songs match your search."
+        ) {
+            ForEach(songs, id: \.id) { track in
+                unifiedSongRow(track)
             }
         }
+    }
+
+    private var libraryPlaylistsSection: some View {
+        let music = musicService
+        let activeID = music.activeProvider?.serviceID
+        let playlists = viewModel.filteredPlaylists(for: activeID)
+        return libraryPane(
+            title: "Playlists",
+            systemImage: "music.note.list",
+            accent: .pink,
+            isLoading: music.isLibraryLoading(for: activeID),
+            errorMessage: music.libraryError(for: activeID),
+            isEmpty: playlists.isEmpty,
+            emptyTitle: "No Playlists",
+            emptySystemImage: "music.note.list",
+            emptyDescription: "No playlists match your search."
+        ) {
+            ForEach(playlists, id: \.id) { playlist in
+                unifiedPlaylistRow(playlist)
+            }
+        }
+    }
+
+    private var libraryAlbumsSection: some View {
+        let music = musicService
+        let activeID = music.activeProvider?.serviceID
+        let albums = viewModel.filteredAlbums(for: activeID)
+        return libraryPane(
+            title: "Albums",
+            systemImage: "square.stack",
+            accent: .teal,
+            isLoading: music.isLibraryLoading(for: activeID),
+            errorMessage: music.libraryError(for: activeID),
+            isEmpty: albums.isEmpty,
+            emptyTitle: "No Albums",
+            emptySystemImage: "square.stack",
+            emptyDescription: "No albums match your search."
+        ) {
+            ForEach(albums, id: \.id) { album in
+                unifiedAlbumRow(album)
+            }
+        }
+    }
+
+    private func libraryPane<Rows: View>(
+        title: String,
+        systemImage: String,
+        accent: Color,
+        isLoading: Bool,
+        errorMessage: String?,
+        isEmpty: Bool,
+        emptyTitle: String,
+        emptySystemImage: String,
+        emptyDescription: String,
+        @ViewBuilder rows: () -> Rows
+    ) -> some View {
+        let music = musicService
+        let activeID = music.activeProvider?.serviceID
+        return VStack(alignment: .leading, spacing: 10) {
+            libraryPaneHeader(title: title, systemImage: systemImage, accent: accent)
+
+            if isLoading {
+                Spacer(minLength: 0)
+                ProgressView("Loading library…")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
+            } else if let errorMessage {
+                Spacer(minLength: 0)
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Spacer(minLength: 0)
+            } else if isEmpty {
+                ContentUnavailableView(emptyTitle, systemImage: emptySystemImage, description: Text(emptyDescription))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(spacing: 6) {
+                        rows()
+                    }
+                    .padding(.bottom, 10)
+                }
+                .frame(maxHeight: .infinity)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(accent.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(accent.opacity(0.16), lineWidth: 1)
+        )
         .onAppear {
             if music.librarySongs(for: activeID).isEmpty,
                !music.isLibraryLoading(for: activeID) {
                 viewModel.refreshLibrary()
             }
         }
+    }
+
+    private func libraryPaneHeader(title: String, systemImage: String, accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.caption)
+                    .foregroundStyle(accent)
+                Text(title)
+                    .font(.subheadline.bold())
+                Spacer()
+                if let serviceName = musicService.activeProvider?.displayName {
+                    Text(serviceName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(accent.opacity(0.14)))
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Search", text: librarySearchBinding)
+                    .textFieldStyle(.roundedBorder)
+                Button { viewModel.refreshLibrary() } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(accent)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.ultraThinMaterial))
     }
 
     // MARK: - Unified Library Rows
@@ -884,23 +963,6 @@ struct MusicTabContent: View {
     private var reactivitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             if cache.audioReactive.fractalAudioReactiveEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Quick Mix")
-                        .font(.subheadline.bold())
-
-                    sliderRow(label: "Amount", value: Binding(
-                        get: { cache.audioReactive.fractalAudioAmount },
-                        set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
-                    ), range: 0...1, showsFlashingWarning: hasFlashingVisualMappings)
-
-                    sliderRow(label: "Beat", value: Binding(
-                        get: { cache.audioReactive.fractalBeatPunch },
-                        set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
-                    ), range: 0...1)
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.10)))
-
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("Mapped Parameters")
@@ -1126,26 +1188,6 @@ struct MusicTabContent: View {
                 .font(.caption.monospacedDigit())
                 .frame(width: 44, alignment: .trailing)
         }
-    }
-
-    private func compactToggle(_ label: String, isOn: Binding<Bool>) -> some View {
-        Button {
-            isOn.wrappedValue.toggle()
-        } label: {
-            Text(label)
-                .font(.caption2)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isOn.wrappedValue ? Color.blue.opacity(0.3) : Color.clear)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isOn.wrappedValue ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.3), lineWidth: 1)
-                )
-        }
-        .buttonStyle(.plain)
     }
 
     private func meterBar(label: String, level: Float, color: Color) -> some View {
