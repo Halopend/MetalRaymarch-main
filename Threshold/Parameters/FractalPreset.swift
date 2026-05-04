@@ -169,10 +169,10 @@ struct FractalPreset: Codable, Identifiable {
         colorSchemeCurve = try container.decodeIfPresent(Float.self, forKey: .colorSchemeCurve) ?? 0.0
         colorSchemeShadows = try container.decodeIfPresent(Float.self, forKey: .colorSchemeShadows) ?? -0.018
         colorSchemeHighlights = try container.decodeIfPresent(Float.self, forKey: .colorSchemeHighlights) ?? 0.02
-        minDistance = try container.decode(Float.self, forKey: .minDistance)
-        fractalScale = try container.decode(Float.self, forKey: .fractalScale)
-        foldingLimit = try container.decode(Float.self, forKey: .foldingLimit)
-        sphereRadius = try container.decode(Float.self, forKey: .sphereRadius)
+        minDistance = try container.decodeIfPresent(Float.self, forKey: .minDistance) ?? 0.8
+        fractalScale = try container.decodeIfPresent(Float.self, forKey: .fractalScale) ?? 2.8
+        foldingLimit = try container.decodeIfPresent(Float.self, forKey: .foldingLimit) ?? 1.0
+        sphereRadius = try container.decodeIfPresent(Float.self, forKey: .sphereRadius) ?? 0.5
         formulaParamValues = try container.decodeIfPresent([Float].self, forKey: .formulaParamValues)
         resolutionScale = try container.decodeIfPresent(Float.self, forKey: .resolutionScale)
         tileSize = try container.decodeIfPresent(Int.self, forKey: .tileSize)

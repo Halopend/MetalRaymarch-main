@@ -11,7 +11,7 @@ enum FractalBrowseTab: String, CaseIterable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
-    case scenes = "Scenes"
+    case customScenes = "Custom Scenes"
 }
 
 /// Category-ordered list of selectable formulas, used by both the Browse and
@@ -113,13 +113,12 @@ struct FractalGridView: View {
 
     var body: some View {
         let allScenes = animationManager?.scenes ?? []
-        let filteredScenes = allScenes.filter { $0.keyframes.count < 2 }
-        let hasScenes = !filteredScenes.isEmpty
+        let hasCustomScenes = !customScenePresets().isEmpty
         let hasAnimatedScenes = allScenes.contains { $0.keyframes.count >= 2 }
         let currentTab = effectiveTabSelection.wrappedValue
         let selectedTab = resolvedTabSelection(
             currentTab: currentTab,
-            hasScenes: hasScenes,
+            hasCustomScenes: hasCustomScenes,
             hasAnimatedScenes: hasAnimatedScenes
         )
 
@@ -142,10 +141,8 @@ struct FractalGridView: View {
                             animatedScenesGrid(animationManager)
                         }
 
-                    case .scenes:
-                        if let animationManager {
-                            scenesGrid(animationManager)
-                        }
+                    case .customScenes:
+                        customScenesGrid(animationManager)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -153,6 +150,9 @@ struct FractalGridView: View {
             }
         }
         .padding(.bottom, 8)
+        .onAppear {
+            presetManager?.refreshBundledPresets()
+        }
     }
 
     @ViewBuilder
@@ -203,50 +203,49 @@ struct FractalGridView: View {
     }
 
     @ViewBuilder
-    private func scenesGrid(_ animationManager: AnimationManager) -> some View {
-        let visibleScenes = nonAnimatedScenes(in: animationManager)
-        let staticScenePresets = filteredStaticPresets()
+    private func customScenesGrid(_ animationManager: AnimationManager?) -> some View {
+        let presets = customScenePresets()
         let activeSelection = currentSceneSelection(
-            currentScene: animationManager.currentScene,
-            visibleAnimationScenes: visibleScenes,
-            staticScenePresets: staticScenePresets
+            currentScene: animationManager?.currentScene,
+            visibleAnimationScenes: [],
+            staticScenePresets: presets
         )
 
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
-                title: "Scenes",
-                systemImage: "square.stack.3d.up",
-                description: "Saved non-animated scenes and single-state setups.",
+                title: "Custom Scenes",
+                systemImage: "chevron.left.forwardslash.chevron.right",
+                description: "Externally-supplied scenes with embedded custom distance estimators.",
                 current: currentSceneSelectionLabel(
                     selection: activeSelection,
-                    visibleAnimationScenes: visibleScenes,
-                    staticScenePresets: staticScenePresets
+                    visibleAnimationScenes: [],
+                    staticScenePresets: presets
                 ),
-                accentColor: .orange
+                accentColor: .mint
             )
 
-            if visibleScenes.isEmpty {
-                emptySectionLabel("No scenes yet")
+            if presets.isEmpty {
+                emptySectionLabel("No custom scenes yet")
             } else {
                 LazyVGrid(columns: sceneColumns, spacing: 12) {
-                    ForEach(Array(visibleScenes.enumerated()), id: \.offset) { _, scene in
+                    ForEach(Array(presets.enumerated()), id: \.offset) { _, preset in
                         sceneCard(
-                            title: scene.name,
-                            subtitle: scene.fractalType?.displayName ?? "Any fractal",
-                            detail: scene.attachedSong?.title ?? "Visual-only scene",
-                            systemImage: scene.attachedSong == nil ? "square.stack.3d.up" : "music.note",
-                            showsFlashingWarning: scene.name.localizedCaseInsensitiveContains("ambient blur"),
-                            isSelected: activeSelection == .animation(scene.id),
-                            onEdit: { onEditScene?(scene) }
+                            title: preset.name,
+                            subtitle: preset.embeddedFormula?.name ?? preset.fractalType.displayName,
+                            detail: staticSceneDetail(for: preset),
+                            systemImage: "chevron.left.forwardslash.chevron.right",
+                            thumbnailData: preset.thumbnailData,
+                            isSelected: activeSelection == .staticPreset(preset.id),
+                            onEdit: nil
                         ) {
-                            selectScene(scene, using: animationManager)
+                            selectStaticScenePreset(preset, using: animationManager)
                         }
                     }
                 }
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.08)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.mint.opacity(0.08)))
     }
 
     @ViewBuilder
@@ -349,6 +348,9 @@ struct FractalGridView: View {
     }
 
     private func isJumpingOffPreset(_ preset: FractalPreset) -> Bool {
+        // Custom-formula presets belong exclusively in the Custom Scenes tab.
+        guard preset.embeddedFormula == nil else { return false }
+
         let normalizedName = preset.name
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -361,23 +363,25 @@ struct FractalGridView: View {
     }
 
     private func jumpingOffPresets() -> [FractalPreset] {
-        filteredStaticPresets().filter { preset in
-            isJumpingOffPreset(preset)
-        }
+        filteredStaticPresets().filter { isJumpingOffPreset($0) }
     }
 
     private func musicReactivePresets() -> [FractalPreset] {
         filteredStaticPresets().filter { preset in
-            !isJumpingOffPreset(preset)
+            preset.embeddedFormula == nil && !isJumpingOffPreset(preset)
         }
     }
 
-    private func resolvedTabSelection(currentTab: FractalBrowseTab, hasScenes: Bool, hasAnimatedScenes: Bool) -> FractalBrowseTab {
+    private func customScenePresets() -> [FractalPreset] {
+        filteredStaticPresets().filter { $0.embeddedFormula != nil }
+    }
+
+    private func resolvedTabSelection(currentTab: FractalBrowseTab, hasCustomScenes: Bool, hasAnimatedScenes: Bool) -> FractalBrowseTab {
         switch currentTab {
-        case .scenes where !hasScenes:
+        case .customScenes where !hasCustomScenes:
             return .jumpingOff
         case .animated where !hasAnimatedScenes:
-            return hasScenes ? .scenes : .jumpingOff
+            return hasCustomScenes ? .customScenes : .jumpingOff
         default:
             return currentTab
         }
@@ -386,11 +390,6 @@ struct FractalGridView: View {
     private func animatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
         animationManager.scenes.filter { $0.keyframes.count >= 2 }
     }
-
-    private func nonAnimatedScenes(in animationManager: AnimationManager) -> [AnimationScene] {
-        animationManager.scenes.filter { $0.keyframes.count < 2 }
-    }
-
     private func emptySectionLabel(_ text: String) -> some View {
         Text(text)
             .font(.caption)
@@ -446,13 +445,16 @@ struct FractalGridView: View {
         animationManager.play()
     }
 
-    private func selectStaticScenePreset(_ preset: FractalPreset, using animationManager: AnimationManager) {
+    private func selectStaticScenePreset(_ preset: FractalPreset, using animationManager: AnimationManager?) {
         selectedStaticSceneID = preset.id
-        animationManager.clearCurrentSceneSelection()
+        animationManager?.clearCurrentSceneSelection()
         onLoadStaticScene?(preset)
     }
 
     private func staticSceneDetail(for preset: FractalPreset) -> String {
+        if preset.embeddedFormula != nil {
+            return "Custom embedded formula"
+        }
         if preset.musicReactiveMappings?.isEmpty == false {
             return "Music-reactive preset"
         }

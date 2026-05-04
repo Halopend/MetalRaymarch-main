@@ -155,6 +155,7 @@ struct MetalProjectTestApp: App {
             if newPhase == .active {
                 Task { @MainActor in
                     appModel.isAppActive = true
+                    appModel.presetManager.refreshBundledPresets()
                     appModel.ensureWindowContentVisible()
                 }
             } else if newPhase == .background || newPhase == .inactive {

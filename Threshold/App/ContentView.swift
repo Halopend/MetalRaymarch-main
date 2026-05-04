@@ -61,14 +61,14 @@ enum ExploreRailSection: String, CaseIterable {
     case jumpingOff = "Jumping Off"
     case musicReactive = "Music Reactive"
     case animated = "Animated"
-    case scenes = "Scenes"
+    case customScenes = "Custom Scenes"
 
     var icon: String {
         switch self {
         case .jumpingOff: return "photo.on.rectangle.angled"
         case .musicReactive: return "waveform"
         case .animated: return "film.stack"
-        case .scenes: return "square.stack.3d.up"
+        case .customScenes: return "chevron.left.forwardslash.chevron.right"
         }
     }
 
@@ -77,7 +77,7 @@ enum ExploreRailSection: String, CaseIterable {
         case .jumpingOff: return .jumpingOff
         case .musicReactive: return .musicReactive
         case .animated: return .animated
-        case .scenes: return .scenes
+        case .customScenes: return .customScenes
         }
     }
 }
@@ -156,7 +156,7 @@ private enum PinnedRailControl: String, CaseIterable {
     case exploreJumpingOff
     case exploreMusicReactive
     case exploreAnimated
-    case exploreScenes
+    case exploreCustomScenes
     case shapeParameters
     case shapeFormula
     case shapeSpace
@@ -177,7 +177,7 @@ private enum PinnedRailControl: String, CaseIterable {
         case .exploreJumpingOff: return ExploreRailSection.jumpingOff.rawValue
         case .exploreMusicReactive: return ExploreRailSection.musicReactive.rawValue
         case .exploreAnimated: return ExploreRailSection.animated.rawValue
-        case .exploreScenes: return ExploreRailSection.scenes.rawValue
+        case .exploreCustomScenes: return ExploreRailSection.customScenes.rawValue
         case .shapeParameters: return ShapeRailSection.parameters.rawValue
         case .shapeFormula: return ShapeRailSection.formula.rawValue
         case .shapeSpace: return ShapeRailSection.space.rawValue
@@ -200,7 +200,7 @@ private enum PinnedRailControl: String, CaseIterable {
         case .exploreJumpingOff: return ExploreRailSection.jumpingOff.icon
         case .exploreMusicReactive: return ExploreRailSection.musicReactive.icon
         case .exploreAnimated: return ExploreRailSection.animated.icon
-        case .exploreScenes: return ExploreRailSection.scenes.icon
+        case .exploreCustomScenes: return ExploreRailSection.customScenes.icon
         case .shapeParameters: return ShapeRailSection.parameters.icon
         case .shapeFormula: return ShapeRailSection.formula.icon
         case .shapeSpace: return ShapeRailSection.space.icon
@@ -670,9 +670,10 @@ struct ContentView: View {
     // MARK: - Context Rail
 
     private var sectionRail: some View {
-        VStack(spacing: 8) {
-            switch topDockTab {
-            case .explore:
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 8) {
+                switch topDockTab {
+                case .explore:
                 ForEach(ExploreRailSection.allCases, id: \.self) { section in
                     railButton(
                         title: section.rawValue,
@@ -718,8 +719,6 @@ struct ContentView: View {
                 }
             }
 
-            Spacer()
-
             Divider()
                 .padding(.vertical, 4)
 
@@ -753,6 +752,7 @@ struct ContentView: View {
                 selectedTab = .settings
             }
         }
+        }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(width: 170)
@@ -770,8 +770,9 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
     private func railButton(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl? = nil, action: @escaping () -> Void) -> some View {
-        Button {
+        let base = Button {
             if didLongPressPinnedRailControl == pinControl {
                 didLongPressPinnedRailControl = nil
                 return
@@ -804,14 +805,18 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? .primary : .secondary)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.55, maximumDistance: 24)
-                .onEnded { _ in
-                    guard let pinControl else { return }
-                    didLongPressPinnedRailControl = pinControl
-                    togglePinnedRailControl(pinControl)
-                }
-        )
+
+        if let pc = pinControl {
+            base.simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.55, maximumDistance: 24)
+                    .onEnded { _ in
+                        didLongPressPinnedRailControl = pc
+                        togglePinnedRailControl(pc)
+                    }
+            )
+        } else {
+            base
+        }
     }
 
     private func pinnedRailButton(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl, action: @escaping () -> Void) -> some View {
@@ -966,8 +971,8 @@ struct ContentView: View {
             return topDockTab == .explore && exploreRailSection == .musicReactive && selectedTab != .gestures && selectedTab != .settings
         case .exploreAnimated:
             return topDockTab == .explore && exploreRailSection == .animated && selectedTab != .gestures && selectedTab != .settings
-        case .exploreScenes:
-            return topDockTab == .explore && exploreRailSection == .scenes && selectedTab != .gestures && selectedTab != .settings
+        case .exploreCustomScenes:
+            return topDockTab == .explore && exploreRailSection == .customScenes && selectedTab != .gestures && selectedTab != .settings
         case .shapeParameters:
             return topDockTab == .shape && shapeRailSection == .parameters && selectedTab != .gestures && selectedTab != .settings
         case .shapeFormula:
@@ -1008,8 +1013,8 @@ struct ContentView: View {
                 activateExploreSection(.musicReactive)
             case .exploreAnimated:
                 activateExploreSection(.animated)
-            case .exploreScenes:
-                activateExploreSection(.scenes)
+            case .exploreCustomScenes:
+                activateExploreSection(.customScenes)
             case .shapeParameters:
                 activateShapeSection(.parameters)
             case .shapeFormula:
@@ -1047,7 +1052,7 @@ struct ContentView: View {
         case .jumpingOff: return .exploreJumpingOff
         case .musicReactive: return .exploreMusicReactive
         case .animated: return .exploreAnimated
-        case .scenes: return .exploreScenes
+        case .customScenes: return .exploreCustomScenes
         }
     }
 
@@ -1099,7 +1104,7 @@ struct ContentView: View {
             }
         case .animate:
             topDockTab = .explore
-            exploreRailSection = .scenes
+            exploreRailSection = .customScenes
         case .coloring:
             topDockTab = .visualizations
             switch coloringSubTab {

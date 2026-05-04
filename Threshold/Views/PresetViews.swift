@@ -351,6 +351,7 @@ struct PresetsListView: View {
             }
         }
         .onAppear {
+            presetManager.refreshBundledPresets()
             refreshPresets()
         }
         .onChange(of: searchText) { _, _ in

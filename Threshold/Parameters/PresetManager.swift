@@ -14,7 +14,7 @@ import Foundation
 @Observable
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
-    private static let bundledPresets = loadBundledPresets()
+    private static var bundledPresetsCache: [FractalPreset]?
     private let presetsKey = "FractalPresets"
     private let maxBackupCount: Int? = nil  // nil = unlimited retention
     private var pendingSaveTask: Task<Void, Never>?
@@ -67,11 +67,19 @@ class PresetManager {
         loadPresets()
     }
 
-    private func mergedPresets(local localPresets: [FractalPreset]) -> [FractalPreset] {
+    private static func bundledPresets(forceRefresh: Bool = false) -> [FractalPreset] {
+        if forceRefresh || bundledPresetsCache == nil {
+            bundledPresetsCache = loadBundledPresets()
+        }
+        return bundledPresetsCache ?? []
+    }
+
+    private func mergedPresets(local localPresets: [FractalPreset], bundled bundledPresets: [FractalPreset]? = nil) -> [FractalPreset] {
         var mergedByName: [String: FractalPreset] = [:]
+        let resolvedBundledPresets = bundledPresets ?? Self.bundledPresets()
 
         // Seed with bundled presets, then let local presets override by name.
-        for preset in Self.bundledPresets {
+        for preset in resolvedBundledPresets {
             mergedByName[preset.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = preset
         }
         for preset in localPresets {
@@ -81,8 +89,7 @@ class PresetManager {
         return mergedByName.values.sorted { $0.createdAt > $1.createdAt }
     }
     
-    /// Load all presets from disk
-    func loadPresets() {
+    private func loadLocalPresetsFromDisk() -> [FractalPreset] {
         let fileURL = presetsFileURL
         var loadedLocalPresets: [FractalPreset] = []
 
@@ -96,7 +103,23 @@ class PresetManager {
             }
         }
 
-        presets = mergedPresets(local: loadedLocalPresets)
+        return loadedLocalPresets
+    }
+
+    /// Load all presets from disk
+    func loadPresets(forceRefreshBundled: Bool = false) {
+        let loadedLocalPresets = loadLocalPresetsFromDisk()
+        let bundledPresets = Self.bundledPresets(forceRefresh: forceRefreshBundled)
+
+        presets = mergedPresets(local: loadedLocalPresets, bundled: bundledPresets)
+        FractalPreset.clearThumbnailCache()
+    }
+
+    /// Re-scan bundled preset resources while preserving local on-disk overrides.
+    func refreshBundledPresets() {
+        let loadedLocalPresets = loadLocalPresetsFromDisk()
+        let bundledPresets = Self.bundledPresets(forceRefresh: true)
+        presets = mergedPresets(local: loadedLocalPresets, bundled: bundledPresets)
         FractalPreset.clearThumbnailCache()
     }
 
@@ -312,7 +335,8 @@ extension PresetManager {
         // Bundled scene files use either `.threshscene` / `.threshmp` or the
         // double extension `.threshscene.json` / `.threshmp.json` (some assets
         // were exported with the `.json` suffix to keep editor syntax
-        // highlighting). Search for both forms in subdirectory and bundle root.
+        // highlighting). Synchronized Xcode resource folders may flatten some
+        // resources into the bundle root, so collect from every known location.
         var sceneURLs: [URL] = []
         var musicPresetURLs: [URL] = []
         let sceneExts = ["threshscene", "json"]
@@ -320,19 +344,11 @@ extension PresetManager {
 
         for ext in sceneExts {
             sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
+            sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
         }
         for ext in musicExts {
             musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Examples/Scenes") ?? []
-        }
-        if sceneURLs.isEmpty {
-            for ext in sceneExts {
-                sceneURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
-            }
-        }
-        if musicPresetURLs.isEmpty {
-            for ext in musicExts {
-                musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
-            }
+            musicPresetURLs += Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
         }
         // Filter the .json hits down to ones that are actually our preset files.
         sceneURLs = sceneURLs.filter {
@@ -344,8 +360,8 @@ extension PresetManager {
             return n.hasSuffix(".threshmp") || n.hasSuffix(".threshmp.json")
         }
 
-        // Deep-scan fallback: enumerate the entire bundle for our custom extensions
-        if sceneURLs.isEmpty && musicPresetURLs.isEmpty, let resourcePath = Bundle.main.resourcePath {
+        // Deep scan as a final safety net for mixed resource layouts.
+        if let resourcePath = Bundle.main.resourcePath {
             let enumerator = FileManager.default.enumerator(atPath: resourcePath)
             while let file = enumerator?.nextObject() as? String {
                 let url = URL(fileURLWithPath: resourcePath).appendingPathComponent(file)
@@ -384,7 +400,7 @@ extension PresetManager {
     /// Loaded from Bright_Preset.threshscene; falls back to a minimal inline
     /// preset if the bundle file is somehow missing.
     static func brightPreset() -> FractalPreset {
-        if let preset = bundledPresets.first(where: { $0.name == "Bright Preset" || $0.name == "Bright_Preset" }) {
+        if let preset = bundledPresets().first(where: { $0.name == "Bright Preset" || $0.name == "Bright_Preset" }) {
             return preset
         }
         // Minimal inline fallback (should never be reached)
@@ -399,7 +415,7 @@ extension PresetManager {
     
     /// Merge built-in presets with local presets.
     func addBuiltInPresetsIfNeeded() {
-        presets = mergedPresets(local: presets)
+        refreshBundledPresets()
     }
     
     // MARK: - Last State Auto-Save/Restore
