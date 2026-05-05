@@ -114,6 +114,49 @@ extension Renderer {
         }
     }
 
+    @inline(__always)
+    fileprivate func cacheSelectedRenderPipeline(
+        _ pipeline: MTLRenderPipelineState,
+        iterations: Int,
+        raySteps: Int,
+        useQuadShared: Bool,
+        neonMode: Bool,
+        fractalTypeRawValue: Int32,
+        mandelbulbPower: Int32?,
+        activeCustomHash: String?,
+        isSpecialized: Bool
+    ) -> MTLRenderPipelineState {
+        lastSelectIter = iterations
+        lastSelectRS = raySteps
+        lastSelectQS = useQuadShared
+        lastSelectNeon = neonMode
+        lastSelectFT = fractalTypeRawValue
+        lastSelectPower = mandelbulbPower
+        lastSelectCustomHash = activeCustomHash
+        lastSelectedPipeline = pipeline
+        lastSelectedIsSpecialized = isSpecialized
+        appModel.isUsingSpecializedPipeline = isSpecialized
+        return pipeline
+    }
+
+    @inline(__always)
+    fileprivate func cacheSelectedComputePipeline(
+        _ pipeline: MTLComputePipelineState?,
+        fractalTypeRawValue: Int32,
+        fractalIterations: Int,
+        maxRaySteps: Int,
+        mandelbulbPower: Int32?,
+        activeCustomHash: String?
+    ) -> MTLComputePipelineState? {
+        lastComputeFT = fractalTypeRawValue
+        lastComputeFI = fractalIterations
+        lastComputeRS = maxRaySteps
+        lastComputePower = mandelbulbPower
+        lastComputeCustomHash = activeCustomHash
+        lastSelectedComputePipeline = pipeline
+        return pipeline
+    }
+
     // MARK: - Unified Pipeline Management
 
     /// Gets or builds a specialized pipeline for a given preset.
@@ -379,17 +422,17 @@ extension Renderer {
                     print("⚠️ [CustomScene] Missing active custom shader library for render pipeline build")
                     isSpecialized = false
                     result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
-                    lastSelectIter = iterations
-                    lastSelectRS = raySteps
-                    lastSelectQS = useQuadShared
-                    lastSelectNeon = neonMode
-                    lastSelectFT = fractalType.rawValue
-                    lastSelectPower = mandelbulbPower
-                    lastSelectCustomHash = activeCustomHash
-                    lastSelectedPipeline = result
-                    lastSelectedIsSpecialized = false
-                    appModel.isUsingSpecializedPipeline = false
-                    return result
+                    return cacheSelectedRenderPipeline(
+                        result,
+                        iterations: iterations,
+                        raySteps: raySteps,
+                        useQuadShared: useQuadShared,
+                        neonMode: neonMode,
+                        fractalTypeRawValue: fractalType.rawValue,
+                        mandelbulbPower: mandelbulbPower,
+                        activeCustomHash: activeCustomHash,
+                        isSpecialized: false
+                    )
                 }
                 do {
                     let pipeline = try Renderer.buildSpecializedPipeline(
@@ -405,17 +448,17 @@ extension Renderer {
                     lastLoggedPipelineKey = cacheKey
                     result = pipeline
                     recordPipelineTelemetry(renderSource: "custom-exact-build")
-                    lastSelectIter = iterations
-                    lastSelectRS = raySteps
-                    lastSelectQS = useQuadShared
-                    lastSelectNeon = neonMode
-                    lastSelectFT = fractalType.rawValue
-                    lastSelectPower = mandelbulbPower
-                    lastSelectCustomHash = activeCustomHash
-                    lastSelectedPipeline = result
-                    lastSelectedIsSpecialized = true
-                    appModel.isUsingSpecializedPipeline = true
-                    return result
+                    return cacheSelectedRenderPipeline(
+                        result,
+                        iterations: iterations,
+                        raySteps: raySteps,
+                        useQuadShared: useQuadShared,
+                        neonMode: neonMode,
+                        fractalTypeRawValue: fractalType.rawValue,
+                        mandelbulbPower: mandelbulbPower,
+                        activeCustomHash: activeCustomHash,
+                        isSpecialized: true
+                    )
                 } catch {
                     print("❌ [CustomScene] Exact render pipeline build failed: \(error)")
                 }
@@ -474,17 +517,17 @@ extension Renderer {
         }
 
         // Cache for next frame's fast-path
-        lastSelectIter = iterations
-        lastSelectRS = raySteps
-        lastSelectQS = useQuadShared
-        lastSelectNeon = neonMode
-        lastSelectFT = fractalType.rawValue
-        lastSelectPower = mandelbulbPower
-        lastSelectCustomHash = activeCustomHash
-        lastSelectedPipeline = result
-        lastSelectedIsSpecialized = isSpecialized
-        appModel.isUsingSpecializedPipeline = isSpecialized
-        return result
+        return cacheSelectedRenderPipeline(
+            result,
+            iterations: iterations,
+            raySteps: raySteps,
+            useQuadShared: useQuadShared,
+            neonMode: neonMode,
+            fractalTypeRawValue: fractalType.rawValue,
+            mandelbulbPower: mandelbulbPower,
+            activeCustomHash: activeCustomHash,
+            isSpecialized: isSpecialized
+        )
     }
 
     /// Ensures a pipeline exists for the given configuration.
@@ -660,13 +703,14 @@ extension Renderer {
                 print("🎯 [ComputeCache] Exact hit: \(exactKey)")
                 lastComputePipelineKey = exactKey
             }
-            lastComputeFT = fractalType.rawValue
-            lastComputeFI = fractalIterations
-            lastComputeRS = maxRaySteps
-            lastComputePower = mbPowerInt
-            lastComputeCustomHash = activeCustomHash
-            lastSelectedComputePipeline = pipeline
-            return pipeline
+            return cacheSelectedComputePipeline(
+                pipeline,
+                fractalTypeRawValue: fractalType.rawValue,
+                fractalIterations: fractalIterations,
+                maxRaySteps: maxRaySteps,
+                mandelbulbPower: mbPowerInt,
+                activeCustomHash: activeCustomHash
+            )
         }
 
         let sharedKey = keyContext.sharedKey
@@ -676,13 +720,14 @@ extension Renderer {
                 print("🎯 [ComputeCache] Shared quality hit: \(sharedKey) for FT=\(fractalType.rawValue)")
                 lastComputePipelineKey = sharedKey
             }
-            lastComputeFT = fractalType.rawValue
-            lastComputeFI = fractalIterations
-            lastComputeRS = maxRaySteps
-            lastComputePower = mbPowerInt
-            lastComputeCustomHash = activeCustomHash
-            lastSelectedComputePipeline = pipeline
-            return pipeline
+            return cacheSelectedComputePipeline(
+                pipeline,
+                fractalTypeRawValue: fractalType.rawValue,
+                fractalIterations: fractalIterations,
+                maxRaySteps: maxRaySteps,
+                mandelbulbPower: mbPowerInt,
+                activeCustomHash: activeCustomHash
+            )
         }
 
         // 3. Kick off a background build for this exact configuration and serve
@@ -705,14 +750,15 @@ extension Renderer {
            ) {
             computePipelineCache[exactKey] = pipeline
             recordPipelineTelemetry(computeSource: "custom-exact-build")
-            lastComputeFT = fractalType.rawValue
-            lastComputeFI = fractalIterations
-            lastComputeRS = maxRaySteps
-            lastComputePower = mbPowerInt
-            lastComputeCustomHash = activeCustomHash
-            lastSelectedComputePipeline = pipeline
             lastComputePipelineKey = exactKey
-            return pipeline
+            return cacheSelectedComputePipeline(
+                pipeline,
+                fractalTypeRawValue: fractalType.rawValue,
+                fractalIterations: fractalIterations,
+                maxRaySteps: maxRaySteps,
+                mandelbulbPower: mbPowerInt,
+                activeCustomHash: activeCustomHash
+            )
         }
 
         enqueueBackgroundComputePipelineBuild(
@@ -732,13 +778,14 @@ extension Renderer {
         }
         recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "generic-fallback")
         let fallback = adaptiveHierarchicalPipeline8x8
-        lastComputeFT = fractalType.rawValue
-        lastComputeFI = fractalIterations
-        lastComputeRS = maxRaySteps
-        lastComputePower = mbPowerInt
-        lastComputeCustomHash = activeCustomHash
-        lastSelectedComputePipeline = fallback
-        return fallback
+        return cacheSelectedComputePipeline(
+            fallback,
+            fractalTypeRawValue: fractalType.rawValue,
+            fractalIterations: fractalIterations,
+            maxRaySteps: maxRaySteps,
+            mandelbulbPower: mbPowerInt,
+            activeCustomHash: activeCustomHash
+        )
     }
 
     /// Returns the number of pipelines currently in the unified cache.
