@@ -34,22 +34,6 @@ extension Renderer {
         set { Renderer.customShaderState.update(library: customShaderLibrary, hash: newValue) }
     }
 
-    nonisolated static func activateEmbeddedFormulaDirect(device: MTLDevice, formula: EmbeddedFormula?) async throws {
-        guard let formula else {
-            customShaderState.update(library: nil, hash: nil)
-            return
-        }
-
-        if customShaderState.currentHash() == formula.shortHash,
-           customShaderState.currentLibrary() != nil {
-            return
-        }
-
-        let compiler = customShaderState.compiler(for: device)
-        let library = try await compiler.library(for: formula)
-        customShaderState.update(library: library, hash: formula.shortHash)
-    }
-
     /// Cache-key prefix to apply when looking up pipelines for the active
     /// embedded formula (returns "" when no custom library is active or when
     /// the supplied fractal type isn't `.custom`).

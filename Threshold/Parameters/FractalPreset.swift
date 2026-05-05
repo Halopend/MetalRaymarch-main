@@ -360,7 +360,7 @@ struct FractalPreset: Codable, Identifiable {
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
         let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
-        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)\(powerKey)"
+        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)_CI\(fc.colorIterations)\(powerKey)"
     }
     
     /// Create a preset from current render settings

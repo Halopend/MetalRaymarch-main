@@ -11,11 +11,12 @@ private struct RenderPipelineKeyContext {
          iterations: Int,
          raySteps: Int,
          qualityMode: Int,
+         colorIterations: Int32,
          powerKey: String,
          useQuadShared: Bool) {
         exactStem = prefix + "FT\(fractalTypeRawValue)_FI\(iterations)_RS\(raySteps)_N"
         sharedStem = prefix + "FI\(iterations)_RS\(raySteps)_N"
-        suffix = "_Q\(qualityMode)\(powerKey)" + (useQuadShared ? "_QS" : "")
+        suffix = "_Q\(qualityMode)_CI\(colorIterations)\(powerKey)" + (useQuadShared ? "_QS" : "")
     }
 
     @inline(__always)
@@ -41,6 +42,17 @@ private struct ComputePipelineKeyContext {
         exactKey = prefix + "FT\(fractalTypeRawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
         sharedKey = prefix + "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
     }
+}
+
+struct RenderPipelineRequest {
+    let fractalType: FractalModelType
+    let formulaParams: FormulaParams
+    let colorIterations: Float
+}
+
+struct ComputePipelineRequest {
+    let fractalType: FractalModelType
+    let formulaParams: FormulaParams
 }
 
 extension Renderer {
@@ -121,6 +133,7 @@ extension Renderer {
         raySteps: Int,
         useQuadShared: Bool,
         neonMode: Bool,
+        colorIterations: Int32,
         fractalTypeRawValue: Int32,
         mandelbulbPower: Int32?,
         activeCustomHash: String?,
@@ -130,6 +143,7 @@ extension Renderer {
         lastSelectRS = raySteps
         lastSelectQS = useQuadShared
         lastSelectNeon = neonMode
+        lastSelectColorIterations = colorIterations
         lastSelectFT = fractalTypeRawValue
         lastSelectPower = mandelbulbPower
         lastSelectCustomHash = activeCustomHash
@@ -202,7 +216,7 @@ extension Renderer {
     /// Call this when slider values change to pre-compile the needed pipeline.
     func getPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool = false) -> MTLRenderPipelineState {
         // Build cache key matching the preset format
-        let colorIters = appModel.renderSettings.colorIterations  // Direct read (own lock) — avoids full snapshot
+        let colorIterations = Int32(appModel.renderSettings.colorIterations)  // Direct read (own lock) — avoids full snapshot
         let fractalType = appModel.renderSettings.fractalType
         let library = fractalType == .custom ? renderingLibrary(for: fractalType) : nil
 
@@ -223,6 +237,7 @@ extension Renderer {
             iterations: iterations,
             raySteps: raySteps,
             qualityMode: Int(qualityMode),
+            colorIterations: colorIterations,
             powerKey: powerKey,
             useQuadShared: useQuadShared
         )
@@ -243,7 +258,7 @@ extension Renderer {
             maxRaySteps: Int32(raySteps),
             fractalType: fractalType.rawValue,
             neonModeEnabled: neon == 1,
-            colorIterations: Int32(colorIters),  // Use actual color iterations, not fractal iterations
+            colorIterations: colorIterations,
             mandelbulbPower: mandelbulbPower
         )
 
@@ -334,12 +349,14 @@ extension Renderer {
     /// 4. Shared quality key fallback (startup-prebuilt, no FC_FRACTAL_TYPE)
     /// 5. Generic pipeline fallback
     func selectPipeline(forIterations iterations: Int, raySteps: Int, useQuadShared: Bool,
-                        neonMode: Bool = false) -> MTLRenderPipelineState {
-        let fractalType = appModel.renderSettings.fractalType
+                        neonMode: Bool = false,
+                        request: RenderPipelineRequest? = nil) -> MTLRenderPipelineState {
+        let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
+        let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
         let activeCustomHash = fractalType == .custom ? customShaderHash : nil
         let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
             fractalType: fractalType,
-            formulaParams: appModel.renderSettings.formulaParams
+            formulaParams: formulaParams
         )
         if RENDERER_DEBUG,
            fractalType == .mandelbulb,
@@ -348,11 +365,13 @@ extension Renderer {
             let nextPower = mandelbulbPower.map { String($0) } ?? "runtime"
             print("🔀 [Pipeline] Mandelbulb power changed: \(previousPower) → \(nextPower)")
         }
+                let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
 
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
            useQuadShared == lastSelectQS &&
            neonMode == lastSelectNeon &&
+              colorIterations == lastSelectColorIterations &&
            fractalType.rawValue == lastSelectFT &&
            activeCustomHash == lastSelectCustomHash &&
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
@@ -370,6 +389,7 @@ extension Renderer {
             iterations: iterations,
             raySteps: raySteps,
             qualityMode: qualityMode,
+            colorIterations: colorIterations,
             powerKey: powerKey,
             useQuadShared: useQuadShared
         )
@@ -402,7 +422,6 @@ extension Renderer {
         else {
             recordPipelineTelemetry(renderHit: false, renderMissKey: cacheKey)
 
-            let colorIters = appModel.renderSettings.colorIterations
             let exactConfig = FunctionConstantConfig(
                 fractalIterations: Int32(iterations),
                 shadowIterations: Int32(max(iterations - 2, 2)),
@@ -412,7 +431,7 @@ extension Renderer {
                 maxRaySteps: Int32(raySteps),
                 fractalType: fractalType.rawValue,
                 neonModeEnabled: neonMode,
-                colorIterations: Int32(colorIters),
+                colorIterations: colorIterations,
                 mandelbulbPower: mandelbulbPower
             )
 
@@ -428,6 +447,7 @@ extension Renderer {
                         raySteps: raySteps,
                         useQuadShared: useQuadShared,
                         neonMode: neonMode,
+                        colorIterations: colorIterations,
                         fractalTypeRawValue: fractalType.rawValue,
                         mandelbulbPower: mandelbulbPower,
                         activeCustomHash: activeCustomHash,
@@ -454,6 +474,7 @@ extension Renderer {
                         raySteps: raySteps,
                         useQuadShared: useQuadShared,
                         neonMode: neonMode,
+                        colorIterations: colorIterations,
                         fractalTypeRawValue: fractalType.rawValue,
                         mandelbulbPower: mandelbulbPower,
                         activeCustomHash: activeCustomHash,
@@ -523,6 +544,7 @@ extension Renderer {
             raySteps: raySteps,
             useQuadShared: useQuadShared,
             neonMode: neonMode,
+            colorIterations: colorIterations,
             fractalTypeRawValue: fractalType.rawValue,
             mandelbulbPower: mandelbulbPower,
             activeCustomHash: activeCustomHash,
@@ -539,6 +561,7 @@ extension Renderer {
         if fractalType == .custom, renderingLibrary(for: fractalType) == nil {
             return
         }
+        let colorIterations = Int32(appModel.renderSettings.colorIterations)
         let mandelbulbPower = FunctionConstantConfig.specializedMandelbulbPower(
             fractalType: fractalType,
             formulaParams: appModel.renderSettings.formulaParams
@@ -551,6 +574,7 @@ extension Renderer {
             iterations: iterations,
             raySteps: raySteps,
             qualityMode: qualityMode,
+            colorIterations: colorIterations,
             powerKey: powerKey,
             useQuadShared: useQuadShared
         )
@@ -571,7 +595,7 @@ extension Renderer {
             maxRaySteps: Int32(raySteps),
             fractalType: fractalType.rawValue,
             neonModeEnabled: neonMode,
-            colorIterations: 8,  // Color iterations are fixed for consistent coloring
+            colorIterations: colorIterations,
             mandelbulbPower: mandelbulbPower
         )
         let library = fractalType == .custom ? renderingLibrary(for: fractalType) : nil
@@ -598,6 +622,38 @@ extension Renderer {
     }
 
     // MARK: - Compute Pipeline Cache
+
+    /// Prewarms the exact adaptive-compute pipeline for a preset without using
+    /// the bundled generic fallback as the selected frame-time pipeline.
+    func prewarmComputePipeline(forPreset preset: FractalPreset) {
+        let library = preset.fractalType == .custom ? renderingLibrary(for: preset.fractalType) : nil
+
+        if preset.fractalType == .custom, library == nil {
+            return
+        }
+
+        let functionConstants = preset.deriveFunctionConstants()
+        let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
+        let keyContext = ComputePipelineKeyContext(
+            prefix: customCacheKeyPrefix(for: preset.fractalType),
+            fractalTypeRawValue: Int(preset.fractalType.rawValue),
+            fractalIterations: Int(functionConstants.fractalIterations),
+            maxRaySteps: Int(functionConstants.maxRaySteps),
+            powerKey: powerKey
+        )
+        let exactKey = keyContext.exactKey
+
+        if computePipelineCache[exactKey] != nil { return }
+
+        enqueueBackgroundComputePipelineBuild(
+            cacheKey: exactKey,
+            fractalType: Int32(preset.fractalType.rawValue),
+            fractalIterations: functionConstants.fractalIterations,
+            shadowIterations: functionConstants.shadowIterations,
+            maxRaySteps: functionConstants.maxRaySteps,
+            mandelbulbPower: functionConstants.mandelbulbPower
+        )
+    }
 
     /// Builds a specialized compute pipeline with function constants baked in.
     /// The Metal compiler fully unrolls Map()/Shadow loops for the given iteration counts.
@@ -662,12 +718,15 @@ extension Renderer {
     /// 3. Shared quality key match (startup-prebuilt, no FC_FRACTAL_TYPE)
     /// 4. Builds on-demand for exact configuration (cached for future frames)
     /// 5. Falls back to generic (no function constants) pipeline — shader uses runtime params
-    func selectComputePipeline(fractalIterations: Int, maxRaySteps: Int) -> MTLComputePipelineState? {
-        let fractalType = appModel.renderSettings.fractalType
+    func selectComputePipeline(fractalIterations: Int,
+                               maxRaySteps: Int,
+                               request: ComputePipelineRequest? = nil) -> MTLComputePipelineState? {
+        let fractalType = request?.fractalType ?? appModel.renderSettings.fractalType
+        let formulaParams = request?.formulaParams ?? appModel.renderSettings.formulaParams
         let activeCustomHash = fractalType == .custom ? customShaderHash : nil
         // Extract Mandelbulb integer power for compile-time specialization
         let mbPowerRaw = fractalType == .mandelbulb
-            ? FormulaCatalog.getParam(appModel.renderSettings.formulaParams, index: 0)
+            ? FormulaCatalog.getParam(formulaParams, index: 0)
             : Float(0)
         let mbPowerInt: Int32? = {
             let rounded = roundf(mbPowerRaw)
@@ -730,29 +789,27 @@ extension Renderer {
             )
         }
 
-        // 3. Kick off a background build for this exact configuration and serve
-        //    the frame from the generic fallback below. Previously this branch
-        //    called `buildComputePipeline` synchronously, which can block the
-        //    render actor when the user picks a new fractal type or iteration
-        //    count. Metal compute-pipeline construction is thread-safe, so we
-        //    hop off the actor to build and back on to insert.
-        if fractalType == .custom,
-           let library = renderingLibrary(for: fractalType),
-           let pipeline = Renderer.buildComputePipeline(
-                device: device,
-                library: library,
-                kernelName: "adaptiveHierarchical8x8",
-                fractalType: Int32(fractalType.rawValue),
-                fractalIterations: Int32(fractalIterations),
-                shadowIterations: Int32(max(fractalIterations - 2, 2)),
-                maxRaySteps: Int32(maxRaySteps),
-                mandelbulbPower: mbPowerInt
-           ) {
-            computePipelineCache[exactKey] = pipeline
-            recordPipelineTelemetry(computeSource: "custom-exact-build")
-            lastComputePipelineKey = exactKey
+        // 3. Kick off a background build for this exact configuration. Built-in
+        //    fractals can serve the current frame from the bundled generic
+        //    compute pipeline; custom formulas cannot, because their dispatch arm
+        //    exists only in the runtime-compiled library. For custom misses,
+        //    decline adaptive compute for this frame so the fragment path can run.
+        if fractalType == .custom {
+            if renderingLibrary(for: fractalType) != nil {
+                enqueueBackgroundComputePipelineBuild(
+                    cacheKey: exactKey,
+                    fractalType: Int32(fractalType.rawValue),
+                    fractalIterations: Int32(fractalIterations),
+                    shadowIterations: Int32(max(fractalIterations - 2, 2)),
+                    maxRaySteps: Int32(maxRaySteps),
+                    mandelbulbPower: mbPowerInt
+                )
+                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-background-build")
+            } else {
+                recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-missing-library")
+            }
             return cacheSelectedComputePipeline(
-                pipeline,
+                nil,
                 fractalTypeRawValue: fractalType.rawValue,
                 fractalIterations: fractalIterations,
                 maxRaySteps: maxRaySteps,

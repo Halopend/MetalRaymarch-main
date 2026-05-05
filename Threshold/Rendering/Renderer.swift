@@ -355,7 +355,8 @@ actor Renderer {
             
             // Build unified cache key (quality presets have E=0, N=0)
             let qualityMode: Int = iterCount <= 7 ? 2 : (iterCount <= 9 ? 1 : 0)
-            let unifiedKey = "FI\(iterCount)_RS\(raySteps)_N0_Q\(qualityMode)"
+            let colorIterations = config.colorIterations ?? Int32(iterCount)
+            let unifiedKey = "FI\(iterCount)_RS\(raySteps)_N0_Q\(qualityMode)_CI\(colorIterations)"
             
             // Standard pipeline
             if let pipeline = try? Renderer.buildRenderPipelineWithDevice(
@@ -509,6 +510,7 @@ actor Renderer {
                     // Build both standard and quad-shared variants
                     _ = await renderer.getPipeline(forPreset: preset, useQuadShared: false)
                     _ = await renderer.getPipeline(forPreset: preset, useQuadShared: true)
+                    await renderer.prewarmComputePipeline(forPreset: preset)
                 }
                 
                 // Setup pipeline preparation for specific iteration/ray step values
@@ -528,7 +530,7 @@ actor Renderer {
 
                 // Setup custom-shader (.threshfx) activation handler.
                 appModel.activateEmbeddedFormulaHandler = { formula in
-                    try await Renderer.activateEmbeddedFormulaDirect(device: renderer.device, formula: formula)
+                    try await renderer.activateEmbeddedFormula(formula)
                 }
             }
             
@@ -587,6 +589,7 @@ actor Renderer {
     var lastSelectRS: Int = -1
     var lastSelectQS: Bool = false
     var lastSelectNeon: Bool = false
+    var lastSelectColorIterations: Int32 = -1
     var lastSelectFT: Int32 = -1
     var lastSelectPower: Int32?
     var lastSelectCustomHash: String?
@@ -1148,7 +1151,12 @@ actor Renderer {
             forIterations: currentIterations,
             raySteps: currentRaySteps,
             useQuadShared: useQuadShared,
-            neonMode: isNeonMode
+            neonMode: isNeonMode,
+            request: RenderPipelineRequest(
+                fractalType: settingsSnapshot.fractalType,
+                formulaParams: settingsSnapshot.formulaParams,
+                colorIterations: settingsSnapshot.colorIterations
+            )
         )
         renderEncoder.setRenderPipelineState(selectedPipeline)
 
@@ -1566,7 +1574,14 @@ actor Renderer {
         // Select the best compute pipeline for current iteration/ray step settings
         let fi = settingsSnapshot.fractalIterations
         let rs = settingsSnapshot.maxRaySteps
-        let computePipeline = selectComputePipeline(fractalIterations: fi, maxRaySteps: rs)
+        let computePipeline = selectComputePipeline(
+            fractalIterations: fi,
+            maxRaySteps: rs,
+            request: ComputePipelineRequest(
+                fractalType: settingsSnapshot.fractalType,
+                formulaParams: settingsSnapshot.formulaParams
+            )
+        )
         
         guard computePipeline != nil else { return false }
         guard let uniformBuffer = tileUniformBuffer else { return false }
