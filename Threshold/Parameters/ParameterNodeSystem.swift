@@ -317,11 +317,15 @@ struct ParameterNodeBatch: Sendable {
     }
 }
 
-/// Startup-built, immutable registry of parameter nodes shared across UI and rendering.
-final class ParameterNodeRegistry: Sendable {
+/// Startup-built registry of parameter nodes shared across UI and rendering.
+/// @unchecked Sendable justification: mutable custom-formula batches are rebuilt
+/// on demand behind `formulaBatchLock`; the singleton is otherwise read-mostly.
+final class ParameterNodeRegistry: @unchecked Sendable {
     static let shared = ParameterNodeRegistry()
 
-    private let formulaBatches: [FractalModelType: ParameterNodeBatch]
+    private var formulaBatches: [FractalModelType: ParameterNodeBatch]
+    private var customBatchDescriptorID: String?
+    private let formulaBatchLock = NSLock()
     /// Core parameter nodes (fractalScale, colorMix).
     /// Keyed by their canonical targetID string (e.g. "core.fractalScale").
     let coreNodes: [String: FloatParameterNode]
@@ -338,6 +342,7 @@ final class ParameterNodeRegistry: Sendable {
             batches[type] = Self.buildFormulaBatch(for: type)
         }
         self.formulaBatches = batches
+        self.customBatchDescriptorID = FormulaCatalog.shared.descriptor(for: .custom)?.id
     }
 
     /// One-time build of engine-level parameter nodes for core geometry and effects.
@@ -466,7 +471,20 @@ final class ParameterNodeRegistry: Sendable {
     }
 
     func formulaBatch(for type: FractalModelType) -> ParameterNodeBatch {
-        formulaBatches[type] ?? ParameterNodeBatch(fractalType: type)
+        formulaBatchLock.lock()
+        defer { formulaBatchLock.unlock() }
+
+        if type == .custom {
+            let currentDescriptorID = FormulaCatalog.shared.descriptor(for: .custom)?.id
+            if currentDescriptorID != customBatchDescriptorID {
+                formulaBatches[type] = currentDescriptorID == nil
+                    ? ParameterNodeBatch(fractalType: type)
+                    : Self.buildFormulaBatch(for: type)
+                customBatchDescriptorID = currentDescriptorID
+            }
+        }
+
+        return formulaBatches[type] ?? ParameterNodeBatch(fractalType: type)
     }
 
     func node(for type: FractalModelType, formulaIndex: Int) -> FloatParameterNode? {

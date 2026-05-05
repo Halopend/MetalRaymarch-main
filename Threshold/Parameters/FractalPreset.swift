@@ -691,3 +691,13 @@ struct FractalPreset: Codable, Identifiable {
     }
     #endif
 }
+
+extension FractalPreset {
+    var isCustomScenePreset: Bool {
+        embeddedFormula != nil
+    }
+
+    var hasMusicReactiveMappings: Bool {
+        !(musicReactiveMappings?.isEmpty ?? true)
+    }
+}

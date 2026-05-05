@@ -349,7 +349,7 @@ struct FractalGridView: View {
 
     private func isJumpingOffPreset(_ preset: FractalPreset) -> Bool {
         // Custom-formula presets belong exclusively in the Custom Scenes tab.
-        guard preset.embeddedFormula == nil else { return false }
+        guard !preset.isCustomScenePreset else { return false }
 
         let normalizedName = preset.name
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -359,7 +359,7 @@ struct FractalGridView: View {
             return true
         }
 
-        return preset.musicReactiveMappings?.isEmpty ?? true
+        return !preset.hasMusicReactiveMappings
     }
 
     private func jumpingOffPresets() -> [FractalPreset] {
@@ -368,12 +368,12 @@ struct FractalGridView: View {
 
     private func musicReactivePresets() -> [FractalPreset] {
         filteredStaticPresets().filter { preset in
-            preset.embeddedFormula == nil && !isJumpingOffPreset(preset)
+            !preset.isCustomScenePreset && !isJumpingOffPreset(preset)
         }
     }
 
     private func customScenePresets() -> [FractalPreset] {
-        filteredStaticPresets().filter { $0.embeddedFormula != nil }
+        filteredStaticPresets().filter(\.isCustomScenePreset)
     }
 
     private func resolvedTabSelection(currentTab: FractalBrowseTab, hasCustomScenes: Bool, hasAnimatedScenes: Bool) -> FractalBrowseTab {
@@ -452,10 +452,10 @@ struct FractalGridView: View {
     }
 
     private func staticSceneDetail(for preset: FractalPreset) -> String {
-        if preset.embeddedFormula != nil {
+        if preset.isCustomScenePreset {
             return "Custom embedded formula"
         }
-        if preset.musicReactiveMappings?.isEmpty == false {
+        if preset.hasMusicReactiveMappings {
             return "Music-reactive preset"
         }
         return "Static starting scene"

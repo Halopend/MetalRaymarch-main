@@ -558,8 +558,14 @@ struct ContentView: View {
 
     private func routeExternalFile(_ request: ExternalFileImportRequest) {
         switch request.payload {
-        case .preset:
-            activateExploreSection(request.fileExtension == "threshmp" ? .musicReactive : .jumpingOff)
+        case .preset(let preset):
+            if preset.isCustomScenePreset {
+                activateExploreSection(.customScenes)
+            } else if preset.hasMusicReactiveMappings {
+                activateExploreSection(.musicReactive)
+            } else {
+                activateExploreSection(.jumpingOff)
+            }
         case .animation:
             selectedTab = .animate
             syncNavigationChromeFromLegacySelection()
@@ -773,7 +779,7 @@ struct ContentView: View {
     @ViewBuilder
     private func railButton(title: String, systemImage: String, isSelected: Bool, pinControl: PinnedRailControl? = nil, action: @escaping () -> Void) -> some View {
         let base = Button {
-            if didLongPressPinnedRailControl == pinControl {
+            if let pinControl, didLongPressPinnedRailControl == pinControl {
                 didLongPressPinnedRailControl = nil
                 return
             }
