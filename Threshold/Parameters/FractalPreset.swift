@@ -224,6 +224,7 @@ struct FractalPreset: Codable, Identifiable {
 
         if let formula = try container.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedFormula) {
             try formula.validate()
+            fractalType = .custom
             embeddedFormula = formula
         } else {
             embeddedFormula = nil

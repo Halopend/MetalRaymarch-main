@@ -238,10 +238,10 @@ extension EmbeddedFormula {
         // Cheap text check — confirm both DE variants appear by name.
         let fullName = "DE_\(functionStem)"
         let distName = "DE_\(functionStem)_Dist"
-        if !metalSource.contains(fullName) {
+        if !Self.containsFunctionDefinition(in: metalSource, named: fullName) {
             throw ValidationError.missingFunctionDefinition(fullName)
         }
-        if !metalSource.contains(distName) {
+        if !Self.containsFunctionDefinition(in: metalSource, named: distName) {
             throw ValidationError.missingFunctionDefinition(distName)
         }
 
@@ -274,6 +274,16 @@ extension EmbeddedFormula {
                 throw ValidationError.invalidFunctionStem(stem)
             }
         }
+    }
+
+    private static func containsFunctionDefinition(in source: String, named name: String) -> Bool {
+        let escapedName = NSRegularExpression.escapedPattern(for: name)
+        let pattern = "(?m)^\\s*(?:[A-Za-z_][A-Za-z0-9_]*\\s+)+" + escapedName + "\\s*\\("
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source.contains(name)
+        }
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return regex.firstMatch(in: source, options: [], range: range) != nil
     }
 }
 

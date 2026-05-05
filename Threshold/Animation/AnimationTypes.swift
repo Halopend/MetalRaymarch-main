@@ -810,6 +810,7 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         songFadeOutOffset     = try c.decodeIfPresent(TimeInterval.self, forKey: .songFadeOutOffset)
         if let formula = try c.decodeIfPresent(EmbeddedFormula.self, forKey: .embeddedFormula) {
             try formula.validate()
+            fractalType = .custom
             embeddedFormula = formula
         } else {
             embeddedFormula = nil
