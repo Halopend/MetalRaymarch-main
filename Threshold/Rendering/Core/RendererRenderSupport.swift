@@ -7,6 +7,23 @@ enum RenderFramePath {
     case fragment(useQuadShared: Bool)
 }
 
+#if canImport(MetalFX)
+struct RendererMetalFXBundle {
+    let manager: MetalFXManager
+    let inputWidth: Int
+    let inputHeight: Int
+}
+#endif
+
+struct RendererFragmentPassPlan {
+    let renderPassDescriptor: MTLRenderPassDescriptor
+    let viewports: [MTLViewport]
+    let resolutionScale: Float
+#if canImport(MetalFX)
+    let metalFXBundle: RendererMetalFXBundle?
+#endif
+}
+
 struct FramePhaseBreakdown {
     var backgroundCpuMs: Double = 0
     var clockWaitMs: Double = 0
@@ -22,6 +39,120 @@ struct FramePhaseBreakdown {
 }
 
 extension Renderer {
+    func applyVertexAmplificationIfNeeded(
+        to renderEncoder: MTLRenderCommandEncoder,
+        viewCount: Int
+    ) {
+        guard viewCount > 1 else { return }
+
+        if viewCount != cachedViewMappingsCount {
+            cachedViewMappings = (0..<viewCount).map {
+                MTLVertexAmplificationViewMapping(
+                    viewportArrayIndexOffset: UInt32($0),
+                    renderTargetArrayIndexOffset: UInt32($0)
+                )
+            }
+            cachedViewMappingsCount = viewCount
+        }
+
+        renderEncoder.setVertexAmplificationCount(viewCount, viewMappings: &cachedViewMappings)
+    }
+
+    func prepareFragmentPassPlan(
+        drawable: LayerRenderer.Drawable,
+        settingsSnapshot: RenderSettingsSnapshot,
+        framePath: RenderFramePath
+    ) -> RendererFragmentPassPlan {
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+        let directViewports = drawable.views.map { $0.textureMap.viewport }
+
+#if canImport(MetalFX)
+        let rasterizationRateMap = drawable.rasterizationRateMaps.first
+        let metalFXActive = isMetalFXActive(for: settingsSnapshot, framePath: framePath)
+        var metalFXBundle: RendererMetalFXBundle?
+
+        if metalFXActive {
+            if let updated = updateMetalFXManager(
+                drawable: drawable,
+                settingsSnapshot: settingsSnapshot,
+                rasterizationRateMap: rasterizationRateMap
+            ) {
+                metalFXBundle = RendererMetalFXBundle(
+                    manager: updated.0,
+                    inputWidth: updated.1,
+                    inputHeight: updated.2
+                )
+            }
+        } else {
+            metalFXManager = nil
+        }
+
+        if let metalFXBundle {
+            configureMetalFXRenderTargets(
+                renderPassDescriptor: renderPassDescriptor,
+                metalFX: metalFXBundle.manager,
+                drawable: drawable,
+                rasterizationRateMap: rasterizationRateMap
+            )
+            let viewports = scaledViewports(
+                for: drawable,
+                targetWidth: metalFXBundle.inputWidth,
+                targetHeight: metalFXBundle.inputHeight
+            )
+            return RendererFragmentPassPlan(
+                renderPassDescriptor: renderPassDescriptor,
+                viewports: viewports,
+                resolutionScale: settingsSnapshot.resolutionScale,
+                metalFXBundle: metalFXBundle
+            )
+        }
+#endif
+
+        configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
+#if canImport(MetalFX)
+        return RendererFragmentPassPlan(
+            renderPassDescriptor: renderPassDescriptor,
+            viewports: directViewports,
+            resolutionScale: settingsSnapshot.resolutionScale,
+            metalFXBundle: nil
+        )
+#else
+        return RendererFragmentPassPlan(
+            renderPassDescriptor: renderPassDescriptor,
+            viewports: directViewports,
+            resolutionScale: settingsSnapshot.resolutionScale
+        )
+#endif
+    }
+
+    func finishFragmentPass(
+        commandBuffer: MTLCommandBuffer,
+        drawable: LayerRenderer.Drawable,
+        fragmentPassPlan: RendererFragmentPassPlan
+    ) {
+#if canImport(MetalFX)
+        guard let bundle = fragmentPassPlan.metalFXBundle else { return }
+
+        do {
+            try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
+            resolveMetalFXOutputToDrawable(
+                commandBuffer: commandBuffer,
+                metalFX: bundle.manager,
+                drawable: drawable,
+                resolutionScale: fragmentPassPlan.resolutionScale
+            )
+        } catch {
+            if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
+                print("⚠️ MetalFX spatial upscale failed: \(error). Falling back to direct rendering next frame.")
+                hasLoggedMetalFXFallback = true
+            }
+            metalFXManager = nil
+        }
+#else
+        _ = (commandBuffer, drawable, fragmentPassPlan)
+#endif
+    }
+
     func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {
         // Resolution scaling is currently implemented only on the fragment path via MetalFX.
         // If scale < native, force fragment rendering so the user's resolution budget applies.
@@ -471,15 +602,6 @@ extension Renderer {
         }
 
         let viewports = drawable.views.map { $0.textureMap.viewport }
-        if drawable.views.count > 1 {
-            if drawable.views.count != cachedViewMappingsCount {
-                cachedViewMappings = (0..<drawable.views.count).map {
-                    MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
-                                                      renderTargetArrayIndexOffset: UInt32($0))
-                }
-                cachedViewMappingsCount = drawable.views.count
-            }
-        }
 
         if RENDERER_DEBUG && !hasLoggedMetalFXResolve {
             hasLoggedMetalFXResolve = true
@@ -537,9 +659,7 @@ extension Renderer {
             encoder.setRenderPipelineState(mergedPipeline)
             encoder.setDepthStencilState(depthState)
             encoder.setViewports(viewports)
-            if drawable.views.count > 1 {
-                encoder.setVertexAmplificationCount(drawable.views.count, viewMappings: &cachedViewMappings)
-            }
+            applyVertexAmplificationIfNeeded(to: encoder, viewCount: drawable.views.count)
             encoder.setFragmentTexture(outputTexture, index: 0)
             encoder.setFragmentTexture(depthTexture, index: 1)
             encoder.setFragmentBytes(&params, length: MemoryLayout<MetalFXResolveParams>.stride, index: 0)
@@ -556,9 +676,7 @@ extension Renderer {
         colorEncoder.label = "Resolve MetalFX Color"
         colorEncoder.setRenderPipelineState(colorPipeline)
         colorEncoder.setViewports(viewports)
-        if drawable.views.count > 1 {
-            colorEncoder.setVertexAmplificationCount(drawable.views.count, viewMappings: &cachedViewMappings)
-        }
+        applyVertexAmplificationIfNeeded(to: colorEncoder, viewCount: drawable.views.count)
         colorEncoder.setFragmentTexture(outputTexture, index: 0)
         colorEncoder.setFragmentBytes(&params, length: MemoryLayout<MetalFXResolveParams>.stride, index: 0)
         colorEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
@@ -580,9 +698,7 @@ extension Renderer {
         depthEncoder.setRenderPipelineState(depthPipeline)
         depthEncoder.setDepthStencilState(depthState)
         depthEncoder.setViewports(viewports)
-        if drawable.views.count > 1 {
-            depthEncoder.setVertexAmplificationCount(drawable.views.count, viewMappings: &cachedViewMappings)
-        }
+        applyVertexAmplificationIfNeeded(to: depthEncoder, viewCount: drawable.views.count)
         depthEncoder.setFragmentTexture(depthTexture, index: 0)
         depthEncoder.setFragmentBytes(&params, length: MemoryLayout<MetalFXResolveParams>.stride, index: 0)
         depthEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)

@@ -71,23 +71,10 @@ actor Renderer {
     
     // Cached constant matrices (computed once, reused every frame)
     let cachedRotationMatrix: matrix_float4x4
-    
-    // === FRAME-LEVEL CACHED VALUES ===
-    // Computed once in updateGameState(), reused in encodeAdaptiveCompute() per eye.
-    // Eliminates redundant makePrecomputedFractal/Lighting + model matrix computation.
-    var cachedFrameTime: Float = 0
-    var cachedPrecomputedFractal: PrecomputedFractalParams = PrecomputedFractalParams()
-    var cachedPrecomputedLighting: PrecomputedLighting = PrecomputedLighting()
-    var cachedPrecomputedAudio: PrecomputedAudio = PrecomputedAudio()
-    var cachedPrecomputedFog: PrecomputedFog = PrecomputedFog()
-    var cachedModelMatrix: matrix_float4x4 = matrix_identity_float4x4
-    var cachedMaxViewDistance: Float = RenderSettings.maxViewDistance
+
+    // Smoothed render distance persists across frames and is folded into the
+    // explicit frame preparation returned by updateGameState().
     var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
-    
-    // Per-eye matrices — computed once in updateGameState(), reused in encodeAdaptiveCompute()
-    var cachedPerEyeModelView: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var cachedPerEyeInverseModelView: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
-    var cachedPerEyeProjection: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]
     
     // Tile-based compute pipelines (adaptive 8x8 hierarchical cascade)
     var adaptiveHierarchicalPipeline8x8: MTLComputePipelineState?  // Adaptive 3-level cascade
@@ -587,6 +574,8 @@ actor Renderer {
     var lastPipelineMissHistogramLogTime: TimeInterval = 0
     var renderPipelineMissKeyCounts: [String: Int] = [:]
     var computePipelineMissKeyCounts: [String: Int] = [:]
+    var renderPipelineSelectionCounts: [String: Int] = [:]
+    var computePipelineSelectionCounts: [String: Int] = [:]
     
     // Track last logged pipeline to avoid spam
     var lastLoggedPipelineKey: String = ""
@@ -1036,7 +1025,7 @@ actor Renderer {
         frameBreakdown.snapshotMs = (CACurrentMediaTime() - snapshotStart) * 1000.0
         
         let updateGameStateStart = CACurrentMediaTime()
-        self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
+        let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
         frameBreakdown.updateGameStateMs = (CACurrentMediaTime() - updateGameStateStart) * 1000.0
 
         // Begin submission only once CPU updates are complete.
@@ -1062,7 +1051,7 @@ actor Renderer {
             }
             
             if let bbrot = buddhabrotRenderer {
-                let bbrotTime = cachedFrameTime
+                let bbrotTime = framePreparation.frameTime
                 let rendered = bbrot.renderFrame(
                     commandBuffer: commandBuffer,
                     drawable: drawable,
@@ -1089,7 +1078,8 @@ actor Renderer {
             let computeRendered = renderWithAdaptiveCompute(
                 commandBuffer: commandBuffer,
                 drawable: drawable,
-                settingsSnapshot: settingsSnapshot
+                settingsSnapshot: settingsSnapshot,
+                framePreparation: framePreparation
             )
             
             if computeRendered {
@@ -1114,44 +1104,13 @@ actor Renderer {
         // tile cascade) or don't benefit from spatial upscaling of a volume
         // integration result (Buddhabrot).
         // ═══════════════════════════════════════════════════════════════════════
-        let rasterizationRateMap = drawable.rasterizationRateMaps.first
-        let metalFXActive = isMetalFXActive(for: settingsSnapshot, framePath: framePath)
+        let fragmentPassPlan = prepareFragmentPassPlan(
+            drawable: drawable,
+            settingsSnapshot: settingsSnapshot,
+            framePath: framePath
+        )
 
-        let renderPassDescriptor = MTLRenderPassDescriptor()
-
-        #if canImport(MetalFX)
-        // Configure MetalFX (if active). If configuration fails, `metalFX` is nil
-        // and we fall back to direct rendering into the drawable.
-        var metalFXBundle: (manager: MetalFXManager, inputWidth: Int, inputHeight: Int)?
-        if metalFXActive {
-            if let updated = updateMetalFXManager(
-                drawable: drawable,
-                settingsSnapshot: settingsSnapshot,
-                rasterizationRateMap: rasterizationRateMap
-            ) {
-                metalFXBundle = (updated.0, updated.1, updated.2)
-            }
-        } else {
-            // resolutionScale is at native: release any previously-created upscaler
-            // so we don't hold its textures while unused.
-            metalFXManager = nil
-        }
-
-        if let bundle = metalFXBundle {
-            configureMetalFXRenderTargets(
-                renderPassDescriptor: renderPassDescriptor,
-                metalFX: bundle.manager,
-                drawable: drawable,
-                rasterizationRateMap: rasterizationRateMap
-            )
-        } else {
-            configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
-        }
-        #else
-        configureDirectRenderTargets(renderPassDescriptor: renderPassDescriptor, drawable: drawable)
-        #endif
-
-        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: fragmentPassPlan.renderPassDescriptor) else {
             if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
             drawable.encodePresent(commandBuffer: commandBuffer)
             shouldSignalInFlightSemaphore = false
@@ -1200,34 +1159,9 @@ actor Renderer {
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // Viewports: drawable-native when rendering direct, scaled when rendering
-        // into MetalFX's low-res input texture.
-        let viewports: [MTLViewport]
-        #if canImport(MetalFX)
-        if let bundle = metalFXBundle {
-            viewports = scaledViewports(
-                for: drawable,
-                targetWidth: bundle.inputWidth,
-                targetHeight: bundle.inputHeight
-            )
-        } else {
-            viewports = drawable.views.map { $0.textureMap.viewport }
-        }
-        #else
-        viewports = drawable.views.map { $0.textureMap.viewport }
-        #endif
+        let viewports = fragmentPassPlan.viewports
         renderEncoder.setViewports(viewports)
-
-        if drawable.views.count > 1 {
-            if drawable.views.count != cachedViewMappingsCount {
-                cachedViewMappings = (0..<drawable.views.count).map {
-                    MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
-                                                      renderTargetArrayIndexOffset: UInt32($0))
-                }
-                cachedViewMappingsCount = drawable.views.count
-            }
-            renderEncoder.setVertexAmplificationCount(viewports.count, viewMappings: &cachedViewMappings)
-        }
+        applyVertexAmplificationIfNeeded(to: renderEncoder, viewCount: viewports.count)
 
         for binding in cachedMeshBindings {
             renderEncoder.setVertexBuffer(binding.buffer, offset: binding.offset, index: binding.bufferIndex)
@@ -1250,34 +1184,18 @@ actor Renderer {
         // explicit fence makes the dependency unambiguous across devices/OS
         // versions and matches how MTLFXSpatialScaler is documented to be used.
         #if canImport(MetalFX)
-        if metalFXBundle != nil, let fence = metalFXFence {
+        if fragmentPassPlan.metalFXBundle != nil, let fence = metalFXFence {
             renderEncoder.updateFence(fence, after: .fragment)
         }
         #endif
 
         renderEncoder.endEncoding()
 
-        // Spatial upscale + resolve to drawable when MetalFX is active.
-        #if canImport(MetalFX)
-        if let bundle = metalFXBundle {
-            do {
-                try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
-                resolveMetalFXOutputToDrawable(
-                    commandBuffer: commandBuffer,
-                    metalFX: bundle.manager,
-                    drawable: drawable,
-                    resolutionScale: settingsSnapshot.resolutionScale
-                )
-            } catch {
-                if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
-                    print("⚠️ MetalFX spatial upscale failed: \(error). Falling back to direct rendering next frame.")
-                    hasLoggedMetalFXFallback = true
-                }
-                // Dropping the manager forces the next frame to go direct.
-                metalFXManager = nil
-            }
-        }
-        #endif
+        finishFragmentPass(
+            commandBuffer: commandBuffer,
+            drawable: drawable,
+            fragmentPassPlan: fragmentPassPlan
+        )
         
         frameBreakdown.renderPathEncodeMs = (CACurrentMediaTime() - renderEncodeStart) * 1000.0
 
@@ -1329,6 +1247,7 @@ actor Renderer {
         drawable: LayerRenderer.Drawable,
         viewIndex: Int,
         settingsSnapshot: RenderSettingsSnapshot,
+        framePreparation: RendererFramePreparation,
         pipeline: MTLComputePipelineState? = nil,
         prevDepthTexture: MTLTexture,
         curDepthTexture: MTLTexture,
@@ -1341,10 +1260,10 @@ actor Renderer {
             if RENDERER_DEBUG { print("⚠️ Adaptive compute pipeline not available") }
             return
         }
-        // Reuse per-eye matrices cached by updateGameState() — eliminates 2 matrix inversions per eye
-        let modelView = cachedPerEyeModelView[viewIndex]
-        let inverseModelView = cachedPerEyeInverseModelView[viewIndex]
-        let projection = cachedPerEyeProjection[viewIndex]
+        let eyePreparation = framePreparation.perEye[viewIndex]
+        let modelView = eyePreparation.modelView
+        let inverseModelView = eyePreparation.inverseModelView
+        let projection = eyePreparation.projection
         
         // Current frame's full model-view-projection (for temporal reprojection)
         let currentViewProj = projection * modelView
@@ -1355,16 +1274,8 @@ actor Renderer {
         // Get color scheme parameters
         let colorSchemeParams = settingsSnapshot.colorSchemeParams
         
-        // === REUSE PRECOMPUTED VALUES from updateGameState() ===
-        // These are frame-uniform (identical for both eyes), computed once per frame.
-        let computePrecomputedFractal = cachedPrecomputedFractal
-        let computePrecomputedLighting = cachedPrecomputedLighting
-        let computePrecomputedAudio = cachedPrecomputedAudio
-        let computePrecomputedFog = cachedPrecomputedFog
-        let frameTime = cachedFrameTime
-        let effectiveScale = smoothedScale * settingsSnapshot.detailScale
-        let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(effectiveScale, 0.001)
-        let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
+        let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(framePreparation.effectiveScale, 0.001)
+        let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(framePreparation.effectiveScale, 0.001)
 
         // Match fragment path projection mapping by using the actual per-eye
         // viewport (origin + size), not the full texture dimensions.
@@ -1380,7 +1291,7 @@ actor Renderer {
             invViewMatrix: inverseModelView,  // Use inverse MODEL-VIEW, not just inverse view!
             invProjMatrix: projection.inverse,
             cameraPos: cameraPos,
-            time: frameTime,
+            time: framePreparation.frameTime,
             resolution: SIMD2<Float>(Float(viewportWidth), Float(viewportHeight)),
             viewportOrigin: SIMD2<Float>(Float(viewportOriginX), Float(viewportOriginY)),
             minDistance: settingsSnapshot.minDistance,
@@ -1393,12 +1304,12 @@ actor Renderer {
             safetyBubbleFadeWidth: scaleCorrectedFadeWidth,
             safetyBubbleStrength: (settingsSnapshot.fractalType == .mandelbulb) ? 0.0 : settingsSnapshot.safetyBubbleStrength,
             foldingLimit: settingsSnapshot.foldingLimit,
-            glowIntensity: settingsSnapshot.colorSchemeParams.glowIntensity,
-            colorMix: settingsSnapshot.colorMix,
+            glowIntensity: framePreparation.animatedGlow,
+            colorMix: framePreparation.animatedColorMix,
             fractalIterations: Int32(settingsSnapshot.fractalIterations),
             colorIterations: Int32(settingsSnapshot.colorIterations),
             maxRaySteps: Int32(settingsSnapshot.maxRaySteps),
-            maxViewDistance: cachedMaxViewDistance,
+            maxViewDistance: framePreparation.maxViewDistance,
             eyeIndex: UInt32(viewIndex),
             debugHierarchical: settingsSnapshot.debugHierarchical ? 1 : 0,
             limitFlash: settingsSnapshot.limitFlash,
@@ -1426,10 +1337,10 @@ actor Renderer {
             currentViewProjMatrix: currentViewProj,
             previousViewProjMatrix: previousViewProjMatrices[viewIndex],
             currentInvViewProjMatrix: currentViewProj.inverse,
-            precomputedFractal: computePrecomputedFractal,
-            precomputedLighting: computePrecomputedLighting,
-            precomputedAudio: computePrecomputedAudio,
-            precomputedFog: computePrecomputedFog,
+            precomputedFractal: framePreparation.precomputedFractal,
+            precomputedLighting: framePreparation.precomputedLighting,
+            precomputedAudio: framePreparation.precomputedAudio,
+            precomputedFog: framePreparation.precomputedFog,
             colorScheme: colorSchemeParams
         )
         
@@ -1649,7 +1560,8 @@ actor Renderer {
     private func renderWithAdaptiveCompute(
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
-        settingsSnapshot: RenderSettingsSnapshot
+        settingsSnapshot: RenderSettingsSnapshot,
+        framePreparation: RendererFramePreparation
     ) -> Bool {
         // Select the best compute pipeline for current iteration/ray step settings
         let fi = settingsSnapshot.fractalIterations
@@ -1695,6 +1607,7 @@ actor Renderer {
                 drawable: drawable,
                 viewIndex: viewIndex,
                 settingsSnapshot: settingsSnapshot,
+                framePreparation: framePreparation,
                 pipeline: computePipeline,
                 prevDepthTexture: depthPair.read,
                 curDepthTexture: depthPair.write,

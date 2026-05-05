@@ -1,8 +1,28 @@
 @preconcurrency import CompositorServices
 import Foundation
 
+struct RendererPreparedEyeState {
+    var modelView: matrix_float4x4 = matrix_identity_float4x4
+    var inverseModelView: matrix_float4x4 = matrix_identity_float4x4
+    var projection: matrix_float4x4 = matrix_identity_float4x4
+}
+
+struct RendererFramePreparation {
+    var frameTime: Float
+    var precomputedFractal: PrecomputedFractalParams
+    var precomputedLighting: PrecomputedLighting
+    var precomputedAudio: PrecomputedAudio
+    var precomputedFog: PrecomputedFog
+    var modelMatrix: matrix_float4x4
+    var maxViewDistance: Float
+    var effectiveScale: Float
+    var animatedColorMix: Float
+    var animatedGlow: Float
+    var perEye: [RendererPreparedEyeState]
+}
+
 extension Renderer {
-    func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot) {
+    func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot) -> RendererFramePreparation {
         /// Update any game state before rendering
 
         // Use already-smoothed position from settings (interpolated above)
@@ -107,15 +127,8 @@ extension Renderer {
         let animatedColorMix = settingsSnapshot.lightingPlay ? min(max(baseColorMix + lightingWave * 0.08, 0.0), 1.0) : baseColorMix
         let animatedGlow = settingsSnapshot.lightingPlay ? min(max(baseGlow + max(0, lightingWave) * 0.25, 0.0), 2.0) : baseGlow
 
-        // Cache frame-level values for reuse in encodeAdaptiveCompute (avoids recomputing per eye)
-        cachedFrameTime = frameTime
-        cachedPrecomputedFractal = precomputedFractal
-        cachedPrecomputedLighting = precomputedLighting
-        cachedPrecomputedAudio = precomputedAudio
-        cachedPrecomputedFog = precomputedFog
-        cachedModelMatrix = modelMatrix
-        cachedMaxViewDistance = maxViewDistance
         let boundingSphereRadius = settingsSnapshot.estimatedBoundingSphereRadius
+        var preparedEyeStates = Array(repeating: RendererPreparedEyeState(), count: drawable.views.count)
 
         func uniforms(forViewIndex viewIndex: Int) -> Uniforms {
             let view = drawable.views[viewIndex]
@@ -125,10 +138,11 @@ extension Renderer {
             let modelView = viewMatrix * modelMatrix
             let inverseModelView = modelView.inverse
 
-            // Cache per-eye matrices for reuse in encodeAdaptiveCompute()
-            cachedPerEyeModelView[viewIndex] = modelView
-            cachedPerEyeInverseModelView[viewIndex] = inverseModelView
-            cachedPerEyeProjection[viewIndex] = projection
+            preparedEyeStates[viewIndex] = RendererPreparedEyeState(
+                modelView: modelView,
+                inverseModelView: inverseModelView,
+                projection: projection
+            )
 
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
 
@@ -179,8 +193,8 @@ extension Renderer {
                             jitterOffset: .zero,
                             _pad_uniforms: [0, 0],
                             formulaParams: settingsSnapshot.formulaParams,
-                            precomputedFractal: cachedPrecomputedFractal,
-                            precomputedLighting: cachedPrecomputedLighting,
+                            precomputedFractal: precomputedFractal,
+                            precomputedLighting: precomputedLighting,
                             precomputedAudio: precomputedAudio,
                             precomputedFog: precomputedFog,
                             colorScheme: colorSchemeParams)
@@ -190,6 +204,20 @@ extension Renderer {
         if drawable.views.count > 1 {
             self.uniforms[0].uniforms.1 = uniforms(forViewIndex: 1)
         }
+
+        return RendererFramePreparation(
+            frameTime: frameTime,
+            precomputedFractal: precomputedFractal,
+            precomputedLighting: precomputedLighting,
+            precomputedAudio: precomputedAudio,
+            precomputedFog: precomputedFog,
+            modelMatrix: modelMatrix,
+            maxViewDistance: maxViewDistance,
+            effectiveScale: effectiveScale,
+            animatedColorMix: animatedColorMix,
+            animatedGlow: animatedGlow,
+            perEye: preparedEyeStates
+        )
 
 //        rotation += 0.01
     }
