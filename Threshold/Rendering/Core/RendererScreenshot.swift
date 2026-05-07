@@ -30,7 +30,10 @@ extension Renderer {
         screenshotDepthTexture?.label = "Screenshot Depth"
 
         do {
-            let library = device.makeDefaultLibrary()!
+            guard let library = Renderer.bundledDefaultLibrary(device: device) else {
+                if RENDERER_DEBUG { print("⚠️ Failed to load default Metal library for screenshot setup") }
+                return
+            }
             let vertexFunction = library.makeFunction(name: "screenshotVertexShader")
             let fragmentFunction = try library.makeFunction(name: "fragmentShader", constantValues: MTLFunctionConstantValues())
 

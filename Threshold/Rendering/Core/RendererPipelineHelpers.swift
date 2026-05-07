@@ -2,6 +2,13 @@
 import Metal
 
 extension Renderer {
+    static func bundledDefaultLibrary(device: MTLDevice) -> MTLLibrary? {
+        if let cached = _cachedLibrary { return cached }
+        let library = device.makeDefaultLibrary()
+        _cachedLibrary = library
+        return library
+    }
+
     static func buildRenderPipelineWithDevice(device: MTLDevice,
                                               layerRenderer: LayerRenderer,
                                               rasterSampleCount: Int,
@@ -21,8 +28,7 @@ extension Renderer {
         if let library {
             resolvedLibrary = library
         } else {
-            resolvedLibrary = _cachedLibrary ?? device.makeDefaultLibrary()
-            if _cachedLibrary == nil { _cachedLibrary = resolvedLibrary }
+            resolvedLibrary = bundledDefaultLibrary(device: device)
         }
         let library = resolvedLibrary
 

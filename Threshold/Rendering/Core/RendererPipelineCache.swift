@@ -1,8 +1,16 @@
 @preconcurrency import CompositorServices
+import Foundation
 import Metal
 
 private let maxPendingRenderPipelineBuilds = 3
 private let maxPendingComputePipelineBuilds = 3
+private let initialPipelineBuildRetryDelay: TimeInterval = 0.25
+private let maxPipelineBuildRetryDelay: TimeInterval = 4.0
+
+struct PipelineBuildRetryState {
+    let failures: Int
+    let retryAfter: TimeInterval
+}
 
 private struct RenderPipelineKeyContext {
     let exactStem: String
@@ -301,7 +309,9 @@ extension Renderer {
 
         // Build pipelines for unique configurations only
         var compiledKeys = Set<String>()
+        var prewarmedComputeKeys = Set<String>()
         var compiledCount = 0
+        var computePrewarmCount = 0
 
         if RENDERER_DEBUG { print("🔧 [ShaderCompilation] Starting preset pipeline precompilation for \(presets.count) presets...") }
 
@@ -330,13 +340,37 @@ extension Renderer {
             // Build both standard and quad-shared variants
             _ = getPipeline(forPreset: preset, useQuadShared: false)
             _ = getPipeline(forPreset: preset, useQuadShared: true)
+
+            let functionConstants = preset.deriveFunctionConstants()
+            let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
+            let computeKey = ComputePipelineKeyContext(
+                prefix: customCacheKeyPrefix(for: preset.fractalType),
+                fractalTypeRawValue: Int(preset.fractalType.rawValue),
+                fractalIterations: Int(functionConstants.fractalIterations),
+                maxRaySteps: Int(functionConstants.maxRaySteps),
+                powerKey: powerKey
+            ).exactKey
+            if prewarmedComputeKeys.insert(computeKey).inserted {
+                await prewarmComputePipelineDuringStartup(forPreset: preset)
+                computePrewarmCount += 1
+            }
+
             compiledCount += 1
         }
 
         if RENDERER_DEBUG {
             print("✅ [ShaderCompilation] Precompiled \(compiledCount) unique preset pipelines (from \(presets.count) presets)")
+            print("   Prewarmed \(computePrewarmCount) unique compute pipelines")
             print("   Unified cache now contains \(pipelineCache.count) pipelines")
         }
+    }
+
+    private func prewarmComputePipelineDuringStartup(forPreset preset: FractalPreset) async {
+        while pendingComputePipelineBuildKeys.count >= maxPendingComputePipelineBuilds {
+            guard !Task.isCancelled else { return }
+            await Task.yield()
+        }
+        prewarmComputePipeline(forPreset: preset)
     }
 
     /// Select the best specialized pipeline for the current render settings.
@@ -859,6 +893,16 @@ extension Renderer {
         return key.hasPrefix("CX\(activeHash)_")
     }
 
+    private func shouldDelayRenderPipelineBuild(forKey key: String, now: TimeInterval = Date.timeIntervalSinceReferenceDate) -> Bool {
+        guard let retryState = renderPipelineBuildRetryStates[key] else { return false }
+        return now < retryState.retryAfter
+    }
+
+    private func shouldDelayComputePipelineBuild(forKey key: String, now: TimeInterval = Date.timeIntervalSinceReferenceDate) -> Bool {
+        guard let retryState = computePipelineBuildRetryStates[key] else { return false }
+        return now < retryState.retryAfter
+    }
+
     // MARK: - Background Pipeline Builds
 
     /// Inserts a built render pipeline into the cache. Callable from the
@@ -866,6 +910,7 @@ extension Renderer {
     /// compilation finishes.
     func insertBuiltRenderPipeline(_ pipeline: MTLRenderPipelineState, forKey key: String) {
         pendingPipelineBuildKeys.remove(key)
+        renderPipelineBuildRetryStates.removeValue(forKey: key)
         guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
             if RENDERER_DEBUG { print("⏭️ [Pipeline] Dropped stale async custom render pipeline: \(key)") }
             return
@@ -880,11 +925,18 @@ extension Renderer {
     /// Marks a background build as failed so the pending set doesn't leak.
     func markPipelineBuildFailed(forKey key: String) {
         pendingPipelineBuildKeys.remove(key)
+        let nextFailureCount = (renderPipelineBuildRetryStates[key]?.failures ?? 0) + 1
+        let delay = min(maxPipelineBuildRetryDelay, initialPipelineBuildRetryDelay * pow(2.0, Double(nextFailureCount - 1)))
+        renderPipelineBuildRetryStates[key] = PipelineBuildRetryState(
+            failures: nextFailureCount,
+            retryAfter: Date.timeIntervalSinceReferenceDate + delay
+        )
     }
 
     /// Inserts a built compute pipeline into the cache and clears its pending marker.
     func insertBuiltComputePipeline(_ pipeline: MTLComputePipelineState, forKey key: String) {
         pendingComputePipelineBuildKeys.remove(key)
+        computePipelineBuildRetryStates.removeValue(forKey: key)
         guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
             if RENDERER_DEBUG { print("⏭️ [Compute] Dropped stale async custom compute pipeline: \(key)") }
             return
@@ -896,6 +948,12 @@ extension Renderer {
 
     func markComputePipelineBuildFailed(forKey key: String) {
         pendingComputePipelineBuildKeys.remove(key)
+        let nextFailureCount = (computePipelineBuildRetryStates[key]?.failures ?? 0) + 1
+        let delay = min(maxPipelineBuildRetryDelay, initialPipelineBuildRetryDelay * pow(2.0, Double(nextFailureCount - 1)))
+        computePipelineBuildRetryStates[key] = PipelineBuildRetryState(
+            failures: nextFailureCount,
+            retryAfter: Date.timeIntervalSinceReferenceDate + delay
+        )
     }
 
     /// Enqueues a detached task to build a specialized render pipeline off-actor,
@@ -908,6 +966,7 @@ extension Renderer {
         useQuadShared: Bool
     ) {
         if pendingPipelineBuildKeys.contains(cacheKey) { return }
+        if shouldDelayRenderPipelineBuild(forKey: cacheKey) { return }
         if pendingPipelineBuildKeys.count >= maxPendingRenderPipelineBuilds { return }
         pendingPipelineBuildKeys.insert(cacheKey)
 
@@ -958,6 +1017,7 @@ extension Renderer {
         mandelbulbPower: Int32?
     ) {
         if pendingComputePipelineBuildKeys.contains(cacheKey) { return }
+        if shouldDelayComputePipelineBuild(forKey: cacheKey) { return }
         if pendingComputePipelineBuildKeys.count >= maxPendingComputePipelineBuilds { return }
         pendingComputePipelineBuildKeys.insert(cacheKey)
 
@@ -966,13 +1026,8 @@ extension Renderer {
         let library: MTLLibrary?
         if cacheKey.hasPrefix("CX"), let custom = customShaderLibrary {
             library = custom
-        } else if let cached = cachedDefaultLibrary {
-            library = cached
-        } else if let fresh = device.makeDefaultLibrary() {
-            cachedDefaultLibrary = fresh
-            library = fresh
         } else {
-            library = nil
+            library = Renderer.bundledDefaultLibrary(device: device)
         }
 
         guard let metalLibrary = library else {

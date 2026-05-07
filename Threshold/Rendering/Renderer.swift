@@ -43,6 +43,8 @@ actor Renderer {
     /// Renderer actor.
     var pendingPipelineBuildKeys: Set<String> = []
     var pendingComputePipelineBuildKeys: Set<String> = []
+    var renderPipelineBuildRetryStates: [String: PipelineBuildRetryState] = [:]
+    var computePipelineBuildRetryStates: [String: PipelineBuildRetryState] = [:]
 
     /// Compute pipeline cache - specialized compute kernels keyed by "FI{n}_RS{n}"
     /// Mirrors the render pipeline cache but for the adaptive hierarchical compute path.
@@ -66,9 +68,6 @@ actor Renderer {
     /// Coordinates parameter smoothing and animation updates without blocking MainActor
     private(set) var parameterUpdateCoordinator: ParameterUpdateCoordinator?
 
-    // Cached default Metal library — avoids device.makeDefaultLibrary() on every compute cache miss
-    var cachedDefaultLibrary: MTLLibrary?
-    
     // Cached constant matrices (computed once, reused every frame)
     let cachedRotationMatrix: matrix_float4x4
 
@@ -408,7 +407,7 @@ actor Renderer {
 
         // Build tile-based compute pipelines with function constants for maximum optimization
         do {
-            guard let library = device.makeDefaultLibrary() else {
+            guard let library = Renderer.bundledDefaultLibrary(device: device) else {
                 if RENDERER_DEBUG { print("⚠️ Failed to load default Metal library; compute path disabled") }
                 adaptiveHierarchicalPipeline8x8 = nil
                 throw RendererError.metalLibraryUnavailable
@@ -1621,7 +1620,7 @@ actor Renderer {
         let device = self.device
         let commandQueue = self.commandQueue
         
-        guard let library = device.makeDefaultLibrary(),
+                guard let library = Renderer.bundledDefaultLibrary(device: device),
               let diagnosticFunc = library.makeFunction(name: "diagnosticKernel"),
               let diagnosticPipeline = try? device.makeComputePipelineState(function: diagnosticFunc) else {
             print("⚠️ Could not create diagnostic pipeline")
