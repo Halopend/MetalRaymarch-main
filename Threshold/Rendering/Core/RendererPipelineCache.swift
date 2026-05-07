@@ -1,6 +1,9 @@
 @preconcurrency import CompositorServices
 import Metal
 
+private let maxPendingRenderPipelineBuilds = 3
+private let maxPendingComputePipelineBuilds = 3
+
 private struct RenderPipelineKeyContext {
     let exactStem: String
     let sharedStem: String
@@ -850,14 +853,24 @@ extension Renderer {
         return pipelineCache.count
     }
 
+    private func acceptsCompletedCustomPipelineBuild(forKey key: String) -> Bool {
+        guard key.hasPrefix("CX") else { return true }
+        guard let activeHash = customShaderHash else { return false }
+        return key.hasPrefix("CX\(activeHash)_")
+    }
+
     // MARK: - Background Pipeline Builds
 
     /// Inserts a built render pipeline into the cache. Callable from the
     /// Renderer actor only; the background-build helper hops back here once
     /// compilation finishes.
     func insertBuiltRenderPipeline(_ pipeline: MTLRenderPipelineState, forKey key: String) {
-        pipelineCache[key] = pipeline
         pendingPipelineBuildKeys.remove(key)
+        guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
+            if RENDERER_DEBUG { print("⏭️ [Pipeline] Dropped stale async custom render pipeline: \(key)") }
+            return
+        }
+        pipelineCache[key] = pipeline
         // Nudge the fast-path so the next frame picks the specialized pipeline
         // immediately instead of remembering the previous fallback.
         lastSelectedPipeline = nil
@@ -871,8 +884,12 @@ extension Renderer {
 
     /// Inserts a built compute pipeline into the cache and clears its pending marker.
     func insertBuiltComputePipeline(_ pipeline: MTLComputePipelineState, forKey key: String) {
-        computePipelineCache[key] = pipeline
         pendingComputePipelineBuildKeys.remove(key)
+        guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
+            if RENDERER_DEBUG { print("⏭️ [Compute] Dropped stale async custom compute pipeline: \(key)") }
+            return
+        }
+        computePipelineCache[key] = pipeline
         lastSelectedComputePipeline = nil
         if RENDERER_DEBUG { print("✅ [Compute] Async-built and cached: \(key)") }
     }
@@ -891,6 +908,7 @@ extension Renderer {
         useQuadShared: Bool
     ) {
         if pendingPipelineBuildKeys.contains(cacheKey) { return }
+        if pendingPipelineBuildKeys.count >= maxPendingRenderPipelineBuilds { return }
         pendingPipelineBuildKeys.insert(cacheKey)
 
         // Capture only Sendable values / references we know are Metal-thread-safe.
@@ -940,6 +958,7 @@ extension Renderer {
         mandelbulbPower: Int32?
     ) {
         if pendingComputePipelineBuildKeys.contains(cacheKey) { return }
+        if pendingComputePipelineBuildKeys.count >= maxPendingComputePipelineBuilds { return }
         pendingComputePipelineBuildKeys.insert(cacheKey)
 
         let device = self.device

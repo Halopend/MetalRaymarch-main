@@ -95,8 +95,6 @@ actor Renderer {
     private var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
     private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
     private var temporalDepthSize: SIMD2<Int> = .zero
-    private var temporalColorTextures: [MTLTexture?] = [nil, nil]   // ping-pong color history
-    private var temporalColorSize: SIMD2<Int> = .zero
     
     // Cached view amplification mappings — avoids per-frame array allocation
     var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []
@@ -1259,8 +1257,6 @@ actor Renderer {
         pipeline: MTLComputePipelineState? = nil,
         prevDepthTexture: MTLTexture,
         curDepthTexture: MTLTexture,
-        prevColorTexture: MTLTexture,
-        curColorTexture: MTLTexture,
         uniformBuffer: MTLBuffer,
         bufferContents: UnsafeMutableRawPointer
     ) {
@@ -1337,7 +1333,6 @@ actor Renderer {
             springVisible: (settingsSnapshot.springActive || simd_length(settingsSnapshot.springDisplacement) > 0.001) ? 1 : 0,
             springRestRadius: 0.06,
             jitterOffset: .zero,
-            accumulationFrame: 0,
             temporalReprojectionEnabled: temporalFrameCount > 0 ? 1 : 0,
             coherentPacketEnabled: settingsSnapshot.coherentPacketEnabled ? 1 : 0,
             _pad_tile: 0,
@@ -1370,8 +1365,6 @@ actor Renderer {
         // Temporal reprojection depth textures
         computeEncoder.setTexture(prevDepthTexture, index: 1)
         computeEncoder.setTexture(curDepthTexture, index: 2)
-        computeEncoder.setTexture(prevColorTexture, index: 3)
-        computeEncoder.setTexture(curColorTexture, index: 4)
         
         // Store current VP for next frame's reprojection
         previousViewProjMatrices[viewIndex] = currentViewProj
@@ -1475,50 +1468,6 @@ actor Renderer {
         return (read: tex0, write: tex0)  // First frame: read=write (will be marked invalid)
     }
 
-    /// Creates or resizes the double-buffered temporal color textures for accumulation.
-    /// Returns (previousRead, currentWrite) texture pair.
-    private func ensureTemporalColorTextures(for drawable: LayerRenderer.Drawable) -> (read: MTLTexture, write: MTLTexture)? {
-        let width = drawable.colorTextures[0].width
-        let height = drawable.colorTextures[0].height
-        let viewCount = drawable.views.count
-        let pixelFormat = drawable.colorTextures[0].pixelFormat
-
-        if let tex0 = temporalColorTextures[0],
-           let _ = temporalColorTextures[1],
-           tex0.width == width,
-           tex0.height == height,
-           tex0.arrayLength == viewCount,
-           tex0.pixelFormat == pixelFormat {
-            let readIdx = 1 - temporalDepthIndex
-            return (read: temporalColorTextures[readIdx]!, write: temporalColorTextures[temporalDepthIndex]!)
-        }
-
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type2DArray
-        descriptor.pixelFormat = pixelFormat
-        descriptor.width = width
-        descriptor.height = height
-        descriptor.arrayLength = viewCount
-        descriptor.storageMode = .private
-        descriptor.usage = [.shaderWrite, .shaderRead]
-
-        guard let tex0 = device.makeTexture(descriptor: descriptor),
-              let tex1 = device.makeTexture(descriptor: descriptor) else {
-            if RENDERER_DEBUG { print("⚠️ Failed to create temporal color textures") }
-            return nil
-        }
-        tex0.label = "Temporal Color 0"
-        tex1.label = "Temporal Color 1"
-
-        temporalColorTextures = [tex0, tex1]
-        temporalColorSize = SIMD2(width, height)
-
-        // Residency update deferred to renderWithAdaptiveCompute() for batching
-
-        if RENDERER_DEBUG { print("📐 Created temporal color textures: \(width)×\(height) × \(viewCount) layers") }
-        return (read: tex0, write: tex0)  // First frame: no valid previous history
-    }
-    
     /// Copies compute output texture to drawable using blit encoder
     private func blitComputeOutputToDrawable(
         commandBuffer: MTLCommandBuffer,
@@ -1590,27 +1539,22 @@ actor Renderer {
         // Track textures created this frame for batched residency update
         let prevComputeOutput = computeOutputTexture
         let prevDepth0 = temporalDepthTextures[0]
-        let prevColor0 = temporalColorTextures[0]
         
         guard let outputTexture = ensureComputeOutputTexture(for: drawable) else {
             return false
         }
         
-                // Set up temporal reprojection depth textures (ping-pong)
-                guard let depthPair = ensureTemporalDepthTextures(for: drawable),
-                            let colorPair = ensureTemporalColorTextures(for: drawable) else {
-                        if RENDERER_DEBUG { print("⚠️ Temporal textures unavailable; falling back to fragment rendering") }
-                        return false
-                }
+        // Set up temporal reprojection depth textures (ping-pong)
+        guard let depthPair = ensureTemporalDepthTextures(for: drawable) else {
+            if RENDERER_DEBUG { print("⚠️ Temporal textures unavailable; falling back to fragment rendering") }
+            return false
+        }
         
         // Batch residency set updates for any newly created textures (single commit)
         var newTextures: [MTLTexture] = []
         if computeOutputTexture !== prevComputeOutput { newTextures.append(outputTexture) }
         if temporalDepthTextures[0] !== prevDepth0 {
             newTextures.append(contentsOf: temporalDepthTextures.compactMap { $0 })
-        }
-        if temporalColorTextures[0] !== prevColor0 {
-            newTextures.append(contentsOf: temporalColorTextures.compactMap { $0 })
         }
         if !newTextures.isEmpty { updateResidencySetForComputeTextures(newTextures) }
         
@@ -1626,8 +1570,6 @@ actor Renderer {
                 pipeline: computePipeline,
                 prevDepthTexture: depthPair.read,
                 curDepthTexture: depthPair.write,
-                prevColorTexture: colorPair.read,
-                curColorTexture: colorPair.write,
                 uniformBuffer: uniformBuffer,
                 bufferContents: bufferContents
             )

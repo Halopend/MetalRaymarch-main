@@ -301,7 +301,7 @@ typedef struct
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
-    float blendFactor;           // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
+    float blendFactor;           // Temporal reuse factor: 1.0 = moving, lower = stable enough to trust depth history
     // === SPRING BLOB NAVIGATION WIDGET ===
     // Packed as scalars to avoid float3 alignment issues between Swift and Metal
     float springDisplacementX;        // Spring displacement X (NDC-ish space)
@@ -313,7 +313,6 @@ typedef struct
     float springRestRadius;           // Blob rest radius in NDC units
     // === GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA ===
     vector_float2 jitterOffset;  // Sub-pixel jitter in pixels (±0.5 range)
-    int accumulationFrame;       // Frame count since last parameter change (0 = first frame)
     int temporalReprojectionEnabled;         // 0 = off (first frame / parameter change), 1 = on
     // === COHERENT-PACKET EXPERIMENTAL PATH (Stages 0-3 prototype) ===
     // 0 = legacy adaptiveHierarchical8x8 path (prevDepth*0.9 warm-start, unconditional

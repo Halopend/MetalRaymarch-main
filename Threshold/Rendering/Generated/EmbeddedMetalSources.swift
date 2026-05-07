@@ -317,7 +317,7 @@ typedef struct
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
-    float blendFactor;           // Temporal blend: 1.0 = show current (moving), 0.05 = accumulate (still)
+    float blendFactor;           // Temporal reuse factor: 1.0 = moving, lower = stable enough to trust depth history
     // === SPRING BLOB NAVIGATION WIDGET ===
     // Packed as scalars to avoid float3 alignment issues between Swift and Metal
     float springDisplacementX;        // Spring displacement X (NDC-ish space)
@@ -329,7 +329,6 @@ typedef struct
     float springRestRadius;           // Blob rest radius in NDC units
     // === GMT-FRACTALS: HALTON JITTER FOR TEMPORAL AA ===
     vector_float2 jitterOffset;  // Sub-pixel jitter in pixels (±0.5 range)
-    int accumulationFrame;       // Frame count since last parameter change (0 = first frame)
     int temporalReprojectionEnabled;         // 0 = off (first frame / parameter change), 1 = on
     // === COHERENT-PACKET EXPERIMENTAL PATH (Stages 0-3 prototype) ===
     // 0 = legacy adaptiveHierarchical8x8 path (prevDepth*0.9 warm-start, unconditional
@@ -1967,15 +1966,6 @@ constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
 // Quality threshold
 constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quality
 
-// Temporal accumulation confidence tuning
-constant float kTemporalMaxHistory = 0.96f;      // Cap history to avoid infinite lag
-constant float kTemporalReprojPxLow = 0.75f;     // Reprojection drift (px) where confidence starts dropping
-constant float kTemporalReprojPxHigh = 3.5f;     // Reprojection drift (px) where confidence is near zero
-constant float kTemporalMotionPxLow = 1.0f;       // Motion (px) where history starts reducing
-constant float kTemporalMotionPxHigh = 18.0f;     // Motion (px) where history strongly attenuates
-constant float kTemporalLumaLow = 0.04f;         // Luminance delta where confidence starts dropping
-constant float kTemporalLumaHigh = 0.24f;        // Luminance delta where confidence is near zero
-
 // === FOG COLOR ===
 constant half3 kFogColor = half3(0.01h, 0.015h, 0.02h);
 // Always-on inner glow tint (per-step accumulation contribution).
@@ -2239,7 +2229,7 @@ FORCE_INLINE float applySafetyBubble(float d, float3 pos, FractalParams params) 
     // (Map is called 50-100+ times per pixel per eye at 90Hz).
     if (params.bubbleStrength >= 1.0f) return dBubbled;
     // Temporal blend: lerp between original and bubble-applied distance
-    // When strength < 1, the bubble partially fades in via the temporal accumulation system
+    // When strength < 1, the bubble partially fades in via the configured fade strength
     return mix(d, dBubbled, params.bubbleStrength);
 }
 
@@ -3344,9 +3334,7 @@ kernel void adaptiveHierarchical8x8(
     constant TileUniforms& uniforms [[buffer(0)]],
     texture2d_array<float, access::write> outputTexture [[texture(0)]],
     texture2d_array<float, access::read> prevDepthTexture [[texture(1)]],
-    texture2d_array<float, access::write> curDepthTexture [[texture(2)]],
-    texture2d_array<float, access::read> prevColorTexture [[texture(3)]],
-    texture2d_array<float, access::write> curColorTexture [[texture(4)]]
+    texture2d_array<float, access::write> curDepthTexture [[texture(2)]]
 ) {
     const uint ADAPTIVE_TILE_SIZE = 8;
     const uint ADAPTIVE_SUPERTILE_SIZE = 32;
@@ -3416,12 +3404,6 @@ kernel void adaptiveHierarchical8x8(
     // ~288 inner-loop fine march into a ~30 inner-loop refinement.
     float reprojectedStartT = 0.0;
     float reprojectedDepth = -1.0;
-    float reprojectionDriftPixels = 0.0;
-    float hitMotionPixels = 0.0;
-    bool hitMotionValid = false;
-    float2 historyUV = pixelCenter / uniforms.resolution;
-    uint2 historyPixel = pixelCoord;
-    bool historySampleValid = false;
     bool reprojectionValid = false;
     
     if (uniforms.temporalReprojectionEnabled) {
@@ -3452,9 +3434,6 @@ kernel void adaptiveHierarchical8x8(
             prevPixel = clamp(prevPixel, uint2(0), viewportSize - 1);
             prevPixel += viewportOrigin;
             float prevDepth = prevDepthTexture.read(prevPixel, uniforms.eyeIndex).x;
-            historyUV = prevUV;
-            historyPixel = prevPixel;
-            historySampleValid = true;
             
             if (prevDepth > 0.0 && prevDepth < kRayMissThreshold) {
                 // 4. Iterative refinement: reproject with the sampled depth
@@ -3464,16 +3443,12 @@ kernel void adaptiveHierarchical8x8(
                 float2 betterNDC = betterClip.xy / betterClip.w;
                 float2 betterUV = betterNDC * 0.5 + 0.5;
                 betterUV.y = 1.0 - betterUV.y;
-                reprojectionDriftPixels = length((betterUV - prevUV) * uniforms.resolution);
                 
                 if (betterUV.x >= 0.0 && betterUV.x <= 1.0 && betterUV.y >= 0.0 && betterUV.y <= 1.0) {
                     uint2 betterPixel = uint2(betterUV * uniforms.resolution);
                     betterPixel = clamp(betterPixel, uint2(0), viewportSize - 1);
                     betterPixel += viewportOrigin;
                     float refinedDepth = prevDepthTexture.read(betterPixel, uniforms.eyeIndex).x;
-                    historyUV = betterUV;
-                    historyPixel = betterPixel;
-                    historySampleValid = true;
                     
                     if (refinedDepth > 0.0 && refinedDepth < kRayMissThreshold) {
                         prevDepth = refinedDepth;
@@ -3557,7 +3532,6 @@ kernel void adaptiveHierarchical8x8(
     threadgroup int tileIsEmpty = 0;       // 1 = entire tile missed, skip fine march
     threadgroup half tg_shaSpot = 0.0h;    // Shared spotlight shadow (1 eval per tile)
     threadgroup half tg_shaSun = 0.0h;     // Shared sun shadow (1 eval per tile)
-    threadgroup float3 tg_currentColor[64]; // For neighborhood clamp against history
     // Coherent-packet Stage 3: anchor's surface frame for normal-coherence gate.
     // NOTE: threadgroup vars cannot be reliably initialized in their declaration
     // in Metal — initialize from thread 0 then barrier so all lanes see the value.
@@ -3841,7 +3815,6 @@ kernel void adaptiveHierarchical8x8(
         col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), 0.0h);
         float4 currentColor = float4(float3(col), 1.0);
         outputTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
-        curColorTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
         // Write miss depth so next frame knows this pixel was empty
         curDepthTexture.write(float4(kRayMissThreshold + 100.0, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
         return;
@@ -3894,22 +3867,13 @@ kernel void adaptiveHierarchical8x8(
             float2 prevHitUV = prevHitNDC * 0.5 + 0.5;
             prevHitUV.y = 1.0 - prevHitUV.y;
             if (prevHitUV.x >= 0.0 && prevHitUV.x <= 1.0 && prevHitUV.y >= 0.0 && prevHitUV.y <= 1.0) {
-                float2 currentUV = pixelCenter / uniforms.resolution;
-                hitMotionPixels = length((prevHitUV - currentUV) * uniforms.resolution);
-                hitMotionValid = true;
+                uint2 prevHitPixel = uint2(prevHitUV * uniforms.resolution);
+                prevHitPixel = clamp(prevHitPixel, uint2(0), viewportSize - 1);
+                prevHitPixel += viewportOrigin;
 
-                // TRUE motion-vector reprojection coordinate for history sampling.
-                historyUV = prevHitUV;
-                historyPixel = uint2(prevHitUV * uniforms.resolution);
-                historyPixel = clamp(historyPixel, uint2(0), viewportSize - 1);
-                historyPixel += viewportOrigin;
-
-                float prevHitDepth = prevDepthTexture.read(historyPixel, uniforms.eyeIndex).x;
+                float prevHitDepth = prevDepthTexture.read(prevHitPixel, uniforms.eyeIndex).x;
                 if (prevHitDepth > 0.0 && prevHitDepth < kRayMissThreshold) {
                     reprojectedDepth = prevHitDepth;
-                    historySampleValid = true;
-                } else {
-                    historySampleValid = false;
                 }
             }
         }
@@ -4043,89 +4007,11 @@ kernel void adaptiveHierarchical8x8(
         }
     }
     
-    float4 currentColor = float4(float3(col), 1.0);
-    tg_currentColor[localIndex] = currentColor.rgb;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    float4 finalColor = currentColor;
-    if (adjustedDist >= kRayMissThreshold) {
-        reprojectionValid = false;
-        historySampleValid = false;
-    }
-
-    if (historySampleValid && reprojectedDepth > 0.0) {
-        // Reject history if reprojected depth and newly traced depth disagree.
-        // Relative threshold keeps rejection stable across near/far geometry.
-        float depthThreshold = max(0.02, adjustedDist * 0.06);
-        if (abs(adjustedDist - reprojectedDepth) > depthThreshold) {
-            historySampleValid = false;
-        }
-    }
-
-    if (historySampleValid && uniforms.temporalReprojectionEnabled && uniforms.accumulationFrame > 0 && uniforms.blendFactor < 0.999) {
-        float historyWeight = clamp(1.0 - uniforms.blendFactor, 0.0, 0.98);
-        float accumulationWarmup = saturate((float(uniforms.accumulationFrame) - 1.0) / 6.0);
-        historyWeight *= accumulationWarmup;
-        float4 previousColor = prevColorTexture.read(historyPixel, uniforms.eyeIndex);
-
-        // Neighborhood clamp: confine history to local 3x3 current-frame color box
-        // to reduce ghost trails and history leaking across edges.
-        int lx = int(localId.x);
-        int ly = int(localId.y);
-        float3 minColor = currentColor.rgb;
-        float3 maxColor = currentColor.rgb;
-        for (int oy = -1; oy <= 1; ++oy) {
-            int ny = clamp(ly + oy, 0, 7);
-            for (int ox = -1; ox <= 1; ++ox) {
-                int nx = clamp(lx + ox, 0, 7);
-                uint nIndex = uint(ny * 8 + nx);
-                float3 sampleColor = tg_currentColor[nIndex];
-                minColor = min(minColor, sampleColor);
-                maxColor = max(maxColor, sampleColor);
-            }
-        }
-        const float clampPad = 0.02;
-        float3 neighborhoodSpan = maxColor - minColor;
-        float neighborhoodContrast = max(max(neighborhoodSpan.x, neighborhoodSpan.y), neighborhoodSpan.z);
-        float adaptivePad = clampPad + neighborhoodContrast * 0.08;
-        previousColor.rgb = clamp(previousColor.rgb, minColor - adaptivePad, maxColor + adaptivePad);
-
-        // Confidence model:
-        // 1) depth agreement between reprojected and current hit
-        // 2) reprojection stability (UV drift after one-step refinement)
-        // 3) luminance similarity to reject changing/transient lighting
-        // 4) edge attenuation: reduce history on high-contrast neighborhoods
-        float depthThreshold = max(0.02, adjustedDist * 0.06);
-        float depthDelta = abs(adjustedDist - reprojectedDepth);
-        float depthConfidence = 1.0 - smoothstep(depthThreshold * 0.5, depthThreshold * 2.0, depthDelta);
-
-        float reprojectionConfidence = 1.0 - smoothstep(kTemporalReprojPxLow, kTemporalReprojPxHigh, reprojectionDriftPixels);
-
-        float motionConfidence = 1.0;
-        if (hitMotionValid) {
-            motionConfidence = 1.0 - smoothstep(kTemporalMotionPxLow, kTemporalMotionPxHigh, hitMotionPixels);
-        }
-
-        float currentLuma = dot(currentColor.rgb, float3(0.2126, 0.7152, 0.0722));
-        float previousLuma = dot(previousColor.rgb, float3(0.2126, 0.7152, 0.0722));
-        float lumaDelta = abs(currentLuma - previousLuma);
-        float lumaConfidence = 1.0 - smoothstep(kTemporalLumaLow, kTemporalLumaHigh, lumaDelta);
-
-        float edgeConfidence = 1.0 - smoothstep(0.10, 0.45, neighborhoodContrast);
-
-        float temporalConfidence = saturate(depthConfidence * reprojectionConfidence * motionConfidence * lumaConfidence * edgeConfidence);
-        float weightedHistory = min(historyWeight * temporalConfidence, kTemporalMaxHistory);
-
-        finalColor = mix(currentColor, previousColor, weightedHistory);
-    }
-
-    // History texture must NOT contain the debug tint, otherwise TAA washes it
-    // out frame-over-frame and contaminates real geometry. Write history first.
-    curColorTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
+    float4 finalColor = float4(float3(col), 1.0);
 
     // === COHERENT-PACKET LAYER-OF-ACCEPTANCE OVERLAY (Stage 0) ===
-    // Applied AFTER TAA blend so the tint is unambiguous and not attenuated by
-    // history. Engages whenever the experimental toggle is on (independent of
+    // Applied after shading so the tint is unambiguous. Engages whenever the
+    // experimental toggle is on (independent of
     // the hierarchical-debug toggle) so it's always visible while testing.
     //   1 = magenta : warm-start probe HIT (skipped fine march, fastest path)
     //   2 = green   : warm-start probe accepted as tight startT (Lipschitz-safe)

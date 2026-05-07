@@ -51,7 +51,7 @@ struct RenderSettingsSnapshot {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // GEOMETRY STABILITY STATE
-    // When geometry parameters settle, enables optimized "stable geometry" render path
+    // When geometry parameters settle, enables the stable-geometry heuristics
     // ═══════════════════════════════════════════════════════════════════════════
     let geometryState: GeometryState
     let isGeometryGestureActive: Bool

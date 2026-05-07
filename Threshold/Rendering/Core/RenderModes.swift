@@ -5,13 +5,13 @@ import Foundation
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tracks whether geometry parameters (minDistance, foldingLimit, sphereRadius,
 // fractalScale) are actively changing or have settled. When stable, the renderer
-// can switch to an optimized path with temporal accumulation.
+// can rely more heavily on temporal depth reuse and higher step multipliers.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 enum GeometryState: Int, CaseIterable {
     case dynamic   = 0  // Geometry parameters are actively changing
     case settling  = 1  // Parameters stopped changing, waiting for confirmation
-    case stable    = 2  // Parameters confirmed stable, optimized rendering enabled
+    case stable    = 2  // Parameters confirmed stable, temporal depth reuse can stay aggressive
 }
 
 // Lighting mode controls animated light movement and audio reactivity
