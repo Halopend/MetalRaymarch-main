@@ -36,6 +36,14 @@ class PresetManager {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+
+    static func sanitizedExportFileNameStem(_ name: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:\n\r")
+        let cleaned = name.components(separatedBy: invalid).joined()
+            .replacingOccurrences(of: " ", with: "_")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "._- "))
+        return cleaned.isEmpty ? "Untitled" : String(cleaned.prefix(64))
+    }
     
     /// URL for the presets directory in the app's documents
     private var presetsDirectory: URL {
@@ -273,7 +281,7 @@ class PresetManager {
     func exportPreset(_ preset: FractalPreset) -> URL? {
         let hasMusicMappings = preset.musicReactiveMappings != nil && !(preset.musicReactiveMappings?.isEmpty ?? true)
         let ext = hasMusicMappings ? "threshmp" : "threshscene"
-        let fileName = "\(preset.name.replacingOccurrences(of: " ", with: "_")).\(ext)"
+        let fileName = "\(Self.sanitizedExportFileNameStem(preset.name)).\(ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         
         do {

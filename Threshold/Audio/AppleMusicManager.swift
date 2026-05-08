@@ -85,6 +85,7 @@ final class AppleMusicManager {
     private var songLookup: [UInt64: MPMediaItem] = [:]
     private var playlistLookup: [UInt64: MPMediaPlaylist] = [:]
     private var albumLookup: [UInt64: MPMediaItemCollection] = [:]
+    private let logger = Logger(subsystem: "com.puppypower.Threshold", category: "AppleMusic")
 
     init() {
         authorizationStatus = MPMediaLibrary.authorizationStatus()
@@ -129,8 +130,8 @@ final class AppleMusicManager {
         libraryLoading = true
         libraryErrorMessage = nil
 
-        let songItems = MPMediaQuery.songs().items ?? []
-        songLookup = Dictionary(uniqueKeysWithValues: songItems.map { ($0.persistentID, $0) })
+        let songItems = sanitizedMediaItems(MPMediaQuery.songs().items ?? [], kind: "songs")
+        songLookup = Dictionary(songItems.map { ($0.persistentID, $0) }, uniquingKeysWith: { first, _ in first })
         librarySongs = songItems
             .map {
                 LibrarySong(
@@ -145,8 +146,8 @@ final class AppleMusicManager {
                 return $0.title < $1.title
             }
 
-        let playlists = (MPMediaQuery.playlists().collections as? [MPMediaPlaylist]) ?? []
-        playlistLookup = Dictionary(uniqueKeysWithValues: playlists.map { ($0.persistentID, $0) })
+        let playlists = sanitizedMediaItems((MPMediaQuery.playlists().collections as? [MPMediaPlaylist]) ?? [], kind: "playlists")
+        playlistLookup = Dictionary(playlists.map { ($0.persistentID, $0) }, uniquingKeysWith: { first, _ in first })
         libraryPlaylists = playlists
             .map {
                 LibraryPlaylist(
@@ -157,8 +158,8 @@ final class AppleMusicManager {
             }
             .sorted { $0.name < $1.name }
 
-        let albums = MPMediaQuery.albums().collections ?? []
-        albumLookup = Dictionary(uniqueKeysWithValues: albums.map { ($0.persistentID, $0) })
+        let albums = sanitizedMediaItems(MPMediaQuery.albums().collections ?? [], kind: "albums")
+        albumLookup = Dictionary(albums.map { ($0.persistentID, $0) }, uniquingKeysWith: { first, _ in first })
         libraryAlbums = albums
             .compactMap { collection in
                 guard let representative = collection.representativeItem else { return nil }
@@ -355,6 +356,38 @@ final class AppleMusicManager {
         let speed = target > value ? attack : decay
         let t = 1.0 - exp(-speed * dt)
         value += (target - value) * t
+    }
+
+    private func sanitizedMediaItems<Item>(_ items: [Item], kind: String, persistentID: (Item) -> UInt64 = { item in
+        guard let mediaEntity = item as? MPMediaEntity else { return 0 }
+        return mediaEntity.persistentID
+    }) -> [Item] {
+        var seenIDs = Set<UInt64>()
+        var invalidCount = 0
+        var duplicateCount = 0
+
+        let sanitizedItems = items.filter { item in
+            let id = persistentID(item)
+            guard id != 0 else {
+                invalidCount += 1
+                return false
+            }
+
+            guard seenIDs.insert(id).inserted else {
+                duplicateCount += 1
+                return false
+            }
+
+            return true
+        }
+
+        if invalidCount > 0 || duplicateCount > 0 {
+            logger.warning(
+                "Skipped \(invalidCount, privacy: .public) invalid and \(duplicateCount, privacy: .public) duplicate Apple Music \(kind, privacy: .public) during library refresh."
+            )
+        }
+
+        return sanitizedItems
     }
 
     private func clearLibrary(reason: String? = nil) {

@@ -35,7 +35,7 @@ struct FirstLaunchWindowView: View {
             .tabViewStyle(.automatic)
             #endif
         }
-        .frame(minWidth: 580, maxWidth: 660, minHeight: 500, maxHeight: 620)
+        .frame(minWidth: 680, maxWidth: 760, minHeight: 560, maxHeight: 700)
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -175,7 +175,7 @@ struct FirstLaunchWindowView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Share with the Community")
                     .font(.title2.weight(.bold))
-                Text("Optional, off by default, and no sign-up required.")
+                Text("Optional, off by default, no sign-up required, and a user name is optional.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -189,41 +189,34 @@ struct FirstLaunchWindowView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Contribute to Future Community Collections")
                             .font(.headline)
-                        Text("Share a community name and let us consider your favorite setups for future featured collections.")
+                        Text("Opt in to share your favorite setups with the Threshold community. A user name is optional.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("User Name")
+                    Text("User Name (Optional)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    TextField("Choose a user name", text: $communityDisplayName)
+                    TextField("Add a user name (optional)", text: $communityDisplayName)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled(true)
 
-                    Text("Choosing a user name does not create an account. It only gives us a name to credit if we feature one of your setups later.")
+                    Text("Choosing a user name does not create an account. Leave it blank if you prefer to share anonymously.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
 
                 Toggle("Share with the community", isOn: $shareAnalytics)
                     .tint(.blue)
-                    .disabled(communityDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !shareAnalytics)
-
-                if communityDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Choose a user name to enable community sharing.")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Label("What you're opting into:", systemImage: "checkmark.circle")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• Your chosen user name can be used for attribution\n• Aggregated usage stats still help us improve performance and features")
+                    Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• If you add a user name, it can be used for attribution\n• Aggregated usage stats still help us improve performance and features")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
 
@@ -250,7 +243,7 @@ struct FirstLaunchWindowView: View {
                 .buttonStyle(.plain)
 
                 if showAnalyticsDetail {
-                    Text("Threshold stores aggregated session metrics in Apple's CloudKit public database to help steer future releases. Your community name is stored locally on this device so you can opt into future attributed sharing without creating an account. You can change this anytime in Settings > General.")
+                    Text("Threshold stores aggregated session metrics in Apple's CloudKit public database to help steer future releases. Your community name is optional and stored locally on this device only if you choose to add one for future attribution. You can change this anytime in Settings > General.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(8)

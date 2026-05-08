@@ -1363,7 +1363,7 @@ final class AnimationManager {
     
     /// Export a scene to a shareable file URL
     func exportSceneToFile(_ scene: AnimationScene) -> URL? {
-        let sanitizedName = scene.name.replacingOccurrences(of: " ", with: "_")
+            let sanitizedName = PresetManager.sanitizedExportFileNameStem(scene.name)
         // Use .threshanimv for scenes with attached music, .threshanim otherwise
         let ext = scene.attachedSong != nil ? "threshanimv" : "threshanim"
         let fileName = "\(sanitizedName).\(ext)"
@@ -1562,7 +1562,9 @@ final class AnimationManager {
     
     private func formattedTimestamp() -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "HH-mm-ss"
         return formatter.string(from: Date())
     }
 }

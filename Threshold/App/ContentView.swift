@@ -514,7 +514,9 @@ struct ContentView: View {
 
     private func saveCurrentAsPreset(named providedName: String? = nil, includeGeneratedPreview: Bool = false) {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd HH-mm"
         let autoName = "Preset \(formatter.string(from: Date()))"
         let presetName = providedName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = (presetName?.isEmpty == false) ? presetName! : autoName
@@ -532,6 +534,27 @@ struct ContentView: View {
             fractalType: appModel.renderSettings.fractalType,
             gradientState: appModel.renderSettings.gradientState,
             lightingPreset: appModel.renderSettings.lightingPreset
+        )
+    }
+
+    private func applyPresetGestureOverridesIfNeeded(for preset: FractalPreset) {
+        let normalizedName = preset.name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard ["ring around the rosie", "a space ring odyssey"].contains(normalizedName),
+              preset.fractalType == .kleinian else { return }
+
+        let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: .kleinian)
+        guard let minsTriplet = triplets.first(where: { $0.groupName == "Mins" }),
+              let maxsTriplet = triplets.first(where: { $0.groupName == "Maxs" }) else { return }
+
+        appModel.renderSettings.setBinding(
+            .parameterTriplet(minsTriplet),
+            for: GestureSlot(hand: .left, finger: .middle)
+        )
+        appModel.renderSettings.setBinding(
+            .parameterTriplet(maxsTriplet),
+            for: GestureSlot(hand: .right, finger: .middle)
         )
     }
 
@@ -1342,6 +1365,7 @@ struct ContentView: View {
                                 into: appModel.renderSettings,
                                 resetEnvironment: true
                             )
+                            applyPresetGestureOverridesIfNeeded(for: preset)
                             appModel.gestureController?.syncWithSettings()
                             cache.loadFromSettings()
                         }
@@ -3092,18 +3116,18 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("User Name")
+                    Text("User Name (Optional)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    TextField("Choose a user name", text: Binding(
+                    TextField("Add a user name (optional)", text: Binding(
                         get: { UsageAnalytics.shared.communityDisplayName },
                         set: { UsageAnalytics.shared.communityDisplayName = $0 }
                     ))
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled(true)
 
-                    Text("This is only a display name for future community credits. It does not create an account or sign you up for anything.")
+                    Text("This is only a display name for future community credits. Leave it blank if you prefer to share anonymously.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -3112,13 +3136,6 @@ struct ContentView: View {
                     get: { UsageAnalytics.shared.analyticsEnabled },
                     set: { UsageAnalytics.shared.analyticsEnabled = $0 }
                 ))
-                .disabled(!UsageAnalytics.shared.canEnableCommunitySharing && !UsageAnalytics.shared.analyticsEnabled)
-
-                if !UsageAnalytics.shared.canEnableCommunitySharing {
-                    Text("Choose a user name to enable community sharing.")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
 
                 Text("By opting in, you are letting us review your settings so they may be added to the community later on your behalf and may appear in original or altered form.")
                     .font(.caption2)

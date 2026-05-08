@@ -205,17 +205,10 @@ final class UsageAnalytics {
 
             if normalized.isEmpty {
                 UserDefaults.standard.removeObject(forKey: communityDisplayNameKey)
-                if analyticsEnabled {
-                    analyticsEnabled = false
-                }
             } else {
                 UserDefaults.standard.set(normalized, forKey: communityDisplayNameKey)
             }
         }
-    }
-
-    var canEnableCommunitySharing: Bool {
-        !storedCommunityDisplayName.isEmpty
     }
     
     private init() {
@@ -224,10 +217,6 @@ final class UsageAnalytics {
         self.storedCommunityDisplayName = Self.normalizedCommunityDisplayName(
             UserDefaults.standard.string(forKey: communityDisplayNameKey) ?? ""
         )
-
-        if storedCommunityDisplayName.isEmpty {
-            self.analyticsEnabled = false
-        }
         
         // Try to upload any pending snapshots from previous sessions when opted in.
         if analyticsEnabled {
