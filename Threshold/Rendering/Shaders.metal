@@ -337,12 +337,14 @@ FORCE_INLINE float safetyBubbleCubeDistance(float3 p, float bubbleRadius) {
 }
 
 FORCE_INLINE float safetyBubbleTetrahedralDistance(float3 p, float bubbleRadius) {
-    constexpr float k = 0.5773502691896258f;
-    float d1 = dot(p, float3( k,  k,  k));
-    float d2 = dot(p, float3( k, -k, -k));
-    float d3 = dot(p, float3(-k,  k, -k));
-    float d4 = dot(p, float3(-k, -k,  k));
-    return max(max(d1, d2), max(d3, d4)) - bubbleRadius;
+    constexpr float invSqrt3 = 0.5773502691896258f;
+    // Keep axis extent aligned with bubbleRadius, matching sphere/cube behavior.
+    float faceOffset = bubbleRadius * invSqrt3;
+    float d1 = dot(p, float3( invSqrt3,  invSqrt3,  invSqrt3));
+    float d2 = dot(p, float3( invSqrt3, -invSqrt3, -invSqrt3));
+    float d3 = dot(p, float3(-invSqrt3,  invSqrt3, -invSqrt3));
+    float d4 = dot(p, float3(-invSqrt3, -invSqrt3,  invSqrt3));
+    return max(max(d1, d2), max(d3, d4)) - faceOffset;
 }
 
 FORCE_INLINE float safetyBubbleNegativeCubeDistance(float3 p, float bubbleRadius) {
@@ -359,24 +361,28 @@ FORCE_INLINE float safetyBubbleOctahedronDistance(float3 p, float bubbleRadius) 
 
 FORCE_INLINE float safetyBubbleIcosahedronDistance(float3 p, float bubbleRadius) {
     constexpr float phi = 1.618033988749895f;
-    constexpr float invLen = 0.5257311121191336f;
+    constexpr float invPhiLen = 0.5257311121191336f;
+    constexpr float invTriLen = 0.5773502691896258f;
+    constexpr float axisScale = 0.85065080835204f;
     float3 q = abs(p);
-    float d1 = dot(q, float3(phi, 1.0f, 0.0f) * invLen);
-    float d2 = dot(q, float3(1.0f, 0.0f, phi) * invLen);
-    float d3 = dot(q, float3(0.0f, phi, 1.0f) * invLen);
-    return max(d1, max(d2, d3)) - bubbleRadius;
+    // Icosahedron: 20 planes (8 from (1,1,1), 12 from golden-ratio families).
+    float d1 = dot(q, float3(1.0f, 1.0f, 1.0f) * invTriLen);
+    float d2 = dot(q, float3(0.0f, 1.0f, phi) * invPhiLen);
+    float d3 = dot(q, float3(1.0f, phi, 0.0f) * invPhiLen);
+    float d4 = dot(q, float3(phi, 0.0f, 1.0f) * invPhiLen);
+    return max(max(d1, d2), max(d3, d4)) - bubbleRadius * axisScale;
 }
 
 FORCE_INLINE float safetyBubbleDodecahedronDistance(float3 p, float bubbleRadius) {
     constexpr float phi = 1.618033988749895f;
     constexpr float invPhiLen = 0.5257311121191336f;
-    constexpr float invTriLen = 0.5773502691896258f;
+    constexpr float axisScale = 0.85065080835204f;
     float3 q = abs(p);
-    float d1 = dot(q, float3(1.0f, 1.0f, 1.0f) * invTriLen);
-    float d2 = dot(q, float3(0.0f, 1.0f, phi) * invPhiLen);
-    float d3 = dot(q, float3(1.0f, phi, 0.0f) * invPhiLen);
-    float d4 = dot(q, float3(phi, 0.0f, 1.0f) * invPhiLen);
-    return max(max(d1, d2), max(d3, d4)) - bubbleRadius;
+    // Dodecahedron: 12 planes from icosahedral normal families.
+    float d1 = dot(q, float3(phi, 1.0f, 0.0f) * invPhiLen);
+    float d2 = dot(q, float3(1.0f, 0.0f, phi) * invPhiLen);
+    float d3 = dot(q, float3(0.0f, phi, 1.0f) * invPhiLen);
+    return max(d1, max(d2, d3)) - bubbleRadius * axisScale;
 }
 
 // === SAFETY BUBBLE DISTANCE FUNCTION ===

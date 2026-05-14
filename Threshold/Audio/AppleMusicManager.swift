@@ -456,6 +456,19 @@ final class AppleMusicManager {
         let items = songIDs.compactMap { songLookup[$0] }
         guard !items.isEmpty else { return nil }
 
+        let productIDs = items.compactMap { item -> String? in
+            let storeID = item.playbackStoreID.trimmingCharacters(in: .whitespacesAndNewlines)
+            return storeID.isEmpty ? nil : storeID
+        }
+
+        guard productIDs.count == items.count else {
+            libraryErrorMessage = "Some Apple Music tracks can't be added to playlists because they don't have a store catalog ID."
+            logger.warning(
+                "Skipping Apple Music playlist creation because \(items.count - productIDs.count, privacy: .public) selected tracks lack playbackStoreID values."
+            )
+            return nil
+        }
+
         let metadata = MPMediaPlaylistCreationMetadata(name: name)
         metadata.descriptionText = "Created by Threshold"
 
@@ -471,13 +484,13 @@ final class AppleMusicManager {
                     return
                 }
 
-                // Add items one at a time via persistent IDs
+                // Add items one at a time via Apple Music catalog product IDs.
                 let group = DispatchGroup()
                 let failCount = OSAllocatedUnfairLock(initialState: 0)
-                for item in items {
+                for productID in productIDs {
                     group.enter()
                     playlist.addItem(
-                        withProductID: String(item.persistentID),
+                        withProductID: productID,
                         completionHandler: { error in
                             if error != nil { failCount.withLock { $0 += 1 } }
                             group.leave()

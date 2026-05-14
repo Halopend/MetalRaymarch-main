@@ -28,7 +28,7 @@ enum SafetyBubbleShapePreset: Int, CaseIterable, Identifiable, Sendable {
     static let maxStoredValue: Float = 6.0
 
     static var platonicOptions: [SafetyBubbleShapePreset] {
-        [.tetrahedral, .negativeCube, .octahedron, .icosahedron, .dodecahedron]
+        [.tetrahedral, .octahedron, .icosahedron, .dodecahedron]
     }
 
     var id: Self { self }

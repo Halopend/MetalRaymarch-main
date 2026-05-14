@@ -1303,7 +1303,14 @@ final class AnimationManager {
             if let data = UserDefaults.standard.data(forKey: "editedDefaultOverrides") {
                 do {
                     let overrides = try sceneDecoder.decode([AnimationScene].self, from: data)
-                    editedDefaultOverrides = Dictionary(uniqueKeysWithValues: overrides.map { ($0.id, $0) })
+                    let deduplicatedOverrides = Dictionary(
+                        overrides.map { ($0.id, $0) },
+                        uniquingKeysWith: { _, replacement in replacement }
+                    )
+                    if deduplicatedOverrides.count != overrides.count {
+                        print("⚠️ Deduplicated \(overrides.count - deduplicatedOverrides.count) edited default scene overrides with repeated IDs")
+                    }
+                    editedDefaultOverrides = deduplicatedOverrides
                 } catch {
                     print("❌ Failed to load default overrides: \(error)")
                 }
