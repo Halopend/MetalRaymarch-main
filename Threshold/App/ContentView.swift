@@ -610,6 +610,31 @@ struct ContentView: View {
         return VStack(spacing: 16) {
             Text("Threshold")
                 .font(.title2.bold())
+
+            // Feature icon row
+            HStack(spacing: 14) {
+                ForEach([
+                    ("cube.transparent", "Fractals"),
+                    ("hand.raised.fingers.spread", "Gestures"),
+                    ("waveform", "Reactive"),
+                    ("paintbrush.pointed.fill", "Color"),
+                ], id: \.0) { icon, label in
+                    VStack(spacing: 5) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.accentColor.opacity(0.14))
+                            Image(systemName: icon)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                        .frame(width: 44, height: 44)
+                        Text(label)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             ToggleImmersiveSpaceButton()
             if isTransitioning {
                 VStack(spacing: 8) {
@@ -622,7 +647,7 @@ struct ContentView: View {
             }
         }
         .padding(30)
-        .frame(minWidth: 300, idealWidth: 300, maxWidth: isTransitioning ? 360 : 300, minHeight: 180)
+        .frame(minWidth: 300, idealWidth: 360, maxWidth: isTransitioning ? 400 : 360, minHeight: 220)
     }
     
     // MARK: - Immersive Layout (Sidebar + Content)
