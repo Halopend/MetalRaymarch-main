@@ -420,6 +420,20 @@ extension PresetManager {
         preset.position = SIMD3<Float>(0.10157842, 1.3497616, -3.3686383)
         return preset
     }
+
+    /// Clean Mandelbox at the default/reset position, used as the first-launch
+    /// default when no `__lastState__` has been saved yet.
+    static func mandelboxDefaultPreset() -> FractalPreset {
+        var preset = FractalPreset(name: "Mandelbox")
+        preset.fractalType = .mandelbox
+        preset.fractalScale = 2.8
+        preset.foldingLimit = 1.0
+        preset.sphereRadius = 0.5
+        preset.minDistance = 0.18
+        preset.position = SIMD3<Float>(0, 0, -1.15)
+        preset.scale = 1.0
+        return preset
+    }
     
     /// Merge built-in presets with local presets.
     func addBuiltInPresetsIfNeeded() {
@@ -455,8 +469,8 @@ extension PresetManager {
     @discardableResult
     func restoreLastState(to settings: RenderSettings) -> FractalPreset? {
         guard FileManager.default.fileExists(atPath: lastStateFileURL.path) else {
-            print("ℹ️ No last state found - loading Bright Preset default")
-            let defaultPreset = PresetManager.brightPreset()
+            print("ℹ️ No last state found - loading Mandelbox default")
+            let defaultPreset = PresetManager.mandelboxDefaultPreset()
             defaultPreset.apply(to: settings)
             return defaultPreset
         }

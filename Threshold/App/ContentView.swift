@@ -455,6 +455,13 @@ struct ContentView: View {
         .onChange(of: coloringSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: appModel.immersiveSpaceState) { _, newState in
+            // When the immersive space is no longer open, snap back to Explore
+            // so the user never gets stuck on a tab that requires active rendering.
+            if newState != .open, topDockTab != .explore {
+                withAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
+            }
+        }
         .sheet(isPresented: $showSaveDestinationSheet) {
             SaveDestinationSheet(
                 onSave: { choice, customName in
@@ -647,8 +654,12 @@ struct ContentView: View {
     // MARK: - Top Dock
 
     private var topDockBar: some View {
-        HStack(spacing: 10) {
-            ForEach(TopDockTab.allCases, id: \.self) { tab in
+        // Only show Shape, Visualizations, and Music once the immersive space is
+        // fully open — they require an active render session to be meaningful.
+        let isSpaceOpen = appModel.immersiveSpaceState == .open
+        let visibleTabs = TopDockTab.allCases.filter { $0 == .explore || isSpaceOpen }
+        return HStack(spacing: 10) {
+            ForEach(visibleTabs, id: \.self) { tab in
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         activateTopDock(tab)
@@ -703,7 +714,8 @@ struct ContentView: View {
             VStack(spacing: 8) {
                 switch topDockTab {
                 case .explore:
-                ForEach(ExploreRailSection.allCases, id: \.self) { section in
+                let exploreSections = ExploreRailSection.allCases.filter { $0 != .customScenes || allowCustomScenes }
+                ForEach(exploreSections, id: \.self) { section in
                     railButton(
                         title: section.rawValue,
                         systemImage: section.icon,
