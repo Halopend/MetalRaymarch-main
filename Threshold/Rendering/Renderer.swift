@@ -478,6 +478,11 @@ actor Renderer {
             // === PRESET PIPELINE PRECOMPILATION ===
             // Build specialized pipelines for saved presets to avoid hitches when loading
             await self.precompilePresetPipelines()
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                self.appModel.rendererStartupWarmupComplete = true
+            }
         }
     }
 
@@ -487,6 +492,7 @@ actor Renderer {
     
     @MainActor
     static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel) {
+        appModel.rendererStartupWarmupComplete = false
         Task(executorPreference: RendererTaskExecutor.shared) {
             guard let renderer = Renderer(layerRenderer, appModel: appModel) else {
                 await MainActor.run {
@@ -538,11 +544,11 @@ actor Renderer {
             // pipeline and rendering fog/sky only.
             let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
             if let pending = pendingFormula {
-                print("🔬 [CSDiag] Handler ready — running deferred activation for '\(pending.name)' hash=\(pending.shortHash)")
+                customSceneDiagnostic("🔬 [CSDiag] Handler ready — running deferred activation for '\(pending.name)' hash=\(pending.shortHash)")
                 do {
                     try await renderer.activateEmbeddedFormula(pending)
                 } catch {
-                    print("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
+                    customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
                 }
             }
             
@@ -641,8 +647,9 @@ actor Renderer {
         var frameBreakdown = FramePhaseBreakdown()
 
         guard let frame = layerRenderer.queryNextFrame() else {
-            // Avoid busy-spinning if the compositor hasn't produced a frame yet.
-            Thread.sleep(forTimeInterval: 0.001)
+            // The async render loop yields before each iteration; return here
+            // instead of blocking the Renderer actor when the compositor has no
+            // frame ready yet.
             return
         }
 

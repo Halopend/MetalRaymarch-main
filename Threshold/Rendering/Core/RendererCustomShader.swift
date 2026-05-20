@@ -58,11 +58,11 @@ extension Renderer {
     /// Throws if Metal compilation fails. The renderer continues to function
     /// (built-in fractal types unaffected).
     func activateEmbeddedFormula(_ formula: EmbeddedFormula?) async throws {
-        print("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") newHash=\(formula?.shortHash ?? "nil") currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
+        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") newHash=\(formula?.shortHash ?? "nil") currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
         guard let formula else {
             // Deactivate.
             if customShaderLibrary != nil {
-                print("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — evicting")
+                customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — evicting")
                 evictCustomShaderPipelines()
                 customShaderLibrary = nil
                 customShaderHash = nil
@@ -72,12 +72,12 @@ extension Renderer {
 
         // Already active and unchanged — no work.
         if customShaderHash == formula.shortHash, customShaderLibrary != nil {
-            print("🔬 [CSDiag] activateEmbeddedFormula NO-OP (hash unchanged + library present)")
+            customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula NO-OP (hash unchanged + library present)")
             return
         }
 
         // Compile (cached internally by sourceHash).
-        print("🔬 [CSDiag] activateEmbeddedFormula compiling library…")
+        customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library…")
         let compiler = ensureCompiler()
         let library = try await compiler.library(for: formula)
 
@@ -85,7 +85,7 @@ extension Renderer {
         customShaderLibrary = library
         customShaderHash = formula.shortHash
 
-        print("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED '\(formula.name)' hash=\(formula.shortHash) — library now present")
+        customSceneDiagnostic("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED '\(formula.name)' hash=\(formula.shortHash) — library now present")
         if RENDERER_DEBUG {
             print("🧪 [CustomShader] Activated '\(formula.name)' (hash=\(formula.shortHash))")
         }
@@ -121,7 +121,7 @@ extension Renderer {
         if RENDERER_DEBUG && (renderEvicted + computeEvicted) > 0 {
             print("🧹 [CustomShader] Evicted \(renderEvicted) render + \(computeEvicted) compute pipelines")
         }
-        print("🔬 [CSDiag] evictCustomShaderPipelines render=\(renderEvicted) compute=\(computeEvicted) (fast-paths reset)")
+        customSceneDiagnostic("🔬 [CSDiag] evictCustomShaderPipelines render=\(renderEvicted) compute=\(computeEvicted) (fast-paths reset)")
     }
 
     // MARK: - Helpers

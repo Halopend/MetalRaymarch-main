@@ -456,9 +456,14 @@ struct ContentView: View {
         .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: appModel.immersiveSpaceState) { _, newState in
-            // When the immersive space is no longer open, snap back to Explore
-            // so the user never gets stuck on a tab that requires active rendering.
-            if newState != .open, topDockTab != .explore {
+            // When the renderer is not ready, snap back to Explore so the user
+            // never gets stuck on a tab that requires active rendering.
+            if (newState != .open || !appModel.rendererStartupWarmupComplete), topDockTab != .explore {
+                withAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
+            }
+        }
+        .onChange(of: appModel.rendererStartupWarmupComplete) { _, isReady in
+            if !isReady, topDockTab != .explore {
                 withAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
@@ -680,9 +685,9 @@ struct ContentView: View {
 
     private var topDockBar: some View {
         // Only show Shape, Visualizations, and Music once the immersive space is
-        // fully open — they require an active render session to be meaningful.
-        let isSpaceOpen = appModel.immersiveSpaceState == .open
-        let visibleTabs = TopDockTab.allCases.filter { $0 == .explore || isSpaceOpen }
+        // fully open and startup pipeline warmup has finished — they require an
+        // active, ready render session to be meaningful.
+        let visibleTabs = TopDockTab.allCases.filter { $0 == .explore || isRendererNavigationReady }
         return HStack(spacing: 10) {
             ForEach(visibleTabs, id: \.self) { tab in
                 Button {
@@ -948,7 +953,16 @@ struct ContentView: View {
         syncNavigationChromeFromLegacySelection()
     }
 
+    private var isRendererNavigationReady: Bool {
+        appModel.immersiveSpaceState == .open && appModel.rendererStartupWarmupComplete
+    }
+
     private func activateTopDock(_ tab: TopDockTab) {
+        guard tab == .explore || isRendererNavigationReady else {
+            activateExploreSection(.jumpingOff)
+            return
+        }
+
         switch tab {
         case .explore:
             activateExploreSection(exploreRailSection)
@@ -1389,17 +1403,22 @@ struct ContentView: View {
                     },
                     onLoadStaticScene: { preset in
                         Task { @MainActor in
-                            print("🔬 [CSDiag] ContentView.onLoadStaticScene name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
+                            customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
                             if let formula = preset.embeddedFormula {
                                 let installed = await appModel.installEmbeddedFormulaIfNeededAndWait(formula)
-                                print("🔬 [CSDiag] ContentView.onLoadStaticScene installEmbeddedFormula returned \(installed)")
+                                customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene installEmbeddedFormula returned \(installed)")
                                 guard installed else { return }
                             } else {
                                 appModel.uninstallEmbeddedFormula()
                             }
 
-                            Task { await appModel.preparePipelineHandler?(preset) }
-                            print("🔬 [CSDiag] ContentView.onLoadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
+                            if preset.embeddedFormula != nil {
+                                await appModel.preparePipelineHandler?(preset)
+                                customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene preparePipelineHandler completed; loading preset NOW")
+                            } else {
+                                Task { await appModel.preparePipelineHandler?(preset) }
+                                customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
+                            }
                             appModel.presetManager.loadPreset(
                                 preset,
                                 into: appModel.renderSettings,

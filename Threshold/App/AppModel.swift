@@ -62,6 +62,7 @@ class AppModel {
     }
     
     var immersiveSpaceState = ImmersiveSpaceState.closed
+    var rendererStartupWarmupComplete = false
     var runtimeViewMode: RuntimeViewMode = .raymarch {
         didSet {
             runtimeViewModeForRenderer = runtimeViewMode
@@ -433,7 +434,7 @@ class AppModel {
     }
 
     func previewExternalImport(_ request: ExternalFileImportRequest) {
-        print("🔬 [CSDiag] previewExternalImport id=\(request.id) payload=\(request.payload)")
+        customSceneDiagnostic("🔬 [CSDiag] previewExternalImport id=\(request.id) payload=\(request.payload)")
         if activeExternalPreviewID != request.id {
             clearExternalPreview(restorePreviewedState: true)
             activeExternalPreviewID = request.id
@@ -441,7 +442,7 @@ class AppModel {
 
         switch request.payload {
         case .preset(let preset):
-            print("🔬 [CSDiag] previewExternalImport .preset name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
+            customSceneDiagnostic("🔬 [CSDiag] previewExternalImport .preset name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
             if externalPreviewRestorePreset == nil {
                 externalPreviewRestorePreset = FractalPreset.fromSettings(
                     renderSettings,
@@ -454,7 +455,7 @@ class AppModel {
                 externalPreviewCapturedEmbeddedFormula = true
             }
             guard let formula = preset.embeddedFormula else {
-                print("🔬 [CSDiag] previewExternalImport BUILT-IN preset path (no embeddedFormula) — dispatching prewarm Task + applying preset synchronously")
+                customSceneDiagnostic("🔬 [CSDiag] previewExternalImport BUILT-IN preset path (no embeddedFormula) — dispatching prewarm Task + applying preset synchronously")
                 installEmbeddedFormulaIfNeeded(nil)
                 Task { await preparePipelineHandler?(preset) }
                 preset.apply(to: renderSettings, resetEnvironment: true)
@@ -462,13 +463,13 @@ class AppModel {
                 NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
                 return
             }
-            print("🔬 [CSDiag] previewExternalImport CUSTOM preset path — will activate formula then preparePipeline then apply")
+            customSceneDiagnostic("🔬 [CSDiag] previewExternalImport CUSTOM preset path — will activate formula then preparePipeline then apply")
             Task { @MainActor in
                 let activated = await activateEmbeddedFormulaForSceneLoad(formula)
-                print("🔬 [CSDiag] previewExternalImport activateEmbeddedFormulaForSceneLoad returned \(activated)")
+                customSceneDiagnostic("🔬 [CSDiag] previewExternalImport activateEmbeddedFormulaForSceneLoad returned \(activated)")
                 guard activated, activeExternalPreviewID == request.id else { return }
-                Task { await preparePipelineHandler?(preset) }
-                print("🔬 [CSDiag] previewExternalImport preparePipelineHandler dispatched (fire-and-forget); applying preset NOW")
+                await preparePipelineHandler?(preset)
+                customSceneDiagnostic("🔬 [CSDiag] previewExternalImport preparePipelineHandler completed; applying preset NOW")
                 preset.apply(to: renderSettings, resetEnvironment: true)
                 gestureController?.syncWithSettings()
                 NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
@@ -497,10 +498,10 @@ class AppModel {
     }
 
     func importExternalFile(_ request: ExternalFileImportRequest) {
-        print("🔬 [CSDiag] importExternalFile id=\(request.id)")
+        customSceneDiagnostic("🔬 [CSDiag] importExternalFile id=\(request.id)")
         switch request.payload {
         case .preset(let preset):
-            print("🔬 [CSDiag] importExternalFile .preset name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
+            customSceneDiagnostic("🔬 [CSDiag] importExternalFile .preset name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
             guard let formula = preset.embeddedFormula else {
                 uninstallEmbeddedFormula()
                 let importedPreset = presetManager.importPreset(preset)
@@ -516,11 +517,11 @@ class AppModel {
             }
             Task { @MainActor in
                 let activated = await activateEmbeddedFormulaForSceneLoad(formula)
-                print("🔬 [CSDiag] importExternalFile activateEmbeddedFormulaForSceneLoad returned \(activated)")
+                customSceneDiagnostic("🔬 [CSDiag] importExternalFile activateEmbeddedFormulaForSceneLoad returned \(activated)")
                 guard activated else { return }
                 let importedPreset = presetManager.importPreset(preset)
-                Task { await preparePipelineHandler?(importedPreset) }
-                print("🔬 [CSDiag] importExternalFile preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
+                await preparePipelineHandler?(importedPreset)
+                customSceneDiagnostic("🔬 [CSDiag] importExternalFile preparePipelineHandler completed; loading preset NOW")
                 presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
                 gestureController?.syncWithSettings()
                 saveLastState()

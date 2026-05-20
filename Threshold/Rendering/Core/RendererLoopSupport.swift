@@ -22,7 +22,7 @@ extension Renderer {
                 return
             } else if layerRenderer.state == .paused {
                 updateImmersiveSpaceStateIfNeeded(.inTransition)
-                layerRenderer.waitUntilRunning()
+                try? await Task.sleep(nanoseconds: 50_000_000)
                 continue
             } else {
                 updateImmersiveSpaceStateIfNeeded(.open)

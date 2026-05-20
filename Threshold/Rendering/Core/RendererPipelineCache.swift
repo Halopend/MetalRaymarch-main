@@ -192,11 +192,11 @@ extension Renderer {
         let library = preset.fractalType == .custom ? renderingLibrary(for: preset.fractalType) : nil
 
         if preset.fractalType == .custom {
-            print("🔬 [CSDiag] getPipeline(forPreset) FT=custom name='\(preset.name)' libraryPresent=\(library != nil) hash=\(customShaderHash ?? "nil") key=\(cacheKey) cacheHit=\(pipelineCache[cacheKey] != nil)")
+            customSceneDiagnostic("🔬 [CSDiag] getPipeline(forPreset) FT=custom name='\(preset.name)' libraryPresent=\(library != nil) hash=\(customShaderHash ?? "nil") key=\(cacheKey) cacheHit=\(pipelineCache[cacheKey] != nil)")
         }
 
         if preset.fractalType == .custom, library == nil {
-            print("🔬 [CSDiag] ⚠️ getPipeline(forPreset) returning DEFAULT pipelineState — custom library missing — key=\(cacheKey)")
+            customSceneDiagnostic("🔬 [CSDiag] ⚠️ getPipeline(forPreset) returning DEFAULT pipelineState — custom library missing — key=\(cacheKey)")
             return useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
         }
 
@@ -419,7 +419,7 @@ extension Renderer {
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
             recordPipelineTelemetry(renderHit: true, renderSource: "fast-path")
             if fractalType == .custom, !lastSelectedIsSpecialized {
-                print("🔬 [CSDiag] ⚠️ selectPipeline FAST-PATH on .custom returning NON-SPECIALIZED pipeline — hash=\(activeCustomHash ?? "nil")")
+                customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FAST-PATH on .custom returning NON-SPECIALIZED pipeline — hash=\(activeCustomHash ?? "nil")")
             }
             appModel.isUsingSpecializedPipeline = lastSelectedIsSpecialized
             return cached
@@ -456,7 +456,7 @@ extension Renderer {
                 lastLoggedPipelineKey = cacheKey
             }
             if fractalType == .custom, lastLoggedPipelineKey != cacheKey + "_csdiag" {
-                print("🔬 [CSDiag] ✅ selectPipeline FT=custom CACHE HIT — key=\(cacheKey)")
+                customSceneDiagnostic("🔬 [CSDiag] ✅ selectPipeline FT=custom CACHE HIT — key=\(cacheKey)")
                 lastLoggedPipelineKey = cacheKey + "_csdiag"
             }
             result = pipeline
@@ -485,11 +485,11 @@ extension Renderer {
             )
 
             if fractalType == .custom {
-                print("🔬 [CSDiag] selectPipeline FT=custom CACHE MISS — hash=\(activeCustomHash ?? "nil") libraryPresent=\(renderingLibrary(for: fractalType) != nil) key=\(cacheKey)")
+                customSceneDiagnostic("🔬 [CSDiag] selectPipeline FT=custom CACHE MISS — hash=\(activeCustomHash ?? "nil") libraryPresent=\(renderingLibrary(for: fractalType) != nil) key=\(cacheKey)")
                 guard let library = renderingLibrary(for: fractalType) else {
                     recordPipelineTelemetry(renderSource: "custom-missing-library")
                     print("⚠️ [CustomScene] Missing active custom shader library for render pipeline build")
-                    print("🔬 [CSDiag] ⚠️ selectPipeline FT=custom → returning DEFAULT pipelineState (library == nil) — this WILL render as fog/sky only because FractalDE_Dispatch lacks FractalTypeCustom arm in default library")
+                    customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom → returning DEFAULT pipelineState (library == nil) — this WILL render as fog/sky only because FractalDE_Dispatch lacks FractalTypeCustom arm in default library")
                     isSpecialized = false
                     result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
                     return cacheSelectedRenderPipeline(
@@ -519,7 +519,7 @@ extension Renderer {
                     lastLoggedPipelineKey = cacheKey
                     result = pipeline
                     recordPipelineTelemetry(renderSource: "custom-exact-build")
-                    print("🔬 [CSDiag] ✅ selectPipeline FT=custom built specialized pipeline — key=\(cacheKey)")
+                    customSceneDiagnostic("🔬 [CSDiag] ✅ selectPipeline FT=custom built specialized pipeline — key=\(cacheKey)")
                     return cacheSelectedRenderPipeline(
                         result,
                         iterations: iterations,
@@ -534,7 +534,7 @@ extension Renderer {
                     )
                 } catch {
                     print("❌ [CustomScene] Exact render pipeline build failed: \(error)")
-                    print("🔬 [CSDiag] ⚠️ selectPipeline FT=custom build FAILED → falling through to default-library fallback chain (will render fog/sky only) — error=\(error)")
+                    customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom build FAILED → falling through to default-library fallback chain (will render fog/sky only) — error=\(error)")
                 }
             } else {
                 enqueueBackgroundPipelineBuild(
@@ -553,7 +553,7 @@ extension Renderer {
                     lastLoggedPipelineKey = fallbackKey
                 }
                 if fractalType == .custom {
-                    print("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via exact-neon-off fallback — key=\(fallbackKey) (DEFAULT-library pipeline, no FractalTypeCustom dispatch)")
+                    customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via exact-neon-off fallback — key=\(fallbackKey) (DEFAULT-library pipeline, no FractalTypeCustom dispatch)")
                 }
                 result = pipeline
             }
@@ -567,7 +567,7 @@ extension Renderer {
                         lastLoggedPipelineKey = sharedExactKey
                     }
                     if fractalType == .custom {
-                        print("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via shared-exact fallback — key=\(sharedExactKey) (DEFAULT-library)")
+                        customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via shared-exact fallback — key=\(sharedExactKey) (DEFAULT-library)")
                     }
                     result = pipeline
                 }
@@ -581,7 +581,7 @@ extension Renderer {
                             lastLoggedPipelineKey = sharedFallbackKey
                         }
                         if fractalType == .custom {
-                            print("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via shared-neon-off fallback — key=\(sharedFallbackKey) (DEFAULT-library)")
+                            customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via shared-neon-off fallback — key=\(sharedFallbackKey) (DEFAULT-library)")
                         }
                         result = pipeline
                     }
@@ -593,7 +593,7 @@ extension Renderer {
                             lastLoggedPipelineKey = "fallback"
                         }
                         if fractalType == .custom {
-                            print("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via generic-fallback — DEFAULT pipelineState (fog/sky only)")
+                            customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom served via generic-fallback — DEFAULT pipelineState (fog/sky only)")
                         }
                         isSpecialized = false
                         result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
@@ -860,7 +860,7 @@ extension Renderer {
         //    exists only in the runtime-compiled library. For custom misses,
         //    decline adaptive compute for this frame so the fragment path can run.
         if fractalType == .custom {
-            print("🔬 [CSDiag] selectComputePipeline FT=custom miss — libraryPresent=\(renderingLibrary(for: fractalType) != nil) hash=\(activeCustomHash ?? "nil") key=\(exactKey)")
+            customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom miss — libraryPresent=\(renderingLibrary(for: fractalType) != nil) hash=\(activeCustomHash ?? "nil") key=\(exactKey)")
             if renderingLibrary(for: fractalType) != nil {
                 enqueueBackgroundComputePipelineBuild(
                     cacheKey: exactKey,
@@ -871,10 +871,10 @@ extension Renderer {
                     mandelbulbPower: mbPowerInt
                 )
                 recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-background-build")
-                print("🔬 [CSDiag] selectComputePipeline FT=custom → enqueued background build, returning NIL (compute prepass declined this frame)")
+                customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom → enqueued background build, returning NIL (compute prepass declined this frame)")
             } else {
                 recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-missing-library")
-                print("🔬 [CSDiag] ⚠️ selectComputePipeline FT=custom → library MISSING, compute prepass disabled")
+                customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectComputePipeline FT=custom → library MISSING, compute prepass disabled")
             }
             return cacheSelectedComputePipeline(
                 nil,
