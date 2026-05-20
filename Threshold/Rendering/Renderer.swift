@@ -530,6 +530,21 @@ actor Renderer {
                     try await renderer.activateEmbeddedFormula(formula)
                 }
             }
+
+            // If an embedded formula was already registered (e.g. via
+            // __lastState__ restore that ran before the handler was
+            // installed), activate it now so the renderer compiles the
+            // custom MTLLibrary instead of falling back to the default
+            // pipeline and rendering fog/sky only.
+            let pendingFormula = await MainActor.run { appModel.activeEmbeddedFormula }
+            if let pending = pendingFormula {
+                print("🔬 [CSDiag] Handler ready — running deferred activation for '\(pending.name)' hash=\(pending.shortHash)")
+                do {
+                    try await renderer.activateEmbeddedFormula(pending)
+                } catch {
+                    print("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
+                }
+            }
             
             await renderer.startARSession()
             await renderer.renderLoop()

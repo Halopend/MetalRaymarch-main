@@ -14,7 +14,7 @@ enum GestureDefaults {
     // MARK: - Sensitivity & smoothing
     static let gestureSensitivity: Float = 5.0
     static let menuAndMovementOnly = false
-    static let useRelativeGestures = false
+    static let useRelativeGestures = true
     static let extendedGestureRange = false
     static let translationSensitivity: Float = 1.0
 

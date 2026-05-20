@@ -1352,14 +1352,17 @@ struct ContentView: View {
                     },
                     onLoadStaticScene: { preset in
                         Task { @MainActor in
+                            print("🔬 [CSDiag] ContentView.onLoadStaticScene name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
                             if let formula = preset.embeddedFormula {
                                 let installed = await appModel.installEmbeddedFormulaIfNeededAndWait(formula)
+                                print("🔬 [CSDiag] ContentView.onLoadStaticScene installEmbeddedFormula returned \(installed)")
                                 guard installed else { return }
                             } else {
                                 appModel.uninstallEmbeddedFormula()
                             }
 
                             Task { await appModel.preparePipelineHandler?(preset) }
+                            print("🔬 [CSDiag] ContentView.onLoadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
                             appModel.presetManager.loadPreset(
                                 preset,
                                 into: appModel.renderSettings,
@@ -2863,16 +2866,25 @@ struct ContentView: View {
                             Label("Core Behavior", systemImage: "slider.horizontal.3")
                                 .font(.subheadline.weight(.semibold))
 
-                        Toggle("Spring Blob Navigation", isOn: $cache.gesture.useSpringBlob)
-                            .onChange(of: cache.gesture.useSpringBlob) { _, v in cache.push(\.useSpringBlob, value: v) }
-                        Toggle("Menu + Movement Only", isOn: $cache.gesture.menuAndMovementOnly)
-                            .onChange(of: cache.gesture.menuAndMovementOnly) { _, v in cache.push(\.menuAndMovementOnly, value: v) }
-                        Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
-                            .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
-                        Toggle("Extended Range", isOn: $cache.gesture.extendedGestureRange)
-                            .onChange(of: cache.gesture.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
-                        Toggle("Rotation Auto-Snap", isOn: $cache.gesture.rotationAutoSnap)
-                            .onChange(of: cache.gesture.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
+                        // Compact 2-column grid of boolean behavior toggles
+                        LazyVGrid(
+                            columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                            alignment: .leading,
+                            spacing: 6
+                        ) {
+                            Toggle("Relative Gestures", isOn: $cache.gesture.useRelativeGestures)
+                                .onChange(of: cache.gesture.useRelativeGestures) { _, v in cache.push(\.useRelativeGestures, value: v) }
+                            Toggle("Spring Blob", isOn: $cache.gesture.useSpringBlob)
+                                .onChange(of: cache.gesture.useSpringBlob) { _, v in cache.push(\.useSpringBlob, value: v) }
+                            Toggle("Menu + Movement Only", isOn: $cache.gesture.menuAndMovementOnly)
+                                .onChange(of: cache.gesture.menuAndMovementOnly) { _, v in cache.push(\.menuAndMovementOnly, value: v) }
+                            Toggle("Extended Range", isOn: $cache.gesture.extendedGestureRange)
+                                .onChange(of: cache.gesture.extendedGestureRange) { _, v in cache.push(\.extendedGestureRange, value: v) }
+                            Toggle("Rotation Auto-Snap", isOn: $cache.gesture.rotationAutoSnap)
+                                .onChange(of: cache.gesture.rotationAutoSnap) { _, v in cache.push(\.rotationAutoSnap, value: v) }
+                        }
+                        .toggleStyle(.switch)
+                        .font(.subheadline)
                         if cache.gesture.menuAndMovementOnly {
                             Text("Skips shape and parameter gesture scans, keeping only menu trigger and movement gestures active.")
                                 .font(.caption2)
@@ -3104,6 +3116,9 @@ struct ContentView: View {
     
     private var settingsGeneralContent: some View {
         VStack(spacing: 12) {
+            // Experimental features section
+            experimentalFeaturesSection
+
             // Community sharing section
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -3114,23 +3129,6 @@ struct ContentView: View {
                 Text("Optional. Share your setups with the Threshold community without creating an account.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("User Name (Optional)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    TextField("Add a user name (optional)", text: Binding(
-                        get: { UsageAnalytics.shared.communityDisplayName },
-                        set: { UsageAnalytics.shared.communityDisplayName = $0 }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled(true)
-
-                    Text("This is only a display name for future community credits. Leave it blank if you prefer to share anonymously.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
 
                 Toggle("Share with the community", isOn: Binding(
                     get: { UsageAnalytics.shared.analyticsEnabled },
@@ -3144,6 +3142,27 @@ struct ContentView: View {
                 Text("You can use Threshold normally without sharing anything, and you can change this later in Settings.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+
+                if UsageAnalytics.shared.analyticsEnabled {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Display Name (Optional)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextField("Leave blank to share anonymously", text: Binding(
+                            get: { UsageAnalytics.shared.communityDisplayName },
+                            set: { UsageAnalytics.shared.communityDisplayName = $0 }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled(true)
+
+                        Text("Used only for community credits. Leave blank to share anonymously.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))
@@ -3151,6 +3170,42 @@ struct ContentView: View {
             // iCloud Drive section
             iCloudDriveSection
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MARK: Experimental Features
+    // ─────────────────────────────────────────────────────────────────
+
+    @AppStorage("allowCustomScenes") private var allowCustomScenes: Bool = false
+
+    @ViewBuilder
+    private var experimentalFeaturesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Label("Experimental", systemImage: "flask.fill").font(.headline)
+                Text("BETA")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.25)))
+                    .foregroundStyle(.orange)
+                Spacer()
+            }
+
+            Toggle(isOn: $allowCustomScenes) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Allow custom scenes")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Enables loading .threshfx files and custom shader formulas. Default parameters may not be ideal and some scenes may not render correctly yet.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.orange)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
     }
 
     // ─────────────────────────────────────────────────────────────────

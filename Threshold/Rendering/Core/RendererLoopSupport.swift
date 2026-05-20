@@ -1,11 +1,19 @@
 import Foundation
 
 extension Renderer {
-    func renderLoop() {
+    func renderLoop() async {
         while true {
-            
+            // Yield to the actor's executor once per frame so queued actor jobs
+            // (e.g. activateEmbeddedFormula, prewarm handlers) can run between
+            // frames. Without this, the infinite render loop monopolises the
+            // Renderer actor's serial executor and any external `await
+            // renderer.foo()` call deadlocks forever.
+            await Task.yield()
+
             if !appModel.isAppActive {
-                Thread.sleep(forTimeInterval: 0.05)
+                // Cooperative sleep so the actor executor can still service
+                // queued jobs while the app is inactive.
+                try? await Task.sleep(nanoseconds: 50_000_000)
                 continue
             }
             if layerRenderer.state == .invalidated {
