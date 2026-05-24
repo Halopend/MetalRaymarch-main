@@ -345,6 +345,30 @@ struct ContentView: View {
         cache.audioReactive.musicReactiveMappings.contains(where: \.hasFlashingRisk)
     }
 
+        private var shouldUseWorkspaceLayout: Bool {
+    #if os(macOS)
+        true
+    #else
+        appModel.immersiveSpaceState == .open
+    #endif
+        }
+
+        private var isMenuContentVisible: Bool {
+    #if os(macOS)
+        true
+    #else
+        appModel.isMenuWindowVisible
+    #endif
+        }
+
+        private var shouldRenderInlineTopDock: Bool {
+    #if os(macOS)
+        true
+    #else
+        false
+    #endif
+        }
+
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     private var qualityGoalPreference: QualityGoalPreference {
@@ -386,11 +410,10 @@ struct ContentView: View {
     var body: some View {
         @Bindable var appModel = appModel
 
-        let isOpen = appModel.immersiveSpaceState == .open
-        let isShortcutOrnamentVisible = appModel.immersiveSpaceState != .closed && appModel.isMenuWindowVisible
+        let isShortcutOrnamentVisible = !shouldRenderInlineTopDock && appModel.immersiveSpaceState != .closed && appModel.isMenuWindowVisible
 
         Group {
-            if isOpen {
+            if shouldUseWorkspaceLayout {
                 immersiveLayout
             } else {
                 preImmersiveLayout
@@ -407,11 +430,9 @@ struct ContentView: View {
                 .strokeBorder(menuSurfaceStroke, lineWidth: 1)
         )
         .thresholdGlassBackground(cornerRadius: 20)
-        // Content visibility: keep the window physically open (preserves world-space position)
-        // but hide content and disable hit-testing when the user gestures the menu closed.
-        .opacity(appModel.isMenuWindowVisible ? 1 : 0)
-        .animation(.easeInOut(duration: 0.18), value: appModel.isMenuWindowVisible)
-        .allowsHitTesting(appModel.isMenuWindowVisible)
+        .opacity(isMenuContentVisible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.18), value: isMenuContentVisible)
+        .allowsHitTesting(isMenuContentVisible)
         .thresholdTopDockOrnament(isVisible: isShortcutOrnamentVisible) {
             topDockOrnament
                 .padding(.bottom, 10)
@@ -451,10 +472,10 @@ struct ContentView: View {
         .onChange(of: coloringSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: effectsSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: musicPanelTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
-        .onChange(of: appModel.immersiveSpaceState) { _, newState in
+        .onChange(of: appModel.immersiveSpaceState) { _, _ in
             // When the renderer is not ready, snap back to Explore so the user
             // never gets stuck on a tab that requires active rendering.
-            if (newState != .open || !appModel.rendererStartupWarmupComplete), topDockTab != .explore {
+            if !isRendererNavigationReady, topDockTab != .explore {
                 withAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
@@ -654,7 +675,13 @@ struct ContentView: View {
     // MARK: - Immersive Layout (Sidebar + Content)
     
     private var immersiveLayout: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 10) {
+#if os(macOS)
+            HStack(spacing: 0) {
+                topDockOrnament
+                Spacer(minLength: 0)
+            }
+#endif
             HStack(spacing: 0) {
                 // ── LEFT: Context Rail ──
                 sectionRail
@@ -950,7 +977,18 @@ struct ContentView: View {
     }
 
     private var isRendererNavigationReady: Bool {
+#if os(macOS)
+        appModel.rendererStartupWarmupComplete
+#else
         appModel.immersiveSpaceState == .open && appModel.rendererStartupWarmupComplete
+#endif
+    }
+
+    private func dismissMenuWindowIfNeeded() {
+#if os(visionOS)
+        appModel.markMenuWindowDismissed()
+        dismissWindow(id: appModel.menuWindowID)
+#endif
     }
 
     private func activateTopDock(_ tab: TopDockTab) {
@@ -2336,8 +2374,7 @@ struct ContentView: View {
                                 onPlay: animateEditButtonsVisible ? nil : {
                                     animationManager.currentScene = scene
                                     animationManager.play()
-                                    appModel.markMenuWindowDismissed()
-                                    dismissWindow(id: appModel.menuWindowID)
+                                    dismissMenuWindowIfNeeded()
                                 }
                             )
                         }

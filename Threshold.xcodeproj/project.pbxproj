@@ -225,9 +225,9 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
-				EXECUTABLE_NAME = Threshold;
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				EXECUTABLE_NAME = Threshold;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
@@ -266,9 +266,9 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
-				EXECUTABLE_NAME = Threshold;
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				EXECUTABLE_NAME = Threshold;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
@@ -427,7 +427,7 @@
 		D7D716B72CEAC4B200CEEA51 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = OSX;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -439,8 +439,8 @@
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_CFBundleName = Threshold;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
@@ -463,7 +463,7 @@
 		D7D716B82CEAC4B200CEEA51 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = OSX;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
@@ -476,8 +476,8 @@
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_CFBundleName = Threshold;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";

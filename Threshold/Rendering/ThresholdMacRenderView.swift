@@ -310,6 +310,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
         @MainActor
         func configure(_ view: MTKView) {
+            appModel.rendererStartupWarmupComplete = false
             guard let device = view.device,
                   let metalLayer = view.layer as? CAMetalLayer else { return }
             metalLayer.device = device
@@ -324,11 +325,15 @@ struct ThresholdMacRenderView: NSViewRepresentable {
                                             depthPixelFormat: view.depthStencilPixelFormat,
                                             clearColor: view.clearColor)
             renderer?.drawableSizeDidChange(view.drawableSize)
+            appModel.rendererStartupWarmupComplete = renderer != nil
         }
 
         func tearDown() {
             inputController.setFocus(false)
             renderer = nil
+            Task { @MainActor [appModel] in
+                appModel.rendererStartupWarmupComplete = false
+            }
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {

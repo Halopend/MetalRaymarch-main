@@ -14,7 +14,7 @@ struct ThresholdMacApp: App {
                     appModel.openExternalFile(url)
                 }
         }
-        .defaultSize(width: 1280, height: 820)
+        .defaultSize(width: 1780, height: 920)
         .windowResizability(.contentMinSize)
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -42,7 +42,7 @@ private struct ThresholdMacRootView: View {
 
             ContentView()
                 .environment(appModel)
-                .frame(width: 430)
+                .frame(minWidth: 980, idealWidth: 1040)
                 .frame(maxHeight: .infinity)
         }
     }
