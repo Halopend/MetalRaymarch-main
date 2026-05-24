@@ -8,7 +8,7 @@
 
 /* Begin PBXFileReference section */
 		D7D716912CEAC4B100CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		D7D716B12CEAC4B200CEEA51 /* ThresholdMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThresholdMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7D716B12CEAC4B200CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -16,6 +16,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				App/Info.plist,
+				App/ThresholdMacInfo.plist,
 			);
 			target = D7D716902CEAC4B100CEEA51 /* Threshold */;
 		};
@@ -23,6 +24,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				App/Info.plist,
+				App/ThresholdMacInfo.plist,
 				Audio/AppleMusicManager.swift,
 				Audio/AppleMusicServiceAdapter.swift,
 				Rendering/Core/RendererCoreTypes.swift,
@@ -85,7 +87,7 @@
 			isa = PBXGroup;
 			children = (
 				D7D716912CEAC4B100CEEA51 /* Threshold.app */,
-				D7D716B12CEAC4B200CEEA51 /* ThresholdMac.app */,
+				D7D716B12CEAC4B200CEEA51 /* Threshold.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -133,8 +135,8 @@
 			name = ThresholdMac;
 			packageProductDependencies = (
 			);
-			productName = ThresholdMac;
-			productReference = D7D716B12CEAC4B200CEEA51 /* ThresholdMac.app */;
+			productName = Threshold;
+			productReference = D7D716B12CEAC4B200CEEA51 /* Threshold.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -223,6 +225,7 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
+				EXECUTABLE_NAME = Threshold;
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -263,6 +266,7 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
 				ENABLE_PREVIEWS = YES;
+				EXECUTABLE_NAME = Threshold;
 				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -436,6 +440,8 @@
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
+				INFOPLIST_KEY_CFBundleName = Threshold;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -445,7 +451,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.mac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Threshold;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -471,6 +477,8 @@
 				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
+				INFOPLIST_KEY_CFBundleName = Threshold;
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -480,7 +488,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.mac;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Threshold;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;

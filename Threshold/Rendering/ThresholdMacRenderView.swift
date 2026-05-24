@@ -4,8 +4,263 @@ import Metal
 @preconcurrency import MetalKit
 import ModelIO
 import QuartzCore
+import Synchronization
 import SwiftUI
 import simd
+
+enum ThresholdMacMovementKey: Hashable, Sendable {
+    case forward
+    case backward
+    case left
+    case right
+}
+
+private struct ThresholdMacInputFrame: Sendable {
+    var pressedKeys: Set<ThresholdMacMovementKey> = []
+    var orbitDelta: SIMD2<Float> = .zero
+    var panDelta: SIMD2<Float> = .zero
+    var zoomDelta: Float = 0
+    var shouldTogglePlayback = false
+    var shouldResetView = false
+}
+
+private protocol ThresholdMacViewportInputDelegate: AnyObject {
+    func viewportDidChangeFocus(_ isFocused: Bool)
+    func viewportDidOrbit(delta: SIMD2<Float>)
+    func viewportDidPan(delta: SIMD2<Float>)
+    func viewportDidZoom(delta: Float)
+    func viewportDidChangeKey(_ key: ThresholdMacMovementKey, isPressed: Bool)
+    func viewportDidTogglePlayback()
+    func viewportDidRequestReset()
+}
+
+private final class ThresholdMacInputController: Sendable {
+    private struct State {
+        var pressedKeys: Set<ThresholdMacMovementKey> = []
+        var orbitDelta: SIMD2<Float> = .zero
+        var panDelta: SIMD2<Float> = .zero
+        var zoomDelta: Float = 0
+        var shouldTogglePlayback = false
+        var shouldResetView = false
+    }
+
+    private let state = Mutex(State())
+
+    func setFocus(_ isFocused: Bool) {
+        guard !isFocused else { return }
+        state.withLock { current in
+            current.pressedKeys.removeAll()
+            current.orbitDelta = .zero
+            current.panDelta = .zero
+            current.zoomDelta = 0
+            current.shouldTogglePlayback = false
+            current.shouldResetView = false
+        }
+    }
+
+    func setMovementKey(_ key: ThresholdMacMovementKey, isPressed: Bool) {
+        state.withLock { current in
+            if isPressed {
+                current.pressedKeys.insert(key)
+            } else {
+                current.pressedKeys.remove(key)
+            }
+        }
+    }
+
+    func addOrbit(delta: SIMD2<Float>) {
+        state.withLock { current in
+            current.orbitDelta += delta
+        }
+    }
+
+    func addPan(delta: SIMD2<Float>) {
+        state.withLock { current in
+            current.panDelta += delta
+        }
+    }
+
+    func addZoom(delta: Float) {
+        state.withLock { current in
+            current.zoomDelta += delta
+        }
+    }
+
+    func requestPlaybackToggle() {
+        state.withLock { current in
+            current.shouldTogglePlayback = true
+        }
+    }
+
+    func requestReset() {
+        state.withLock { current in
+            current.shouldResetView = true
+        }
+    }
+
+    func consumeFrame() -> ThresholdMacInputFrame {
+        state.withLock { current in
+            let frame = ThresholdMacInputFrame(
+                pressedKeys: current.pressedKeys,
+                orbitDelta: current.orbitDelta,
+                panDelta: current.panDelta,
+                zoomDelta: current.zoomDelta,
+                shouldTogglePlayback: current.shouldTogglePlayback,
+                shouldResetView: current.shouldResetView
+            )
+            current.orbitDelta = .zero
+            current.panDelta = .zero
+            current.zoomDelta = 0
+            current.shouldTogglePlayback = false
+            current.shouldResetView = false
+            return frame
+        }
+    }
+}
+
+private final class ThresholdMacInteractiveView: MTKView {
+    private enum DragMode {
+        case orbit
+        case pan
+    }
+
+    weak var inputDelegate: (any ThresholdMacViewportInputDelegate)?
+    private var dragMode: DragMode?
+
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        dragMode = nil
+        inputDelegate?.viewportDidChangeFocus(false)
+        return resigned
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        beginInteraction(mode: event.modifierFlags.contains(.option) ? .pan : .orbit)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        handleDrag(event, fallbackMode: .orbit)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragMode = nil
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        beginInteraction(mode: .pan)
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        handleDrag(event, fallbackMode: .pan)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        dragMode = nil
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        beginInteraction(mode: .pan)
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        handleDrag(event, fallbackMode: .pan)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        dragMode = nil
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        _ = window?.makeFirstResponder(self)
+        inputDelegate?.viewportDidChangeFocus(true)
+        let multiplier: Float = event.hasPreciseScrollingDeltas ? 1.0 : 6.0
+        inputDelegate?.viewportDidZoom(delta: Float(event.scrollingDeltaY) * multiplier)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if handleKey(event, isPressed: true) {
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if handleKey(event, isPressed: false) {
+            return
+        }
+        super.keyUp(with: event)
+    }
+
+    private func beginInteraction(mode: DragMode) {
+        _ = window?.makeFirstResponder(self)
+        inputDelegate?.viewportDidChangeFocus(true)
+        dragMode = mode
+    }
+
+    private func handleDrag(_ event: NSEvent, fallbackMode: DragMode) {
+        let delta = SIMD2<Float>(Float(event.deltaX), Float(event.deltaY))
+        guard simd_length_squared(delta) > 0 else { return }
+
+        let activeMode: DragMode
+        if event.modifierFlags.contains(.option) {
+            activeMode = .pan
+        } else {
+            activeMode = dragMode ?? fallbackMode
+        }
+
+        switch activeMode {
+        case .orbit:
+            inputDelegate?.viewportDidOrbit(delta: delta)
+        case .pan:
+            inputDelegate?.viewportDidPan(delta: delta)
+        }
+    }
+
+    private func handleKey(_ event: NSEvent, isPressed: Bool) -> Bool {
+        guard let characters = event.charactersIgnoringModifiers?.lowercased(), !characters.isEmpty else {
+            return false
+        }
+
+        var handled = false
+        for character in characters {
+            switch character {
+            case "w":
+                inputDelegate?.viewportDidChangeKey(.forward, isPressed: isPressed)
+                handled = true
+            case "s":
+                inputDelegate?.viewportDidChangeKey(.backward, isPressed: isPressed)
+                handled = true
+            case "a":
+                inputDelegate?.viewportDidChangeKey(.left, isPressed: isPressed)
+                handled = true
+            case "d":
+                inputDelegate?.viewportDidChangeKey(.right, isPressed: isPressed)
+                handled = true
+            case " ":
+                if isPressed && !event.isARepeat {
+                    inputDelegate?.viewportDidTogglePlayback()
+                }
+                handled = true
+            case "r":
+                if isPressed && !event.isARepeat {
+                    inputDelegate?.viewportDidRequestReset()
+                }
+                handled = true
+            default:
+                break
+            }
+        }
+
+        return handled
+    }
+}
 
 struct ThresholdMacRenderView: NSViewRepresentable {
     let appModel: AppModel
@@ -16,7 +271,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> MTKView {
         let device = MTLCreateSystemDefaultDevice()
-        let view = MTKView(frame: .zero, device: device)
+        let view = ThresholdMacInteractiveView(frame: .zero, device: device)
         view.colorPixelFormat = .bgra8Unorm_srgb
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
@@ -26,6 +281,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         view.isPaused = false
         view.framebufferOnly = true
         view.autoResizeDrawable = true
+        view.inputDelegate = context.coordinator
         view.delegate = context.coordinator
         context.coordinator.configure(view)
         return view
@@ -33,16 +289,18 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
     func updateNSView(_ nsView: MTKView, context: Context) {
         context.coordinator.appModel = appModel
+        (nsView as? ThresholdMacInteractiveView)?.inputDelegate = context.coordinator
     }
 
     static func dismantleNSView(_ nsView: MTKView, coordinator: Coordinator) {
         nsView.delegate = nil
+        (nsView as? ThresholdMacInteractiveView)?.inputDelegate = nil
         coordinator.tearDown()
     }
 
-    @MainActor
-    final class Coordinator: NSObject, MTKViewDelegate {
+    final class Coordinator: NSObject, MTKViewDelegate, ThresholdMacViewportInputDelegate {
         var appModel: AppModel
+        private let inputController = ThresholdMacInputController()
         private var renderer: ThresholdMacRenderer?
 
         init(appModel: AppModel) {
@@ -50,12 +308,26 @@ struct ThresholdMacRenderView: NSViewRepresentable {
             super.init()
         }
 
+        @MainActor
         func configure(_ view: MTKView) {
-            guard let device = view.device else { return }
-            renderer = ThresholdMacRenderer(device: device, colorPixelFormat: view.colorPixelFormat, depthPixelFormat: view.depthStencilPixelFormat)
+            guard let device = view.device,
+                  let metalLayer = view.layer as? CAMetalLayer else { return }
+            metalLayer.device = device
+            metalLayer.pixelFormat = view.colorPixelFormat
+            metalLayer.framebufferOnly = true
+            metalLayer.drawableSize = view.drawableSize
+            renderer = ThresholdMacRenderer(device: device,
+                                            appModel: appModel,
+                                            inputController: inputController,
+                                            metalLayer: metalLayer,
+                                            colorPixelFormat: view.colorPixelFormat,
+                                            depthPixelFormat: view.depthStencilPixelFormat,
+                                            clearColor: view.clearColor)
+            renderer?.drawableSizeDidChange(view.drawableSize)
         }
 
         func tearDown() {
+            inputController.setFocus(false)
             renderer = nil
         }
 
@@ -64,12 +336,39 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         }
 
         func draw(in view: MTKView) {
-            renderer?.draw(in: view, appModel: appModel)
+            renderer?.draw(appModel: appModel)
+        }
+
+        func viewportDidChangeFocus(_ isFocused: Bool) {
+            inputController.setFocus(isFocused)
+        }
+
+        func viewportDidOrbit(delta: SIMD2<Float>) {
+            inputController.addOrbit(delta: delta)
+        }
+
+        func viewportDidPan(delta: SIMD2<Float>) {
+            inputController.addPan(delta: delta)
+        }
+
+        func viewportDidZoom(delta: Float) {
+            inputController.addZoom(delta: delta)
+        }
+
+        func viewportDidChangeKey(_ key: ThresholdMacMovementKey, isPressed: Bool) {
+            inputController.setMovementKey(key, isPressed: isPressed)
+        }
+
+        func viewportDidTogglePlayback() {
+            inputController.requestPlaybackToggle()
+        }
+
+        func viewportDidRequestReset() {
+            inputController.requestReset()
         }
     }
 }
 
-@MainActor
 private final class ThresholdMacRenderer {
     private enum SetupError: Error {
         case badVertexDescriptor
@@ -84,11 +383,24 @@ private final class ThresholdMacRenderer {
 
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
     private static let maxBuffersInFlight = 2
+    private static let defaultTargetPosition = SIMD3<Float>(0.1, 0.1, 0.1)
+    private static let minDetailScale: Float = 0.05
+    private static let maxDetailScale: Float = 40.0
+    private static let mouseRotationSpeed: Float = 0.006
+    private static let mousePanSpeed: Float = 0.003
+    private static let scrollZoomSpeed: Float = 0.035
+    private static let keyboardMoveSpeed: Float = 1.6
 
     private let device: MTLDevice
+    private let metalLayer: CAMetalLayer
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
+    private let depthPixelFormat: MTLPixelFormat
+    private let clearColor: MTLClearColor
+    private let inputController: ThresholdMacInputController
+    private let uiUpdateCoordinator: UIUpdateCoordinator
+    private let parameterUpdateCoordinator: ParameterUpdateCoordinator
     private let mesh: MTKMesh
     private let meshBindings: [CachedMeshBinding]
     private let uniformBuffers: [MTLBuffer]
@@ -102,9 +414,22 @@ private final class ThresholdMacRenderer {
     private var smoothedScale: Float = 1.0
     private var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     private var drawableSize: CGSize = .zero
+    private var depthTexture: MTLTexture?
 
-    init?(device: MTLDevice, colorPixelFormat: MTLPixelFormat, depthPixelFormat: MTLPixelFormat) {
+    init?(device: MTLDevice,
+                    appModel: AppModel,
+                    inputController: ThresholdMacInputController,
+          metalLayer: CAMetalLayer,
+          colorPixelFormat: MTLPixelFormat,
+          depthPixelFormat: MTLPixelFormat,
+          clearColor: MTLClearColor) {
         self.device = device
+        self.metalLayer = metalLayer
+        self.depthPixelFormat = depthPixelFormat
+        self.clearColor = clearColor
+                self.inputController = inputController
+                self.uiUpdateCoordinator = UIUpdateCoordinator(appModel: appModel)
+                self.parameterUpdateCoordinator = ParameterUpdateCoordinator(appModel: appModel)
 
         guard let commandQueue = device.makeCommandQueue() else { return nil }
         self.commandQueue = commandQueue
@@ -145,14 +470,15 @@ private final class ThresholdMacRenderer {
 
     func drawableSizeDidChange(_ size: CGSize) {
         drawableSize = size
+        metalLayer.drawableSize = size
     }
 
-    func draw(in view: MTKView, appModel: AppModel) {
+    func draw(appModel: AppModel) {
         guard appModel.isAppActive,
               drawableSize.width > 1,
               drawableSize.height > 1,
-              let drawable = view.currentDrawable,
-              let renderPassDescriptor = view.currentRenderPassDescriptor else {
+              let drawable = metalLayer.nextDrawable(),
+              let renderPassDescriptor = makeRenderPassDescriptor(drawable: drawable) else {
             return
         }
 
@@ -196,25 +522,66 @@ private final class ThresholdMacRenderer {
         commandBuffer.commit()
     }
 
+    private func makeRenderPassDescriptor(drawable: CAMetalDrawable) -> MTLRenderPassDescriptor? {
+        guard let depthTexture = depthTexture(width: drawable.texture.width, height: drawable.texture.height) else {
+            return nil
+        }
+
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = drawable.texture
+        descriptor.colorAttachments[0].loadAction = .clear
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = clearColor
+        descriptor.depthAttachment.texture = depthTexture
+        descriptor.depthAttachment.loadAction = .clear
+        descriptor.depthAttachment.storeAction = .dontCare
+        descriptor.depthAttachment.clearDepth = 1.0
+        return descriptor
+    }
+
+    private func depthTexture(width: Int, height: Int) -> MTLTexture? {
+        if let depthTexture, depthTexture.width == width, depthTexture.height == height {
+            return depthTexture
+        }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthPixelFormat,
+                                                                  width: max(width, 1),
+                                                                  height: max(height, 1),
+                                                                  mipmapped: false)
+        descriptor.usage = .renderTarget
+        descriptor.storageMode = .private
+        depthTexture = device.makeTexture(descriptor: descriptor)
+        depthTexture?.label = "ThresholdMac Depth"
+        return depthTexture
+    }
+
     private func writeUniforms(to buffer: MTLBuffer, appModel: AppModel) {
         let now = CACurrentMediaTime()
         let deltaTime = max(1.0 / 240.0, min(now - lastFrameTime, 1.0 / 15.0))
         lastFrameTime = now
 
         let settings = appModel.renderSettings
+        applyDesktopInput(appModel: appModel, settings: settings, deltaTime: deltaTime)
         settings.interpolateToTargets(deltaTime: Float(deltaTime))
         settings.updateLimitFlash(deltaTime: Float(deltaTime))
         settings.updateColorSchemeTransition(deltaTime: Float(deltaTime))
 
-        if settings.isAnimationPlaying {
-            appModel.animationManager?.update(deltaTime: deltaTime)
-        }
+        let isAudioMode = settings.lightingMode == .audioReactive ||
+            settings.lightingMode == .visualizer ||
+            settings.fractalAudioReactiveEnabled
+        let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
 
-        if settings.lightingMode == .audioReactive || settings.lightingMode == .visualizer || settings.fractalAudioReactiveEnabled {
-            appModel.appleMusicManager.updateFrame()
-        }
+        parameterUpdateCoordinator.scheduleParameterUpdates(
+            shouldUpdateAnimation: settings.isAnimationPlaying,
+            shouldUpdateAudio: isAudioMode && hasActiveAudioSources,
+            deltaTime: deltaTime,
+            currentTime: now
+        )
 
-        updateFPS(deltaTime: deltaTime, appModel: appModel)
+        updateFPS(deltaTime: deltaTime)
+        uiUpdateCoordinator.scheduleUIUpdate(fps: smoothedFPS,
+                                             headHeightMeters: nil,
+                                             currentTime: now)
 
         let snapshot = settings.snapshot()
         let uniforms = makeUniforms(settings: snapshot, elapsedTime: Float(now - startTime), deltaTime: Float(deltaTime))
@@ -223,12 +590,99 @@ private final class ThresholdMacRenderer {
         pointer.pointee.uniforms.1 = uniforms
     }
 
-    private func updateFPS(deltaTime: TimeInterval, appModel: AppModel) {
+    private func applyDesktopInput(appModel: AppModel, settings: RenderSettings, deltaTime: TimeInterval) {
+        let input = inputController.consumeFrame()
+
+        if input.shouldResetView {
+            resetDesktopView(settings: settings)
+        }
+
+        if input.shouldTogglePlayback {
+            Task { @MainActor [weak appModel] in
+                guard let appModel,
+                      let animationManager = appModel.animationManager else { return }
+
+                if animationManager.isPlaying {
+                    animationManager.stop()
+                    return
+                }
+
+                if animationManager.currentScene?.keyframes.count ?? 0 < 2 {
+                    animationManager.currentScene = animationManager.scenes.first { $0.keyframes.count >= 2 }
+                }
+                animationManager.play()
+            }
+        }
+
+        var targetRotation = settings.targetWorldRotation
+        var targetDetailScale = settings.targetDetailScale
+        var positionDelta = SIMD3<Float>.zero
+
+        let gestureSensitivity = max(settings.gestureSensitivity / 10.0, 0.1)
+        let translationSensitivity = settings.translationSensitivity
+
+        if simd_length_squared(input.orbitDelta) > 0 {
+            let yawAngle = -input.orbitDelta.x * Self.mouseRotationSpeed * gestureSensitivity
+            let pitchAngle = -input.orbitDelta.y * Self.mouseRotationSpeed * gestureSensitivity
+            let yawRotation = simd_quatf(angle: yawAngle, axis: SIMD3<Float>(0, 1, 0))
+            let pitchRotation = simd_quatf(angle: pitchAngle, axis: SIMD3<Float>(1, 0, 0))
+            let rotated = yawRotation * targetRotation * pitchRotation
+            targetRotation = abs(simd_length_squared(rotated.vector) - 1.0) > 1e-4 ? rotated.normalized : rotated
+        }
+
+        if input.zoomDelta != 0 {
+            let zoomFactor = exp(-input.zoomDelta * Self.scrollZoomSpeed * gestureSensitivity)
+            targetDetailScale = min(Self.maxDetailScale, max(Self.minDetailScale, targetDetailScale * zoomFactor))
+        }
+
+        let zoomCompensation = simd_clamp(1.0 / pow(max(targetDetailScale, 0.01), 0.3), 0.5, 2.0)
+
+        if simd_length_squared(input.panDelta) > 0 {
+            let panScale = Self.mousePanSpeed * translationSensitivity * zoomCompensation
+            positionDelta += SIMD3<Float>(input.panDelta.x * panScale, -input.panDelta.y * panScale, 0)
+        }
+
+        let moveStep = Float(deltaTime) * Self.keyboardMoveSpeed * translationSensitivity * zoomCompensation
+        if input.pressedKeys.contains(.forward) {
+            positionDelta.z += moveStep
+        }
+        if input.pressedKeys.contains(.backward) {
+            positionDelta.z -= moveStep
+        }
+        if input.pressedKeys.contains(.left) {
+            positionDelta.x -= moveStep
+        }
+        if input.pressedKeys.contains(.right) {
+            positionDelta.x += moveStep
+        }
+
+        if positionDelta != .zero {
+            if settings.isAnimationPlaying {
+                settings.manualOffsetPosition = settings.manualOffsetPosition + positionDelta
+            } else {
+                settings.targetPosition = settings.targetPosition + positionDelta
+            }
+        }
+
+        settings.targetWorldRotation = targetRotation
+        settings.targetDetailScale = targetDetailScale
+    }
+
+    private func resetDesktopView(settings: RenderSettings) {
+        if settings.isAnimationPlaying {
+            settings.clearAnimationManualOffsets()
+        } else {
+            settings.position = Self.defaultTargetPosition
+            settings.targetPosition = Self.defaultTargetPosition
+        }
+        settings.resetDetailTransform()
+    }
+
+    private func updateFPS(deltaTime: TimeInterval) {
         guard deltaTime > 0 else { return }
         let instantFPS = 1.0 / deltaTime
         let smoothFactor = 1.0 - exp(-10.0 * deltaTime)
         smoothedFPS += (instantFPS - smoothedFPS) * smoothFactor
-        appModel.renderMetrics.fps = smoothedFPS
     }
 
     private func makeUniforms(settings: RenderSettingsSnapshot, elapsedTime: Float, deltaTime: Float) -> Uniforms {

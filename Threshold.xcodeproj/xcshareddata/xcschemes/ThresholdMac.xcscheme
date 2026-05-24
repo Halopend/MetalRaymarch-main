@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "D7D716B62CEAC4B200CEEA51"
-               BuildableName = "ThresholdMac.app"
+               BuildableName = "Threshold.app"
                BlueprintName = "ThresholdMac"
                ReferencedContainer = "container:Threshold.xcodeproj">
             </BuildableReference>
@@ -46,7 +46,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "D7D716B62CEAC4B200CEEA51"
-            BuildableName = "ThresholdMac.app"
+            BuildableName = "Threshold.app"
             BlueprintName = "ThresholdMac"
             ReferencedContainer = "container:Threshold.xcodeproj">
          </BuildableReference>
@@ -63,7 +63,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "D7D716B62CEAC4B200CEEA51"
-            BuildableName = "ThresholdMac.app"
+            BuildableName = "Threshold.app"
             BlueprintName = "ThresholdMac"
             ReferencedContainer = "container:Threshold.xcodeproj">
          </BuildableReference>
