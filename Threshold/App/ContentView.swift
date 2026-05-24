@@ -701,7 +701,11 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+#if os(macOS)
+    .frame(minWidth: 980, minHeight: 576)
+#else
         .frame(minWidth: 980, minHeight: 576)
+#endif
     }
     
     // MARK: - Top Dock
