@@ -369,6 +369,14 @@ struct ContentView: View {
     #endif
         }
 
+        private var supportsGestureEditing: Bool {
+    #if os(macOS)
+        false
+    #else
+        true
+    #endif
+        }
+
     @AppStorage("qualityGoalPreference.v2") private var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     @AppStorage("qualityGoalLastDirectPreference.v1") private var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
     private var qualityGoalPreference: QualityGoalPreference {
@@ -459,13 +467,17 @@ struct ContentView: View {
                 selectedTab == .fractal && fractalSubTab == .render
             }
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
+            normalizeDesktopSelectionIfNeeded()
             syncNavigationChromeFromLegacySelection()
         }
         .onDisappear { cache.stopSync() }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
-        .onChange(of: selectedTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
+        .onChange(of: selectedTab) { _, _ in
+            normalizeDesktopSelectionIfNeeded()
+            syncNavigationChromeFromLegacySelectionIfNeeded()
+        }
         .onChange(of: fractalSubTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: shapeInnerTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
         .onChange(of: fractalBrowseTab) { _, _ in syncNavigationChromeFromLegacySelectionIfNeeded() }
@@ -820,8 +832,10 @@ struct ContentView: View {
             Divider()
                 .padding(.vertical, 4)
 
-            railButton(title: "Gestures", systemImage: SidebarTab.gestures.icon, isSelected: selectedTab == .gestures) {
-                selectedTab = .gestures
+            if supportsGestureEditing {
+                railButton(title: "Gestures", systemImage: SidebarTab.gestures.icon, isSelected: selectedTab == .gestures) {
+                    selectedTab = .gestures
+                }
             }
 
             if !pinnedRailControls.isEmpty {
@@ -1268,12 +1282,22 @@ struct ContentView: View {
                 case .coloring: coloringTabContent
                 case .effects:  effectsTabContent
                 case .music:    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
-                case .gestures: gesturesTabContent
+                case .gestures:
+                    if supportsGestureEditing {
+                        gesturesTabContent
+                    } else {
+                        settingsTabContent
+                    }
                 case .settings: settingsTabContent
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func normalizeDesktopSelectionIfNeeded() {
+        guard !supportsGestureEditing, selectedTab == .gestures else { return }
+        selectedTab = .fractal
     }
     
     // MARK: - Bottom Bar
