@@ -2732,6 +2732,12 @@ struct ContentView: View {
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
                     onChanged: { cache.commitFogEffect() })
+                Divider().padding(.leading, 114)
+                FogColorPickerRow(
+                    title: "Fog Tint",
+                    color: Binding(get: { cache.lighting.fogEffect.color }, set: { cache.lighting.fogEffect.color = $0 }),
+                    onChanged: { cache.commitFogEffect() }
+                )
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))

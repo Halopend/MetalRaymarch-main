@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import simd
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MARK: - Effect Tags (Fractal-Effect Association)
@@ -182,6 +183,41 @@ struct BloomEffect: LightingEffect {
 struct FogEffect: LightingEffect {
     var enabled: Bool = true
     var intensity: Float = 0.32     // Fog density (0-1)
+    var color: SIMD3<Float> = Self.defaultColor
+
+    static let defaultColor = SIMD3<Float>(0.01, 0.015, 0.02)
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, intensity, colorRed, colorGreen, colorBlue
+    }
+
+    init(enabled: Bool = true,
+         intensity: Float = 0.32,
+         color: SIMD3<Float> = FogEffect.defaultColor) {
+        self.enabled = enabled
+        self.intensity = intensity
+        self.color = color
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        intensity = try container.decodeIfPresent(Float.self, forKey: .intensity) ?? 0.32
+        color = SIMD3<Float>(
+            try container.decodeIfPresent(Float.self, forKey: .colorRed) ?? Self.defaultColor.x,
+            try container.decodeIfPresent(Float.self, forKey: .colorGreen) ?? Self.defaultColor.y,
+            try container.decodeIfPresent(Float.self, forKey: .colorBlue) ?? Self.defaultColor.z
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(intensity, forKey: .intensity)
+        try container.encode(color.x, forKey: .colorRed)
+        try container.encode(color.y, forKey: .colorGreen)
+        try container.encode(color.z, forKey: .colorBlue)
+    }
     
     var primaryValue: Float {
         get { intensity }

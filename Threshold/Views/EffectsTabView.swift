@@ -35,6 +35,12 @@ struct EffectsStaticView: View {
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
                     onChanged: { cache.commitFogEffect() })
+                Divider().padding(.leading, 114)
+                FogColorPickerRow(
+                    title: "Fog Tint",
+                    color: Binding(get: { cache.lighting.fogEffect.color }, set: { cache.lighting.fogEffect.color = $0 }),
+                    onChanged: { cache.commitFogEffect() }
+                )
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
@@ -196,6 +202,56 @@ struct EffectsDynamicView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.06)))
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+        }
+    }
+}
+
+struct FogColorPickerRow: View {
+    let title: String
+    @Binding var color: SIMD3<Float>
+    let onChanged: () -> Void
+
+    var body: some View {
+        HStack {
+            Label(title, systemImage: "paintpalette.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            ColorPicker(
+                "",
+                selection: Binding(
+                    get: {
+                        Color(
+                            red: Double(color.x),
+                            green: Double(color.y),
+                            blue: Double(color.z)
+                        )
+                    },
+                    set: { newColor in
+                        guard let components = newColor.thresholdRGBComponents else { return }
+                        color = components
+                        onChanged()
+                    }
+                ),
+                supportsOpacity: false
+            )
+            .labelsHidden()
+        }
+    }
+}
+
+private extension Color {
+    var thresholdRGBComponents: SIMD3<Float>? {
+        guard let cgColor else { return nil }
+        let components = cgColor.components ?? []
+        switch components.count {
+        case 2:
+            let channel = Float(components[0])
+            return SIMD3<Float>(repeating: channel)
+        case 3...:
+            return SIMD3<Float>(Float(components[0]), Float(components[1]), Float(components[2]))
+        default:
+            return nil
         }
     }
 }

@@ -44,6 +44,7 @@ struct RenderSettingsSnapshot {
     // Fog for CPU precomputation (not sent to GPU in ColorSchemeParams)
     let fogEnabled: Bool
     let fogIntensity: Float
+    let fogColor: SIMD3<Float>
     
     // Two-point grab world rotation + detail scale
     let worldRotation: simd_quatf

@@ -105,7 +105,8 @@ extension Renderer {
         let fogIntensity = settings.fogEnabled ? settings.fogIntensity : 0.0
         let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
         return PrecomputedFog(
-            fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0)
+            fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0),
+            color: SIMD4<Float>(settings.fogColor.x, settings.fogColor.y, settings.fogColor.z, 0.0)
         )
     }
 

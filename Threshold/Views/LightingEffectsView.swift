@@ -358,6 +358,11 @@ struct LightingEffectsSection: View {
                         cache.commitFogEffect()
                     }
                 })
+                FogColorPickerRow(
+                    title: "Tint",
+                    color: fogColorBinding,
+                    onChanged: { cache.commitFogEffect() }
+                )
             }
             
             // Gradient Cycle Effect
@@ -535,6 +540,13 @@ struct LightingEffectsSection: View {
         Binding(
             get: { cache.lighting.fogEffect.intensity },
             set: { cache.lighting.fogEffect.intensity = $0 }
+        )
+    }
+
+    private var fogColorBinding: Binding<SIMD3<Float>> {
+        Binding(
+            get: { cache.lighting.fogEffect.color },
+            set: { cache.lighting.fogEffect.color = $0 }
         )
     }
     

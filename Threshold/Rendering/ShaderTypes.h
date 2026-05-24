@@ -203,7 +203,8 @@ typedef struct
 // Captures fog scalars that benefit from CPU-side precomputation.
 typedef struct
 {
-    vector_float4 fog; // x=intensity, y=1/intensity (0 if disabled), z/w=unused
+    vector_float4 fog;   // x=intensity, y=1/intensity (0 if disabled), z/w=unused
+    vector_float4 color; // xyz=fog tint, w=unused
 } PrecomputedFog;
 
 typedef struct

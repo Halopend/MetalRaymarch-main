@@ -382,7 +382,8 @@ struct AnimationKeyframe: Codable, Identifiable, Equatable {
         func lerpFog(_ a: FogEffect?, _ b: FogEffect?) -> FogEffect? {
             guard let a, let b else { return pickDiscrete(a, b) }
             return FogEffect(enabled: clampedT < 0.5 ? a.enabled : b.enabled,
-                             intensity: lerp(a.intensity, b.intensity))
+                             intensity: lerp(a.intensity, b.intensity),
+                             color: a.color + (b.color - a.color) * clampedT)
         }
 
         func lerpGradientCycle(_ a: GradientCycleEffect?, _ b: GradientCycleEffect?) -> GradientCycleEffect? {
@@ -1149,7 +1150,8 @@ struct CatmullRomSpline {
     private static func lerpFog(_ a: FogEffect?, _ b: FogEffect?, t: Float) -> FogEffect? {
         guard let a, let b else { return t < 0.5 ? a : b }
         return FogEffect(enabled: t < 0.5 ? a.enabled : b.enabled,
-                         intensity: a.intensity + (b.intensity - a.intensity) * t)
+                         intensity: a.intensity + (b.intensity - a.intensity) * t,
+                         color: a.color + (b.color - a.color) * t)
     }
     
     private static func lerpGradientCycle(_ a: GradientCycleEffect?, _ b: GradientCycleEffect?, t: Float) -> GradientCycleEffect? {

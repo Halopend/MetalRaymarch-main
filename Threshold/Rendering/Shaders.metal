@@ -185,8 +185,6 @@ constant float kRayMissThreshold = 900.0f;      // Distance indicating ray miss
 // Quality threshold
 constant float kMinQualityForShadows = 0.25f;   // Skip shadows below this quality
 
-// === FOG COLOR ===
-constant half3 kFogColor = half3(0.01h, 0.015h, 0.02h);
 // Always-on inner glow tint (per-step accumulation contribution).
 // Kept cool to avoid muddy yellow shifts when post glow is enabled.
 constant half3 kGlowColor = half3(0.07h, 0.11h, 0.20h);
@@ -216,7 +214,7 @@ FORCE_INLINE half3 applyFog(half3 col, float distance, PrecomputedFog fog) {
     // Precomputed: exp(1.5) ≈ 4.4817
     float exponent = fma(distance, -fogIntensity * 2.0f, 1.5f);
     half fogFactor = half(saturate(exp(exponent)));
-    return mix(kFogColor, col, fogFactor);
+    return mix(half3(fog.color.xyz), col, fogFactor);
 }
 
 // Apply glow contribution from ray steps

@@ -116,7 +116,10 @@ extension Renderer {
                 let fogScale = min(1.0, max(0.08, traceScale / 0.15))
                 let fogIntensity = baseFog * fogScale
                 let invFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
-                precomputedFog = PrecomputedFog(fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0))
+                precomputedFog = PrecomputedFog(
+                    fog: SIMD4<Float>(fogIntensity, invFog, 0.0, 0.0),
+                    color: precomputedFog.color
+                )
             }
         }
 

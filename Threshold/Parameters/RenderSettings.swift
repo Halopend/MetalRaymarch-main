@@ -1887,6 +1887,7 @@ final class RenderSettings: @unchecked Sendable {
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
                 fogIntensity: _fogEffect.intensity,
+                fogColor: _fogEffect.color,
                 worldRotation: _worldRotation,
                 detailScale: _detailScale,
                 geometryState: _geometryState,
