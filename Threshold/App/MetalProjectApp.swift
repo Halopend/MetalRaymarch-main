@@ -5,6 +5,7 @@
 //  Created by MU on 18/11/24.
 //
 
+#if os(visionOS)
 import SwiftUI
 import CompositorServices
 
@@ -170,4 +171,5 @@ struct MetalProjectTestApp: App {
         }
     }
 }
+#endif
 

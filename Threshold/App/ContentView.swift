@@ -406,17 +406,13 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(menuSurfaceStroke, lineWidth: 1)
         )
-        .glassBackgroundEffect(in: .rect(cornerRadius: 20))
+        .thresholdGlassBackground(cornerRadius: 20)
         // Content visibility: keep the window physically open (preserves world-space position)
         // but hide content and disable hit-testing when the user gestures the menu closed.
         .opacity(appModel.isMenuWindowVisible ? 1 : 0)
         .animation(.easeInOut(duration: 0.18), value: appModel.isMenuWindowVisible)
         .allowsHitTesting(appModel.isMenuWindowVisible)
-        .ornament(
-            visibility: isShortcutOrnamentVisible ? .visible : .hidden,
-            attachmentAnchor: .scene(.top),
-            contentAlignment: .bottom
-        ) {
+        .thresholdTopDockOrnament(isVisible: isShortcutOrnamentVisible) {
             topDockOrnament
                 .padding(.bottom, 10)
         }
@@ -734,7 +730,7 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.14), lineWidth: 1)
             )
-            .glassBackgroundEffect(in: .rect(cornerRadius: 18))
+            .thresholdGlassBackground(cornerRadius: 18)
     }
 
     // MARK: - Context Rail
@@ -3830,7 +3826,7 @@ private struct ActivityLightButton: View {
             }
         }
         .buttonStyle(.plain)
-        .hoverEffect()
+        .thresholdHoverEffect()
         .onHover { hovering in
             withAnimation(.snappy(duration: 0.18, extraBounce: 0.05)) {
                 isHovering = hovering
@@ -4255,6 +4251,49 @@ private struct FPSIndicatorView: View {
     }
 }
 
+private extension View {
+    @ViewBuilder
+    func thresholdGlassBackground(cornerRadius: CGFloat) -> some View {
+#if os(visionOS)
+        glassBackgroundEffect(in: .rect(cornerRadius: cornerRadius))
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func thresholdTopDockOrnament<Content: View>(
+        isVisible: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+#if os(visionOS)
+        ornament(
+            visibility: isVisible ? .visible : .hidden,
+            attachmentAnchor: .scene(.top),
+            contentAlignment: .bottom,
+            content: content
+        )
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func thresholdHoverEffect() -> some View {
+#if os(visionOS)
+        hoverEffect()
+#else
+        self
+#endif
+    }
+}
+
+#if os(visionOS)
 #Preview(windowStyle: .automatic) {
     ContentView().environment(AppModel())
 }
+#else
+#Preview {
+    ContentView().environment(AppModel())
+}
+#endif

@@ -99,7 +99,9 @@ struct AnimationPlayerWindowView: View {
             }
         }
         .frame(minWidth: 700, idealWidth: 700, minHeight: 170, idealHeight: 182)
+#if os(visionOS)
         .glassBackgroundEffect()
+#endif
     }
 }
 
@@ -406,7 +408,9 @@ struct AnimationEditorWindowView: View {
             }
         }
         .frame(minWidth: 920, minHeight: 620)
+#if os(visionOS)
         .glassBackgroundEffect()
+#endif
     }
 }
 
@@ -866,7 +870,9 @@ struct SceneEditorView: View {
     
     @State private var selectedKeyframeForEdit: AnimationKeyframe?
     @State private var defaultDuration: Double = 2.0
+#if !os(macOS)
     @State private var isEditMode: EditMode = .inactive
+#endif
     @State private var showSceneSettings = false
     @State private var showSongPicker = false
     @State private var showCapturedFlash = false
@@ -901,6 +907,7 @@ struct SceneEditorView: View {
 
                     Spacer(minLength: 0)
 
+#if !os(macOS)
                     Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
                         withAnimation {
                             isEditMode = isEditMode == .active ? .inactive : .active
@@ -908,6 +915,7 @@ struct SceneEditorView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
+#endif
 
                     Button {
                         updateLightingAcrossKeyframes()
@@ -943,8 +951,7 @@ struct SceneEditorView: View {
             
             Divider()
             
-            editorList
-                .environment(\.editMode, $isEditMode)
+            inlineEditorList
         }
         .sheet(item: $selectedKeyframeForEdit) { keyframe in keyframeSheet(for: keyframe) }
         .onChange(of: scene) { _, _ in persistSceneIfNeeded() }
@@ -1250,7 +1257,9 @@ struct SceneEditorView: View {
                         .popover(isPresented: $showSceneSettings) {
                             sceneSettingsPopover
                         }
+#if !os(macOS)
                         EditButton()
+#endif
                     }
                 }
             }
@@ -1260,6 +1269,16 @@ struct SceneEditorView: View {
         .onDisappear { persistSceneIfNeeded() }
     }
     
+    @ViewBuilder
+    private var inlineEditorList: some View {
+#if os(macOS)
+        editorList
+#else
+        editorList
+            .environment(\.editMode, $isEditMode)
+#endif
+    }
+
     // Shared list content
     private var editorList: some View {
         List {
@@ -1859,7 +1878,9 @@ struct KeyframeEditorView: View {
                 .frame(width: AnimationEditorLayout.keyframeSheetRightPaneWidth)
             }
             .navigationTitle("Keyframe Details")
+#if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
+#endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)

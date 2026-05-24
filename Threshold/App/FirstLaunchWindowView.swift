@@ -41,7 +41,9 @@ struct FirstLaunchWindowView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(windowSurfaceStroke, lineWidth: 1)
         )
+#if os(visionOS)
         .glassBackgroundEffect(in: .rect(cornerRadius: 24))
+#endif
         .onAppear {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
             communityDisplayName = UsageAnalytics.shared.communityDisplayName

@@ -69,7 +69,9 @@ struct FractalShortcutWindowView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(windowSurfaceStroke, lineWidth: 1)
         )
+#if os(visionOS)
         .glassBackgroundEffect(in: .rect(cornerRadius: 20))
+#endif
         .frame(minWidth: 520, maxWidth: 640)
     }
 

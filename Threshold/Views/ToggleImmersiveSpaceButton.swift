@@ -10,10 +10,13 @@ import SwiftUI
 struct ToggleImmersiveSpaceButton: View {
     @Environment(AppModel.self) private var appModel
 
+#if os(visionOS)
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
+#endif
 
     var body: some View {
+#if os(visionOS)
         Button {
             Task { @MainActor in
                 switch appModel.immersiveSpaceState {
@@ -61,5 +64,11 @@ struct ToggleImmersiveSpaceButton: View {
         .disabled(appModel.immersiveSpaceState == .inTransition)
         .animation(.none, value: 0)
         .fontWeight(.semibold)
+#else
+        Button("Desktop Window") {}
+            .disabled(true)
+            .animation(.none, value: 0)
+            .fontWeight(.semibold)
+#endif
     }
 }

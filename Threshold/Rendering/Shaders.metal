@@ -2485,6 +2485,17 @@ fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
     return fragmentMain(in, uniforms, fragCoord, uniforms.time);
 }
 
+fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
+                               constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]])
+{
+    Uniforms uniforms = uniformsArray.uniforms[0];
+    float2 fragCoord = in.position.xy;
+
+    fragCoord += uniforms.jitterOffset;
+
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time);
+}
+
 // === HIERARCHICAL QUAD-SHARED RAYMARCHING ===
 // Two-level approach:
 // 1. Lane 0 does COARSE raymarch (few steps) to find approximate distance

@@ -17,7 +17,9 @@
 
 import Metal
 import simd
+#if os(visionOS)
 import CompositorServices
+#endif
 import os
 
 // MARK: - Render Mode
@@ -166,6 +168,7 @@ struct BuddhabrotSettingsSnapshot {
 
 // MARK: - BuddhabrotRenderer
 
+#if os(visionOS)
 /// Manages all GPU resources and passes for 3D Buddhabrot volume rendering.
 /// Designed to be owned by the main Renderer actor and called from the render loop.
 final class BuddhabrotRenderer: @unchecked Sendable {
@@ -1390,3 +1393,4 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         return volumeWorld
     }
 }
+#endif

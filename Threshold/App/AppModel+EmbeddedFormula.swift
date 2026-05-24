@@ -9,6 +9,10 @@
 import Foundation
 import simd
 
+#if os(macOS)
+private let RENDERER_DEBUG = false
+#endif
+
 @inline(__always)
 func customSceneDiagnostic(_ message: @autoclosure () -> String) {
     guard RENDERER_DEBUG else { return }

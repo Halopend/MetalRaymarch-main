@@ -71,7 +71,9 @@
 
 import Foundation
 import CloudKit
+#if canImport(UIKit)
 import UIKit
+#endif
 import Observation
 
 /// Anonymous usage statistics collected during a session
@@ -257,6 +259,14 @@ final class UsageAnalytics {
         }
     }
 
+    private func currentOSVersion() -> String {
+        #if canImport(UIKit)
+        UIDevice.current.systemVersion
+        #else
+        ProcessInfo.processInfo.operatingSystemVersionString
+        #endif
+    }
+
     private func jsonString<T: Encodable>(from value: T) -> String? {
         guard let data = try? JSONEncoder().encode(value) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -300,7 +310,7 @@ final class UsageAnalytics {
             favoritePresetNames: topFavoritePresets(),
             avgFPS: fpsAccum / durationF,
             deviceModel: currentDeviceModel(),
-            osVersion: UIDevice.current.systemVersion,
+            osVersion: currentOSVersion(),
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         )
     }

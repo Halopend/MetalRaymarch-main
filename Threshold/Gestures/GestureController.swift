@@ -15,7 +15,9 @@
 //
 
 import Foundation
+#if os(visionOS)
 import ARKit
+#endif
 import simd
 
 // MARK: - Gesture Controller
@@ -173,6 +175,7 @@ final class GestureController {
     /// Called every frame via async dispatch. Sets TARGET values on RenderSettings.
     /// The Renderer's interpolateToTargets() handles smooth animation at 90Hz.
     /// - Parameter deltaTime: Time since last hand tracking update (not used for smoothing anymore)
+#if os(visionOS)
     @available(visionOS 2.0, *)
     func updateHands(leftAnchor: HandAnchor?, rightAnchor: HandAnchor?, deltaTime: Float = 1.0/90.0) {
         operationFrameCounter &+= 1
@@ -247,12 +250,14 @@ final class GestureController {
 
         processWindowPullGesture(deltaTime: deltaTime)
     }
+#endif
 
     private func filteredPerFingerTapActions(_ actions: [PerFingerTapAction], menuAndMovementOnly: Bool) -> [PerFingerTapAction] {
         guard menuAndMovementOnly else { return actions }
         return actions.map { $0.isMenuEssentialAction ? $0 : .none }
     }
     
+#if os(visionOS)
     @available(visionOS 2.0, *)
     private func buildHandData(from anchor: HandAnchor?) -> HandData {
         guard let anchor = anchor, anchor.isTracked else {
@@ -325,6 +330,7 @@ final class GestureController {
         
         return data
     }
+        #endif
     
     // MARK: - Special Gesture Processing
     
