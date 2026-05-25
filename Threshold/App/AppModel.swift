@@ -175,6 +175,7 @@ class AppModel {
     // its placement when reopened, which keeps the user's chosen location intact.
     var isMenuWindowVisible: Bool = true
     var isMenuInteractionActive: Bool = false
+    @ObservationIgnored private(set) var activeResetPreset: FractalPreset?
 
     @ObservationIgnored private let menuWindowRetoggleGuardInterval: CFTimeInterval = 0.45
     @ObservationIgnored private var lastMenuWindowOpenedAt: CFTimeInterval = 0
@@ -519,6 +520,7 @@ class AppModel {
                 Task { await preparePipelineHandler?(importedPreset) }
                 presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
                 gestureController?.syncWithSettings()
+                rememberActiveResetPreset(importedPreset)
                 saveLastState()
                 NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
                 clearExternalPreview(restorePreviewedState: false)
@@ -535,6 +537,7 @@ class AppModel {
                 customSceneDiagnostic("🔬 [CSDiag] importExternalFile preparePipelineHandler completed; loading preset NOW")
                 presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
                 gestureController?.syncWithSettings()
+                rememberActiveResetPreset(importedPreset)
                 saveLastState()
                 NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
                 clearExternalPreview(restorePreviewedState: false)
@@ -619,6 +622,9 @@ class AppModel {
 
     /// Returns true when the Fractal > Render tab is already active.
     var isRenderMenuActiveHandler: (() -> Bool)?
+
+    /// Callback to present the save preset sheet from the active content view.
+    var openSavePresetMenuHandler: (() -> Void)?
     
     /// Toggle menu window visibility.
     /// Closing dismisses the actual window; opening reuses the system-restored placement.
@@ -751,6 +757,22 @@ class AppModel {
         isMenuInteractionActive = interacting
         renderSettings.isMenuInteractionActive = interacting
         gestureController?.suppressParameterGestures = interacting
+    }
+
+    func rememberActiveResetPreset(_ preset: FractalPreset) {
+        var snapshot = FractalPreset.fromSettings(
+            renderSettings,
+            name: preset.name,
+            id: preset.id,
+            createdAt: preset.createdAt,
+            embeddedFormula: activeEmbeddedFormula
+        )
+        snapshot.thumbnailData = nil
+        activeResetPreset = snapshot
+    }
+
+    func clearActiveResetPreset() {
+        activeResetPreset = nil
     }
 
     private func canCloseMenuWindowNow() -> Bool {

@@ -17,6 +17,7 @@ enum ThresholdMacMovementKey: Hashable, Sendable {
 
 private struct ThresholdMacInputFrame: Sendable {
     var pressedKeys: Set<ThresholdMacMovementKey> = []
+    var isShiftPressed: Bool = false
     var orbitDelta: SIMD2<Float> = .zero
     var panDelta: SIMD2<Float> = .zero
     var zoomDelta: Float = 0
@@ -30,6 +31,7 @@ private protocol ThresholdMacViewportInputDelegate: AnyObject {
     func viewportDidPan(delta: SIMD2<Float>)
     func viewportDidZoom(delta: Float)
     func viewportDidChangeKey(_ key: ThresholdMacMovementKey, isPressed: Bool)
+    func viewportDidChangeShift(_ isPressed: Bool)
     func viewportDidTogglePlayback()
     func viewportDidRequestReset()
 }
@@ -37,6 +39,7 @@ private protocol ThresholdMacViewportInputDelegate: AnyObject {
 private final class ThresholdMacInputController: Sendable {
     private struct State {
         var pressedKeys: Set<ThresholdMacMovementKey> = []
+        var isShiftPressed: Bool = false
         var orbitDelta: SIMD2<Float> = .zero
         var panDelta: SIMD2<Float> = .zero
         var zoomDelta: Float = 0
@@ -50,6 +53,7 @@ private final class ThresholdMacInputController: Sendable {
         guard !isFocused else { return }
         state.withLock { current in
             current.pressedKeys.removeAll()
+            current.isShiftPressed = false
             current.orbitDelta = .zero
             current.panDelta = .zero
             current.zoomDelta = 0
@@ -65,6 +69,12 @@ private final class ThresholdMacInputController: Sendable {
             } else {
                 current.pressedKeys.remove(key)
             }
+        }
+    }
+
+    func setShiftPressed(_ isPressed: Bool) {
+        state.withLock { current in
+            current.isShiftPressed = isPressed
         }
     }
 
@@ -102,6 +112,7 @@ private final class ThresholdMacInputController: Sendable {
         state.withLock { current in
             let frame = ThresholdMacInputFrame(
                 pressedKeys: current.pressedKeys,
+                isShiftPressed: current.isShiftPressed,
                 orbitDelta: current.orbitDelta,
                 panDelta: current.panDelta,
                 zoomDelta: current.zoomDelta,
@@ -196,6 +207,11 @@ private final class ThresholdMacInteractiveView: MTKView {
             return
         }
         super.keyUp(with: event)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        inputDelegate?.viewportDidChangeShift(event.modifierFlags.contains(.shift))
+        super.flagsChanged(with: event)
     }
 
     private func beginInteraction(mode: DragMode) {
@@ -362,6 +378,10 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
         func viewportDidChangeKey(_ key: ThresholdMacMovementKey, isPressed: Bool) {
             inputController.setMovementKey(key, isPressed: isPressed)
+        }
+
+        func viewportDidChangeShift(_ isPressed: Bool) {
+            inputController.setShiftPressed(isPressed)
         }
 
         func viewportDidTogglePlayback() {
@@ -667,11 +687,20 @@ private final class ThresholdMacRenderer {
         }
 
         let moveStep = Float(deltaTime) * Self.keyboardMoveSpeed * translationSensitivity * zoomCompensation
-        if input.pressedKeys.contains(.forward) {
-            positionDelta.z += moveStep
-        }
-        if input.pressedKeys.contains(.backward) {
-            positionDelta.z -= moveStep
+        if input.isShiftPressed {
+            if input.pressedKeys.contains(.forward) {
+                positionDelta.y += moveStep
+            }
+            if input.pressedKeys.contains(.backward) {
+                positionDelta.y -= moveStep
+            }
+        } else {
+            if input.pressedKeys.contains(.forward) {
+                positionDelta.z += moveStep
+            }
+            if input.pressedKeys.contains(.backward) {
+                positionDelta.z -= moveStep
+            }
         }
         if input.pressedKeys.contains(.left) {
             positionDelta.x -= moveStep

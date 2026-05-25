@@ -492,11 +492,17 @@ struct ContentView: View {
             appModel.isRenderMenuActiveHandler = {
                 selectedTab == .fractal && fractalSubTab == .render
             }
+            appModel.openSavePresetMenuHandler = {
+                showSaveDestinationSheet = true
+            }
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
             normalizeDesktopSelectionIfNeeded()
             syncNavigationChromeFromLegacySelection()
         }
-        .onDisappear { cache.stopSync() }
+        .onDisappear {
+            cache.stopSync()
+            appModel.openSavePresetMenuHandler = nil
+        }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
         }
@@ -570,7 +576,17 @@ struct ContentView: View {
     }
 
     private func resetCurrentFractalSettings() {
-        appModel.gestureController?.applyFractalDefaults()
+        if let preset = appModel.activeResetPreset {
+            appModel.presetManager.loadPreset(
+                preset,
+                into: appModel.renderSettings,
+                resetEnvironment: true
+            )
+            applyPresetGestureOverridesIfNeeded(for: preset)
+            appModel.gestureController?.syncWithSettings()
+        } else {
+            appModel.gestureController?.applyFractalDefaults()
+        }
         cache.loadFromSettings()
     }
 
@@ -805,95 +821,103 @@ struct ContentView: View {
     // MARK: - Context Rail
 
     private var sectionRail: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 8) {
-                switch topDockTab {
-                case .explore:
-                let exploreSections = ExploreRailSection.allCases.filter { $0 != .customScenes || allowCustomScenes }
-                ForEach(exploreSections, id: \.self) { section in
-                    railButton(
-                        title: section.rawValue,
-                        systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .explore && exploreRailSection == section,
-                        pinControl: pinnedRailControl(for: section)
-                    ) {
-                        activateExploreSection(section)
-                    }
-                }
-            case .shape:
-                ForEach(ShapeRailSection.allCases, id: \.self) { section in
-                    railButton(
-                        title: section.rawValue,
-                        systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .shape && shapeRailSection == section,
-                        pinControl: pinnedRailControl(for: section)
-                    ) {
-                        activateShapeSection(section)
-                    }
-                }
-            case .visualizations:
-                ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
-                    railButton(
-                        title: section.title,
-                        systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section,
-                        pinControl: pinnedRailControl(for: section)
-                    ) {
-                        activateVisualizationsSection(section)
-                    }
-                }
-            case .music:
-                ForEach(MusicRailSection.availableCases, id: \.self) { section in
-                    railButton(
-                        title: section.title,
-                        systemImage: section.icon,
-                        isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section,
-                        pinControl: pinnedRailControl(for: section)
-                    ) {
-                        activateMusicSection(section)
-                    }
-                }
-            }
-
-            Divider()
-                .padding(.vertical, 4)
-
-            if supportsGestureEditing {
-                railButton(title: "Gestures", systemImage: SidebarTab.gestures.icon, isSelected: selectedTab == .gestures) {
-                    selectedTab = .gestures
-                }
-            }
-
-            if !pinnedRailControls.isEmpty {
-                Divider()
-                    .padding(.vertical, 4)
-
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    ForEach(pinnedRailControls, id: \.self) { control in
-                        pinnedRailButton(
-                            title: control.title,
-                            systemImage: control.icon,
-                            isSelected: isPinnedRailControlSelected(control),
-                            pinControl: control
-                        ) {
-                            activatePinnedRailControl(control)
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 8) {
+                    switch topDockTab {
+                    case .explore:
+                        let exploreSections = ExploreRailSection.allCases.filter { $0 != .customScenes || allowCustomScenes }
+                        ForEach(exploreSections, id: \.self) { section in
+                            railButton(
+                                title: section.rawValue,
+                                systemImage: section.icon,
+                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .explore && exploreRailSection == section,
+                                pinControl: pinnedRailControl(for: section)
+                            ) {
+                                activateExploreSection(section)
+                            }
+                        }
+                    case .shape:
+                        ForEach(ShapeRailSection.allCases, id: \.self) { section in
+                            railButton(
+                                title: section.rawValue,
+                                systemImage: section.icon,
+                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .shape && shapeRailSection == section,
+                                pinControl: pinnedRailControl(for: section)
+                            ) {
+                                activateShapeSection(section)
+                            }
+                        }
+                    case .visualizations:
+                        ForEach(VisualizationsRailSection.allCases, id: \.self) { section in
+                            railButton(
+                                title: section.title,
+                                systemImage: section.icon,
+                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .visualizations && visualizationsRailSection == section,
+                                pinControl: pinnedRailControl(for: section)
+                            ) {
+                                activateVisualizationsSection(section)
+                            }
+                        }
+                    case .music:
+                        ForEach(MusicRailSection.availableCases, id: \.self) { section in
+                            railButton(
+                                title: section.title,
+                                systemImage: section.icon,
+                                isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section,
+                                pinControl: pinnedRailControl(for: section)
+                            ) {
+                                activateMusicSection(section)
+                            }
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .top)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
 
-            railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
-                selectedTab = .settings
+            VStack(spacing: 8) {
+                Divider()
+                    .padding(.vertical, 4)
+
+                if supportsGestureEditing {
+                    railButton(title: "Gestures", systemImage: SidebarTab.gestures.icon, isSelected: selectedTab == .gestures) {
+                        selectedTab = .gestures
+                    }
+                }
+
+                if !pinnedRailControls.isEmpty {
+                    Divider()
+                        .padding(.vertical, 4)
+
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                        alignment: .leading,
+                        spacing: 8
+                    ) {
+                        ForEach(pinnedRailControls, id: \.self) { control in
+                            pinnedRailButton(
+                                title: control.title,
+                                systemImage: control.icon,
+                                isSelected: isPinnedRailControlSelected(control),
+                                pinControl: control
+                            ) {
+                                activatePinnedRailControl(control)
+                            }
+                        }
+                    }
+                }
+
+                railButton(title: "Settings", systemImage: SidebarTab.settings.icon, isSelected: selectedTab == .settings) {
+                    selectedTab = .settings
+                }
             }
-        }
+            .padding(.top, 8)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(width: 170)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
@@ -1546,6 +1570,7 @@ struct ContentView: View {
                             )
                             applyPresetGestureOverridesIfNeeded(for: preset)
                             appModel.gestureController?.syncWithSettings()
+                            appModel.rememberActiveResetPreset(preset)
                             cache.loadFromSettings()
                         }
                     }

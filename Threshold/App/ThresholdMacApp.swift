@@ -26,6 +26,15 @@ struct ThresholdMacApp: App {
                 appModel.saveLastState()
                 Task { await UsageAnalytics.shared.endSession() }
             }
+        .commands {
+            CommandGroup(replacing: .saveItem) {
+                Button("Save Preset…") {
+                    appModel.openSavePresetMenuHandler?()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(appModel.openSavePresetMenuHandler == nil)
+            }
+        }
         }
     }
 }
@@ -47,11 +56,12 @@ private struct ThresholdMacRootView: View {
     private let panelPreferredWidth: CGFloat = 1040
     private let minimumVisibleViewportWidth: CGFloat = 360
     private let panelPadding: CGFloat = 14
-    private let revealHotZoneWidth: CGFloat = 28
+    private let revealHotZoneWidth: CGFloat = 84
+    private let panelMaterialOpacity: Double = 0.68
     private let panelAnimation = Animation.spring(response: 0.35, dampingFraction: 0.85)
 
     private var isControlsVisible: Bool {
-        switch controlsOverride {
+            return true
         case .automatic:
             return isAutoVisible || appModel.isMenuInteractionActive
         case .forcedVisible:
@@ -107,12 +117,15 @@ private struct ThresholdMacRootView: View {
         ContentView()
             .environment(appModel)
             .frame(maxHeight: .infinity)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.ultraThinMaterial.opacity(panelMaterialOpacity))
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.45), radius: 22, x: -6, y: 8)
+            .shadow(color: Color.black.opacity(0.32), radius: 22, x: -6, y: 8)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
