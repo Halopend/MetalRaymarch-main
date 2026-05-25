@@ -53,7 +53,7 @@ private struct ThresholdMacRootView: View {
     private var isControlsVisible: Bool {
         switch controlsOverride {
         case .automatic:
-            return isAutoVisible
+            return isAutoVisible || appModel.isMenuInteractionActive
         case .forcedVisible:
             return true
         case .forcedHiddenUntilReset:

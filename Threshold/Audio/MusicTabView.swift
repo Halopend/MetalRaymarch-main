@@ -22,6 +22,7 @@ enum MusicPanelTab: String, CaseIterable {
 
 struct MusicTabContent: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.menuAdjustmentActions) private var menuAdjustmentActions
     @Bindable var cache: UISettingsCache
 
     private let musicService: MusicService
@@ -35,6 +36,7 @@ struct MusicTabContent: View {
     var tabSelection: Binding<MusicPanelTab>? = nil
     @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
     @State private var isShowingVisualizationAddPopover = false
+    @State private var isHoldingVisualizationAddAdjustment = false
 
     private var effectiveTabSelection: Binding<MusicPanelTab> {
         Binding(
@@ -168,6 +170,26 @@ struct MusicTabContent: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(maxHeight: .infinity, alignment: .top)
+        .onChange(of: isShowingVisualizationAddPopover) { _, isPresented in
+            updateVisualizationAddPopoverAdjustment(isPresented: isPresented)
+        }
+        .onDisappear {
+            updateVisualizationAddPopoverAdjustment(isPresented: false)
+        }
+    }
+
+    private func updateVisualizationAddPopoverAdjustment(isPresented: Bool) {
+#if os(macOS)
+        if isPresented {
+            guard !isHoldingVisualizationAddAdjustment else { return }
+            isHoldingVisualizationAddAdjustment = true
+            menuAdjustmentActions.begin()
+        } else {
+            guard isHoldingVisualizationAddAdjustment else { return }
+            isHoldingVisualizationAddAdjustment = false
+            menuAdjustmentActions.end()
+        }
+#endif
     }
 
     #if os(macOS)

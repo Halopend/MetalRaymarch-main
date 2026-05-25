@@ -420,6 +420,16 @@ private final class ThresholdMacRenderer {
     private var smoothedMaxViewDistance: Float = RenderSettings.maxViewDistance
     private var drawableSize: CGSize = .zero
     private var depthTexture: MTLTexture?
+    private var musicReactiveLayerActive: Bool = false
+    private var musicReactivePhaseByTarget: [MusicReactiveTarget: Float] = [:]
+    private var musicReactiveDecayByTarget: [MusicReactiveTarget: Float] = [:]
+    private var musicReactiveDriftByTarget: [MusicReactiveTarget: Float] = [:]
+    private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
+    private var cachedMusicReactiveFractalType: FractalModelType?
+    private var cachedMusicReactiveTripletGains: [String: Float] = [:]
+    private var cachedSlotGainLookup: [Int: Float] = [:]
+    private var audioOperationsBuffer: [ParameterOperation] = []
+    private var parameterOperationFrameIndex: UInt64 = 0
 
     init?(device: MTLDevice,
                     appModel: AppModel,
@@ -586,6 +596,11 @@ private final class ThresholdMacRenderer {
                           settings: settings,
                           isAudioMode: isAudioMode,
                           hasActiveAudioSources: hasActiveAudioSources)
+        updateMusicReactiveParameters(appModel: appModel,
+                                      settings: settings,
+                                      isAudioMode: isAudioMode,
+                                      hasActiveAudioSources: hasActiveAudioSources,
+                                      deltaTime: Float(deltaTime))
 
         updateFPS(deltaTime: deltaTime)
         uiUpdateCoordinator.scheduleUIUpdate(fps: smoothedFPS,
@@ -732,6 +747,177 @@ private final class ThresholdMacRenderer {
         settings.trebleLevel = min(1.0, totalTreble * inverseSourceCount * trebleSensitivity)
         settings.beatIntensity = min(1.0, totalBeat * beatSensitivity)
         settings.audioLevel = totalLevel * inverseSourceCount
+    }
+
+    private func updateMusicReactiveParameters(appModel: AppModel,
+                                               settings: RenderSettings,
+                                               isAudioMode: Bool,
+                                               hasActiveAudioSources: Bool,
+                                               deltaTime: Float) {
+        guard isAudioMode, hasActiveAudioSources, settings.fractalAudioReactiveEnabled else {
+            clearMusicReactiveLayersIfNeeded(appModel: appModel, settings: settings)
+            return
+        }
+
+        musicReactiveLayerActive = true
+
+        let bass = settings.bassLevel
+        let mid = settings.midLevel
+        let treble = settings.trebleLevel
+        let beat = settings.beatIntensity
+        let globalAmount = settings.fractalAudioAmount
+        let beatPunch = settings.fractalBeatPunch
+
+        let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
+        let drive = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
+
+        audioOperationsBuffer.removeAll(keepingCapacity: true)
+
+        let activeFractalType = settings.fractalType
+        let mappings = settings.musicReactiveMappings
+        let tripletGains = settings.tripletMusicGains
+
+        if cachedMusicReactiveFractalType != activeFractalType ||
+            cachedMusicReactiveTripletGains != tripletGains {
+            cachedMusicReactiveFractalType = activeFractalType
+            cachedMusicReactiveTripletGains = tripletGains
+            cachedSlotGainLookup.removeAll(keepingCapacity: true)
+
+            if !tripletGains.isEmpty {
+                let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: activeFractalType)
+                let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
+                for triplet in triplets {
+                    guard let gain = tripletGains[triplet.groupName], gain != 1.0 else { continue }
+                    for formulaIndex in [triplet.xFormulaIndex, triplet.yFormulaIndex, triplet.zFormulaIndex] {
+                        if let slot = floatParams.firstIndex(where: { $0.index == formulaIndex }) {
+                            cachedSlotGainLookup[slot] = gain
+                        }
+                    }
+                }
+            }
+        }
+
+        let slotGainLookup = cachedSlotGainLookup
+
+        for mapping in mappings where mapping.isEnabled {
+            let sourceValue: Float
+            switch mapping.source {
+            case .composite:
+                sourceValue = drive
+            case .bass:
+                sourceValue = bass
+            case .mid:
+                sourceValue = mid
+            case .treble:
+                sourceValue = treble
+            case .beat:
+                sourceValue = beat
+            case .overall:
+                sourceValue = settings.audioLevel
+            }
+
+            let absAmount = abs(mapping.amount)
+            let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
+            let allowed = mapping.target.allowedRange(for: activeFractalType)
+            let allowedSpan = allowed.upperBound - allowed.lowerBound
+            let maxDeviation = allowedSpan * 0.15 * absAmount * globalAmount
+
+            let delta: Float
+            switch mapping.responseCurve {
+            case .sinusoidal:
+                let phaseSpeed: Float = 2.0 + sourceValue * 4.0
+                var phase = musicReactivePhaseByTarget[mapping.target] ?? 0
+                phase += phaseSpeed * deltaTime
+                phase = phase - floor(phase)
+                musicReactivePhaseByTarget[mapping.target] = phase
+                delta = sin(phase * 2.0 * .pi) * sourceValue * maxDeviation * sign
+
+            case .pulse:
+                let attack = sourceValue * sourceValue
+                var decay = musicReactiveDecayByTarget[mapping.target] ?? 0
+                decay = max(attack, decay * exp(-6.0 * deltaTime))
+                musicReactiveDecayByTarget[mapping.target] = decay
+                delta = decay * maxDeviation * sign
+
+            case .drift:
+                let target = sourceValue * maxDeviation * sign
+                var drifted = musicReactiveDriftByTarget[mapping.target] ?? 0
+                let driftRate: Float = 2.0
+                drifted += (target - drifted) * min(1.0, deltaTime / driftRate)
+                musicReactiveDriftByTarget[mapping.target] = drifted
+                delta = drifted
+
+            case .hybrid:
+                let combo = max(0.0, min(1.0, mapping.hybridCombo))
+
+                let target = sourceValue * maxDeviation * sign
+                var drifted = musicReactiveDriftByTarget[mapping.target] ?? 0
+                let driftRate: Float = 2.4
+                drifted += (target - drifted) * min(1.0, deltaTime / driftRate)
+                musicReactiveDriftByTarget[mapping.target] = drifted
+
+                let vibrationSpeed: Float = 6.0 + sourceValue * 8.0 + combo * 4.0
+                var phase = musicReactivePhaseByTarget[mapping.target] ?? 0
+                phase += vibrationSpeed * deltaTime
+                phase = phase - floor(phase)
+                musicReactivePhaseByTarget[mapping.target] = phase
+
+                let vibrationAmplitude = maxDeviation * sourceValue * (0.08 + 0.35 * combo)
+                let vibration = sin(phase * 2.0 * .pi) * vibrationAmplitude * sign
+
+                let combined = drifted + vibration
+                let limit = maxDeviation * 1.2
+                delta = max(-limit, min(limit, combined))
+            }
+
+            var lfoOffset: Float = 0
+            if mapping.lfo.enabled {
+                var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
+                phase += mapping.lfo.frequency * deltaTime
+                phase = phase - floor(phase)
+                musicLFOPhaseByTarget[mapping.target] = phase
+                lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
+            }
+
+            let rawTargetValue = delta + lfoOffset
+
+            guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
+
+            let finalOffset: Float
+            if let slot = mapping.target.formulaParamSlot, let gain = slotGainLookup[slot] {
+                finalOffset = rawTargetValue * gain
+            } else {
+                finalOffset = rawTargetValue
+            }
+
+            audioOperationsBuffer.append(
+                ParameterOperation(
+                    targetID: targetID,
+                    source: .audio,
+                    value: .absolute(finalOffset),
+                    frameIndex: parameterOperationFrameIndex,
+                    smoothing: ParameterOperationSmoothing(
+                        smoothingTime: max(0.02, mapping.smoothingWindow)
+                    )
+                )
+            )
+        }
+
+        if !audioOperationsBuffer.isEmpty {
+            appModel.parameterPipeline.dispatchAudio(audioOperationsBuffer, settings: settings)
+            parameterOperationFrameIndex &+= 1
+        }
+    }
+
+    private func clearMusicReactiveLayersIfNeeded(appModel: AppModel, settings: RenderSettings) {
+        if musicReactiveLayerActive {
+            appModel.parameterPipeline.clearMusicLayers(settings: settings)
+        }
+        musicReactiveLayerActive = false
+        musicReactivePhaseByTarget.removeAll()
+        musicReactiveDecayByTarget.removeAll()
+        musicReactiveDriftByTarget.removeAll()
+        musicLFOPhaseByTarget.removeAll()
     }
 
     private func resetDesktopView(settings: RenderSettings) {

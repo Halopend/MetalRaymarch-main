@@ -174,6 +174,7 @@ class AppModel {
     // The window is physically dismissed when closed; visionOS currently preserves
     // its placement when reopened, which keeps the user's chosen location intact.
     var isMenuWindowVisible: Bool = true
+    var isMenuInteractionActive: Bool = false
 
     @ObservationIgnored private let menuWindowRetoggleGuardInterval: CFTimeInterval = 0.45
     @ObservationIgnored private var lastMenuWindowOpenedAt: CFTimeInterval = 0
@@ -747,6 +748,7 @@ class AppModel {
 
     private func refreshMenuInteractionState() {
         let interacting = isMenuWindowVisible && (isMenuHovering || menuAdjustmentDepth > 0)
+        isMenuInteractionActive = interacting
         renderSettings.isMenuInteractionActive = interacting
         gestureController?.suppressParameterGestures = interacting
     }
