@@ -32,8 +32,14 @@ class AudioAnalyzer {
     /// Treble level (high frequencies 2k-20kHz) - good for sparkles
     @ObservationIgnored nonisolated(unsafe) private(set) var trebleLevel: Float = 0.0
     
-    /// Whether audio capture is active
+    /// Whether any audio capture source is active.
     @ObservationIgnored nonisolated(unsafe) private(set) var isCapturing: Bool = false
+
+    /// Whether the microphone capture path is active.
+    @ObservationIgnored nonisolated(unsafe) private(set) var isMicrophoneCapturing: Bool = false
+
+    /// Whether an external PCM source (for example Music.app via SCK) is active.
+    @ObservationIgnored nonisolated(unsafe) private(set) var isExternalCapturing: Bool = false
     
     // Pending MainActor dispatch batching — avoids creating ~86 Tasks/sec
     @ObservationIgnored nonisolated(unsafe) private var pendingLevelDispatch = false
@@ -96,6 +102,7 @@ class AudioAnalyzer {
     private let inputGain: Float = 25.0        // Amplify quiet input
     private let bassBoost: Float = 1.5         // Bass needs more boost
     private let trebleBoost: Float = 1.2       // Treble boost
+    private let silenceRMSFloor: Float = 0.0015
     
     // Timestamp for frame-rate independent smoothing
     private var lastUpdateTime: CFTimeInterval = 0
@@ -110,7 +117,8 @@ class AudioAnalyzer {
     
     /// Start capturing audio from the default input device
     func startCapture() {
-        guard !isCapturing else { return }
+        guard !isMicrophoneCapturing else { return }
+        errorMessage = nil
         
         Task {
             let permission = await checkMicrophonePermission()
@@ -132,15 +140,44 @@ class AudioAnalyzer {
         inputNode?.removeTap(onBus: 0)
         audioEngine = nil
         inputNode = nil
-        isCapturing = false
-        level = 0
-        peakLevel = 0
-        bassLevel = 0
-        midLevel = 0
-        trebleLevel = 0
-        lastUpdateTime = 0
+        isMicrophoneCapturing = false
+        refreshCaptureState(resetLevelsWhenIdle: true)
     }
-    
+
+    // MARK: - External PCM Ingestion
+    //
+    // Allows alternate capture backends (e.g. ScreenCaptureKit capturing
+    // the native Music.app window on macOS) to feed PCM into the same
+    // FFT pipeline used by the microphone path.
+
+    /// Mark the analyzer as actively receiving samples from an external source.
+    /// Recomputes band indices if the source's sample rate differs from the
+    /// last-known rate.
+    func beginExternalCapture(sampleRate externalSampleRate: Double) {
+        let rate = Float(externalSampleRate)
+        if rate > 0, abs(rate - sampleRate) > 1 {
+            sampleRate = rate
+            computeBandIndices()
+        }
+        isExternalCapturing = true
+        refreshCaptureState()
+        errorMessage = nil
+    }
+
+    /// Stop external ingestion and decay levels back to zero.
+    func endExternalCapture() {
+        isExternalCapturing = false
+        refreshCaptureState(resetLevelsWhenIdle: true)
+    }
+
+    /// Feed an externally-captured PCM buffer into the FFT pipeline.
+    /// Caller must guarantee the buffer is owned (not referencing borrowed
+    /// memory from a CMSampleBuffer); see `MusicAppAudioCapture` for the
+    /// copying delegate used on macOS.
+    func ingestExternalBuffer(_ buffer: AVAudioPCMBuffer) {
+        processAudioBuffer(buffer)
+    }
+
     // MARK: - Private Methods
     
     private func setupFFT() {
@@ -178,7 +215,6 @@ class AudioAnalyzer {
     }
     
     private func checkMicrophonePermission() async -> Bool {
-        #if os(visionOS) || os(iOS)
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
         case .authorized:
@@ -188,9 +224,6 @@ class AudioAnalyzer {
         default:
             return false
         }
-        #else
-        return true
-        #endif
     }
     
     private func setupAudioCapture() {
@@ -217,10 +250,13 @@ class AudioAnalyzer {
             try engine.start()
             self.audioEngine = engine
             self.inputNode = input
-            self.isCapturing = true
+            self.isMicrophoneCapturing = true
+            self.refreshCaptureState()
             self.errorMessage = nil
             print("🎤 Audio capture started (sample rate: \(format.sampleRate), FFT size: \(fftSize))")
         } catch {
+            self.isMicrophoneCapturing = false
+            self.refreshCaptureState(resetLevelsWhenIdle: true)
             self.errorMessage = "Failed to start audio: \(error.localizedDescription)"
             print("❌ Audio capture error: \(error)")
         }
@@ -238,6 +274,22 @@ class AudioAnalyzer {
         // Calculate RMS for overall level
         var rms: Float = 0
         vDSP_rmsqv(samples, 1, &rms, vDSP_Length(frameLength))
+
+        // ScreenCaptureKit and microphones both produce a small idle noise floor.
+        // Gate it here so paused music and silent rooms decay to zero instead of flickering.
+        if rms < silenceRMSFloor {
+            pendingOverall = 0
+            pendingBass = 0
+            pendingMid = 0
+            pendingTreble = 0
+            if !pendingLevelDispatch {
+                pendingLevelDispatch = true
+                Task { @MainActor in
+                    self.drainPendingLevels()
+                }
+            }
+            return
+        }
         
         // Apply gain and compress
         let normalizedLevel = min(1.0, compressLevel(rms * inputGain))
@@ -364,6 +416,22 @@ class AudioAnalyzer {
         } else {
             current = current + (target - current) * cachedBandDecayFactor
         }
+    }
+
+    private func refreshCaptureState(resetLevelsWhenIdle: Bool = false) {
+        isCapturing = isMicrophoneCapturing || isExternalCapturing
+        if resetLevelsWhenIdle, !isCapturing {
+            resetLevels()
+        }
+    }
+
+    private func resetLevels() {
+        level = 0
+        peakLevel = 0
+        bassLevel = 0
+        midLevel = 0
+        trebleLevel = 0
+        lastUpdateTime = 0
     }
 }
 

@@ -45,6 +45,7 @@ final class AppleMusicManager {
     private(set) var libraryLoading: Bool = false
     private(set) var libraryErrorMessage: String?
 
+    @ObservationIgnored var onStateDidChange: (() -> Void)?
     /// Live playback progress callback: `(currentTime, duration, isPlaying)`.
     var onPlaybackProgress: ((TimeInterval, TimeInterval, Bool) -> Void)?
 

@@ -27,6 +27,9 @@ struct MusicTabContent: View {
     private let musicService: MusicService
     private let audioAnalyzer: AudioAnalyzer
     private let renderSettings: RenderSettings
+    #if os(macOS)
+    private let musicAppCapture: MusicAppAudioCapture
+    #endif
 
     @State private var viewModel: MusicTabViewModel
     var tabSelection: Binding<MusicPanelTab>? = nil
@@ -35,12 +38,26 @@ struct MusicTabContent: View {
 
     private var effectiveTabSelection: Binding<MusicPanelTab> {
         Binding(
-            get: { tabSelection?.wrappedValue ?? storedTabSelection },
+            get: { normalizedMusicPanelTab(tabSelection?.wrappedValue ?? storedTabSelection) },
             set: { newValue in
-                storedTabSelection = newValue
-                tabSelection?.wrappedValue = newValue
+                let normalized = normalizedMusicPanelTab(newValue)
+                storedTabSelection = normalized
+                tabSelection?.wrappedValue = normalized
             }
         )
+    }
+
+    private func normalizedMusicPanelTab(_ tab: MusicPanelTab) -> MusicPanelTab {
+        #if os(macOS)
+        switch tab {
+        case .songs, .playlists, .albums:
+            return .music
+        case .music, .visualizations:
+            return tab
+        }
+        #else
+        return tab
+        #endif
     }
 
     private var activeMusicPermutationCount: Int {
@@ -56,6 +73,24 @@ struct MusicTabContent: View {
         cache.audioReactive.fractalAudioReactiveEnabled && !availableMappingTargetsToAdd.isEmpty
     }
 
+    #if os(macOS)
+    init(
+        cache: UISettingsCache,
+        musicService: MusicService,
+        audioAnalyzer: AudioAnalyzer,
+        renderSettings: RenderSettings,
+        musicAppCapture: MusicAppAudioCapture,
+        tabSelection: Binding<MusicPanelTab>? = nil
+    ) {
+        self.cache = cache
+        self.musicService = musicService
+        self.audioAnalyzer = audioAnalyzer
+        self.renderSettings = renderSettings
+        self.musicAppCapture = musicAppCapture
+        self.tabSelection = tabSelection
+        _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
+    }
+    #else
     init(
         cache: UISettingsCache,
         musicService: MusicService,
@@ -70,12 +105,16 @@ struct MusicTabContent: View {
         self.tabSelection = tabSelection
         _viewModel = State(initialValue: MusicTabViewModel(musicService: musicService))
     }
+    #endif
 
     var body: some View {
         VStack(spacing: 10) {
             Group {
                 switch effectiveTabSelection.wrappedValue {
                 case .music:
+                    #if os(macOS)
+                    musicAppVisualizerDashboard
+                    #else
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 10) {
                             serviceToggle
@@ -98,6 +137,7 @@ struct MusicTabContent: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                     }
+                    #endif
 
                 case .songs:
                     librarySongsSection
@@ -129,6 +169,76 @@ struct MusicTabContent: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
+
+    #if os(macOS)
+    private var musicAppVisualizerDashboard: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 10) {
+                musicAppVisualizerHero
+                levelMeters
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private var musicAppVisualizerHero: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Music App Visualizer")
+                        .font(.headline)
+                    Text("Threshold listens to the native macOS Music app, then switches the renderer into a dedicated visualizer mode inside Threshold.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Label(musicAppCapture.isCapturing ? "Live" : "Ready",
+                      systemImage: musicAppCapture.isCapturing ? "waveform.circle.fill" : "circle.dashed")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(musicAppCapture.isCapturing ? .green : .secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button(musicAppCapture.isCapturing ? "Refresh Visualizer" : "Start Visualizer") {
+                    startMusicAppVisualizer(using: .electronic)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Reactive Controls") {
+                    effectiveTabSelection.wrappedValue = .visualizations
+                }
+                .buttonStyle(.bordered)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Quick Presets")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    ForEach([ReactivityPreset.electronic, .ambient, .hiphop], id: \.self) { preset in
+                        Button(preset.rawValue) {
+                            startMusicAppVisualizer(using: preset)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            Text("Advanced mappings, sensitivities, and manual routing are still available in the Visualizations tab.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            musicAppCaptureRow
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.indigo.opacity(0.08)))
+    }
+    #endif
 
     private var reactToMusicBinding: Binding<Bool> {
         Binding(
@@ -552,28 +662,116 @@ struct MusicTabContent: View {
 
             Divider()
 
+            #if os(macOS)
+            Text("Music.app capture is the supported reactive audio source on macOS. The microphone path is disabled in the sandboxed Mac target for now.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+            musicAppCaptureRow
+            #else
             // Microphone row
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: audioAnalyzer.isMicrophoneCapturing ? "mic.fill" : "mic.slash.fill")
+                        .font(.caption)
+                        .foregroundStyle(audioAnalyzer.isMicrophoneCapturing ? .green : .secondary)
+                    Text("Microphone")
+                        .font(.subheadline)
+                    Spacer()
+                    Button(audioAnalyzer.isMicrophoneCapturing ? "Stop" : "Start") {
+                        if audioAnalyzer.isMicrophoneCapturing {
+                            audioAnalyzer.stopCapture()
+                        } else {
+                            audioAnalyzer.startCapture()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                if let message = audioAnalyzer.errorMessage {
+                    Text(message)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            #endif
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.10)))
+    }
+
+    #if os(macOS)
+    /// Row that lets the user start/stop capturing audio from the native Music.app.
+    @ViewBuilder
+    private var musicAppCaptureRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: audioAnalyzer.isCapturing ? "mic.fill" : "mic.slash.fill")
+                Image(systemName: musicAppCapture.isCapturing ? "speaker.wave.2.fill" : "music.note")
                     .font(.caption)
-                    .foregroundStyle(audioAnalyzer.isCapturing ? .green : .secondary)
-                Text("Microphone")
+                    .foregroundStyle(musicAppCapture.isCapturing ? .green : .secondary)
+                Text("Music App")
                     .font(.subheadline)
                 Spacer()
-                Button(audioAnalyzer.isCapturing ? "Stop" : "Start") {
-                    if audioAnalyzer.isCapturing {
-                        audioAnalyzer.stopCapture()
+                Button(musicAppCapture.isCapturing ? "Stop" : "Start") {
+                    if musicAppCapture.isCapturing {
+                        Task {
+                            await musicAppCapture.stop()
+                        }
                     } else {
-                        audioAnalyzer.startCapture()
+                        startMusicAppVisualizer(using: .electronic)
                     }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
+            if let message = musicAppCapture.errorMessage {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !musicAppCapture.isMusicAppRunning {
+                Text("Open the Music app to capture its audio.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else if musicAppCapture.isCapturing {
+                Text("Capturing Music.app audio. Start playback to drive the visualizer.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.10)))
+        .task(id: musicAppCapture.isCapturing) {
+            if !musicAppCapture.isCapturing {
+                await musicAppCapture.refreshAvailability()
+            }
+        }
     }
+
+    private func startMusicAppVisualizer(using preset: ReactivityPreset) {
+        Task {
+            if !musicAppCapture.isCapturing {
+                await musicAppCapture.start()
+            }
+            guard musicAppCapture.isCapturing else { return }
+            configureMusicAppVisualizer(using: preset)
+        }
+    }
+
+    private func configureMusicAppVisualizer(using preset: ReactivityPreset) {
+        if cache.display.lightingMode != .visualizer {
+            cache.display.lightingMode = .visualizer
+            cache.push(\.lightingMode, value: .visualizer)
+        }
+        if !cache.audioReactive.fractalAudioReactiveEnabled {
+            cache.audioReactive.fractalAudioReactiveEnabled = true
+            cache.push(\.fractalAudioReactiveEnabled, value: true)
+        }
+        applyPreset(preset)
+    }
+    #endif
 
     /// A single service connection row — works for any provider.
     private func serviceRow(_ provider: MusicServiceProvider) -> some View {
@@ -1263,12 +1461,22 @@ private struct MusicTabPreviewHarness: View {
                 .font(.headline)
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
+            #if os(macOS)
+            MusicTabContent(
+                cache: cache,
+                musicService: musicService,
+                audioAnalyzer: AudioAnalyzer(),
+                renderSettings: RenderSettings(),
+                musicAppCapture: MusicAppAudioCapture(analyzer: AudioAnalyzer())
+            )
+            #else
             MusicTabContent(
                 cache: cache,
                 musicService: musicService,
                 audioAnalyzer: AudioAnalyzer(),
                 renderSettings: RenderSettings()
             )
+            #endif
         }
         .frame(width: 460, height: 860)
     }

@@ -133,13 +133,39 @@ enum MusicRailSection: String, CaseIterable {
     case playlists = "Playlists"
     case albums = "Albums"
 
+    var title: String {
+        #if os(macOS)
+        switch self {
+        case .playback:
+            return "Music App"
+        case .songs, .playlists, .albums:
+            return rawValue
+        }
+        #else
+        return rawValue
+        #endif
+    }
+
     var icon: String {
         switch self {
-        case .playback:  return "play.circle.fill"
+        case .playback:
+            #if os(macOS)
+            return "waveform.circle.fill"
+            #else
+            return "play.circle.fill"
+            #endif
         case .songs:     return "music.note"
         case .playlists: return "music.note.list"
         case .albums:    return "square.stack"
         }
+    }
+
+    static var availableCases: [MusicRailSection] {
+        #if os(macOS)
+        return [.playback]
+        #else
+        return allCases
+        #endif
     }
 
     var musicPanelTab: MusicPanelTab {
@@ -188,10 +214,10 @@ private enum PinnedRailControl: String, CaseIterable {
         case .visualizationsMotion: return VisualizationsRailSection.motion.title
         case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.title
         case .visualizationsReactive: return VisualizationsRailSection.reactive.title
-        case .musicPlayback: return MusicRailSection.playback.rawValue
-        case .musicSongs: return MusicRailSection.songs.rawValue
-        case .musicPlaylists: return MusicRailSection.playlists.rawValue
-        case .musicAlbums: return MusicRailSection.albums.rawValue
+        case .musicPlayback: return MusicRailSection.playback.title
+        case .musicSongs: return MusicRailSection.songs.title
+        case .musicPlaylists: return MusicRailSection.playlists.title
+        case .musicAlbums: return MusicRailSection.albums.title
         }
     }
 
@@ -817,9 +843,9 @@ struct ContentView: View {
                     }
                 }
             case .music:
-                ForEach(MusicRailSection.allCases, id: \.self) { section in
+                ForEach(MusicRailSection.availableCases, id: \.self) { section in
                     railButton(
-                        title: section.rawValue,
+                        title: section.title,
                         systemImage: section.icon,
                         isSelected: selectedTab != .gestures && selectedTab != .settings && topDockTab == .music && musicRailSection == section,
                         pinControl: pinnedRailControl(for: section)
@@ -971,10 +997,24 @@ struct ContentView: View {
             pinnedRailControlsRaw
                 .split(separator: ",")
                 .compactMap { PinnedRailControl(rawValue: String($0)) }
+                .filter(isSupportedPinnedRailControl)
         }
         nonmutating set {
             pinnedRailControlsRaw = newValue.map(\.rawValue).joined(separator: ",")
         }
+    }
+
+    private func isSupportedPinnedRailControl(_ control: PinnedRailControl) -> Bool {
+        #if os(macOS)
+        switch control {
+        case .musicSongs, .musicPlaylists, .musicAlbums:
+            return false
+        default:
+            return true
+        }
+        #else
+        return true
+        #endif
     }
 
     private func countBadge(_ count: Int, color: Color) -> some View {
@@ -1080,9 +1120,15 @@ struct ContentView: View {
 
     private func activateMusicSection(_ section: MusicRailSection) {
         topDockTab = .music
-        musicRailSection = section
+        let resolvedSection: MusicRailSection
+        #if os(macOS)
+        resolvedSection = .playback
+        #else
+        resolvedSection = section
+        #endif
+        musicRailSection = resolvedSection
         selectedTab = .music
-        musicPanelTab = section.musicPanelTab
+        musicPanelTab = resolvedSection.musicPanelTab
     }
 
     private func togglePinnedRailControl(_ control: PinnedRailControl) {
@@ -1256,6 +1302,12 @@ struct ContentView: View {
                 visualizationsRailSection = .reactive
             } else {
                 topDockTab = .music
+                #if os(macOS)
+                musicRailSection = .playback
+                if musicPanelTab != .music {
+                    musicPanelTab = .music
+                }
+                #else
                 switch musicPanelTab {
                 case .music:       musicRailSection = .playback
                 case .songs:       musicRailSection = .songs
@@ -1263,6 +1315,7 @@ struct ContentView: View {
                 case .albums:      musicRailSection = .albums
                 case .visualizations: musicRailSection = .playback
                 }
+                #endif
             }
         case .gestures, .settings:
             break
@@ -1281,7 +1334,12 @@ struct ContentView: View {
                 case .animate:  animateTabContent
                 case .coloring: coloringTabContent
                 case .effects:  effectsTabContent
-                case .music:    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
+                case .music:
+                    #if os(macOS)
+                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, musicAppCapture: appModel.musicAppCapture, tabSelection: $musicPanelTab)
+                    #else
+                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
+                    #endif
                 case .gestures:
                     if supportsGestureEditing {
                         gesturesTabContent

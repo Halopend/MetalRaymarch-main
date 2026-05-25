@@ -168,6 +168,14 @@ private struct ParameterNodeRow: View {
         )
     }
 
+    private var supportsGestureShortcuts: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
+    }
+
     var body: some View {
         if let boolNode = node as? BoolParameterNode {
             HStack(spacing: 8) {
@@ -256,7 +264,7 @@ private struct ParameterNodeRow: View {
             )
 
             if floatNode.isGestureMappable {
-                if let formulaBinding = floatGestureBinding {
+                if supportsGestureShortcuts, let formulaBinding = floatGestureBinding {
                     Menu {
                         // Filter hand modes: triplets only work on single-hand
                         let isTriplet: Bool = { if case .parameterTriplet = formulaBinding { return true }; return false }()
@@ -307,16 +315,18 @@ private struct ParameterNodeRow: View {
                 }
 
                 // Flip to sensitivity
-                Button {
-                    isFlipped = true
-                } label: {
-                    Image(systemName: sensitivityIsCustom ? "gauge.with.dots.needle.67percent" : "gauge.with.dots.needle.50percent")
-                        .font(.caption)
-                        .foregroundStyle(sensitivityIsCustom ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary.opacity(0.6)))
-                        .frame(width: 20)
+                if supportsGestureShortcuts {
+                    Button {
+                        isFlipped = true
+                    } label: {
+                        Image(systemName: sensitivityIsCustom ? "gauge.with.dots.needle.67percent" : "gauge.with.dots.needle.50percent")
+                            .font(.caption)
+                            .foregroundStyle(sensitivityIsCustom ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary.opacity(0.6)))
+                            .frame(width: 20)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(sensitivityIsCustom ? "Sensitivity: \(String(format: "%.1fx", sensitivityValue))" : "Adjust gesture sensitivity")
                 }
-                .buttonStyle(.borderless)
-                .help(sensitivityIsCustom ? "Sensitivity: \(String(format: "%.1fx", sensitivityValue))" : "Adjust gesture sensitivity")
             }
         }
     }
@@ -664,6 +674,14 @@ private struct TripletRow: View {
         cache.push(\.tripletMusicGains, value: cache.audioReactive.tripletMusicGains)
     }
 
+    private var supportsGestureShortcuts: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
@@ -678,50 +696,52 @@ private struct TripletRow: View {
 
                 Spacer()
 
-                Menu {
-                    ForEach([GestureHandMode.left, .right], id: \.self) { hand in
-                        Menu(hand.displayName) {
-                            ForEach(FingerDigit.allCases, id: \.self) { finger in
-                                let slot = GestureSlot(hand: hand, finger: finger)
-                                let isCurrent = currentSlot == slot
-                                Button {
-                                    cache.setGestureBinding(binding, for: slot)
-                                } label: {
-                                    HStack {
-                                        Label(finger.displayName, systemImage: finger.icon)
-                                        if isCurrent { Image(systemName: "checkmark") }
+                if supportsGestureShortcuts {
+                    Menu {
+                        ForEach([GestureHandMode.left, .right], id: \.self) { hand in
+                            Menu(hand.displayName) {
+                                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                                    let slot = GestureSlot(hand: hand, finger: finger)
+                                    let isCurrent = currentSlot == slot
+                                    Button {
+                                        cache.setGestureBinding(binding, for: slot)
+                                    } label: {
+                                        HStack {
+                                            Label(finger.displayName, systemImage: finger.icon)
+                                            if isCurrent { Image(systemName: "checkmark") }
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    if currentSlot != nil {
-                        Divider()
-                        Button("Clear") {
-                            if let slot = currentSlot {
-                                cache.setGestureBinding(.core(.none), for: slot)
+                        if currentSlot != nil {
+                            Divider()
+                            Button("Clear") {
+                                if let slot = currentSlot {
+                                    cache.setGestureBinding(.core(.none), for: slot)
+                                }
                             }
                         }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        if let slot = currentSlot {
-                            Image(systemName: slot.hand.icon)
-                            Text("\(slot.hand.displayName) \(slot.finger.displayName)")
-                        } else {
-                            Text("Not Assigned")
+                    } label: {
+                        HStack(spacing: 4) {
+                            if let slot = currentSlot {
+                                Image(systemName: slot.hand.icon)
+                                Text("\(slot.hand.displayName) \(slot.finger.displayName)")
+                            } else {
+                                Text("Not Assigned")
+                            }
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2)
                         }
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
+                        .font(.caption)
+                        .foregroundStyle(currentSlot != nil ? .green : .secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(currentSlot != nil ? Color.green.opacity(0.1) : Color.secondary.opacity(0.08))
+                        )
                     }
-                    .font(.caption)
-                    .foregroundStyle(currentSlot != nil ? .green : .secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(currentSlot != nil ? Color.green.opacity(0.1) : Color.secondary.opacity(0.08))
-                    )
                 }
             }
 

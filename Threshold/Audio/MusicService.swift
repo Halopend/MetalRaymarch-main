@@ -19,6 +19,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class MusicService {
+    private var providerStateRevision: UInt64 = 0
 
     // ══════════════════════════════════════════════════════════════════════
     // PROVIDER REGISTRY
@@ -56,6 +57,8 @@ final class MusicService {
     ///           3) first connected service with a track,
     ///           4) first connected service.
     var activeProvider: MusicServiceProvider? {
+        _ = providerStateRevision
+
         // If user has a preference and it's connected
         if let prefID = preferredServiceID,
            let preferred = provider(for: prefID),
@@ -108,6 +111,9 @@ final class MusicService {
 
     init(appleMusic: AppleMusicManager) {
         self.appleMusic = appleMusic
+        appleMusic.onStateDidChange = { [weak self] in
+            self?.providerStateRevision &+= 1
+        }
 
         // Build and register adapter
         let amAdapter = AppleMusicServiceAdapter(manager: appleMusic)
@@ -234,6 +240,7 @@ final class MusicService {
     }
 
     private func resolvedProvider(_ serviceID: String?) -> MusicServiceProvider? {
+        _ = providerStateRevision
         if let id = serviceID { return provider(for: id) }
         return activeProvider
     }
@@ -364,12 +371,14 @@ final class MusicService {
 
     /// At least one music service is available.
     var hasAnyConnection: Bool {
-        providers.contains { $0.isConnected }
+        _ = providerStateRevision
+        return providers.contains { $0.isConnected }
     }
 
     /// All connected providers.
     var connectedProviders: [MusicServiceProvider] {
-        providers.filter { $0.isConnected }
+        _ = providerStateRevision
+        return providers.filter { $0.isConnected }
     }
 
     // ══════════════════════════════════════════════════════════════════════

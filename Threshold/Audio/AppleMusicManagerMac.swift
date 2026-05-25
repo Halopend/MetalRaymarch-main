@@ -55,6 +55,7 @@ final class AppleMusicManager {
     private(set) var libraryLoading: Bool = false
     private(set) var libraryErrorMessage: String?
 
+    @ObservationIgnored var onStateDidChange: (() -> Void)?
     var onPlaybackProgress: ((TimeInterval, TimeInterval, Bool) -> Void)?
     var onPlaybackFinished: (() -> Void)?
 
@@ -97,12 +98,13 @@ final class AppleMusicManager {
 
     init() {
         authorizationStatus = MusicAuthorization.currentStatus
-        if isAuthorized {
-            startMonitoring()
-            Task {
-                await refreshLibrary()
-            }
-        }
+        // Note: do NOT eagerly start MusicKit monitoring or refresh the library
+        // on init. ApplicationMusicPlayer can spam account-store timeout errors
+        // at launch when the user isn't actively using the in-app Apple Music
+        // provider. MusicKit work is now deferred until the user explicitly
+        // connects (via `requestAuthorization()`) or invokes a playback/library
+        // call. The native Music.app reactivity path (MusicAppAudioCapture)
+        // does not depend on MusicKit at all.
         updateFrame()
     }
 
@@ -119,6 +121,7 @@ final class AppleMusicManager {
         Task {
             let status = await MusicAuthorization.request()
             authorizationStatus = status
+            notifyStateDidChange()
 
             if status == .authorized {
                 startMonitoring()
@@ -139,62 +142,69 @@ final class AppleMusicManager {
 
         libraryLoading = true
         libraryErrorMessage = nil
+        notifyStateDidChange()
 
-        do {
-            async let songsTask = fetchSongs()
-            async let playlistsTask = fetchPlaylists()
-            async let albumsTask = fetchAlbums()
+        async let songsResult = self.loadSection("songs") { try await self.fetchSongs() }
+        async let playlistsResult = self.loadSection("playlists") { try await self.fetchPlaylists() }
+        async let albumsResult = self.loadSection("albums") { try await self.fetchAlbums() }
 
-            let songs = try await songsTask
-            let playlists = try await playlistsTask
-            let albums = try await albumsTask
+        let songsLoad = await songsResult
+        let playlistsLoad = await playlistsResult
+        let albumsLoad = await albumsResult
 
-            songLookup = Dictionary(uniqueKeysWithValues: songs.map { ($0.id.rawValue, $0) })
-            playlistLookup = Dictionary(uniqueKeysWithValues: playlists.map { ($0.playlist.id.rawValue, $0.playlist) })
-            albumLookup = Dictionary(uniqueKeysWithValues: albums.map { ($0.id.rawValue, $0) })
-            playlistTracksLookup = Dictionary(uniqueKeysWithValues: playlists.map { ($0.playlist.id.rawValue, $0.tracks) })
-            albumTracksLookup = [:]
+        let songs = songsLoad.value ?? []
+        let playlists = playlistsLoad.value ?? []
+        let albums = albumsLoad.value ?? []
 
-            librarySongs = songs
-                .map(librarySong(from:))
-                .sorted { lhs, rhs in
-                    if lhs.title == rhs.title {
-                        return lhs.artist.localizedCaseInsensitiveCompare(rhs.artist) == .orderedAscending
-                    }
-                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        songLookup = Dictionary(uniqueKeysWithValues: songs.map { ($0.id.rawValue, $0) })
+        playlistLookup = Dictionary(uniqueKeysWithValues: playlists.map { ($0.playlist.id.rawValue, $0.playlist) })
+        albumLookup = Dictionary(uniqueKeysWithValues: albums.map { ($0.id.rawValue, $0) })
+        playlistTracksLookup = Dictionary(uniqueKeysWithValues: playlists.map { ($0.playlist.id.rawValue, $0.tracks) })
+        albumTracksLookup = [:]
+
+        librarySongs = songs
+            .map(librarySong(from:))
+            .sorted { lhs, rhs in
+                if lhs.title == rhs.title {
+                    return lhs.artist.localizedCaseInsensitiveCompare(rhs.artist) == .orderedAscending
                 }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
 
-            libraryPlaylists = playlists
-                .map {
-                    LibraryPlaylist(
-                        id: $0.playlist.id.rawValue,
-                        name: $0.playlist.name,
-                        trackCount: $0.tracks.count
-                    )
-                }
-                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        libraryPlaylists = playlists
+            .map {
+                LibraryPlaylist(
+                    id: $0.playlist.id.rawValue,
+                    name: $0.playlist.name,
+                    trackCount: $0.tracks.count
+                )
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
-            libraryAlbums = albums
-                .map {
-                    LibraryAlbum(
-                        id: $0.id.rawValue,
-                        title: $0.title,
-                        artist: $0.artistName,
-                        trackCount: $0.trackCount
-                    )
+        libraryAlbums = albums
+            .map {
+                LibraryAlbum(
+                    id: $0.id.rawValue,
+                    title: $0.title,
+                    artist: $0.artistName,
+                    trackCount: $0.trackCount
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.title == rhs.title {
+                    return lhs.artist.localizedCaseInsensitiveCompare(rhs.artist) == .orderedAscending
                 }
-                .sorted { lhs, rhs in
-                    if lhs.title == rhs.title {
-                        return lhs.artist.localizedCaseInsensitiveCompare(rhs.artist) == .orderedAscending
-                    }
-                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-                }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
 
-            libraryLoading = false
-        } catch {
-            logger.error("Failed to refresh macOS Apple Music library: \(error.localizedDescription, privacy: .public)")
-            clearLibrary(reason: "Couldn't load your Apple Music library on macOS.")
+        libraryLoading = false
+
+        let allSectionsFailed = songsLoad.value == nil && playlistsLoad.value == nil && albumsLoad.value == nil
+        if allSectionsFailed {
+            libraryErrorMessage = songsLoad.errorMessage ?? playlistsLoad.errorMessage ?? albumsLoad.errorMessage ?? "Couldn't load your Apple Music library on macOS."
         }
+
+        notifyStateDidChange()
     }
 
     func playSong(id: String) async {
@@ -370,6 +380,11 @@ final class AppleMusicManager {
         let wasPlaying = isPlaying
         let previousPlaybackTime = playbackTimeSeconds
         let previousDuration = durationSeconds
+        let previousNowPlayingID = nowPlayingID
+        let previousNowPlayingTitle = nowPlayingTitle
+        let previousNowPlayingArtist = nowPlayingArtist
+        let previousNowPlayingAlbum = nowPlayingAlbum
+        let previousIsActive = isActive
 
         let playbackStatus = player.state.playbackStatus
         let isNowPlaying = playbackStatus == .playing
@@ -386,6 +401,18 @@ final class AppleMusicManager {
         }
 
         onPlaybackProgress?(playbackTimeSeconds, durationSeconds, isNowPlaying)
+
+        let stateChanged = wasPlaying != isNowPlaying
+            || previousIsActive != isActive
+            || previousNowPlayingID != nowPlayingID
+            || previousNowPlayingTitle != nowPlayingTitle
+            || previousNowPlayingArtist != nowPlayingArtist
+            || previousNowPlayingAlbum != nowPlayingAlbum
+            || previousDuration != durationSeconds
+
+        if stateChanged {
+            notifyStateDidChange()
+        }
 
         guard isNowPlaying else {
             decayToZero()
@@ -431,16 +458,35 @@ final class AppleMusicManager {
         snapshots.reserveCapacity(response.items.count)
 
         for playlist in response.items {
-            let detailedPlaylist = try await playlist.with([.tracks])
-            snapshots.append(
-                PlaylistSnapshot(
-                    playlist: detailedPlaylist,
-                    tracks: Array(detailedPlaylist.tracks ?? [])
+            do {
+                let detailedPlaylist = try await playlist.with([.tracks])
+                snapshots.append(
+                    PlaylistSnapshot(
+                        playlist: detailedPlaylist,
+                        tracks: Array(detailedPlaylist.tracks ?? [])
+                    )
                 )
-            )
+            } catch {
+                logger.error("Failed to load Apple Music playlist tracks on macOS: \(error.localizedDescription, privacy: .public)")
+                snapshots.append(
+                    PlaylistSnapshot(
+                        playlist: playlist,
+                        tracks: []
+                    )
+                )
+            }
         }
 
         return snapshots
+    }
+
+    private func loadSection<T>(_ name: String, operation: @escaping @MainActor () async throws -> T) async -> (value: T?, errorMessage: String?) {
+        do {
+            return (try await operation(), nil)
+        } catch {
+            logger.error("Failed to load Apple Music \(name, privacy: .public) on macOS: \(error.localizedDescription, privacy: .public)")
+            return (nil, "Couldn't load Apple Music \(name) on macOS.")
+        }
     }
 
     private func fetchAlbums() async throws -> [Album] {
@@ -531,6 +577,7 @@ final class AppleMusicManager {
         albumTracksLookup = [:]
         libraryLoading = false
         libraryErrorMessage = reason
+        notifyStateDidChange()
     }
 
     private func decayToZero() {
@@ -550,7 +597,12 @@ final class AppleMusicManager {
     private func reportPlaybackError(_ error: Error, fallbackMessage: String) {
         logger.error("Apple Music macOS operation failed: \(error.localizedDescription, privacy: .public)")
         libraryErrorMessage = fallbackMessage
+        notifyStateDidChange()
         updateFrame()
+    }
+
+    private func notifyStateDidChange() {
+        onStateDidChange?()
     }
 
     private func formatTime(_ seconds: Double) -> String {

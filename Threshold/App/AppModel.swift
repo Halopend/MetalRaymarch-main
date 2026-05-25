@@ -102,6 +102,12 @@ class AppModel {
     
     // Unified music service (wraps Apple Music)
     let musicService: MusicService
+
+    #if os(macOS)
+    /// Captures audio from the native Music.app via ScreenCaptureKit
+    /// and feeds it into `audioAnalyzer` for FFT-driven visuals.
+    let musicAppCapture: MusicAppAudioCapture
+    #endif
     
     // Hand tracking state
     var handTrackingEnabled: Bool = {
@@ -254,6 +260,10 @@ class AppModel {
 
         // Initialize unified music service first since it's a non-optional constant
         musicService = MusicService(appleMusic: appleMusicManager)
+
+        #if os(macOS)
+        musicAppCapture = MusicAppAudioCapture(analyzer: audioAnalyzer)
+        #endif
         
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings, parameterPipeline: parameterPipeline)
