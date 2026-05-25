@@ -35,6 +35,9 @@ struct MusicTabContent: View {
     @State private var viewModel: MusicTabViewModel
     var tabSelection: Binding<MusicPanelTab>? = nil
     @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
+    #if os(macOS)
+    @AppStorage("macMusicAppAudioCaptureEnabled") private var macMusicAppAudioCaptureEnabled = false
+    #endif
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
 
@@ -115,7 +118,7 @@ struct MusicTabContent: View {
                 switch effectiveTabSelection.wrappedValue {
                 case .music:
                     #if os(macOS)
-                    musicAppVisualizerDashboard
+                    macAudioVisualizerDashboard
                     #else
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 10) {
@@ -193,10 +196,13 @@ struct MusicTabContent: View {
     }
 
     #if os(macOS)
-    private var musicAppVisualizerDashboard: some View {
+    private var macAudioVisualizerDashboard: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 10) {
-                musicAppVisualizerHero
+                macAudioInputHero
+                if macMusicAppAudioCaptureEnabled {
+                    musicAppVisualizerHero
+                }
                 levelMeters
             }
             .padding(.horizontal, 16)
@@ -204,13 +210,89 @@ struct MusicTabContent: View {
         }
     }
 
+    private var macAudioInputHero: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Audio Input Visualizer")
+                        .font(.headline)
+                    Text("Use the Mac microphone or selected audio input for reactive visuals. Music.app audio capture is available as an advanced opt-in below.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Label(audioAnalyzer.isCapturing ? "Live" : "Ready",
+                      systemImage: audioAnalyzer.isCapturing ? "waveform.circle.fill" : "circle.dashed")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(audioAnalyzer.isCapturing ? .green : .secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button(audioAnalyzer.isMicrophoneCapturing ? "Stop Input" : "Start Input") {
+                    if audioAnalyzer.isMicrophoneCapturing {
+                        audioAnalyzer.stopCapture()
+                    } else {
+                        startAudioInputVisualizer(using: .electronic)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Reactive Controls") {
+                    effectiveTabSelection.wrappedValue = .visualizations
+                }
+                .buttonStyle(.bordered)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Quick Presets")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    ForEach([ReactivityPreset.electronic, .ambient, .hiphop], id: \.self) { preset in
+                        Button(preset.rawValue) {
+                            startAudioInputVisualizer(using: preset)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            if let message = audioAnalyzer.errorMessage {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Toggle("Advanced Music.app audio capture", isOn: $macMusicAppAudioCaptureEnabled)
+                .font(.caption)
+                .onChange(of: macMusicAppAudioCaptureEnabled) { _, isEnabled in
+                    guard !isEnabled else { return }
+                    Task { await musicAppCapture.stop() }
+                }
+
+            if !macMusicAppAudioCaptureEnabled {
+                Text("Optional Music.app capture uses ScreenCaptureKit and may require Screen Recording or Screen & System Audio Recording permission. It captures Music.app process audio, not a specific window.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
+    }
+
     private var musicAppVisualizerHero: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Music App Visualizer")
+                    Text("Music.app Audio Capture")
                         .font(.headline)
-                    Text("Threshold listens to the native macOS Music app, then switches the renderer into a dedicated visualizer mode inside Threshold.")
+                    Text("Advanced opt-in capture listens to Music.app process audio through ScreenCaptureKit. macOS may ask for Screen Recording or Screen & System Audio Recording permission.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -224,7 +306,7 @@ struct MusicTabContent: View {
             }
 
             HStack(spacing: 8) {
-                Button(musicAppCapture.isCapturing ? "Refresh Visualizer" : "Start Visualizer") {
+                Button(musicAppCapture.isCapturing ? "Refresh Capture" : "Start Capture") {
                     startMusicAppVisualizer(using: .electronic)
                 }
                 .buttonStyle(.borderedProminent)
@@ -251,7 +333,7 @@ struct MusicTabContent: View {
                 }
             }
 
-            Text("Advanced mappings, sensitivities, and manual routing are still available in the Visualizations tab.")
+            Text("ScreenCaptureKit can target Music.app as a process, but macOS does not provide reliable per-window audio isolation.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -685,13 +767,11 @@ struct MusicTabContent: View {
             Divider()
 
             #if os(macOS)
-            Text("Music.app capture is the supported reactive audio source on macOS. The microphone path is disabled in the sandboxed Mac target for now.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Divider()
-            musicAppCaptureRow
+            macMicrophoneCaptureRow
+            if macMusicAppAudioCaptureEnabled {
+                Divider()
+                musicAppCaptureRow
+            }
             #else
             // Microphone row
             VStack(alignment: .leading, spacing: 6) {
@@ -727,6 +807,40 @@ struct MusicTabContent: View {
     }
 
     #if os(macOS)
+    private var macMicrophoneCaptureRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: audioAnalyzer.isMicrophoneCapturing ? "mic.fill" : "mic.slash.fill")
+                    .font(.caption)
+                    .foregroundStyle(audioAnalyzer.isMicrophoneCapturing ? .green : .secondary)
+                Text("Audio Input")
+                    .font(.subheadline)
+                Spacer()
+                Button(audioAnalyzer.isMicrophoneCapturing ? "Stop" : "Start") {
+                    if audioAnalyzer.isMicrophoneCapturing {
+                        audioAnalyzer.stopCapture()
+                    } else {
+                        audioAnalyzer.startCapture()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            if let message = audioAnalyzer.errorMessage {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Uses microphone permission only. Select a system or virtual audio input in macOS Sound settings when needed.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     /// Row that lets the user start/stop capturing audio from the native Music.app.
     @ViewBuilder
     private var musicAppCaptureRow: some View {
@@ -735,7 +849,7 @@ struct MusicTabContent: View {
                 Image(systemName: musicAppCapture.isCapturing ? "speaker.wave.2.fill" : "music.note")
                     .font(.caption)
                     .foregroundStyle(musicAppCapture.isCapturing ? .green : .secondary)
-                Text("Music App")
+                Text("Music.app")
                     .font(.subheadline)
                 Spacer()
                 Button(musicAppCapture.isCapturing ? "Stop" : "Start") {
@@ -756,7 +870,7 @@ struct MusicTabContent: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             } else if !musicAppCapture.isMusicAppRunning {
-                Text("Open the Music app to capture its audio.")
+                Text("Open Music.app to capture its process audio. This cannot isolate one Music window from another.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else if musicAppCapture.isCapturing {
@@ -774,12 +888,20 @@ struct MusicTabContent: View {
 
     private func startMusicAppVisualizer(using preset: ReactivityPreset) {
         Task {
+            guard macMusicAppAudioCaptureEnabled else { return }
             if !musicAppCapture.isCapturing {
                 await musicAppCapture.start()
             }
             guard musicAppCapture.isCapturing else { return }
             configureMusicAppVisualizer(using: preset)
         }
+    }
+
+    private func startAudioInputVisualizer(using preset: ReactivityPreset) {
+        if !audioAnalyzer.isMicrophoneCapturing {
+            audioAnalyzer.startCapture()
+        }
+        configureMusicAppVisualizer(using: preset)
     }
 
     private func configureMusicAppVisualizer(using preset: ReactivityPreset) {

@@ -1124,11 +1124,18 @@ struct SceneEditorView: View {
                     .padding(10)
                     .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
                 } else {
+                    #if os(macOS)
+                    Text("Attached-song playback isn't available in the macOS build. Use audio input reactivity for music-driven scenes.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    #else
                     Text("Auto-plays when the scene starts.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    #endif
                 }
                 
+                #if !os(macOS)
                 Button {
                     Task {
                         if let attachment = await appModel.musicService.captureAttachmentWithFallbacks() {
@@ -1215,6 +1222,7 @@ struct SceneEditorView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
+                #endif
                 }
             }
             .padding(AnimationEditorLayout.settingsContentPadding)

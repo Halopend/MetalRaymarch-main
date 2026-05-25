@@ -2,7 +2,7 @@
 //  MusicAppAudioCapture.swift
 //  Threshold
 //
-//  macOS-only: captures audio output from the native Music.app window
+//  macOS-only: captures audio output from the native Music.app process
 //  via ScreenCaptureKit and feeds it into AudioAnalyzer for FFT analysis.
 //
 //  This is the supported public path for reacting to music played in
@@ -65,7 +65,7 @@ final class MusicAppAudioCapture {
             }
         } catch {
             isMusicAppRunning = false
-            errorMessage = "Screen Recording permission required to detect Music windows. Enable it in System Settings → Privacy & Security."
+            errorMessage = "Screen Recording or Screen & System Audio Recording permission required to detect Music.app. Enable it in System Settings → Privacy & Security."
             logger.error("SCShareableContent failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -186,7 +186,7 @@ final class MusicAppAudioCapture {
         let ns = error as NSError
         // SCStreamErrorDomain user-declined / missing TCC permission paths.
         if ns.domain.contains("SCStream") || ns.domain == "com.apple.ScreenCaptureKit" {
-            return "Couldn't access Music audio. Grant Screen Recording permission in System Settings → Privacy & Security."
+            return "Couldn't access Music.app audio. Grant Screen Recording or Screen & System Audio Recording permission in System Settings → Privacy & Security."
         }
         return "Couldn't start Music app capture: \(error.localizedDescription)"
     }

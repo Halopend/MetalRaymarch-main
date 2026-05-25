@@ -610,7 +610,7 @@ private final class ThresholdMacRenderer {
         let isAudioMode = settings.lightingMode == .audioReactive ||
             settings.lightingMode == .visualizer ||
             settings.fractalAudioReactiveEnabled
-        let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing || appModel.appleMusicManager.isActive
+        let hasActiveAudioSources = appModel.audioAnalyzer.isCapturing
 
         parameterUpdateCoordinator.scheduleParameterUpdates(
             shouldUpdateAnimation: settings.isAnimationPlaying,
@@ -743,45 +743,16 @@ private final class ThresholdMacRenderer {
         }
 
         let analyzer = appModel.audioAnalyzer
-        let appleMusicManager = appModel.appleMusicManager
         let bassSensitivity = settings.bassSensitivity
         let midSensitivity = settings.midSensitivity
         let trebleSensitivity = settings.trebleSensitivity
         let beatSensitivity = settings.beatSensitivity
 
-        var totalBass: Float = 0
-        var totalMid: Float = 0
-        var totalTreble: Float = 0
-        var totalBeat: Float = 0
-        var totalLevel: Float = 0
-        var sourceCount: Float = 0
-
-        if analyzer.isCapturing {
-            totalBass += analyzer.bassLevel
-            totalMid += analyzer.midLevel
-            totalTreble += analyzer.trebleLevel
-            totalBeat = max(totalBeat, analyzer.peakLevel * 0.7)
-            totalLevel += analyzer.level
-            sourceCount += 1
-        }
-
-        if appleMusicManager.isActive {
-            totalBass += appleMusicManager.bassLevel
-            totalMid += appleMusicManager.midLevel
-            totalTreble += appleMusicManager.trebleLevel
-            totalBeat = max(totalBeat, appleMusicManager.beatIntensity)
-            totalLevel += appleMusicManager.overallLevel
-            sourceCount += 1
-        }
-
-        guard sourceCount > 0 else { return }
-
-        let inverseSourceCount = 1.0 / sourceCount
-        settings.bassLevel = min(1.0, totalBass * inverseSourceCount * bassSensitivity)
-        settings.midLevel = min(1.0, totalMid * inverseSourceCount * midSensitivity)
-        settings.trebleLevel = min(1.0, totalTreble * inverseSourceCount * trebleSensitivity)
-        settings.beatIntensity = min(1.0, totalBeat * beatSensitivity)
-        settings.audioLevel = totalLevel * inverseSourceCount
+        settings.bassLevel = min(1.0, analyzer.bassLevel * bassSensitivity)
+        settings.midLevel = min(1.0, analyzer.midLevel * midSensitivity)
+        settings.trebleLevel = min(1.0, analyzer.trebleLevel * trebleSensitivity)
+        settings.beatIntensity = min(1.0, analyzer.peakLevel * 0.7 * beatSensitivity)
+        settings.audioLevel = analyzer.level
     }
 
     private func updateMusicReactiveParameters(appModel: AppModel,

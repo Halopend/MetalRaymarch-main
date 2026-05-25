@@ -107,7 +107,7 @@ final class MusicService {
     let appleMusic: AppleMusicManager
 
     /// Typed adapter access when needed.
-    private(set) var appleMusicAdapter: AppleMusicServiceAdapter!
+    private(set) var appleMusicAdapter: AppleMusicServiceAdapter?
 
     init(appleMusic: AppleMusicManager) {
         self.appleMusic = appleMusic
@@ -115,10 +115,14 @@ final class MusicService {
             self?.providerStateRevision &+= 1
         }
 
+        #if os(macOS)
+        appleMusicAdapter = nil
+        #else
         // Build and register adapter
         let amAdapter = AppleMusicServiceAdapter(manager: appleMusic)
         self.appleMusicAdapter = amAdapter
         register(amAdapter)
+        #endif
     }
 
 
