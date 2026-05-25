@@ -195,6 +195,12 @@ private final class ThresholdMacInteractiveView: MTKView {
         inputDelegate?.viewportDidZoom(delta: Float(event.scrollingDeltaY) * multiplier)
     }
 
+    override func magnify(with event: NSEvent) {
+        _ = window?.makeFirstResponder(self)
+        inputDelegate?.viewportDidChangeFocus(true)
+        inputDelegate?.viewportDidZoom(delta: -Float(event.magnification) * 18.0)
+    }
+
     override func keyDown(with event: NSEvent) {
         if handleKey(event, isPressed: true) {
             return
