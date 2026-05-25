@@ -244,6 +244,7 @@ final class AnimationManager {
     @ObservationIgnored private var iCloudQuery: NSMetadataQuery?
     /// The Animations/ folder URL currently being watched.
     @ObservationIgnored private var iCloudAnimDir: URL?
+    @ObservationIgnored private var iCloudQueryObservers: [NSObjectProtocol] = []
 
     /// Start watching `animDir` (the iCloud Drive Animations/ subfolder) for new
     /// `.threshanim` / `.threshanimv` files. Idempotent — calling again with the
@@ -259,7 +260,10 @@ final class AnimationManager {
         // Then set up an NSMetadataQuery to catch files added later (including
         // those that are still downloading from the cloud).
         let query = NSMetadataQuery()
-        query.searchScopes = [NSMetadataQueryUbiquitousDocumentsScope]
+        // Scope Spotlight to the resolved Animations folder itself; using the
+        // broad ubiquitous-documents scope can trigger sandboxed file-provider
+        // permission noise for unrelated iCloud content on macOS.
+        query.searchScopes = [animDir]
         // Restrict to files inside our Animations subfolder.
         query.predicate = NSPredicate(
             format: "%K BEGINSWITH %@ AND (%K ENDSWITH '.threshanim' OR %K ENDSWITH '.threshanimv')",
@@ -269,7 +273,7 @@ final class AnimationManager {
         )
         query.operationQueue = .main
 
-        NotificationCenter.default.addObserver(
+        let finishObserver = NotificationCenter.default.addObserver(
             forName: .NSMetadataQueryDidFinishGathering,
             object: query,
             queue: .main
@@ -278,7 +282,7 @@ final class AnimationManager {
                     self?.handleiCloudQueryUpdate()
                 }
         }
-        NotificationCenter.default.addObserver(
+        let updateObserver = NotificationCenter.default.addObserver(
             forName: .NSMetadataQueryDidUpdate,
             object: query,
             queue: .main
@@ -287,6 +291,7 @@ final class AnimationManager {
                     self?.handleiCloudQueryUpdate()
                 }
         }
+        iCloudQueryObservers = [finishObserver, updateObserver]
 
         query.start()
         iCloudQuery = query
@@ -296,10 +301,12 @@ final class AnimationManager {
     func stopWatchingiCloudAnimations() {
         if let query = iCloudQuery {
             query.stop()
-            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
-            NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidUpdate, object: query)
             iCloudQuery = nil
         }
+        for observer in iCloudQueryObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        iCloudQueryObservers.removeAll()
         iCloudAnimDir = nil
     }
 

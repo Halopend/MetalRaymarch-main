@@ -13,6 +13,7 @@
 #if os(macOS)
 
 import AVFoundation
+import CoreGraphics
 @preconcurrency import ScreenCaptureKit
 import Observation
 import os
@@ -42,6 +43,12 @@ final class MusicAppAudioCapture {
 
     private static let musicBundleID = "com.apple.Music"
 
+    private enum ScreenCapturePermissionState {
+        case granted
+        case grantedNeedsRelaunch
+        case denied
+    }
+
     init(analyzer: AudioAnalyzer) {
         self.analyzer = analyzer
     }
@@ -52,6 +59,12 @@ final class MusicAppAudioCapture {
     /// Safe to call without Screen Recording permission; on denial
     /// `errorMessage` will explain how to grant access.
     func refreshAvailability() async {
+        guard CGPreflightScreenCaptureAccess() else {
+            isMusicAppRunning = false
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
+            return
+        }
+
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false,
@@ -65,7 +78,7 @@ final class MusicAppAudioCapture {
             }
         } catch {
             isMusicAppRunning = false
-            errorMessage = "Screen Recording or Screen & System Audio Recording permission required to detect Music.app. Enable it in System Settings → Privacy & Security."
+            errorMessage = mapStartError(error)
             logger.error("SCShareableContent failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -78,6 +91,19 @@ final class MusicAppAudioCapture {
     /// `SCRunningApplication` — a window-only filter will not deliver audio.
     func start() async {
         guard !isCapturing else { return }
+
+        switch ensureScreenCapturePermission() {
+        case .granted:
+            break
+        case .grantedNeedsRelaunch:
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
+            logger.info("Screen capture permission granted; waiting for relaunch before starting Music.app capture")
+            return
+        case .denied:
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
+            logger.error("Music.app capture blocked: screen capture permission denied")
+            return
+        }
 
         // Always refresh so we pick up Music.app even if the user launched it
         // after the tab first appeared.
@@ -185,10 +211,36 @@ final class MusicAppAudioCapture {
     private func mapStartError(_ error: Error) -> String {
         let ns = error as NSError
         // SCStreamErrorDomain user-declined / missing TCC permission paths.
-        if ns.domain.contains("SCStream") || ns.domain == "com.apple.ScreenCaptureKit" {
-            return "Couldn't access Music.app audio. Grant Screen Recording or Screen & System Audio Recording permission in System Settings → Privacy & Security."
+        if isScreenCapturePermissionError(ns) {
+            return screenCapturePermissionMessage(needsRelaunch: CGPreflightScreenCaptureAccess())
         }
         return "Couldn't start Music app capture: \(error.localizedDescription)"
+    }
+
+    private func ensureScreenCapturePermission() -> ScreenCapturePermissionState {
+        if CGPreflightScreenCaptureAccess() {
+            return .granted
+        }
+
+        if CGRequestScreenCaptureAccess() {
+            return .grantedNeedsRelaunch
+        }
+
+        return .denied
+    }
+
+    private func screenCapturePermissionMessage(needsRelaunch: Bool) -> String {
+        if needsRelaunch {
+            return "Screen Recording permission was granted. Quit and reopen Threshold, then start Music.app capture again."
+        }
+
+        return "Screen Recording or Screen & System Audio Recording permission required to detect Music.app. Enable it in System Settings → Privacy & Security."
+    }
+
+    private func isScreenCapturePermissionError(_ error: NSError) -> Bool {
+        error.domain.contains("SCStream") ||
+        error.domain == "com.apple.ScreenCaptureKit" ||
+        error.localizedDescription.localizedCaseInsensitiveContains("declined TCC")
     }
 }
 

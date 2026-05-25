@@ -132,10 +132,16 @@ struct UsageSnapshot: Codable {
 @Observable
 final class UsageAnalytics {
     static let shared = UsageAnalytics()
+    private static let analyticsEnabledKey = "AnalyticsEnabled"
+    private static let communityDisplayNameKey = "CommunityDisplayName"
     
-    // CloudKit container - uses your app's default container
-    private let container = CKContainer.default()
-    private var database: CKDatabase { container.publicCloudDatabase }
+    static var persistedAnalyticsEnabled: Bool {
+        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? false
+    }
+
+    // CloudKit is initialized on first use so analytics-disabled launches
+    // don't touch CloudKit during startup or permission-triggered relaunches.
+    @ObservationIgnored private var cachedDatabase: CKDatabase?
     
     // Local tracking state
     private var sessionStartTime: Date = Date()
@@ -183,13 +189,12 @@ final class UsageAnalytics {
     
     // Persistence key
     private let pendingUploadsKey = "PendingUsageSnapshots"
-    private let communityDisplayNameKey = "CommunityDisplayName"
 
     private var storedCommunityDisplayName: String
     
     var analyticsEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(analyticsEnabled, forKey: "AnalyticsEnabled")
+            UserDefaults.standard.set(analyticsEnabled, forKey: Self.analyticsEnabledKey)
             if analyticsEnabled {
                 Task {
                     await uploadPendingSnapshots()
@@ -206,18 +211,18 @@ final class UsageAnalytics {
             storedCommunityDisplayName = normalized
 
             if normalized.isEmpty {
-                UserDefaults.standard.removeObject(forKey: communityDisplayNameKey)
+                UserDefaults.standard.removeObject(forKey: Self.communityDisplayNameKey)
             } else {
-                UserDefaults.standard.set(normalized, forKey: communityDisplayNameKey)
+                UserDefaults.standard.set(normalized, forKey: Self.communityDisplayNameKey)
             }
         }
     }
     
     private init() {
         // Default to disabled — user must explicitly opt in
-        self.analyticsEnabled = UserDefaults.standard.object(forKey: "AnalyticsEnabled") as? Bool ?? false
+        self.analyticsEnabled = Self.persistedAnalyticsEnabled
         self.storedCommunityDisplayName = Self.normalizedCommunityDisplayName(
-            UserDefaults.standard.string(forKey: communityDisplayNameKey) ?? ""
+            UserDefaults.standard.string(forKey: Self.communityDisplayNameKey) ?? ""
         )
         
         // Try to upload any pending snapshots from previous sessions when opted in.
@@ -270,6 +275,16 @@ final class UsageAnalytics {
     private func jsonString<T: Encodable>(from value: T) -> String? {
         guard let data = try? JSONEncoder().encode(value) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    private func database() -> CKDatabase {
+        if let cachedDatabase {
+            return cachedDatabase
+        }
+
+        let database = CKContainer.default().publicCloudDatabase
+        cachedDatabase = database
+        return database
     }
 
     private func buildSnapshot() -> UsageSnapshot {
@@ -492,7 +507,7 @@ final class UsageAnalytics {
         record["positionZ"] = preset.position.z as NSNumber
         
         do {
-            let _ = try await database.save(record)
+            let _ = try await database().save(record)
             print("📊 Preset snapshot uploaded: \"\(preset.name)\"")
         } catch {
             print("📊 Preset snapshot upload failed: \(error.localizedDescription)")
@@ -588,7 +603,7 @@ final class UsageAnalytics {
         record["appVersion"] = snapshot.appVersion
         
         do {
-            let _ = try await database.save(record)
+            let _ = try await database().save(record)
             print("📊 Analytics uploaded successfully")
         } catch {
             print("📊 Analytics upload failed: \(error.localizedDescription)")

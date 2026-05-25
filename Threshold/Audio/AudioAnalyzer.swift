@@ -242,9 +242,10 @@ class AudioAnalyzer {
         computeBandIndices()
         
         // Use larger buffer for FFT analysis
-        input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(fftSize), format: format) { [weak self] buffer, _ in
-            self?.processAudioBuffer(buffer)
-        }
+        input.installTap(onBus: 0,
+                         bufferSize: AVAudioFrameCount(fftSize),
+                         format: format,
+                         block: makeMicrophoneTapHandler())
         
         do {
             try engine.start()
@@ -260,6 +261,43 @@ class AudioAnalyzer {
             self.errorMessage = "Failed to start audio: \(error.localizedDescription)"
             print("❌ Audio capture error: \(error)")
         }
+    }
+
+    private nonisolated func makeMicrophoneTapHandler() -> AVAudioNodeTapBlock {
+        { [weak self] buffer, _ in
+            guard let ownedBuffer = Self.makeOwnedPCMBufferCopy(buffer) else { return }
+            let payload = SendablePCMBuffer(buffer: ownedBuffer)
+
+            Task { @MainActor [weak self] in
+                self?.processAudioBuffer(payload.buffer)
+            }
+        }
+    }
+
+    private nonisolated static func makeOwnedPCMBufferCopy(_ source: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard source.format.commonFormat == .pcmFormatFloat32,
+              let sourceChannels = source.floatChannelData,
+              let copy = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: source.frameLength),
+              let destinationChannels = copy.floatChannelData else {
+            return nil
+        }
+
+        copy.frameLength = source.frameLength
+
+        let frameCount = Int(source.frameLength)
+        let channelCount = Int(source.format.channelCount)
+
+        if source.format.isInterleaved {
+            let byteCount = frameCount * channelCount * MemoryLayout<Float>.size
+            memcpy(destinationChannels[0], sourceChannels[0], byteCount)
+        } else {
+            let byteCount = frameCount * MemoryLayout<Float>.size
+            for channel in 0..<channelCount {
+                memcpy(destinationChannels[channel], sourceChannels[channel], byteCount)
+            }
+        }
+
+        return copy
     }
     
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -433,6 +471,10 @@ class AudioAnalyzer {
         trebleLevel = 0
         lastUpdateTime = 0
     }
+}
+
+private struct SendablePCMBuffer: @unchecked Sendable {
+    let buffer: AVAudioPCMBuffer
 }
 
 // MARK: - Extension for RenderSettings integration

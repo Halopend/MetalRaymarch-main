@@ -52,7 +52,8 @@ final class UIUpdateCoordinator: Sendable {
                 appModel.headHeightMeters = headHeight
             }
 
-            if pendingWork.shouldUpdateAnalytics {
+            if pendingWork.shouldUpdateAnalytics,
+               UsageAnalytics.persistedAnalyticsEnabled {
                 let settings = appModel.renderSettings
                 let qualityPreset = QualityPreset.detect(
                     fractalIterations: settings.fractalIterations,
