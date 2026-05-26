@@ -852,7 +852,7 @@ actor Renderer {
                 let mid = settings.midLevel
                 let treble = settings.trebleLevel
                 let beat = settings.beatIntensity
-                let globalAmount = settings.fractalAudioAmount
+                let globalAmount = settings.fractalAudioAmount * settings.animationActivityFactor
                 let beatPunch = settings.fractalBeatPunch
 
                 // Composite drive (default source behavior)

@@ -964,7 +964,8 @@ final class AnimationManager {
         let mode = scene.playbackMode
 
         // Advance time. Attached-song fade can temporarily damp velocity near track end.
-        let effectivePlaybackVelocity = playbackSpeed * attachedSongFadeVelocityScale
+        let activityFactor = Double(renderSettings?.animationActivityFactor ?? 1.0)
+        let effectivePlaybackVelocity = playbackSpeed * attachedSongFadeVelocityScale * activityFactor
         playhead.elapsedInSegment += deltaTime * effectivePlaybackVelocity
 
         // Resolve the current segment (from → to) based on playback mode.

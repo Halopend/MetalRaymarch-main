@@ -89,6 +89,21 @@ final class MusicAppAudioCapture {
     /// routes audio at the application level (windows carry video, processes
     /// carry audio), so the content filter must include Music's
     /// `SCRunningApplication` — a window-only filter will not deliver audio.
+    func reactivateSecurityPermissions() async {
+        switch ensureScreenCapturePermission() {
+        case .granted:
+            await refreshAvailability()
+        case .grantedNeedsRelaunch:
+            isMusicAppRunning = false
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
+            logger.info("Screen capture permission granted; waiting for relaunch before reactivating Music.app capture")
+        case .denied:
+            isMusicAppRunning = false
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
+            logger.error("Music.app capture blocked: screen capture permission denied during permission reactivation")
+        }
+    }
+
     func start() async {
         guard !isCapturing else { return }
 

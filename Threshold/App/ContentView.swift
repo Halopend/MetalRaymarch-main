@@ -102,7 +102,7 @@ enum VisualizationsRailSection: String, CaseIterable {
     case color = "Color"
     case mapping = "Mapping"
     case grading = "Grading"
-    case motion = "Motion"
+    case motion = "Cycling"
     case atmosphere = "Atmosphere"
     case reactive = "Reactive"
 
@@ -339,6 +339,9 @@ struct ContentView: View {
     @State private var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
     @State private var didLongPressPinnedRailControl: PinnedRailControl?
+    @State private var animationKillSwitchTask: Task<Void, Never>?
+
+    private let animationKillSwitchDuration: TimeInterval = 0.7
 
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
@@ -358,6 +361,10 @@ struct ContentView: View {
         if cache.fractalType.supports(.polarRotation), cache.lighting.polarRotationEffect.enabled { count += 1 }
         if cache.fractalType.supports(.juliaDrift), cache.lighting.juliaDriftEffect.enabled { count += 1 }
         return count
+    }
+
+    private var hasActiveAnimationSystems: Bool {
+        isAnimationPlaying || activeMusicPermutationCount > 0 || activeDynamicEffectCount > 0 || animationKillSwitchTask != nil
     }
 
     private var hasShapeMusicMapping: Bool {
@@ -502,6 +509,8 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
             appModel.openSavePresetMenuHandler = nil
+            animationKillSwitchTask?.cancel()
+            animationKillSwitchTask = nil
         }
         .onReceive(NotificationCenter.default.publisher(for: AppModel.fractalSettingsDidChangeNotification)) { _ in
             cache.loadFromSettings()
@@ -1438,20 +1447,32 @@ struct ContentView: View {
                 count: nil,
                 action: toggleAnimationPlaybackActive
             )
+            ActivityLightButton(
+                title: "Kill switch",
+                systemImage: animationKillSwitchTask == nil ? "stop.circle" : "stop.circle.fill",
+                color: .red,
+                isActive: hasActiveAnimationSystems,
+                count: nil,
+                action: engageAnimationKillSwitch
+            )
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Capsule().fill(Color.secondary.opacity(0.08)))
         .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.14), lineWidth: 1))
-        .help("Quick toggles for music permutations and dynamic color")
+        .help("Quick toggles for music permutations, dynamic color, playback, and the global kill switch")
     }
 
     private func toggleMusicPermutationsActive() {
         let shouldEnable = activeMusicPermutationCount == 0
-        cache.audioReactive.fractalAudioReactiveEnabled = shouldEnable
-        cache.push(\.fractalAudioReactiveEnabled, value: shouldEnable)
+        setMusicPermutationsEnabled(shouldEnable)
+    }
 
-        if shouldEnable {
+    private func setMusicPermutationsEnabled(_ enabled: Bool) {
+        cache.audioReactive.fractalAudioReactiveEnabled = enabled
+        cache.push(\.fractalAudioReactiveEnabled, value: enabled)
+
+        if enabled {
             cache.display.lightingMode = .audioReactive
             cache.push(\.lightingMode, value: .audioReactive)
             if cache.audioReactive.musicReactiveMappings.isEmpty {
@@ -1495,33 +1516,68 @@ struct ContentView: View {
 
     private func toggleDynamicEffectsActive() {
         if activeDynamicEffectCount > 0 {
-            cache.lighting.gradientCycleEffect.enabled = false
-            cache.commitGradientCycleEffect()
-
-            cache.lighting.hueRotationEffect.enabled = false
-            cache.commitHueRotationEffect()
-
-            cache.lighting.pulseEffect.enabled = false
-            cache.commitPulseEffect()
-
-            cache.lighting.beatFlashEffect.enabled = false
-            cache.commitBeatFlashEffect()
-
-            cache.lighting.polarRotationEffect.direction = .off
-            cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
-
-            cache.lighting.juliaDriftEffect.enabled = false
-            cache.commitJuliaDriftEffect()
+            disableDynamicEffects()
         } else {
-            cache.lighting.gradientCycleEffect = .slow
-            cache.commitGradientCycleEffect()
-
-            cache.lighting.hueRotationEffect = .subtle
-            cache.commitHueRotationEffect()
-
-            cache.lighting.pulseEffect = .subtle
-            cache.commitPulseEffect()
+            enableDefaultDynamicEffects()
         }
+
+        cache.lighting.lightingPreset = .custom
+        cache.push(\.lightingPreset, value: .custom)
+    }
+
+    private func engageAnimationKillSwitch() {
+        guard hasActiveAnimationSystems, animationKillSwitchTask == nil else { return }
+
+        appModel.renderSettings.beginAnimationKillSwitch(duration: animationKillSwitchDuration)
+        animationKillSwitchTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(animationKillSwitchDuration * 1_000_000_000))
+            finalizeAnimationKillSwitch()
+        }
+    }
+
+    private func finalizeAnimationKillSwitch() {
+        animationKillSwitchTask?.cancel()
+        animationKillSwitchTask = nil
+
+        appModel.animationManager?.stop()
+        setMusicPermutationsEnabled(false)
+        disableDynamicEffects()
+        appModel.parameterPipeline.clearMusicLayers(settings: appModel.renderSettings)
+        appModel.renderSettings.cancelAnimationKillSwitch()
+    }
+
+    private func disableDynamicEffects() {
+        cache.lighting.gradientCycleEffect.enabled = false
+        cache.commitGradientCycleEffect()
+
+        cache.lighting.hueRotationEffect.enabled = false
+        cache.commitHueRotationEffect()
+
+        cache.lighting.pulseEffect.enabled = false
+        cache.commitPulseEffect()
+
+        cache.lighting.beatFlashEffect.enabled = false
+        cache.commitBeatFlashEffect()
+
+        cache.lighting.polarRotationEffect.direction = .off
+        cache.push(\.polarRotationEffect, value: cache.lighting.polarRotationEffect)
+
+        cache.lighting.juliaDriftEffect.enabled = false
+        cache.commitJuliaDriftEffect()
+
+        cache.lighting.lightingPreset = .custom
+        cache.push(\.lightingPreset, value: .custom)
+    }
+
+    private func enableDefaultDynamicEffects() {
+        cache.lighting.gradientCycleEffect = .slow
+        cache.commitGradientCycleEffect()
+
+        cache.lighting.hueRotationEffect = .subtle
+        cache.commitHueRotationEffect()
+
+        cache.lighting.pulseEffect = .subtle
+        cache.commitPulseEffect()
 
         cache.lighting.lightingPreset = .custom
         cache.push(\.lightingPreset, value: .custom)

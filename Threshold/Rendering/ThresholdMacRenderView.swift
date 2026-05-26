@@ -771,7 +771,7 @@ private final class ThresholdMacRenderer {
         let mid = settings.midLevel
         let treble = settings.trebleLevel
         let beat = settings.beatIntensity
-        let globalAmount = settings.fractalAudioAmount
+        let globalAmount = settings.fractalAudioAmount * settings.animationActivityFactor
         let beatPunch = settings.fractalBeatPunch
 
         let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15

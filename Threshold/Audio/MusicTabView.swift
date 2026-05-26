@@ -271,8 +271,13 @@ struct MusicTabContent: View {
             Toggle("Advanced Music.app audio capture", isOn: $macMusicAppAudioCaptureEnabled)
                 .font(.caption)
                 .onChange(of: macMusicAppAudioCaptureEnabled) { _, isEnabled in
-                    guard !isEnabled else { return }
-                    Task { await musicAppCapture.stop() }
+                    Task {
+                        if isEnabled {
+                            await musicAppCapture.reactivateSecurityPermissions()
+                        } else {
+                            await musicAppCapture.stop()
+                        }
+                    }
                 }
 
             if !macMusicAppAudioCaptureEnabled {

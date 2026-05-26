@@ -224,6 +224,10 @@ final class RenderSettings: @unchecked Sendable {
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
     private var _colorAnimTime: Float = 0.0                 // Running animation time
+    private var _animationActivityFactor: Float = 1.0
+    private var _animationKillSwitchActive: Bool = false
+    private var _animationKillSwitchRemaining: Float = 0.0
+    private var _animationKillSwitchDuration: Float = 0.7
     private var _lightingPreset: LightingPreset = .off      // Current preset package
     private var _hueRotationEffect: HueRotationEffect = .off
     private var _pulseEffect: PulseEffect = .off
@@ -1654,8 +1658,23 @@ final class RenderSettings: @unchecked Sendable {
     /// Update color scheme transitions and animation time. Call once per frame.
     func updateColorSchemeTransition(deltaTime: Float) {
         withLock {
+            if _animationKillSwitchActive {
+                _animationKillSwitchRemaining = max(0.0, _animationKillSwitchRemaining - deltaTime)
+                if _animationKillSwitchDuration > 0.0001 {
+                    _animationActivityFactor = max(0.0, min(1.0, _animationKillSwitchRemaining / _animationKillSwitchDuration))
+                } else {
+                    _animationActivityFactor = 0.0
+                }
+
+                if _animationKillSwitchRemaining <= 0.0001 {
+                    _animationKillSwitchRemaining = 0.0
+                    _animationActivityFactor = 0.0
+                    _animationKillSwitchActive = false
+                }
+            }
+
             // Update animation time
-            _colorAnimTime += deltaTime
+            _colorAnimTime += deltaTime * _animationActivityFactor
 
             // Accumulate polar rotation angle when enabled and fractal supports it
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
@@ -1757,6 +1776,8 @@ final class RenderSettings: @unchecked Sendable {
         // C array becomes a tuple in Swift — fill all 8 slots
         let gs = (s0, s1, s2, s3, s4, s5, s6, s7)
         
+        let animationActivity = _animationActivityFactor
+
         return ColorSchemeParams(
             saturation: _colorSchemeSaturation,
             contrast: _colorSchemeContrast,
@@ -1789,16 +1810,16 @@ final class RenderSettings: @unchecked Sendable {
             animTime: _colorAnimTime,
             hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,
             hueRotationSpeed: _hueRotationEffect.speed,
-            hueRotationIntensity: _hueRotationEffect.intensity,
+            hueRotationIntensity: _hueRotationEffect.intensity * animationActivity,
             pulseEnabled: _pulseEffect.enabled ? 1 : 0,
             pulseSpeed: _pulseEffect.speed,
-            pulseAmount: _pulseEffect.amount,
+            pulseAmount: _pulseEffect.amount * animationActivity,
             glowEnabled: _glowEffect.enabled ? 1 : 0,
             glowIntensity: _glowEffect.intensity,
             bloomEnabled: _bloomEffect.enabled ? 1 : 0,
             bloomStrength: _bloomEffect.strength,
             beatFlashEnabled: _beatFlashEffect.enabled ? 1 : 0,
-            beatFlashIntensity: _beatFlashEffect.intensity
+            beatFlashIntensity: _beatFlashEffect.intensity * animationActivity
         )
     }
     
@@ -1990,6 +2011,33 @@ final class RenderSettings: @unchecked Sendable {
     var isAnimationPlaying: Bool {
         get { withLock { _isAnimationPlaying } }
         set { withLock { _isAnimationPlaying = newValue } }
+    }
+
+    var animationActivityFactor: Float {
+        get { withLock { _animationActivityFactor } }
+    }
+
+    var isAnimationKillSwitchActive: Bool {
+        get { withLock { _animationKillSwitchActive || _animationActivityFactor < 0.999 } }
+    }
+
+    func beginAnimationKillSwitch(duration: TimeInterval) {
+        let clampedDuration = max(Float(duration), 0.01)
+        withLock {
+            _animationKillSwitchDuration = clampedDuration
+            _animationKillSwitchRemaining = clampedDuration
+            _animationActivityFactor = 1.0
+            _animationKillSwitchActive = true
+        }
+    }
+
+    func cancelAnimationKillSwitch() {
+        withLock {
+            _animationKillSwitchActive = false
+            _animationKillSwitchRemaining = 0.0
+            _animationKillSwitchDuration = 0.7
+            _animationActivityFactor = 1.0
+        }
     }
     
     var animationBaseMinDistance: Float {

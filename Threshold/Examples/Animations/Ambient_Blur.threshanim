@@ -439,7 +439,7 @@
       "hueRotationEffect" : {
         "enabled" : true,
         "intensity" : 0.5,
-        "speed" : 0
+        "speed" : 0.02
       },
       "id" : "D0C7CDB0-AC37-4A17-8C62-3F64FC06F382",
       "lightingMode" : "staticLight",
@@ -451,7 +451,7 @@
       "positionZ" : 8.267327,
       "pulseEffect" : {
         "amount" : 0.1637325,
-        "enabled" : false,
+        "enabled" : true,
         "speed" : 0.46227682
       },
       "scale" : 1,
@@ -513,7 +513,7 @@
       "hueRotationEffect" : {
         "enabled" : true,
         "intensity" : 0.5,
-        "speed" : 0
+        "speed" : 0.02
       },
       "id" : "BA8C4957-EDE3-4C50-B2FE-A1834FA33A3D",
       "lightingMode" : "staticLight",
@@ -525,7 +525,7 @@
       "positionZ" : 8.692078,
       "pulseEffect" : {
         "amount" : 0.1637325,
-        "enabled" : false,
+        "enabled" : true,
         "speed" : 0.46227682
       },
       "scale" : 1,
@@ -587,7 +587,7 @@
       "hueRotationEffect" : {
         "enabled" : true,
         "intensity" : 0.5,
-        "speed" : 0
+        "speed" : 0.02
       },
       "id" : "AD2E2194-2EA8-43F7-AEBE-7F7D145DEF8C",
       "lightingMode" : "staticLight",
@@ -599,7 +599,7 @@
       "positionZ" : 7.653116,
       "pulseEffect" : {
         "amount" : 0.1637325,
-        "enabled" : false,
+        "enabled" : true,
         "speed" : 0.46227682
       },
       "scale" : 1,
