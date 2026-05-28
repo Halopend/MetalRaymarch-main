@@ -92,7 +92,7 @@ protocol FractalTypeDescriptor: Sendable {
 extension FractalTypeDescriptor {
     /// Effects supported by all fractal types.
     static var universalEffectTags: Set<EffectTag> {
-        [.hueRotation, .pulse, .glow, .bloom, .fog, .gradientCycle]
+        [.hueRotation, .pulse, .glow, .bloom, .fog, .gradientCycle, .linearRail]
     }
 
     /// Default core gesture actions for non-Mandelbox types.

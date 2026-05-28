@@ -143,6 +143,8 @@ struct EffectsDynamicView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
 
+            linearRailControls
+
             // ── Beat Flash (music-driven) ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "bolt.fill", label: "Beat Flash",
@@ -203,6 +205,64 @@ struct EffectsDynamicView: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+    }
+
+    private var linearRailControls: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Label("Linear Rail", systemImage: "arrow.left.and.right")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { cache.lighting.linearRailEffect.axis },
+                    set: { axis in
+                        cache.lighting.linearRailEffect.axis = axis
+                        cache.commitLinearRailEffect()
+                    }
+                )) {
+                    ForEach(LinearRailAxis.allCases, id: \.self) { axis in
+                        Text(axis.label).tag(axis)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 230)
+            }
+            EffectSliderRow(icon: "point.3.connected.trianglepath.dotted", label: "Rail Speed",
+                value: Binding(get: { cache.lighting.linearRailEffect.speed }, set: { cache.lighting.linearRailEffect.speed = $0 }),
+                range: 0...1,
+                enabled: Binding(get: { cache.lighting.linearRailEffect.enabled }, set: { cache.lighting.linearRailEffect.enabled = $0 }),
+                onChanged: { cache.commitLinearRailEffect() })
+            if cache.lighting.linearRailEffect.enabled {
+                EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Rail Reach",
+                    value: Binding(get: { cache.lighting.linearRailEffect.amplitude }, set: { cache.lighting.linearRailEffect.amplitude = $0 }),
+                    range: 0...3,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitLinearRailEffect() },
+                    showToggle: false)
+                EffectSliderRow(icon: "waveform", label: "Harmonic",
+                    value: Binding(get: { cache.lighting.linearRailEffect.multiplier }, set: { cache.lighting.linearRailEffect.multiplier = $0 }),
+                    range: 1...8,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitLinearRailEffect() },
+                    showToggle: false)
+                EffectSliderRow(icon: "circle.dotted", label: "Orbit",
+                    value: Binding(get: { cache.lighting.linearRailEffect.orbitAmount }, set: { cache.lighting.linearRailEffect.orbitAmount = $0 }),
+                    range: 0...1,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitLinearRailEffect() },
+                    showToggle: false)
+                if cache.lighting.linearRailEffect.orbitAmount > 0.0001 {
+                    EffectSliderRow(icon: "arrow.triangle.2.circlepath", label: "Orbit Speed",
+                        value: Binding(get: { cache.lighting.linearRailEffect.orbitSpeed }, set: { cache.lighting.linearRailEffect.orbitSpeed = $0 }),
+                        range: 0...1,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitLinearRailEffect() },
+                        showToggle: false)
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
     }
 }
 

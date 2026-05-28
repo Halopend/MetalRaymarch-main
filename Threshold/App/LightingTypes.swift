@@ -24,6 +24,7 @@ enum EffectTag: String, Codable, CaseIterable {
     case bloom            = "BLM"       // Bright-area bleed — universal
     case fog              = "FOG"       // Distance fog — universal
     case gradientCycle    = "GRC"       // Gradient offset animation — universal
+    case linearRail       = "LNR"       // Straight-axis position cycling — universal
     case polarRotation    = "POL"       // Polar/spherical rotation animation — Mandelbulb, Quaternion Julia
     case beatFlash        = "BTF"       // Music-driven edge flash — universal (requires audio)
     case juliaDrift       = "JLD"       // Animated Julia C drift — Mandelbulb Julia only
@@ -36,6 +37,7 @@ enum EffectTag: String, Codable, CaseIterable {
         case .bloom:         return "Bloom"
         case .fog:           return "Fog"
         case .gradientCycle: return "Gradient Cycle"
+        case .linearRail:    return "Linear Rail"
         case .polarRotation: return "Polar Rotation"
         case .beatFlash:     return "Beat Flash"
         case .juliaDrift:    return "Julia Drift"
@@ -401,6 +403,110 @@ struct JuliaDriftEffect: LightingEffect {
     }
 }
 
+enum LinearRailAxis: String, Codable, CaseIterable, Equatable {
+    case x
+    case y
+    case z
+    case diagonal
+
+    var vector: SIMD3<Float> {
+        switch self {
+        case .x:
+            return SIMD3<Float>(1, 0, 0)
+        case .y:
+            return SIMD3<Float>(0, 1, 0)
+        case .z:
+            return SIMD3<Float>(0, 0, 1)
+        case .diagonal:
+            let component: Float = 1.0 / sqrt(3.0)
+            return SIMD3<Float>(component, component, component)
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .x: return "X"
+        case .y: return "Y"
+        case .z: return "Depth"
+        case .diagonal: return "Diag"
+        }
+    }
+}
+
+struct LinearRailEffect: LightingEffect {
+    var enabled: Bool = false
+    var axis: LinearRailAxis = .z
+    var speed: Float = 0.12
+    var amplitude: Float = 0.7
+    var multiplier: Float = 1.0
+    var orbitAmount: Float = 0.0
+    var orbitSpeed: Float = 0.18
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, axis, speed, amplitude, multiplier, orbitAmount, orbitSpeed
+    }
+
+    init(enabled: Bool = false,
+         axis: LinearRailAxis = .z,
+         speed: Float = 0.12,
+         amplitude: Float = 0.7,
+         multiplier: Float = 1.0,
+         orbitAmount: Float = 0.0,
+         orbitSpeed: Float = 0.18) {
+        self.enabled = enabled
+        self.axis = axis
+        self.speed = speed
+        self.amplitude = amplitude
+        self.multiplier = multiplier
+        self.orbitAmount = orbitAmount
+        self.orbitSpeed = orbitSpeed
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        axis = try container.decodeIfPresent(LinearRailAxis.self, forKey: .axis) ?? .z
+        speed = try container.decodeIfPresent(Float.self, forKey: .speed) ?? 0.12
+        amplitude = try container.decodeIfPresent(Float.self, forKey: .amplitude) ?? 0.7
+        multiplier = try container.decodeIfPresent(Float.self, forKey: .multiplier) ?? 1.0
+        orbitAmount = try container.decodeIfPresent(Float.self, forKey: .orbitAmount) ?? 0.0
+        orbitSpeed = try container.decodeIfPresent(Float.self, forKey: .orbitSpeed) ?? 0.18
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(axis, forKey: .axis)
+        try container.encode(speed, forKey: .speed)
+        try container.encode(amplitude, forKey: .amplitude)
+        try container.encode(multiplier, forKey: .multiplier)
+        try container.encode(orbitAmount, forKey: .orbitAmount)
+        try container.encode(orbitSpeed, forKey: .orbitSpeed)
+    }
+
+    var primaryValue: Float {
+        get { speed }
+        set { speed = newValue }
+    }
+    static let primaryLabel = "Speed"
+
+    static var off: LinearRailEffect {
+        LinearRailEffect(enabled: false, axis: .z, speed: 0.0, amplitude: 0.0)
+    }
+
+    static var slow: LinearRailEffect {
+        LinearRailEffect(enabled: true, axis: .z, speed: 0.08, amplitude: 0.45)
+    }
+
+    static var medium: LinearRailEffect {
+        LinearRailEffect(enabled: true, axis: .z, speed: 0.14, amplitude: 0.7)
+    }
+
+    static var fast: LinearRailEffect {
+        LinearRailEffect(enabled: true, axis: .z, speed: 0.24, amplitude: 1.0)
+    }
+}
+
 /// Beat flash effect — music-driven orange-red edge glow that fires on beat detection.
 /// Intensity controls how strongly the flash drives the edge glow (shader mixes beat × intensity).
 struct BeatFlashEffect: LightingEffect {
@@ -468,26 +574,26 @@ enum LightingPreset: String, CaseIterable, Codable {
     }
     
     /// Get the effect bundle for this preset
-    func effects() -> (hue: HueRotationEffect, pulse: PulseEffect, glow: GlowEffect, bloom: BloomEffect, fog: FogEffect, gradientCycle: GradientCycleEffect) {
+    func effects() -> (hue: HueRotationEffect, pulse: PulseEffect, glow: GlowEffect, bloom: BloomEffect, fog: FogEffect, gradientCycle: GradientCycleEffect, linearRail: LinearRailEffect) {
         switch self {
         case .off:
-            return (.off, .off, .off, .off, .off, .off)
+            return (.off, .off, .off, .off, .off, .off, .off)
             
         case .subtle:
-            return (.subtle, .off, .subtle, .subtle, .subtle, .off)
+            return (.subtle, .off, .subtle, .subtle, .subtle, .off, .off)
             
         case .dynamic:
-            return (.medium, .medium, .medium, .medium, .medium, .slow)
+            return (.medium, .medium, .medium, .medium, .medium, .slow, .slow)
             
         case .psychedelic:
-            return (.intense, .intense, .intense, .intense, .medium, .medium)
+            return (.intense, .intense, .intense, .intense, .medium, .medium, .medium)
             
         case .atmospheric:
-            return (.off, .subtle, .medium, .subtle, .dense, .off)
+            return (.off, .subtle, .medium, .subtle, .dense, .off, .off)
             
         case .custom:
             // Return current settings unchanged
-            return (.off, .off, .off, .off, .off, .off)
+            return (.off, .off, .off, .off, .off, .off, .off)
         }
     }
 }

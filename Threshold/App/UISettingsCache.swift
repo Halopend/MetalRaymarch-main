@@ -359,6 +359,10 @@ final class UISettingsCache {
         push(\.gradientCycleEffect, value: lighting.gradientCycleEffect)
     }
 
+    func commitLinearRailEffect() {
+        push(\.linearRailEffect, value: lighting.linearRailEffect)
+    }
+
     func commitBeatFlashEffect() {
         push(\.beatFlashEffect, value: lighting.beatFlashEffect)
     }

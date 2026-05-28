@@ -9,7 +9,18 @@
 /* Begin PBXFileReference section */
 		D7D716912CEAC4B100CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7D716B12CEAC4B200CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D8A000012D00000000000001 /* ThresholdTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThresholdTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXContainerItemProxy section */
+		D8A000072D00000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D7D716892CEAC4B100CEEA51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D7D716B62CEAC4B200CEEA51;
+			remoteInfo = ThresholdMac;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		D7D716932CEAC4B100CEEA52 /* Exceptions for "Threshold" folder in "Threshold" target */ = {
@@ -55,6 +66,11 @@
 			path = Threshold;
 			sourceTree = "<group>";
 		};
+		D8A000022D00000000000001 /* ThresholdTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ThresholdTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +88,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D8A000042D00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -79,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				D7D716932CEAC4B100CEEA51 /* Threshold */,
+				D8A000022D00000000000001 /* ThresholdTests */,
 				D7D716922CEAC4B100CEEA51 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +112,7 @@
 			children = (
 				D7D716912CEAC4B100CEEA51 /* Threshold.app */,
 				D7D716B12CEAC4B200CEEA51 /* Threshold.app */,
+				D8A000012D00000000000001 /* ThresholdTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -139,6 +164,29 @@
 			productReference = D7D716B12CEAC4B200CEEA51 /* Threshold.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D8A000062D00000000000001 /* ThresholdTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D8A0000B2D00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdTests" */;
+			buildPhases = (
+				D8A000032D00000000000001 /* Sources */,
+				D8A000042D00000000000001 /* Frameworks */,
+				D8A000052D00000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D8A000082D00000000000001 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D8A000022D00000000000001 /* ThresholdTests */,
+			);
+			name = ThresholdTests;
+			packageProductDependencies = (
+			);
+			productName = ThresholdTests;
+			productReference = D8A000012D00000000000001 /* ThresholdTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -154,6 +202,10 @@
 					};
 					D7D716B62CEAC4B200CEEA51 = {
 						CreatedOnToolsVersion = 16.1;
+					};
+					D8A000062D00000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = D7D716B62CEAC4B200CEEA51;
 					};
 				};
 			};
@@ -173,6 +225,7 @@
 			targets = (
 				D7D716902CEAC4B100CEEA51 /* Threshold */,
 				D7D716B62CEAC4B200CEEA51 /* ThresholdMac */,
+				D8A000062D00000000000001 /* ThresholdTests */,
 			);
 		};
 /* End PBXProject section */
@@ -186,6 +239,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D7D716B52CEAC4B200CEEA51 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D8A000052D00000000000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -209,7 +269,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D8A000032D00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D8A000082D00000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D7D716B62CEAC4B200CEEA51 /* ThresholdMac */;
+			targetProxy = D8A000072D00000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		D7D716AD2CEAC4B200CEEA51 /* Debug */ = {
@@ -497,6 +572,56 @@
 			};
 			name = Release;
 		};
+		D8A000092D00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Threshold.app/Contents/MacOS/Threshold";
+				TEST_TARGET_NAME = ThresholdMac;
+			};
+			name = Debug;
+		};
+		D8A0000A2D00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 17;
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Threshold.app/Contents/MacOS/Threshold";
+				TEST_TARGET_NAME = ThresholdMac;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -523,6 +648,15 @@
 			buildConfigurations = (
 				D7D716B72CEAC4B200CEEA51 /* Debug */,
 				D7D716B82CEAC4B200CEEA51 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D8A0000B2D00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D8A000092D00000000000001 /* Debug */,
+				D8A0000A2D00000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

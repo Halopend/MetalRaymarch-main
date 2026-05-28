@@ -867,6 +867,8 @@ struct SceneEditorView: View {
     @Bindable var appModel: AppModel
     let onDismiss: () -> Void
     var isInline: Bool = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     @State private var selectedKeyframeForEdit: AnimationKeyframe?
     @State private var defaultDuration: Double = 2.0
@@ -909,7 +911,7 @@ struct SceneEditorView: View {
 
 #if !os(macOS)
                     Button(isEditMode == .active ? "Done Reorder" : "Reorder") {
-                        withAnimation {
+                        withMotionSensitiveAnimation(.default) {
                             isEditMode = isEditMode == .active ? .inactive : .active
                         }
                     }
@@ -1339,12 +1341,13 @@ struct SceneEditorView: View {
                     }
                     Button {
                         addKeyframe()
-                        withAnimation(.easeInOut(duration: 0.2)) {
+                        withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
                             showCapturedFlash = true
                         }
-                        Task {
+                        Task { @MainActor in
                             try? await Task.sleep(for: .seconds(1.2))
-                            withAnimation(.easeOut(duration: 0.3)) {
+                            guard !Task.isCancelled else { return }
+                            withMotionSensitiveAnimation(.easeOut(duration: 0.3)) {
                                 showCapturedFlash = false
                             }
                         }
@@ -1358,6 +1361,14 @@ struct SceneEditorView: View {
             }
         }
         .listStyle(.plain)
+    }
+
+    private func withMotionSensitiveAnimation(_ animation: Animation, _ updates: () -> Void) {
+        if reduceMotion {
+            updates()
+        } else {
+            withAnimation(animation, updates)
+        }
     }
     
     private func keyframeSheet(for keyframe: AnimationKeyframe) -> some View {
@@ -2238,6 +2249,7 @@ struct KeyframeTimelineView: View {
     
     @State private var isScrubbing = false
     @State private var lastScrubbedTime: TimeInterval?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let scrubUpdateThreshold: TimeInterval = 0.01
     
@@ -2303,7 +2315,7 @@ struct KeyframeTimelineView: View {
                     .frame(width: isScrubbing ? 10 : 8, height: isScrubbing ? 10 : 8)
                     .shadow(color: (isScrubbing ? Color.orange : Color.blue).opacity(0.5), radius: 3)
                     .offset(x: w * playheadFraction - (isScrubbing ? 5 : 4), y: trackY - (isScrubbing ? 5 : 4))
-                    .animation(.easeInOut(duration: 0.15), value: isScrubbing)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: isScrubbing)
                 
                 // ── Keyframe markers + labels ──
                 ForEach(Array(timing.keyframes.enumerated()), id: \.element.id) { index, keyframe in

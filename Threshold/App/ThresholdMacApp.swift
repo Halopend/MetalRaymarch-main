@@ -41,6 +41,7 @@ struct ThresholdMacApp: App {
 
 private struct ThresholdMacRootView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isControlsPinnedOpen = false
     @State private var isHoverVisible = true
@@ -63,6 +64,14 @@ private struct ThresholdMacRootView: View {
         isControlsPinnedOpen || isHoverVisible || appModel.isMenuInteractionActive || activeMenuTrackingCount > 0
     }
 
+    private var motionSensitivePanelAnimation: Animation? {
+        reduceMotion ? nil : panelAnimation
+    }
+
+    private var panelTransition: AnyTransition {
+        reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity)
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let controlsWidth = controlsPanelWidth(for: proxy.size)
@@ -81,10 +90,10 @@ private struct ThresholdMacRootView: View {
                     if shouldShowControls {
                         controlsHoverRegion(width: controlsWidth)
                             .padding(.vertical, panelPadding)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .transition(panelTransition)
                     }
                 }
-                .animation(panelAnimation, value: shouldShowControls)
+                .animation(motionSensitivePanelAnimation, value: shouldShowControls)
                 .allowsHitTesting(shouldShowControls)
 
                 floatingToggle
@@ -199,7 +208,7 @@ private struct ThresholdMacRootView: View {
         pendingAutoHide?.cancel()
         pendingAutoHide = nil
 
-        withAnimation(panelAnimation) {
+        withMotionSensitivePanelAnimation {
             isControlsPinnedOpen.toggle()
             if isControlsPinnedOpen {
                 isHoverVisible = true
@@ -250,7 +259,7 @@ private struct ThresholdMacRootView: View {
         guard isHoverVisible != visible else { return }
 
         if animated {
-            withAnimation(panelAnimation) {
+            withMotionSensitivePanelAnimation {
                 isHoverVisible = visible
             }
         } else {
@@ -258,10 +267,18 @@ private struct ThresholdMacRootView: View {
         }
     }
 
+    private func withMotionSensitivePanelAnimation(_ updates: () -> Void) {
+        if reduceMotion {
+            updates()
+        } else {
+            withAnimation(panelAnimation, updates)
+        }
+    }
+
     private func controlsPanelWidth(for size: CGSize) -> CGFloat {
         min(
             panelPreferredWidth,
-            max(size.width - minimumVisibleViewportWidth - (panelPadding * 2), contentMinimumSize.width)
+            max(contentMinimumSize.width, size.width - minimumVisibleViewportWidth)
         )
     }
 }

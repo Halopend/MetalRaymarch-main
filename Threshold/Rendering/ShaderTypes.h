@@ -250,6 +250,8 @@ typedef struct
     
     vector_float2 jitterOffset; // Sub-pixel jitter in pixels (±0.5 range)
     vector_float2 _pad_uniforms; // Align to 16 bytes
+    vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
+    vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     
@@ -321,6 +323,8 @@ typedef struct
     // pixel, normal-coherence-gated shadow share, layer-of-acceptance debug overlay.
     int coherentPacketEnabled;
     float _pad_tile;             // Align to 16 bytes
+    vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
+    vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     
     FormulaParams formulaParams;  // Generic formula parameters (non-Mandelbox)
     

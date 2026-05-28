@@ -123,6 +123,7 @@ final class MusicAppAudioCapture {
         // Always refresh so we pick up Music.app even if the user launched it
         // after the tab first appeared.
         await refreshAvailability()
+        guard !Task.isCancelled else { return }
 
         let content: SCShareableContent
         do {
@@ -130,6 +131,7 @@ final class MusicAppAudioCapture {
                 false,
                 onScreenWindowsOnly: false
             )
+            guard !Task.isCancelled else { return }
         } catch {
             errorMessage = mapStartError(error)
             logger.error("SCShareableContent (start) failed: \(error.localizedDescription, privacy: .public)")
@@ -183,6 +185,11 @@ final class MusicAppAudioCapture {
             // "stream output NOT found. Dropping frame" repeatedly.
             try stream.addStreamOutput(videoSink, type: .screen, sampleHandlerQueue: sampleQueue)
             try await stream.startCapture()
+
+            if Task.isCancelled {
+                try? await stream.stopCapture()
+                return
+            }
 
             self.stream = stream
             self.output = output

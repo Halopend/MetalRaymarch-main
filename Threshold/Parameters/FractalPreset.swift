@@ -75,6 +75,7 @@ struct FractalPreset: Codable, Identifiable {
     var bloomEffect: BloomEffect?
     var fogEffect: FogEffect?
     var gradientCycleEffect: GradientCycleEffect?
+    var linearRailEffect: LinearRailEffect?
     
     // === COLOR SCHEME AUTO-TRANSITION ===
     var colorSchemeAutoTransition: Bool?
@@ -106,7 +107,7 @@ struct FractalPreset: Codable, Identifiable {
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW, detailScale
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
         // v2.0 modular lighting effects
-        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect
+        case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, linearRailEffect
         // Color scheme auto-transition
         case colorSchemeAutoTransition, colorSchemeAutoInterval, colorSchemeTransitionDuration
         // v2.1 gradient coloring system
@@ -195,6 +196,7 @@ struct FractalPreset: Codable, Identifiable {
         bloomEffect = try container.decodeIfPresent(BloomEffect.self, forKey: .bloomEffect)
         fogEffect = try container.decodeIfPresent(FogEffect.self, forKey: .fogEffect)
         gradientCycleEffect = try container.decodeIfPresent(GradientCycleEffect.self, forKey: .gradientCycleEffect)
+        linearRailEffect = try container.decodeIfPresent(LinearRailEffect.self, forKey: .linearRailEffect)
         
         // Color scheme auto-transition
         colorSchemeAutoTransition = try container.decodeIfPresent(Bool.self, forKey: .colorSchemeAutoTransition)
@@ -279,6 +281,7 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(bloomEffect, forKey: .bloomEffect)
         try container.encodeIfPresent(fogEffect, forKey: .fogEffect)
         try container.encodeIfPresent(gradientCycleEffect, forKey: .gradientCycleEffect)
+        try container.encodeIfPresent(linearRailEffect, forKey: .linearRailEffect)
         
         // Color scheme auto-transition
         try container.encodeIfPresent(colorSchemeAutoTransition, forKey: .colorSchemeAutoTransition)
@@ -422,6 +425,7 @@ struct FractalPreset: Codable, Identifiable {
         preset.bloomEffect = lit.bloomEffect
         preset.fogEffect = lit.fogEffect
         preset.gradientCycleEffect = lit.gradientCycleEffect
+        preset.linearRailEffect = lit.linearRailEffect
 
         // ── Display domain (1 lock acquisition) ──
         let disp = settings.displayConfig
@@ -554,6 +558,9 @@ struct FractalPreset: Codable, Identifiable {
         }
         if let gradientCycleEffect = gradientCycleEffect {
             settings.gradientCycleEffect = gradientCycleEffect
+        }
+        if let linearRailEffect = linearRailEffect {
+            settings.linearRailEffect = linearRailEffect
         }
         
         // Color scheme auto-transition

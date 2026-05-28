@@ -1035,6 +1035,8 @@ private final class ThresholdMacRenderer {
                         springRestRadius: 0.06,
                         jitterOffset: .zero,
                         _pad_uniforms: [0, 0],
+                        floorPlane: SIMD4<Float>(0, 1, 0, 0),
+                        floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
                         formulaParams: settings.formulaParams,
                         precomputedFractal: precomputedFractal,
                         precomputedLighting: precomputedLighting,

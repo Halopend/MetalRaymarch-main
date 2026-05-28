@@ -17,6 +17,7 @@ struct GradientStopsPopover: View {
     
     @State private var gradientName: String = ""
     @State private var showSavedConfirmation = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -108,7 +109,7 @@ struct GradientStopsPopover: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.green)
                 }
-                .transition(.opacity.combined(with: .scale))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale))
             }
         }
         .padding(16)
@@ -116,7 +117,7 @@ struct GradientStopsPopover: View {
         .onAppear {
             gradientName = cache.color.gradientState.gradient.name
         }
-        .animation(.easeInOut(duration: 0.25), value: showSavedConfirmation)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: showSavedConfirmation)
     }
     
     private func saveGradient() {

@@ -235,6 +235,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _bloomEffect: BloomEffect = .off
     private var _fogEffect: FogEffect = FogEffect(enabled: true, intensity: 0.32)
     private var _gradientCycleEffect: GradientCycleEffect = .off
+    private var _linearRailEffect: LinearRailEffect = .off
     private var _polarRotationEffect: PolarRotationEffect = .off
     private var _beatFlashEffect: BeatFlashEffect = .off
     private var _polarRotationAccum: Float = 0.0              // Accumulated polar rotation angle (radians)
@@ -1532,6 +1533,7 @@ final class RenderSettings: @unchecked Sendable {
                     _bloomEffect = effects.bloom
                     _fogEffect = effects.fog
                     _gradientCycleEffect = effects.gradientCycle
+                    _linearRailEffect = effects.linearRail
                 }
             }
             persistLighting()
@@ -1604,6 +1606,18 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _gradientCycleEffect = newValue
+                _lightingPreset = .custom
+            }
+            persistLighting()
+        }
+    }
+
+    /// Linear rail effect (pulses the render position along a centered axis)
+    var linearRailEffect: LinearRailEffect {
+        get { withLock { _linearRailEffect } }
+        set {
+            withLock {
+                _linearRailEffect = newValue
                 _lightingPreset = .custom
             }
             persistLighting()
@@ -1870,10 +1884,12 @@ final class RenderSettings: @unchecked Sendable {
                 FormulaCatalog.setParam(&fp, index: 11, value: cz * cosT + crossZ * sinT + invSqrt3 * kDotV * oneMinusCos)
             }
 
+            let railPosition = linearRailPositionLocked(from: _position)
+
             return RenderSettingsSnapshot(
                 minDistance: _minDistance,
                 scale: _scale,
-                position: _position,
+                position: railPosition,
                 fractalScale: _fractalScale,
                 fractalIterations: _fractalIterations,
                 maxRaySteps: _maxRaySteps,
@@ -1919,6 +1935,35 @@ final class RenderSettings: @unchecked Sendable {
                 leftHandedMode: _leftHandedMode
             )
         }
+    }
+
+    @inline(__always)
+    private func linearRailPositionLocked(from basePosition: SIMD3<Float>) -> SIMD3<Float> {
+        let effect = _linearRailEffect
+        guard effect.enabled, effect.amplitude > 0.0001 else {
+            return basePosition
+        }
+
+        let axisVector = effect.axis.vector
+        let amplitude = effect.amplitude * _animationActivityFactor
+        let orbitMix = max(0.0, min(1.0, effect.orbitAmount))
+        let linearMix = 1.0 - orbitMix
+        let twoPi = Float.pi * 2.0
+
+        let harmonic = max(0.0, effect.multiplier)
+        let linearPhase = _colorAnimTime * effect.speed * harmonic * twoPi
+        var offset = axisVector * (sin(linearPhase) * amplitude * linearMix)
+
+        if orbitMix > 0.0001 {
+            let planeNormal = simd_normalize(axisVector)
+            let hintVector: SIMD3<Float> = abs(planeNormal.y) < 0.9 ? SIMD3<Float>(0, 1, 0) : SIMD3<Float>(1, 0, 0)
+            let orbitBasisU = simd_normalize(simd_cross(hintVector, planeNormal))
+            let orbitBasisV = simd_cross(planeNormal, orbitBasisU)
+            let orbitPhase = _colorAnimTime * effect.orbitSpeed * twoPi
+            offset += (orbitBasisU * cos(orbitPhase) + orbitBasisV * sin(orbitPhase)) * (amplitude * orbitMix)
+        }
+
+        return basePosition + offset
     }
     
     /// Manually trigger a transition to a new scheme
@@ -2962,6 +3007,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.bloomEffect = _bloomEffect
                 c.fogEffect = _fogEffect
                 c.gradientCycleEffect = _gradientCycleEffect
+                c.linearRailEffect = _linearRailEffect
                 c.beatFlashEffect = _beatFlashEffect
                 c.polarRotationEffect = _polarRotationEffect
                 c.juliaDriftEffect = _juliaDriftEffect
@@ -2977,6 +3023,7 @@ final class RenderSettings: @unchecked Sendable {
                 _bloomEffect = newValue.bloomEffect
                 _fogEffect = newValue.fogEffect
                 _gradientCycleEffect = newValue.gradientCycleEffect
+                _linearRailEffect = newValue.linearRailEffect
                 _beatFlashEffect = newValue.beatFlashEffect
                 _polarRotationEffect = newValue.polarRotationEffect
                 _juliaDriftEffect = newValue.juliaDriftEffect

@@ -1486,6 +1486,52 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
     return powr(max(rgb, half3(kPowEpsilonHalf)), half3(scheme.gamma));
 }
 
+struct FloorCircleHit {
+    float alpha;
+    float distance;
+};
+
+FORCE_INLINE FloorCircleHit evaluateFloorCircle(float3 rayOrigin,
+                                                float3 rayDirection,
+                                                float sceneDistance,
+                                                float4 floorPlane,
+                                                float4 floorCenterRadius) {
+    FloorCircleHit hit;
+    hit.alpha = 0.0f;
+    hit.distance = kRayMissThreshold + 100.0f;
+
+    float radius = floorCenterRadius.w;
+    if (radius <= 0.001f) return hit;
+
+    float3 planeNormal = normalize(floorPlane.xyz);
+    float denominator = dot(planeNormal, rayDirection);
+    if (abs(denominator) < 1e-4f) return hit;
+
+    float floorDistance = -(dot(planeNormal, rayOrigin) + floorPlane.w) / denominator;
+    float maxVisibleDistance = sceneDistance < kRayMissThreshold ? sceneDistance : kRayMissThreshold;
+    if (floorDistance <= 0.02f || floorDistance >= maxVisibleDistance) return hit;
+
+    float3 floorPoint = rayOrigin + rayDirection * floorDistance;
+    float3 radialVector = floorPoint - floorCenterRadius.xyz;
+    radialVector -= planeNormal * dot(radialVector, planeNormal);
+    float radialDistance = length(radialVector);
+    float edgeWidth = max(radius * 0.015f, 0.025f);
+    float fill = 1.0f - smoothstep(radius - edgeWidth, radius, radialDistance);
+    float rim = 1.0f - smoothstep(edgeWidth * 0.35f, edgeWidth * 1.8f, abs(radialDistance - radius));
+
+    hit.alpha = saturate(fill * 0.16f + rim * 0.34f);
+    hit.distance = floorDistance;
+    return hit;
+}
+
+FORCE_INLINE half3 compositeFloorCircle(half3 color, FloorCircleHit hit) {
+    if (hit.alpha <= 0.0f) return color;
+
+    half floorAlpha = half(saturate(hit.alpha));
+    half3 floorColor = half3(0.38h, 0.68h, 1.0h);
+    return mix(color, floorColor, floorAlpha);
+}
+
 // =============================================================================
 
 // Soft shadow with over-relaxation
@@ -2036,6 +2082,8 @@ kernel void adaptiveHierarchical8x8(
         col = clampColor(col);
         half2 texCoord = half2(pixelCenter / uniforms.resolution);
         col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), 0.0h);
+        FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, kRayMissThreshold + 100.0f, uniforms.floorPlane, uniforms.floorCenterRadius);
+        col = compositeFloorCircle(col, floorHit);
         float4 currentColor = float4(float3(col), 1.0);
         outputTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
         // Write miss depth so next frame knows this pixel was empty
@@ -2219,6 +2267,8 @@ kernel void adaptiveHierarchical8x8(
     // Compute approximate texCoord for vignette (0-1 range)
     half2 texCoord = half2(pixelCenter / uniforms.resolution);
     col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glowH);
+    FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, adjustedDist, uniforms.floorPlane, uniforms.floorCenterRadius);
+    col = compositeFloorCircle(col, floorHit);
     
     // Debug visualization
     // Use function constant to compile out debug code in release builds
@@ -2459,6 +2509,14 @@ inline FragmentOutput fragmentMain(ColorInOut in,
 
     col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glow);
 
+    FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, ret.x, uniforms.floorPlane, uniforms.floorCenterRadius);
+    col = compositeFloorCircle(col, floorHit);
+    if (floorHit.alpha > 0.0f) {
+        float3 floorPoint = cameraPos + rd * floorHit.distance;
+        float4 floorClipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(floorPoint, 1.0);
+        output.depth = encodeDepthFromClip(floorClipPos);
+    }
+
     // Spring blob navigation widget (screen-space overlay)
     // texCoord is [0,1] — convert to NDC [-1, 1] for SDF
     float2 blobUV = in.texCoord * 2.0f - 1.0f;
@@ -2648,6 +2706,13 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     col = clampColor(col);
     
     col = PostEffectsWithScheme(col, half2(in.texCoord), uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), glowH);
+    FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, adjustedDist, uniforms.floorPlane, uniforms.floorCenterRadius);
+    col = compositeFloorCircle(col, floorHit);
+    if (floorHit.alpha > 0.0f) {
+        float3 floorPoint = cameraPos + rd * floorHit.distance;
+        float4 floorClipPos = uniforms.projectionMatrix * uniforms.modelViewMatrix * float4(floorPoint, 1.0);
+        output.depth = encodeDepthFromClip(floorClipPos);
+    }
     
     // Spring blob navigation widget (screen-space overlay)
     float2 blobUV = in.texCoord * 2.0f - 1.0f;

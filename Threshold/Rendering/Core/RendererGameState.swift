@@ -1,10 +1,13 @@
 @preconcurrency import CompositorServices
 import Foundation
+import simd
 
 struct RendererPreparedEyeState {
     var modelView: matrix_float4x4 = matrix_identity_float4x4
     var inverseModelView: matrix_float4x4 = matrix_identity_float4x4
     var projection: matrix_float4x4 = matrix_identity_float4x4
+    var floorPlane: SIMD4<Float> = SIMD4<Float>(0, 1, 0, 0)
+    var floorCenterRadius: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 0)
 }
 
 struct RendererFramePreparation {
@@ -21,7 +24,52 @@ struct RendererFramePreparation {
     var perEye: [RendererPreparedEyeState]
 }
 
+private enum FloorCircleGeometry {
+    static let fallbackEyeHeightMeters: Float = 1.55
+    static let minimumRadiusMeters: Float = 3.0
+    static let floorAngleRadians: Float = 22.0 * Float.pi / 180.0
+}
+
 extension Renderer {
+    private static func makeFloorCircleUniforms(
+        modelMatrix: matrix_float4x4,
+        effectiveScale: Float,
+        deviceTransform: matrix_float4x4
+    ) -> (plane: SIMD4<Float>, centerRadius: SIMD4<Float>) {
+        let headWorldPosition = SIMD3<Float>(
+            deviceTransform.columns.3.x,
+            deviceTransform.columns.3.y,
+            deviceTransform.columns.3.z
+        )
+        let hasTrackedFloorHeight = headWorldPosition.y > 0.25
+        let eyeHeightMeters = hasTrackedFloorHeight ? headWorldPosition.y : FloorCircleGeometry.fallbackEyeHeightMeters
+        let floorY = hasTrackedFloorHeight ? Float(0.0) : headWorldPosition.y - eyeHeightMeters
+        let floorCenterWorld = SIMD3<Float>(headWorldPosition.x, floorY, headWorldPosition.z)
+
+        let inverseModelMatrix = modelMatrix.inverse
+        let centerHomogeneous = inverseModelMatrix * SIMD4<Float>(floorCenterWorld.x, floorCenterWorld.y, floorCenterWorld.z, 1.0)
+        let centerHomogeneousW = abs(centerHomogeneous.w) > 1e-6 ? centerHomogeneous.w : 1.0
+        let floorCenterModel = SIMD3<Float>(centerHomogeneous.x, centerHomogeneous.y, centerHomogeneous.z) / centerHomogeneousW
+
+        let rawNormal = modelMatrix.transpose * SIMD4<Float>(0.0, 1.0, 0.0, 0.0)
+        let rawNormalModel = SIMD3<Float>(rawNormal.x, rawNormal.y, rawNormal.z)
+        let normalLength = simd_length(rawNormalModel)
+        let floorNormalModel = normalLength > 1e-6 ? rawNormalModel / normalLength : SIMD3<Float>(0.0, 1.0, 0.0)
+        let floorPlane = SIMD4<Float>(
+            floorNormalModel.x,
+            floorNormalModel.y,
+            floorNormalModel.z,
+            -simd_dot(floorNormalModel, floorCenterModel)
+        )
+
+        let angleRadiusMeters = eyeHeightMeters / max(tanf(FloorCircleGeometry.floorAngleRadians), 0.001)
+        let floorRadiusMeters = max(FloorCircleGeometry.minimumRadiusMeters, angleRadiusMeters)
+        let floorRadiusModel = floorRadiusMeters / max(effectiveScale, 0.001)
+        let floorCenterRadius = SIMD4<Float>(floorCenterModel.x, floorCenterModel.y, floorCenterModel.z, floorRadiusModel)
+
+        return (floorPlane, floorCenterRadius)
+    }
+
     func updateGameState(drawable: LayerRenderer.Drawable, settingsSnapshot: RenderSettingsSnapshot) -> RendererFramePreparation {
         /// Update any game state before rendering
 
@@ -76,6 +124,11 @@ extension Renderer {
 
         // Use raw device anchor transform (no smoothing) to ensure compositor-predicted pose is used
         let deviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
+        let floorCircle = Self.makeFloorCircleUniforms(
+            modelMatrix: modelMatrix,
+            effectiveScale: effectiveScale,
+            deviceTransform: deviceTransform
+        )
 
         // One-time logging of device anchor to verify position tracking is working
         if !hasLoggedDeviceAnchorInfo, let anchor = drawable.deviceAnchor {
@@ -144,7 +197,9 @@ extension Renderer {
             preparedEyeStates[viewIndex] = RendererPreparedEyeState(
                 modelView: modelView,
                 inverseModelView: inverseModelView,
-                projection: projection
+                projection: projection,
+                floorPlane: floorCircle.plane,
+                floorCenterRadius: floorCircle.centerRadius
             )
 
             let colorSchemeParams = settingsSnapshot.colorSchemeParams
@@ -195,6 +250,8 @@ extension Renderer {
                             springRestRadius: 0.06,
                             jitterOffset: .zero,
                             _pad_uniforms: [0, 0],
+                            floorPlane: floorCircle.plane,
+                            floorCenterRadius: floorCircle.centerRadius,
                             formulaParams: settingsSnapshot.formulaParams,
                             precomputedFractal: precomputedFractal,
                             precomputedLighting: precomputedLighting,

@@ -1379,6 +1379,8 @@ actor Renderer {
             temporalReprojectionEnabled: temporalFrameCount > 0 ? 1 : 0,
             coherentPacketEnabled: settingsSnapshot.coherentPacketEnabled ? 1 : 0,
             _pad_tile: 0,
+            floorPlane: framePreparation.perEye[viewIndex].floorPlane,
+            floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
             formulaParams: settingsSnapshot.formulaParams,
             currentViewProjMatrix: currentViewProj,
             previousViewProjMatrix: previousViewProjMatrices[viewIndex],

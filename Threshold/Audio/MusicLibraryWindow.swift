@@ -21,6 +21,7 @@ extension AppModel {
 
 struct MusicLibraryWindow: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedServiceID: String?
@@ -100,6 +101,7 @@ struct MusicLibraryWindow: View {
                     // Clear playlist drill-down when switching scope
                     expandedPlaylist = nil
                     playlistTracks = []
+                    isLoadingTracks = false
                 }
 
                 if scope != .songs {
@@ -203,7 +205,11 @@ struct MusicLibraryWindow: View {
             // Back bar
             HStack {
                 Button {
-                    withAnimation { expandedPlaylist = nil; playlistTracks = [] }
+                    withMotionSensitiveAnimation {
+                        expandedPlaylist = nil
+                        playlistTracks = []
+                        isLoadingTracks = false
+                    }
                 } label: {
                     Label("Playlists", systemImage: "chevron.left")
                         .font(.subheadline)
@@ -244,22 +250,39 @@ struct MusicLibraryWindow: View {
                 }
             }
         }
+        .task(id: playlist.id) {
+            await loadTracks(for: playlist)
+        }
     }
 
     private func drillIntoPlaylist(_ playlist: UnifiedPlaylist) {
         expandedPlaylist = playlist
         isLoadingTracks = true
         playlistTracks = []
+    }
+
+    private func loadTracks(for playlist: UnifiedPlaylist) async {
+        guard expandedPlaylist?.id == playlist.id else { return }
 
         guard let provider = music.provider(for: playlist.serviceID) else {
             isLoadingTracks = false
             return
         }
 
-        Task {
-            let tracks = await provider.fetchPlaylistTracks(playlist)
-            playlistTracks = tracks
-            isLoadingTracks = false
+        let tracks = await provider.fetchPlaylistTracks(playlist)
+        guard !Task.isCancelled, expandedPlaylist?.id == playlist.id else { return }
+
+        playlistTracks = tracks
+        isLoadingTracks = false
+    }
+
+    private func withMotionSensitiveAnimation(_ updates: () -> Void) {
+        if reduceMotion {
+            updates()
+        } else {
+            withAnimation {
+                updates()
+            }
         }
     }
 

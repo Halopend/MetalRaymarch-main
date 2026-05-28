@@ -22,6 +22,7 @@ enum MusicPanelTab: String, CaseIterable {
 
 struct MusicTabContent: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.menuAdjustmentActions) private var menuAdjustmentActions
     @Bindable var cache: UISettingsCache
 
@@ -37,6 +38,7 @@ struct MusicTabContent: View {
     @AppStorage("MusicTabContent.innerTab") private var storedTabSelection: MusicPanelTab = .music
     #if os(macOS)
     @AppStorage("macMusicAppAudioCaptureEnabled") private var macMusicAppAudioCaptureEnabled = false
+    @State private var musicAppCaptureTask: Task<Void, Never>?
     #endif
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
@@ -176,8 +178,18 @@ struct MusicTabContent: View {
         .onChange(of: isShowingVisualizationAddPopover) { _, isPresented in
             updateVisualizationAddPopoverAdjustment(isPresented: isPresented)
         }
+        #if os(macOS)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                stopMusicAppCapture()
+            }
+        }
+        #endif
         .onDisappear {
             updateVisualizationAddPopoverAdjustment(isPresented: false)
+            #if os(macOS)
+            stopMusicAppCapture()
+            #endif
         }
     }
 
@@ -271,7 +283,7 @@ struct MusicTabContent: View {
             Toggle("Advanced Music.app audio capture", isOn: $macMusicAppAudioCaptureEnabled)
                 .font(.caption)
                 .onChange(of: macMusicAppAudioCaptureEnabled) { _, isEnabled in
-                    Task {
+                    replaceMusicAppCaptureTask {
                         if isEnabled {
                             await musicAppCapture.reactivateSecurityPermissions()
                         } else {
@@ -859,9 +871,7 @@ struct MusicTabContent: View {
                 Spacer()
                 Button(musicAppCapture.isCapturing ? "Stop" : "Start") {
                     if musicAppCapture.isCapturing {
-                        Task {
-                            await musicAppCapture.stop()
-                        }
+                        stopMusicAppCapture()
                     } else {
                         startMusicAppVisualizer(using: .electronic)
                     }
@@ -892,13 +902,29 @@ struct MusicTabContent: View {
     }
 
     private func startMusicAppVisualizer(using preset: ReactivityPreset) {
-        Task {
+        replaceMusicAppCaptureTask {
             guard macMusicAppAudioCaptureEnabled else { return }
             if !musicAppCapture.isCapturing {
                 await musicAppCapture.start()
             }
+            guard !Task.isCancelled else { return }
             guard musicAppCapture.isCapturing else { return }
             configureMusicAppVisualizer(using: preset)
+        }
+    }
+
+    private func stopMusicAppCapture() {
+        replaceMusicAppCaptureTask {
+            await musicAppCapture.stop()
+        }
+    }
+
+    private func replaceMusicAppCaptureTask(_ operation: @escaping @MainActor () async -> Void) {
+        musicAppCaptureTask?.cancel()
+        musicAppCaptureTask = Task { @MainActor in
+            await operation()
+            guard !Task.isCancelled else { return }
+            musicAppCaptureTask = nil
         }
     }
 

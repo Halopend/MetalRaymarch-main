@@ -314,6 +314,7 @@ private enum QualityGoalPreference: Int, CaseIterable {
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -357,6 +358,7 @@ struct ContentView: View {
         if cache.lighting.gradientCycleEffect.enabled { count += 1 }
         if cache.lighting.hueRotationEffect.enabled { count += 1 }
         if cache.lighting.pulseEffect.enabled { count += 1 }
+        if cache.lighting.linearRailEffect.enabled { count += 1 }
         if cache.lighting.beatFlashEffect.enabled { count += 1 }
         if cache.fractalType.supports(.polarRotation), cache.lighting.polarRotationEffect.enabled { count += 1 }
         if cache.fractalType.supports(.juliaDrift), cache.lighting.juliaDriftEffect.enabled { count += 1 }
@@ -464,7 +466,7 @@ struct ContentView: View {
             begin: { appModel.beginMenuAdjustment() },
             end: { appModel.endMenuAdjustment() }
         ))
-        .animation(.easeInOut(duration: 0.3), value: appModel.immersiveSpaceState)
+        .animation(motionSensitiveAnimation(.easeInOut(duration: 0.3)), value: appModel.immersiveSpaceState)
         .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -472,7 +474,7 @@ struct ContentView: View {
         )
         .thresholdGlassBackground(cornerRadius: 20)
         .opacity(isMenuContentVisible ? 1 : 0)
-        .animation(.easeInOut(duration: 0.18), value: isMenuContentVisible)
+        .animation(motionSensitiveAnimation(.easeInOut(duration: 0.18)), value: isMenuContentVisible)
         .allowsHitTesting(isMenuContentVisible)
         .thresholdTopDockOrnament(isVisible: isShortcutOrnamentVisible) {
             topDockOrnament
@@ -484,7 +486,7 @@ struct ContentView: View {
         }
         .onAppear {
             appModel.openShapeMenuHandler = {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
                     activateShapeSection(.parameters)
                 }
             }
@@ -492,7 +494,7 @@ struct ContentView: View {
                 selectedTab == .fractal && fractalSubTab == .shape
             }
             appModel.openRenderMenuHandler = {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) {
                     activateShapeSection(.performance)
                 }
             }
@@ -529,12 +531,12 @@ struct ContentView: View {
             // When the renderer is not ready, snap back to Explore so the user
             // never gets stuck on a tab that requires active rendering.
             if !isRendererNavigationReady, topDockTab != .explore {
-                withAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
+                withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
         .onChange(of: appModel.rendererStartupWarmupComplete) { _, isReady in
             if !isReady, topDockTab != .explore {
-                withAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
+                withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
         .sheet(isPresented: $showSaveDestinationSheet) {
@@ -582,6 +584,18 @@ struct ContentView: View {
 
     private var menuSurfaceStroke: Color {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
+    }
+
+    private func motionSensitiveAnimation(_ animation: Animation) -> Animation? {
+        reduceMotion ? nil : animation
+    }
+
+    private func withMotionSensitiveAnimation(_ animation: Animation, _ updates: () -> Void) {
+        if reduceMotion {
+            updates()
+        } else {
+            withAnimation(animation, updates)
+        }
     }
 
     private func resetCurrentFractalSettings() {
@@ -3011,6 +3025,8 @@ struct ContentView: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
 
+            linearRailControls
+
             // ── Polar Rotation (fractal-specific) ──
             if cache.fractalType.supports(.polarRotation) {
                 VStack(spacing: 8) {
@@ -3046,6 +3062,64 @@ struct ContentView: View {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+    }
+
+    private var linearRailControls: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Label("Linear Rail", systemImage: "arrow.left.and.right")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { cache.lighting.linearRailEffect.axis },
+                    set: { axis in
+                        cache.lighting.linearRailEffect.axis = axis
+                        cache.commitLinearRailEffect()
+                    }
+                )) {
+                    ForEach(LinearRailAxis.allCases, id: \.self) { axis in
+                        Text(axis.label).tag(axis)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 230)
+            }
+            EffectSliderRow(icon: "point.3.connected.trianglepath.dotted", label: "Rail Speed",
+                value: Binding(get: { cache.lighting.linearRailEffect.speed }, set: { cache.lighting.linearRailEffect.speed = $0 }),
+                range: 0...1,
+                enabled: Binding(get: { cache.lighting.linearRailEffect.enabled }, set: { cache.lighting.linearRailEffect.enabled = $0 }),
+                onChanged: { cache.commitLinearRailEffect() })
+            if cache.lighting.linearRailEffect.enabled {
+                EffectSliderRow(icon: "arrow.up.left.and.arrow.down.right", label: "Rail Reach",
+                    value: Binding(get: { cache.lighting.linearRailEffect.amplitude }, set: { cache.lighting.linearRailEffect.amplitude = $0 }),
+                    range: 0...3,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitLinearRailEffect() },
+                    showToggle: false)
+                EffectSliderRow(icon: "waveform", label: "Harmonic",
+                    value: Binding(get: { cache.lighting.linearRailEffect.multiplier }, set: { cache.lighting.linearRailEffect.multiplier = $0 }),
+                    range: 1...8,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitLinearRailEffect() },
+                    showToggle: false)
+                EffectSliderRow(icon: "circle.dotted", label: "Orbit",
+                    value: Binding(get: { cache.lighting.linearRailEffect.orbitAmount }, set: { cache.lighting.linearRailEffect.orbitAmount = $0 }),
+                    range: 0...1,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitLinearRailEffect() },
+                    showToggle: false)
+                if cache.lighting.linearRailEffect.orbitAmount > 0.0001 {
+                    EffectSliderRow(icon: "arrow.triangle.2.circlepath", label: "Orbit Speed",
+                        value: Binding(get: { cache.lighting.linearRailEffect.orbitSpeed }, set: { cache.lighting.linearRailEffect.orbitSpeed = $0 }),
+                        range: 0...1,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitLinearRailEffect() },
+                        showToggle: false)
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
     }
 
     private var dynamicPresetDisclosure: some View {

@@ -14,6 +14,7 @@ struct LightingEffectCard<Content: View>: View {
     @Binding var enabled: Bool
     let content: Content
     var onToggle: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     init(title: String, icon: String, enabled: Binding<Bool>, onToggle: @escaping () -> Void, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -42,7 +43,7 @@ struct LightingEffectCard<Content: View>: View {
                     content
                 }
                 .padding(.leading, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(12)
@@ -54,7 +55,7 @@ struct LightingEffectCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(enabled ? Color.blue.opacity(0.3) : Color.clear, lineWidth: 1)
         )
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: enabled)
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.7), value: enabled)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(title) effect")
     }
@@ -63,6 +64,7 @@ struct LightingEffectCard<Content: View>: View {
 /// Main lighting effects section with presets and individual effect cards
 struct LightingEffectsSection: View {
     @Binding var cache: UISettingsCache
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     var body: some View {
         VStack(spacing: 12) {
@@ -436,7 +438,7 @@ struct LightingEffectsSection: View {
                         }
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
             }
         }
     }
