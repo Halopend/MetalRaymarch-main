@@ -140,6 +140,10 @@ struct MetalProjectTestApp: App {
         .upperLimbVisibility(.visible)
         .persistentSystemOverlays(.hidden)
         .onChange(of: appModel.immersiveSpaceState) { oldValue, newValue in
+            if newValue == .closed {
+                appModel.cancelActiveRenderLoop()
+            }
+
             // When exiting immersive mode, ensure window is visible and populated
             if oldValue == .open && (newValue == .closed || newValue == .inTransition) {
                 Task { @MainActor in

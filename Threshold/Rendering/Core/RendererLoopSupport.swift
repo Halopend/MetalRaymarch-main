@@ -2,7 +2,7 @@ import Foundation
 
 extension Renderer {
     func renderLoop() async {
-        while true {
+        while !Task.isCancelled {
             // Yield to the actor's executor once per frame so queued actor jobs
             // (e.g. activateEmbeddedFormula, prewarm handlers) can run between
             // frames. Without this, the infinite render loop monopolises the

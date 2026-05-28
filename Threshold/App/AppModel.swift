@@ -192,6 +192,53 @@ class AppModel {
     
     // Screenshot capture (set by Renderer)
     var captureScreenshotHandler: (() async -> Data?)?
+
+    @ObservationIgnored private var activeRenderLoopTask: Task<Void, Never>?
+    @ObservationIgnored private var activeRenderLoopID: UUID?
+
+    @discardableResult
+    func beginRenderLoopRegistration() -> UUID {
+        activeRenderLoopTask?.cancel()
+        clearRendererHandlers()
+
+        let id = UUID()
+        activeRenderLoopID = id
+        rendererStartupWarmupComplete = false
+        return id
+    }
+
+    func setActiveRenderLoopTask(_ task: Task<Void, Never>, id: UUID) {
+        guard activeRenderLoopID == id else {
+            task.cancel()
+            return
+        }
+
+        activeRenderLoopTask = task
+    }
+
+    func cancelActiveRenderLoop() {
+        activeRenderLoopTask?.cancel()
+        activeRenderLoopTask = nil
+        activeRenderLoopID = nil
+        clearRendererHandlers()
+    }
+
+    func clearRendererHandlers(renderLoopID: UUID) {
+        guard activeRenderLoopID == renderLoopID else { return }
+
+        activeRenderLoopTask = nil
+        activeRenderLoopID = nil
+        clearRendererHandlers()
+    }
+
+    private func clearRendererHandlers() {
+        captureScreenshotHandler = nil
+        preparePipelineHandler = nil
+        preparePipelineForValuesHandler = nil
+        triggerProfilerHandler = nil
+        activateEmbeddedFormulaHandler = nil
+        rendererStartupWarmupComplete = false
+    }
     
     // Pipeline preparation handler (set by Renderer)
     // Called when a preset is about to be loaded to ensure the pipeline is ready

@@ -492,11 +492,12 @@ actor Renderer {
     
     @MainActor
     static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel) {
-        appModel.rendererStartupWarmupComplete = false
-        Task(executorPreference: RendererTaskExecutor.shared) {
+        let renderLoopID = appModel.beginRenderLoopRegistration()
+        let renderLoopTask = Task(executorPreference: RendererTaskExecutor.shared) {
             guard let renderer = Renderer(layerRenderer, appModel: appModel) else {
                 await MainActor.run {
                     appModel.immersiveSpaceState = .closed
+                    appModel.clearRendererHandlers(renderLoopID: renderLoopID)
                 }
                 return
             }
@@ -551,10 +552,31 @@ actor Renderer {
                     customSceneDiagnostic("🔬 [CSDiag] ❌ Deferred activation failed: \(error)")
                 }
             }
+
+            guard !Task.isCancelled else {
+                await MainActor.run {
+                    appModel.clearRendererHandlers(renderLoopID: renderLoopID)
+                }
+                return
+            }
             
             await renderer.startARSession()
+
+            guard !Task.isCancelled else {
+                await MainActor.run {
+                    appModel.clearRendererHandlers(renderLoopID: renderLoopID)
+                }
+                return
+            }
+
             await renderer.renderLoop()
+
+            await MainActor.run {
+                appModel.clearRendererHandlers(renderLoopID: renderLoopID)
+            }
         }
+
+        appModel.setActiveRenderLoopTask(renderLoopTask, id: renderLoopID)
     }
     
     static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {

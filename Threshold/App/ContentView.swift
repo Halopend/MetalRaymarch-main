@@ -4475,7 +4475,7 @@ private extension View {
             visibility: isVisible ? .visible : .hidden,
             attachmentAnchor: .scene(.top),
             contentAlignment: .bottom,
-            content: content
+            ornament: content
         )
 #else
         self

@@ -43,6 +43,9 @@ final class ICloudBackupManager {
     var isSyncEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isSyncEnabled, forKey: Self.syncEnabledKey)
+            if isSyncEnabled, cloudFolderURL == nil {
+                resolveContainer()
+            }
         }
     }
 
@@ -64,7 +67,9 @@ final class ICloudBackupManager {
 
     init() {
         self.isSyncEnabled = UserDefaults.standard.bool(forKey: Self.syncEnabledKey)
-        resolveContainer()
+        if isSyncEnabled {
+            resolveContainer()
+        }
     }
 
     // MARK: - Container Resolution

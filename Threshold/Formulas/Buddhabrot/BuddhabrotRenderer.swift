@@ -47,84 +47,256 @@ final class BuddhabrotSettings: @unchecked Sendable {
     }
 
     // Volume resolution (per axis). 128^3 = 8 MB density buffer.
-    var resolution: Int = 128
+    private var _resolution: Int = 128
+    var resolution: Int {
+        get { withLock { _resolution } }
+        set { withLock { _resolution = newValue } }
+    }
 
     // Mandelbulb parameters
-    var power: Float = 8.0
-    var maxIterations: Int = 100
-    var bailoutRadius: Float = 4.0
+    private var _power: Float = 8.0
+    var power: Float {
+        get { withLock { _power } }
+        set { withLock { _power = newValue } }
+    }
+
+    private var _maxIterations: Int = 100
+    var maxIterations: Int {
+        get { withLock { _maxIterations } }
+        set { withLock { _maxIterations = newValue } }
+    }
+
+    private var _bailoutRadius: Float = 4.0
+    var bailoutRadius: Float {
+        get { withLock { _bailoutRadius } }
+        set { withLock { _bailoutRadius = newValue } }
+    }
     
     // Iteration bands for RGB Nebulabrot mode
-    var useRGBMode: Bool = false
-    var shortEscapeMax: Int = 20
-    var mediumEscapeMax: Int = 100
+    private var _useRGBMode: Bool = false
+    var useRGBMode: Bool {
+        get { withLock { _useRGBMode } }
+        set { withLock { _useRGBMode = newValue } }
+    }
+
+    private var _shortEscapeMax: Int = 20
+    var shortEscapeMax: Int {
+        get { withLock { _shortEscapeMax } }
+        set { withLock { _shortEscapeMax = newValue } }
+    }
+
+    private var _mediumEscapeMax: Int = 100
+    var mediumEscapeMax: Int {
+        get { withLock { _mediumEscapeMax } }
+        set { withLock { _mediumEscapeMax = newValue } }
+    }
     
     // Accumulation control
-    var batchSize: Int = 65536         // Seeds per compute dispatch
-    var batchesPerFrame: Int = 2       // Dispatches per frame (throttle for thermals)
-    var normalizationInterval: Int = 4 // Normalize every N frames
+    private var _batchSize: Int = 65536         // Seeds per compute dispatch
+    var batchSize: Int {
+        get { withLock { _batchSize } }
+        set { withLock { _batchSize = newValue } }
+    }
+
+    private var _batchesPerFrame: Int = 2       // Dispatches per frame (throttle for thermals)
+    var batchesPerFrame: Int {
+        get { withLock { _batchesPerFrame } }
+        set { withLock { _batchesPerFrame = newValue } }
+    }
+
+    private var _normalizationInterval: Int = 4 // Normalize every N frames
+    var normalizationInterval: Int {
+        get { withLock { _normalizationInterval } }
+        set { withLock { _normalizationInterval = newValue } }
+    }
     
     // Transfer function
-    var densityScale: Float = 1.0
-    var gamma: Float = 0.4
-    var alphaScale: Float = 8.0
+    private var _densityScale: Float = 1.0
+    var densityScale: Float {
+        get { withLock { _densityScale } }
+        set { withLock { _densityScale = newValue } }
+    }
+
+    private var _gamma: Float = 0.4
+    var gamma: Float {
+        get { withLock { _gamma } }
+        set { withLock { _gamma = newValue } }
+    }
+
+    private var _alphaScale: Float = 8.0
+    var alphaScale: Float {
+        get { withLock { _alphaScale } }
+        set { withLock { _alphaScale = newValue } }
+    }
     
     // Palette colors
-    var colorLow:  SIMD3<Float> = SIMD3<Float>(0.02, 0.02, 0.12)  // Deep blue
-    var colorMid:  SIMD3<Float> = SIMD3<Float>(0.6, 0.2, 0.8)     // Purple
-    var colorHigh: SIMD3<Float> = SIMD3<Float>(1.0, 0.95, 0.8)    // Warm white
+    private var _colorLow: SIMD3<Float> = SIMD3<Float>(0.02, 0.02, 0.12)  // Deep blue
+    var colorLow: SIMD3<Float> {
+        get { withLock { _colorLow } }
+        set { withLock { _colorLow = newValue } }
+    }
+
+    private var _colorMid: SIMD3<Float> = SIMD3<Float>(0.6, 0.2, 0.8)     // Purple
+    var colorMid: SIMD3<Float> {
+        get { withLock { _colorMid } }
+        set { withLock { _colorMid = newValue } }
+    }
+
+    private var _colorHigh: SIMD3<Float> = SIMD3<Float>(1.0, 0.95, 0.8)    // Warm white
+    var colorHigh: SIMD3<Float> {
+        get { withLock { _colorHigh } }
+        set { withLock { _colorHigh = newValue } }
+    }
     
     // Ray march quality
-    var maxRaySteps: Int = 80
-    var earlyExitAlpha: Float = 0.95
+    private var _maxRaySteps: Int = 80
+    var maxRaySteps: Int {
+        get { withLock { _maxRaySteps } }
+        set { withLock { _maxRaySteps = newValue } }
+    }
+
+    private var _earlyExitAlpha: Float = 0.95
+    var earlyExitAlpha: Float {
+        get { withLock { _earlyExitAlpha } }
+        set { withLock { _earlyExitAlpha = newValue } }
+    }
     
     // Volume placement (meters from origin, in front of user)
-    var volumeDistance: Float = 1.5
-    var volumeScale: Float = 0.6 // Size of volume cube in meters
-    var autoRotate: Bool = true
-    var rotationSpeed: Float = 0.1
+    private var _volumeDistance: Float = 1.5
+    var volumeDistance: Float {
+        get { withLock { _volumeDistance } }
+        set { withLock { _volumeDistance = newValue } }
+    }
+
+    private var _volumeScale: Float = 0.6 // Size of volume cube in meters
+    var volumeScale: Float {
+        get { withLock { _volumeScale } }
+        set { withLock { _volumeScale = newValue } }
+    }
+
+    private var _autoRotate: Bool = true
+    var autoRotate: Bool {
+        get { withLock { _autoRotate } }
+        set { withLock { _autoRotate = newValue } }
+    }
+
+    private var _rotationSpeed: Float = 0.1
+    var rotationSpeed: Float {
+        get { withLock { _rotationSpeed } }
+        set { withLock { _rotationSpeed = newValue } }
+    }
 
     // World extent for orbit accumulation bounding cube
-    var worldExtent: Float = 2.0
+    private var _worldExtent: Float = 2.0
+    var worldExtent: Float {
+        get { withLock { _worldExtent } }
+        set { withLock { _worldExtent = newValue } }
+    }
     
     // Render mode
-    var renderMode: BuddhabrotRenderMode = .gaussianSplats
+    private var _renderMode: BuddhabrotRenderMode = .gaussianSplats
+    var renderMode: BuddhabrotRenderMode {
+        get { withLock { _renderMode } }
+        set { withLock { _renderMode = newValue } }
+    }
     
     // 3D Gaussian splat settings
-    var maxSplatCount: Int = 524_288    // Ring-buffer capacity (512K, power-of-2 for radix sort)
-    var splatScaleAlongTangent: Float = 0.04  // Scale along orbit tangent direction
-    var splatScalePerp: Float = 0.02          // Scale perpendicular to orbit tangent
-    var splatOpacity: Float = 0.6             // Global opacity multiplier (0–1)
-    var brightnessScale: Float = 1.0          // Global brightness multiplier
+    private var _maxSplatCount: Int = 524_288    // Ring-buffer capacity (512K, power-of-2 for radix sort)
+    var maxSplatCount: Int {
+        get { withLock { _maxSplatCount } }
+        set { withLock { _maxSplatCount = newValue } }
+    }
+
+    private var _splatScaleAlongTangent: Float = 0.04  // Scale along orbit tangent direction
+    var splatScaleAlongTangent: Float {
+        get { withLock { _splatScaleAlongTangent } }
+        set { withLock { _splatScaleAlongTangent = newValue } }
+    }
+
+    private var _splatScalePerp: Float = 0.02          // Scale perpendicular to orbit tangent
+    var splatScalePerp: Float {
+        get { withLock { _splatScalePerp } }
+        set { withLock { _splatScalePerp = newValue } }
+    }
+
+    private var _splatOpacity: Float = 0.6             // Global opacity multiplier (0–1)
+    var splatOpacity: Float {
+        get { withLock { _splatOpacity } }
+        set { withLock { _splatOpacity = newValue } }
+    }
+
+    private var _brightnessScale: Float = 1.0          // Global brightness multiplier
+    var brightnessScale: Float {
+        get { withLock { _brightnessScale } }
+        set { withLock { _brightnessScale = newValue } }
+    }
     
     // State
-    var totalSamplesAccumulated: UInt64 = 0
-    var needsClear: Bool = false
+    private var _totalSamplesAccumulated: UInt64 = 0
+    var totalSamplesAccumulated: UInt64 {
+        get { withLock { _totalSamplesAccumulated } }
+        set { withLock { _totalSamplesAccumulated = newValue } }
+    }
+
+    private var _needsClear: Bool = false
+    private var _clearGeneration: UInt64 = 0
+    var needsClear: Bool {
+        get { withLock { _needsClear } }
+        set {
+            withLock {
+                if newValue {
+                    _clearGeneration &+= 1
+                }
+                _needsClear = newValue
+            }
+        }
+    }
+
+    func resetAccumulationState() {
+        withLock {
+            _totalSamplesAccumulated = 0
+        }
+    }
+
+    func addSamplesAccumulated(_ sampleCount: UInt64) {
+        withLock {
+            _totalSamplesAccumulated &+= sampleCount
+        }
+    }
+
+    func clearNeedsClear(ifGeneration generation: UInt64) {
+        withLock {
+            if _clearGeneration == generation {
+                _needsClear = false
+            }
+        }
+    }
 
     /// Takes a consistent snapshot of all settings under the lock.
     /// Call once per frame from the render thread to avoid per-property locking.
     func snapshot() -> BuddhabrotSettingsSnapshot {
         withLock {
             BuddhabrotSettingsSnapshot(
-                resolution: resolution, power: power, maxIterations: maxIterations,
-                bailoutRadius: bailoutRadius, useRGBMode: useRGBMode,
-                shortEscapeMax: shortEscapeMax, mediumEscapeMax: mediumEscapeMax,
-                batchSize: batchSize, batchesPerFrame: batchesPerFrame,
-                normalizationInterval: normalizationInterval,
-                densityScale: densityScale, gamma: gamma, alphaScale: alphaScale,
-                colorLow: colorLow, colorMid: colorMid, colorHigh: colorHigh,
-                maxRaySteps: maxRaySteps, earlyExitAlpha: earlyExitAlpha,
-                volumeDistance: volumeDistance, volumeScale: volumeScale,
-                autoRotate: autoRotate, rotationSpeed: rotationSpeed,
-                worldExtent: worldExtent,
-                totalSamplesAccumulated: totalSamplesAccumulated,
-                needsClear: needsClear,
-                renderMode: renderMode,
-                maxSplatCount: maxSplatCount,
-                splatScaleAlongTangent: splatScaleAlongTangent,
-                splatScalePerp: splatScalePerp,
-                splatOpacity: splatOpacity,
-                brightnessScale: brightnessScale
+                resolution: _resolution, power: _power, maxIterations: _maxIterations,
+                bailoutRadius: _bailoutRadius, useRGBMode: _useRGBMode,
+                shortEscapeMax: _shortEscapeMax, mediumEscapeMax: _mediumEscapeMax,
+                batchSize: _batchSize, batchesPerFrame: _batchesPerFrame,
+                normalizationInterval: _normalizationInterval,
+                densityScale: _densityScale, gamma: _gamma, alphaScale: _alphaScale,
+                colorLow: _colorLow, colorMid: _colorMid, colorHigh: _colorHigh,
+                maxRaySteps: _maxRaySteps, earlyExitAlpha: _earlyExitAlpha,
+                volumeDistance: _volumeDistance, volumeScale: _volumeScale,
+                autoRotate: _autoRotate, rotationSpeed: _rotationSpeed,
+                worldExtent: _worldExtent,
+                totalSamplesAccumulated: _totalSamplesAccumulated,
+                needsClear: _needsClear,
+                clearGeneration: _clearGeneration,
+                renderMode: _renderMode,
+                maxSplatCount: _maxSplatCount,
+                splatScaleAlongTangent: _splatScaleAlongTangent,
+                splatScalePerp: _splatScalePerp,
+                splatOpacity: _splatOpacity,
+                brightnessScale: _brightnessScale
             )
         }
     }
@@ -158,6 +330,7 @@ struct BuddhabrotSettingsSnapshot {
     let worldExtent: Float
     let totalSamplesAccumulated: UInt64
     let needsClear: Bool
+    let clearGeneration: UInt64
     let renderMode: BuddhabrotRenderMode
     let maxSplatCount: Int
     let splatScaleAlongTangent: Float
@@ -422,20 +595,22 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         radixSortUniformBuffer = device.makeBuffer(length: radixUniSize, options: .storageModeShared)
         radixSortUniformBuffer?.label = "Buddhabrot Radix Sort Uniforms"
         
+        let initialSettings = settings.snapshot()
+
         // Allocate density buffers and volume texture at current resolution
-        reallocateResources(resolution: settings.resolution)
-        
+        reallocateResources(resolution: initialSettings.resolution, useRGBMode: initialSettings.useRGBMode)
+
         // Allocate splat buffer at current capacity
-        reallocateSplatResources(maxSplatCount: settings.maxSplatCount)
+        reallocateSplatResources(maxSplatCount: initialSettings.maxSplatCount)
     }
     
     // MARK: - Resource Management
     
     /// Reallocates the density buffer and 3D texture when resolution changes.
-    func reallocateResources(resolution: Int) {
-        guard resolution != currentResolution || settings.useRGBMode != currentUseRGBMode else { return }
+    func reallocateResources(resolution: Int, useRGBMode: Bool) {
+        guard resolution != currentResolution || useRGBMode != currentUseRGBMode else { return }
         currentResolution = resolution
-        currentUseRGBMode = settings.useRGBMode
+        currentUseRGBMode = useRGBMode
         
         let voxelCount = resolution * resolution * resolution
         let bufferSize = voxelCount * MemoryLayout<UInt32>.size
@@ -444,7 +619,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         densityBuffer = device.makeBuffer(length: bufferSize, options: .storageModeShared)
         densityBuffer?.label = "Buddhabrot Density"
         
-        if settings.useRGBMode {
+        if useRGBMode {
             densityBufferR = device.makeBuffer(length: bufferSize, options: .storageModeShared)
             densityBufferR?.label = "Buddhabrot Density R"
             densityBufferG = device.makeBuffer(length: bufferSize, options: .storageModeShared)
@@ -461,7 +636,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         // 3D float texture for normalized volume
         let texDesc = MTLTextureDescriptor()
         texDesc.textureType = .type3D
-        texDesc.pixelFormat = settings.useRGBMode ? .rgba16Float : .r16Float
+        texDesc.pixelFormat = useRGBMode ? .rgba16Float : .r16Float
         texDesc.width = resolution
         texDesc.height = resolution
         texDesc.depth = resolution
@@ -473,7 +648,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         // Reset accumulation state
         seedOffset = 0
         maxDensityValue = 0
-        settings.totalSamplesAccumulated = 0
+        settings.resetAccumulationState()
         
         print("✓ Buddhabrot: Allocated \(resolution)^3 volume (\(bufferSize / 1024) KB density buffer)")
     }
@@ -504,7 +679,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         // Reset counter
         atomicCounterBuffer?.contents().bindMemory(to: UInt32.self, capacity: 1).pointee = 0
         seedOffset = 0
-        settings.totalSamplesAccumulated = 0
+        settings.resetAccumulationState()
         withCompletedSplatCountLock {
             completedSplatCount = 0
         }
@@ -520,14 +695,15 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     /// Returns the command buffer so the caller can track completion.
     @discardableResult
     func dispatchAccumulation() -> MTLCommandBuffer? {
-        let needsResourceReset = settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear
+        let buddhabrotSnapshot = settings.snapshot()
+        let needsResourceReset = buddhabrotSnapshot.resolution != currentResolution || buddhabrotSnapshot.useRGBMode != currentUseRGBMode || buddhabrotSnapshot.needsClear
 
         // Check if resolution changed
         if needsResourceReset {
-            reallocateResources(resolution: settings.resolution)
+            reallocateResources(resolution: buddhabrotSnapshot.resolution, useRGBMode: buddhabrotSnapshot.useRGBMode)
         }
         
-        guard let pipeline = settings.useRGBMode ? accumulateRGBPipeline : accumulatePipeline,
+        guard let pipeline = buddhabrotSnapshot.useRGBMode ? accumulateRGBPipeline : accumulatePipeline,
               let uniformBuffer = accumulationUniformBuffer else {
             return nil
         }
@@ -537,29 +713,32 @@ final class BuddhabrotRenderer: @unchecked Sendable {
 
         if needsResourceReset {
             guard encodeDensityClear(commandBuffer: commandBuffer) else { return nil }
-            settings.needsClear = false
+            settings.clearNeedsClear(ifGeneration: buddhabrotSnapshot.clearGeneration)
         }
+
+        let batchSize = max(1, buddhabrotSnapshot.batchSize)
+        let batchesPerFrame = max(1, buddhabrotSnapshot.batchesPerFrame)
         
         // Fill uniforms
         let uniforms = uniformBuffer.contents().bindMemory(to: BuddhabrotAccumulationUniforms.self, capacity: 1)
         uniforms.pointee.resolution = UInt32(currentResolution)
-        uniforms.pointee.maxIterations = UInt32(settings.maxIterations)
+        uniforms.pointee.maxIterations = UInt32(buddhabrotSnapshot.maxIterations)
         uniforms.pointee.minIterations = 0 // Accept all escapes for single-channel
-        uniforms.pointee.batchSize = UInt32(settings.batchSize)
+        uniforms.pointee.batchSize = UInt32(batchSize)
         uniforms.pointee.seedOffset = seedOffset
-        uniforms.pointee.escapeRadius = settings.bailoutRadius * settings.bailoutRadius
-        uniforms.pointee.worldExtent = settings.worldExtent
-        uniforms.pointee.power = settings.power
-        uniforms.pointee.bailoutRadius = settings.bailoutRadius
+        uniforms.pointee.escapeRadius = buddhabrotSnapshot.bailoutRadius * buddhabrotSnapshot.bailoutRadius
+        uniforms.pointee.worldExtent = buddhabrotSnapshot.worldExtent
+        uniforms.pointee.power = buddhabrotSnapshot.power
+        uniforms.pointee.bailoutRadius = buddhabrotSnapshot.bailoutRadius
         
-        for _ in 0..<settings.batchesPerFrame {
+        for _ in 0..<batchesPerFrame {
             guard let encoder = commandBuffer.makeComputeCommandEncoder() else { continue }
             encoder.label = "Buddhabrot Orbit Batch"
             encoder.setComputePipelineState(pipeline)
             
             encoder.setBuffer(uniformBuffer, offset: 0, index: 0) // BuddhabrotBufferIndexUniforms
             
-            if settings.useRGBMode {
+            if buddhabrotSnapshot.useRGBMode {
                 encoder.setBuffer(densityBufferR, offset: 0, index: 1)
                 encoder.setBuffer(densityBufferG, offset: 0, index: 2)
                 encoder.setBuffer(densityBufferB, offset: 0, index: 3)
@@ -567,7 +746,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
                 encoder.setBuffer(densityBuffer, offset: 0, index: 1)
             }
             
-            let threadsPerGrid = MTLSize(width: settings.batchSize, height: 1, depth: 1)
+            let threadsPerGrid = MTLSize(width: batchSize, height: 1, depth: 1)
             let threadgroupSize = MTLSize(width: min(256, pipeline.maxTotalThreadsPerThreadgroup), height: 1, depth: 1)
             encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadgroupSize)
             
@@ -578,7 +757,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             uniforms.pointee.seedOffset = seedOffset
         }
         
-        settings.totalSamplesAccumulated += UInt64(settings.batchSize * settings.batchesPerFrame)
+        settings.addSamplesAccumulated(UInt64(batchSize * batchesPerFrame))
         
         commandBuffer.commit()
         return commandBuffer
@@ -586,24 +765,24 @@ final class BuddhabrotRenderer: @unchecked Sendable {
 
     /// In-order accumulation encoded onto the frame command buffer.
     /// This guarantees normalization sees fresh density data in the same frame.
-    func encodeAccumulation(commandBuffer: MTLCommandBuffer) {
-        let needsResourceReset = settings.resolution != currentResolution || settings.useRGBMode != currentUseRGBMode || settings.needsClear
+    func encodeAccumulation(commandBuffer: MTLCommandBuffer, buddhabrotSnapshot: BuddhabrotSettingsSnapshot) {
+        let needsResourceReset = buddhabrotSnapshot.resolution != currentResolution || buddhabrotSnapshot.useRGBMode != currentUseRGBMode || buddhabrotSnapshot.needsClear
 
         if needsResourceReset {
-            reallocateResources(resolution: settings.resolution)
+            reallocateResources(resolution: buddhabrotSnapshot.resolution, useRGBMode: buddhabrotSnapshot.useRGBMode)
         }
 
         if needsResourceReset {
             guard encodeDensityClear(commandBuffer: commandBuffer) else { return }
-            settings.needsClear = false
+            settings.clearNeedsClear(ifGeneration: buddhabrotSnapshot.clearGeneration)
         }
 
-        guard let pipeline = settings.useRGBMode ? accumulateRGBPipeline : accumulatePipeline else {
+        guard let pipeline = buddhabrotSnapshot.useRGBMode ? accumulateRGBPipeline : accumulatePipeline else {
             return
         }
 
-        let batchSize = max(1, settings.batchSize)
-        let batchesPerFrame = max(1, settings.batchesPerFrame)
+        let batchSize = max(1, buddhabrotSnapshot.batchSize)
+        let batchesPerFrame = max(1, buddhabrotSnapshot.batchesPerFrame)
 
         for _ in 0..<batchesPerFrame {
             guard let encoder = commandBuffer.makeComputeCommandEncoder() else { continue }
@@ -612,18 +791,18 @@ final class BuddhabrotRenderer: @unchecked Sendable {
 
             var uniforms = BuddhabrotAccumulationUniforms()
             uniforms.resolution = UInt32(currentResolution)
-            uniforms.maxIterations = UInt32(settings.maxIterations)
+            uniforms.maxIterations = UInt32(buddhabrotSnapshot.maxIterations)
             uniforms.minIterations = 0
             uniforms.batchSize = UInt32(batchSize)
             uniforms.seedOffset = seedOffset
-            uniforms.escapeRadius = settings.bailoutRadius * settings.bailoutRadius
-            uniforms.worldExtent = settings.worldExtent
-            uniforms.power = settings.power
-            uniforms.bailoutRadius = settings.bailoutRadius
+            uniforms.escapeRadius = buddhabrotSnapshot.bailoutRadius * buddhabrotSnapshot.bailoutRadius
+            uniforms.worldExtent = buddhabrotSnapshot.worldExtent
+            uniforms.power = buddhabrotSnapshot.power
+            uniforms.bailoutRadius = buddhabrotSnapshot.bailoutRadius
 
             encoder.setBytes(&uniforms, length: MemoryLayout<BuddhabrotAccumulationUniforms>.stride, index: 0)
 
-            if settings.useRGBMode {
+            if buddhabrotSnapshot.useRGBMode {
                 guard let r = densityBufferR, let g = densityBufferG, let b = densityBufferB else {
                     encoder.endEncoding()
                     continue
@@ -647,33 +826,33 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             seedOffset &+= 1
         }
 
-        settings.totalSamplesAccumulated += UInt64(batchSize * batchesPerFrame)
+        settings.addSamplesAccumulated(UInt64(batchSize * batchesPerFrame))
     }
     
     // MARK: - Phase 2a: Normalization
     
     /// Normalizes the density buffer into the 3D float texture.
     /// Call every N frames (not every frame) to save GPU cycles.
-    func encodeNormalization(commandBuffer: MTLCommandBuffer) {
-        guard let normPipeline = settings.useRGBMode ? normalizeRGBPipeline : normalizePipeline,
+    func encodeNormalization(commandBuffer: MTLCommandBuffer, buddhabrotSnapshot: BuddhabrotSettingsSnapshot) {
+        guard let normPipeline = buddhabrotSnapshot.useRGBMode ? normalizeRGBPipeline : normalizePipeline,
               let uniformBuffer = normalizationUniformBuffer,
               let volumeTex = volumeTexture else {
             return
         }
         
         // Scan for max density on CPU (fast enough for 128^3 at normalization interval)
-        updateMaxDensity()
+        updateMaxDensity(useRGBMode: buddhabrotSnapshot.useRGBMode)
         
         // Diagnostic: log max density periodically so we can verify accumulation is working
         if frameCounter <= 5 || frameCounter % 60 == 0 {
-            print("📊 Buddhabrot normalize: frame=\(frameCounter) maxDensity=\(maxDensityValue) totalSamples=\(settings.totalSamplesAccumulated)")
+            print("📊 Buddhabrot normalize: frame=\(frameCounter) maxDensity=\(maxDensityValue) totalSamples=\(buddhabrotSnapshot.totalSamplesAccumulated)")
         }
         
         // Fill normalization uniforms
         let uniforms = uniformBuffer.contents().bindMemory(to: BuddhabrotNormalizationUniforms.self, capacity: 1)
         uniforms.pointee.resolution = UInt32(currentResolution)
-        uniforms.pointee.densityScale = settings.densityScale
-        uniforms.pointee.gamma = settings.gamma
+        uniforms.pointee.densityScale = buddhabrotSnapshot.densityScale
+        uniforms.pointee.gamma = buddhabrotSnapshot.gamma
         uniforms.pointee.logBase = 1.0
         uniforms.pointee.maxDensity = max(maxDensityValue, 1)
         
@@ -683,7 +862,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         
         encoder.setBuffer(uniformBuffer, offset: 0, index: 0)
         
-        if settings.useRGBMode {
+        if buddhabrotSnapshot.useRGBMode {
             encoder.setBuffer(densityBufferR, offset: 0, index: 1)
             encoder.setBuffer(densityBufferG, offset: 0, index: 2)
             encoder.setBuffer(densityBufferB, offset: 0, index: 3)
@@ -710,7 +889,8 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
         time: Float,
-        settingsSnapshot: RenderSettingsSnapshot
+        settingsSnapshot: RenderSettingsSnapshot,
+        buddhabrotSnapshot: BuddhabrotSettingsSnapshot
     ) -> Bool {
         guard let pipeline = rayMarchPipeline,
               let depthState = depthStencilState,
@@ -729,12 +909,17 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         let uniformsPtr = uniformBuffer.contents().bindMemory(to: BuddhabrotRayMarchUniformsArray.self, capacity: 1)
         
         // Volume world transform (shared helper handles placement, gestures, auto-rotation)
-        let volumeWorld = buildVolumeWorldMatrix(drawable: drawable, time: time, settingsSnapshot: settingsSnapshot)
+        let volumeWorld = buildVolumeWorldMatrix(
+            drawable: drawable,
+            time: time,
+            settingsSnapshot: settingsSnapshot,
+            buddhabrotSnapshot: buddhabrotSnapshot
+        )
         let invVolumeWorld = volumeWorld.inverse
         
         // Use live pose for per-eye view matrices (head-tracked rendering)
         let liveDeviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
-        let ext = settings.worldExtent
+        let ext = buddhabrotSnapshot.worldExtent
         
         for viewIndex in 0..<drawable.views.count {
             let view = drawable.views[viewIndex]
@@ -751,15 +936,15 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             u.volumeMin = SIMD3<Float>(-ext, -ext, -ext)
             u.worldExtent = ext
             u.volumeMax = SIMD3<Float>(ext, ext, ext)
-            u.stepSize = (ext * 2.0) / Float(settings.maxRaySteps)
-            u.colorLow = settings.colorLow
-            u.densityScale = settings.densityScale
-            u.colorMid = settings.colorMid
-            u.alphaScale = settings.alphaScale
-            u.colorHigh = settings.colorHigh
-            u.gamma = settings.gamma
-            u.maxSteps = UInt32(settings.maxRaySteps)
-            u.earlyExitAlpha = settings.earlyExitAlpha
+            u.stepSize = (ext * 2.0) / Float(buddhabrotSnapshot.maxRaySteps)
+            u.colorLow = buddhabrotSnapshot.colorLow
+            u.densityScale = buddhabrotSnapshot.densityScale
+            u.colorMid = buddhabrotSnapshot.colorMid
+            u.alphaScale = buddhabrotSnapshot.alphaScale
+            u.colorHigh = buddhabrotSnapshot.colorHigh
+            u.gamma = buddhabrotSnapshot.gamma
+            u.maxSteps = UInt32(buddhabrotSnapshot.maxRaySteps)
+            u.earlyExitAlpha = buddhabrotSnapshot.earlyExitAlpha
             u.time = time
             u.pad = 0
             
@@ -834,16 +1019,16 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     
     /// Dispatches the splat emission compute kernel: runs Mandelbulb orbits and appends
     /// escaped orbit points to the splat ring buffer with GPU-side transfer function coloring.
-    func encodeSplatEmission(commandBuffer: MTLCommandBuffer) {
+    func encodeSplatEmission(commandBuffer: MTLCommandBuffer, buddhabrotSnapshot: BuddhabrotSettingsSnapshot) {
         // Reallocate if capacity changed
-        if settings.maxSplatCount != currentMaxSplatCount {
-            reallocateSplatResources(maxSplatCount: settings.maxSplatCount)
+        if buddhabrotSnapshot.maxSplatCount != currentMaxSplatCount {
+            reallocateSplatResources(maxSplatCount: buddhabrotSnapshot.maxSplatCount)
         }
         
         // Clear on parameter change
-        if settings.needsClear {
+        if buddhabrotSnapshot.needsClear {
             encodeSplatClear(commandBuffer: commandBuffer)
-            settings.needsClear = false
+            settings.clearNeedsClear(ifGeneration: buddhabrotSnapshot.clearGeneration)
         }
         
         guard let pipeline = splatEmitPipeline,
@@ -851,8 +1036,8 @@ final class BuddhabrotRenderer: @unchecked Sendable {
               let counterBuf = atomicCounterBuffer,
               let _ = splatEmitUniformBuffer else { return }
         
-        let batchSize = max(1, settings.batchSize)
-        let batchesPerFrame = max(1, settings.batchesPerFrame)
+        let batchSize = max(1, buddhabrotSnapshot.batchSize)
+        let batchesPerFrame = max(1, buddhabrotSnapshot.batchesPerFrame)
         
         for _ in 0..<batchesPerFrame {
             guard let encoder = commandBuffer.makeComputeCommandEncoder() else { continue }
@@ -860,17 +1045,17 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             encoder.setComputePipelineState(pipeline)
             
             var uniforms = BuddhabrotEmitUniforms()
-            uniforms.maxIterations = UInt32(settings.maxIterations)
+            uniforms.maxIterations = UInt32(buddhabrotSnapshot.maxIterations)
             uniforms.batchSize = UInt32(batchSize)
             uniforms.seedOffset = seedOffset
-            uniforms.escapeRadius = settings.bailoutRadius * settings.bailoutRadius
-            uniforms.worldExtent = settings.worldExtent
-            uniforms.power = settings.power
-            uniforms.bailoutRadius = settings.bailoutRadius
+            uniforms.escapeRadius = buddhabrotSnapshot.bailoutRadius * buddhabrotSnapshot.bailoutRadius
+            uniforms.worldExtent = buddhabrotSnapshot.worldExtent
+            uniforms.power = buddhabrotSnapshot.power
+            uniforms.bailoutRadius = buddhabrotSnapshot.bailoutRadius
             uniforms.maxSplatCount = UInt32(currentMaxSplatCount)
-            uniforms.colorLow = settings.colorLow
-            uniforms.colorMid = settings.colorMid
-            uniforms.colorHigh = settings.colorHigh
+            uniforms.colorLow = buddhabrotSnapshot.colorLow
+            uniforms.colorMid = buddhabrotSnapshot.colorMid
+            uniforms.colorHigh = buddhabrotSnapshot.colorHigh
             
             encoder.setBytes(&uniforms, length: MemoryLayout<BuddhabrotEmitUniforms>.stride, index: 0)
             encoder.setBuffer(splatBuf, offset: 0, index: 1)
@@ -884,7 +1069,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             seedOffset &+= 1
         }
         
-        settings.totalSamplesAccumulated += UInt64(batchSize * batchesPerFrame)
+        settings.addSamplesAccumulated(UInt64(batchSize * batchesPerFrame))
 
         commandBuffer.addCompletedHandler { [weak self] _ in
             guard let self else { return }
@@ -915,7 +1100,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         counterBuf.contents().storeBytes(of: UInt32(0), as: UInt32.self)
         
         seedOffset = 0
-        settings.totalSamplesAccumulated = 0
+        settings.resetAccumulationState()
         withCompletedSplatCountLock {
             completedSplatCount = 0
         }
@@ -1048,6 +1233,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         drawable: LayerRenderer.Drawable,
         time: Float,
         settingsSnapshot: RenderSettingsSnapshot,
+        buddhabrotSnapshot: BuddhabrotSettingsSnapshot,
         volumeWorldMatrix: matrix_float4x4,
         activeSplatCount: Int
     ) -> Bool {
@@ -1076,12 +1262,12 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             u.viewMatrix = viewTransform
             u.projectionMatrix = projection
             u.volumeWorldMatrix = volumeWorldMatrix
-            u.splatScaleAlongTangent = settings.splatScaleAlongTangent
-            u.splatScalePerp = settings.splatScalePerp
-            u.opacity = settings.splatOpacity
+            u.splatScaleAlongTangent = buddhabrotSnapshot.splatScaleAlongTangent
+            u.splatScalePerp = buddhabrotSnapshot.splatScalePerp
+            u.opacity = buddhabrotSnapshot.splatOpacity
             u.activeSplatCount = UInt32(activeSplatCount)
             u.time = time
-            u.brightnessScale = settings.brightnessScale
+            u.brightnessScale = buddhabrotSnapshot.brightnessScale
             u.viewportWidth = Float(viewport.width)
             u.viewportHeight = Float(viewport.height)
             
@@ -1191,11 +1377,12 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         settingsSnapshot: RenderSettingsSnapshot
     ) -> Bool {
         frameCounter += 1
+        let buddhabrotSnapshot = settings.snapshot()
         
-        switch settings.renderMode {
+        switch buddhabrotSnapshot.renderMode {
         case .gaussianSplats:
             // 3DGS pipeline: emit → depth keys → radix sort → render sorted Gaussians
-            encodeSplatEmission(commandBuffer: commandBuffer)
+            encodeSplatEmission(commandBuffer: commandBuffer, buddhabrotSnapshot: buddhabrotSnapshot)
             
             // Read the splat count directly from the shared atomic counter buffer.
             // The counter was written by *previous* frame GPU work (already completed)
@@ -1217,7 +1404,12 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             }
             
             // Compute volume world transform (shared across all passes)
-            let volumeWorld = buildVolumeWorldMatrix(drawable: drawable, time: time, settingsSnapshot: settingsSnapshot)
+            let volumeWorld = buildVolumeWorldMatrix(
+                drawable: drawable,
+                time: time,
+                settingsSnapshot: settingsSnapshot,
+                buddhabrotSnapshot: buddhabrotSnapshot
+            )
             
             // Left-eye view matrix for depth sorting
             let liveDeviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
@@ -1238,24 +1430,26 @@ final class BuddhabrotRenderer: @unchecked Sendable {
                 drawable: drawable,
                 time: time,
                 settingsSnapshot: settingsSnapshot,
+                buddhabrotSnapshot: buddhabrotSnapshot,
                 volumeWorldMatrix: volumeWorld,
                 activeSplatCount: activeSplatCount
             )
             
         case .volumeRayMarch:
             // Original pipeline: accumulate → normalize → ray march
-            encodeAccumulation(commandBuffer: commandBuffer)
+            encodeAccumulation(commandBuffer: commandBuffer, buddhabrotSnapshot: buddhabrotSnapshot)
             
-            let normalizationEvery = max(1, settings.normalizationInterval)
+            let normalizationEvery = max(1, buddhabrotSnapshot.normalizationInterval)
             if frameCounter <= 120 || frameCounter % normalizationEvery == 0 {
-                encodeNormalization(commandBuffer: commandBuffer)
+                encodeNormalization(commandBuffer: commandBuffer, buddhabrotSnapshot: buddhabrotSnapshot)
             }
             
             return encodeRayMarch(
                 commandBuffer: commandBuffer,
                 drawable: drawable,
                 time: time,
-                settingsSnapshot: settingsSnapshot
+                settingsSnapshot: settingsSnapshot,
+                buddhabrotSnapshot: buddhabrotSnapshot
             )
         }
     }
@@ -1268,9 +1462,10 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     @discardableResult
     private func encodeDensityClear(commandBuffer: MTLCommandBuffer) -> Bool {
         guard let clearPipeline = clearDensityPipeline else { return false }
+        let useRGBMode = currentUseRGBMode
         
         let voxelCount = currentResolution * currentResolution * currentResolution
-        let buffers: [MTLBuffer?] = settings.useRGBMode
+        let buffers: [MTLBuffer?] = useRGBMode
             ? [densityBufferR, densityBufferG, densityBufferB]
             : [densityBuffer]
         
@@ -1291,7 +1486,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
 
         seedOffset = 0
         maxDensityValue = 0
-        settings.totalSamplesAccumulated = 0
+        settings.resetAccumulationState()
         print("✓ Buddhabrot: Density buffers cleared")
 
         return true
@@ -1299,9 +1494,9 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     
     /// Scans the density buffer to find the current maximum value.
     /// Used for adaptive normalization. Fast enough on CPU for 128^3 at low frequency.
-    private func updateMaxDensity() {
+    private func updateMaxDensity(useRGBMode: Bool) {
         let primaryBuffer: MTLBuffer?
-        if settings.useRGBMode {
+        if useRGBMode {
             // For RGB, scan all three buffers and take the max
             primaryBuffer = densityBufferR // Just use R for now as representative
         } else {
@@ -1325,7 +1520,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         }
         
         // If RGB mode, also check G and B
-        if settings.useRGBMode {
+        if useRGBMode {
             for buf in [densityBufferG, densityBufferB] {
                 guard let b = buf else { continue }
                 let p = b.contents().bindMemory(to: UInt32.self, capacity: voxelCount)
@@ -1348,7 +1543,8 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     private func buildVolumeWorldMatrix(
         drawable: LayerRenderer.Drawable,
         time: Float,
-        settingsSnapshot: RenderSettingsSnapshot
+        settingsSnapshot: RenderSettingsSnapshot,
+        buddhabrotSnapshot: BuddhabrotSettingsSnapshot
     ) -> matrix_float4x4 {
         let liveDeviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         
@@ -1363,7 +1559,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         
         let forward = -SIMD3<Float>(placementAnchor.columns.2.x, placementAnchor.columns.2.y, placementAnchor.columns.2.z)
         let devicePos = SIMD3<Float>(placementAnchor.columns.3.x, placementAnchor.columns.3.y, placementAnchor.columns.3.z)
-        let baseCenter = devicePos + forward * settings.volumeDistance
+        let baseCenter = devicePos + forward * buddhabrotSnapshot.volumeDistance
         
         let anchorPosition = volumePlacementAnchorUserPosition ?? settingsSnapshot.position
         let positionDelta = settingsSnapshot.position - anchorPosition
@@ -1375,13 +1571,13 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         let volumeCenter = baseCenter + positionDelta
         let userRotation = matrix4x4_from_quaternion(rotationDelta)
         
-        let s = settings.volumeScale * detailScaleDelta
+        let s = buddhabrotSnapshot.volumeScale * detailScaleDelta
         let translation = matrix4x4_translation(volumeCenter.x, volumeCenter.y, volumeCenter.z)
         let scale = matrix4x4_scale(s, s, s)
         var volumeWorld = translation * userRotation * scale
         
-        if settings.autoRotate {
-            let angle = time * settings.rotationSpeed
+        if buddhabrotSnapshot.autoRotate {
+            let angle = time * buddhabrotSnapshot.rotationSpeed
             let cosA = cos(angle)
             let sinA = sin(angle)
             var rotation = matrix_identity_float4x4
