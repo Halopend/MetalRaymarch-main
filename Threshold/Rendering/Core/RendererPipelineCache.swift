@@ -941,6 +941,7 @@ extension Renderer {
     /// compilation finishes.
     func insertBuiltRenderPipeline(_ pipeline: MTLRenderPipelineState, forKey key: String) {
         pendingPipelineBuildKeys.remove(key)
+        backgroundRenderPipelineBuildTasks.removeValue(forKey: key)
         renderPipelineBuildRetryStates.removeValue(forKey: key)
         guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
             if RENDERER_DEBUG { print("⏭️ [Pipeline] Dropped stale async custom render pipeline: \(key)") }
@@ -956,6 +957,7 @@ extension Renderer {
     /// Marks a background build as failed so the pending set doesn't leak.
     func markPipelineBuildFailed(forKey key: String) {
         pendingPipelineBuildKeys.remove(key)
+        backgroundRenderPipelineBuildTasks.removeValue(forKey: key)
         let nextFailureCount = (renderPipelineBuildRetryStates[key]?.failures ?? 0) + 1
         let delay = min(maxPipelineBuildRetryDelay, initialPipelineBuildRetryDelay * pow(2.0, Double(nextFailureCount - 1)))
         renderPipelineBuildRetryStates[key] = PipelineBuildRetryState(
@@ -967,6 +969,7 @@ extension Renderer {
     /// Inserts a built compute pipeline into the cache and clears its pending marker.
     func insertBuiltComputePipeline(_ pipeline: MTLComputePipelineState, forKey key: String) {
         pendingComputePipelineBuildKeys.remove(key)
+        backgroundComputePipelineBuildTasks.removeValue(forKey: key)
         computePipelineBuildRetryStates.removeValue(forKey: key)
         guard acceptsCompletedCustomPipelineBuild(forKey: key) else {
             if RENDERER_DEBUG { print("⏭️ [Compute] Dropped stale async custom compute pipeline: \(key)") }
@@ -979,6 +982,7 @@ extension Renderer {
 
     func markComputePipelineBuildFailed(forKey key: String) {
         pendingComputePipelineBuildKeys.remove(key)
+        backgroundComputePipelineBuildTasks.removeValue(forKey: key)
         let nextFailureCount = (computePipelineBuildRetryStates[key]?.failures ?? 0) + 1
         let delay = min(maxPipelineBuildRetryDelay, initialPipelineBuildRetryDelay * pow(2.0, Double(nextFailureCount - 1)))
         computePipelineBuildRetryStates[key] = PipelineBuildRetryState(
@@ -1015,7 +1019,7 @@ extension Renderer {
         let customLibrary: MTLLibrary? =
             cacheKey.hasPrefix("CX") ? customShaderLibrary : nil
 
-        Task.detached(priority: .utility) { [weak self] in
+        let buildTask = Task.detached(priority: .utility) { [weak self] in
             do {
                 let pipeline = try Renderer.buildSpecializedPipeline(
                     device: device,
@@ -1034,6 +1038,7 @@ extension Renderer {
                 await self?.markPipelineBuildFailed(forKey: cacheKey)
             }
         }
+        backgroundRenderPipelineBuildTasks[cacheKey] = buildTask
     }
 
     /// Compute-path counterpart to `enqueueBackgroundPipelineBuild`. Builds the
@@ -1066,7 +1071,7 @@ extension Renderer {
             return
         }
 
-        Task.detached(priority: .utility) { [weak self] in
+        let buildTask = Task.detached(priority: .utility) { [weak self] in
             if let pipeline = Renderer.buildComputePipeline(
                 device: device,
                 library: metalLibrary,
@@ -1082,6 +1087,7 @@ extension Renderer {
                 await self?.markComputePipelineBuildFailed(forKey: cacheKey)
             }
         }
+        backgroundComputePipelineBuildTasks[cacheKey] = buildTask
     }
 
 }

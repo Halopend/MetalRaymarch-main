@@ -73,12 +73,14 @@ extension Renderer {
 
             guard let delta = accumulatedDelta else { return }
 
-            Task { @MainActor in
+            let dispatchTask = Task { @MainActor [weak self] in
+                guard let self else { return }
                 defer {
                     // Call directly — finishHandTrackingDispatch is nonisolated
                     // and grabs its own Mutex lock; no need to hop back to the
                     // Renderer actor (which is stuck in a synchronous render loop).
                     self.finishHandTrackingDispatch()
+                    self.clearHandTrackingDispatchTask()
                 }
 
                 // Mark tracking as running (for UI diagnostics)
@@ -139,6 +141,7 @@ extension Renderer {
                     deltaTime: delta
                 )
             }
+            handTrackingDispatchTask = dispatchTask
         }
     }
 
@@ -146,5 +149,9 @@ extension Renderer {
         handTrackingDispatchState.withLock { state in
             state.inFlight = false
         }
+    }
+
+    nonisolated func clearHandTrackingDispatchTask() {
+        handTrackingDispatchTask = nil
     }
 }

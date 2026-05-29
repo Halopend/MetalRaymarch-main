@@ -208,6 +208,11 @@ actor Renderer {
     private var parameterOperationFrameIndex: UInt64 = 0
     // Lifetime is bounded to init/deinit; the task body still hops back onto the actor.
     nonisolated(unsafe) private var setupTask: Task<Void, Never>?
+    // Track detached background builds so they can be cancelled during teardown.
+    nonisolated(unsafe) fileprivate var backgroundRenderPipelineBuildTasks: [String: Task<Void, Never>] = [:]
+    nonisolated(unsafe) fileprivate var backgroundComputePipelineBuildTasks: [String: Task<Void, Never>] = [:]
+    // At most one hand-tracking dispatch task is in flight due to handTrackingDispatchState.
+    nonisolated(unsafe) fileprivate var handTrackingDispatchTask: Task<Void, Never>?
 
     var smoothedScale: Float = 1.0
     
@@ -511,6 +516,15 @@ actor Renderer {
 
     deinit {
         setupTask?.cancel()
+        handTrackingDispatchTask?.cancel()
+        for task in backgroundRenderPipelineBuildTasks.values {
+            task.cancel()
+        }
+        for task in backgroundComputePipelineBuildTasks.values {
+            task.cancel()
+        }
+        backgroundRenderPipelineBuildTasks.removeAll(keepingCapacity: false)
+        backgroundComputePipelineBuildTasks.removeAll(keepingCapacity: false)
     }
     
     @MainActor

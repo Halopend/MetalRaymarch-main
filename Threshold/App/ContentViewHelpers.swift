@@ -180,8 +180,8 @@ struct StatBox: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, DS.Spacing.sm)
+        .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: DS.Radius.inset))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label): \(value)")
     }
