@@ -184,6 +184,12 @@ actor Renderer {
     private var musicReactiveDecayByTarget: [MusicReactiveTarget: Float] = [:]
     private var musicReactiveDriftByTarget: [MusicReactiveTarget: Float] = [:]
     private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
+    private var dampedMusicBassLevel: Float = 0
+    private var dampedMusicMidLevel: Float = 0
+    private var dampedMusicTrebleLevel: Float = 0
+    private var dampedMusicBeatLevel: Float = 0
+    private var dampedMusicOverallLevel: Float = 0
+    private var dampedMusicCompositeLevel: Float = 0
 
     // Cached slot-gain lookup for music-reactive triplet gains. Rebuilt only
     // when the active fractal type or triplet-gain dictionary changes — the
@@ -207,6 +213,23 @@ actor Renderer {
     
     var lastImmersiveSpaceState: AppModel.ImmersiveSpaceState?
 
+    @inline(__always)
+    private func applyMusicSourceDamping(current: Float, target: Float, damping: Float, deltaTime: Float) -> Float {
+        let clampedDamping = max(0.0, min(1.0, damping))
+        guard clampedDamping > 0.001 else { return target }
+        let responseTime = 0.02 + clampedDamping * 0.5
+        let blend = 1.0 - exp(-deltaTime / responseTime)
+        return current + (target - current) * blend
+    }
+
+    private func resetMusicSourceDamping() {
+        dampedMusicBassLevel = 0
+        dampedMusicMidLevel = 0
+        dampedMusicTrebleLevel = 0
+        dampedMusicBeatLevel = 0
+        dampedMusicOverallLevel = 0
+        dampedMusicCompositeLevel = 0
+    }
 
     var mesh: MTKMesh
     
@@ -870,18 +893,50 @@ actor Renderer {
             if settings.fractalAudioReactiveEnabled {
                 musicReactiveLayerActive = true
 
-                let bass = settings.bassLevel
-                let mid = settings.midLevel
-                let treble = settings.trebleLevel
-                let beat = settings.beatIntensity
+                let dt = cachedDeltaTime
+                let damping = settings.fractalAudioDamping
+
+                let bass = applyMusicSourceDamping(current: dampedMusicBassLevel,
+                                                   target: settings.bassLevel,
+                                                   damping: damping,
+                                                   deltaTime: dt)
+                dampedMusicBassLevel = bass
+
+                let mid = applyMusicSourceDamping(current: dampedMusicMidLevel,
+                                                  target: settings.midLevel,
+                                                  damping: damping,
+                                                  deltaTime: dt)
+                dampedMusicMidLevel = mid
+
+                let treble = applyMusicSourceDamping(current: dampedMusicTrebleLevel,
+                                                     target: settings.trebleLevel,
+                                                     damping: damping,
+                                                     deltaTime: dt)
+                dampedMusicTrebleLevel = treble
+
+                let beat = applyMusicSourceDamping(current: dampedMusicBeatLevel,
+                                                   target: settings.beatIntensity,
+                                                   damping: damping,
+                                                   deltaTime: dt)
+                dampedMusicBeatLevel = beat
+
+                let overall = applyMusicSourceDamping(current: dampedMusicOverallLevel,
+                                                      target: settings.audioLevel,
+                                                      damping: damping,
+                                                      deltaTime: dt)
+                dampedMusicOverallLevel = overall
+
                 let globalAmount = settings.fractalAudioAmount * settings.animationActivityFactor
                 let beatPunch = settings.fractalBeatPunch
 
                 // Composite drive (default source behavior)
                 let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
-                let drive = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
-
-                let dt = cachedDeltaTime
+                let driveTarget = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
+                let drive = applyMusicSourceDamping(current: dampedMusicCompositeLevel,
+                                                    target: driveTarget,
+                                                    damping: damping,
+                                                    deltaTime: dt)
+                dampedMusicCompositeLevel = drive
 
                 // Reuse the buffer's backing storage across frames.
                 audioOperationsBuffer.removeAll(keepingCapacity: true)
@@ -923,7 +978,7 @@ actor Renderer {
                     case .mid: sourceValue = mid
                     case .treble: sourceValue = treble
                     case .beat: sourceValue = beat
-                    case .overall: sourceValue = settings.audioLevel
+                    case .overall: sourceValue = overall
                     }
 
                     // ── 2. Scale audio intensity ──
@@ -1051,6 +1106,7 @@ actor Renderer {
                 musicReactiveDecayByTarget.removeAll()
                 musicReactiveDriftByTarget.removeAll()
                 musicLFOPhaseByTarget.removeAll()
+                resetMusicSourceDamping()
             }
         } else {
             if musicReactiveLayerActive {
@@ -1061,6 +1117,7 @@ actor Renderer {
             musicReactiveDecayByTarget.removeAll()
             musicReactiveDriftByTarget.removeAll()
             musicLFOPhaseByTarget.removeAll()
+            resetMusicSourceDamping()
         }
         frameBreakdown.backgroundCpuMs = (CACurrentMediaTime() - backgroundCpuStart) * 1000.0
 

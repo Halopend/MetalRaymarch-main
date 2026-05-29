@@ -13,6 +13,7 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
     var fractalAudioReactiveEnabled: Bool = false
     var fractalAudioAmount: Float = 0.25       // 0.0 - 1.0
     var fractalBeatPunch: Float = 0.3          // 0.0 - 1.0
+    var fractalAudioDamping: Float = 0.0       // 0.0 - 1.0
 
     // Band sensitivities
     var bassSensitivity: Float = 1.0           // 0.0 - 2.0
@@ -28,9 +29,54 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
 
     // MARK: - Validation
 
+    enum CodingKeys: String, CodingKey {
+        case fractalAudioReactiveEnabled
+        case fractalAudioAmount
+        case fractalBeatPunch
+        case fractalAudioDamping
+        case bassSensitivity
+        case midSensitivity
+        case trebleSensitivity
+        case beatSensitivity
+        case musicReactiveMappings
+        case tripletMusicGains
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fractalAudioReactiveEnabled = try container.decodeIfPresent(Bool.self, forKey: .fractalAudioReactiveEnabled) ?? false
+        fractalAudioAmount = try container.decodeIfPresent(Float.self, forKey: .fractalAudioAmount) ?? 0.25
+        fractalBeatPunch = try container.decodeIfPresent(Float.self, forKey: .fractalBeatPunch) ?? 0.3
+        fractalAudioDamping = try container.decodeIfPresent(Float.self, forKey: .fractalAudioDamping) ?? 0.0
+        bassSensitivity = try container.decodeIfPresent(Float.self, forKey: .bassSensitivity) ?? 1.0
+        midSensitivity = try container.decodeIfPresent(Float.self, forKey: .midSensitivity) ?? 1.0
+        trebleSensitivity = try container.decodeIfPresent(Float.self, forKey: .trebleSensitivity) ?? 1.0
+        beatSensitivity = try container.decodeIfPresent(Float.self, forKey: .beatSensitivity) ?? 1.0
+        musicReactiveMappings = try container.decodeIfPresent([MusicReactiveMapping].self, forKey: .musicReactiveMappings) ?? []
+        tripletMusicGains = try container.decodeIfPresent([String: Float].self, forKey: .tripletMusicGains) ?? [:]
+        clamp()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fractalAudioReactiveEnabled, forKey: .fractalAudioReactiveEnabled)
+        try container.encode(fractalAudioAmount, forKey: .fractalAudioAmount)
+        try container.encode(fractalBeatPunch, forKey: .fractalBeatPunch)
+        try container.encode(fractalAudioDamping, forKey: .fractalAudioDamping)
+        try container.encode(bassSensitivity, forKey: .bassSensitivity)
+        try container.encode(midSensitivity, forKey: .midSensitivity)
+        try container.encode(trebleSensitivity, forKey: .trebleSensitivity)
+        try container.encode(beatSensitivity, forKey: .beatSensitivity)
+        try container.encode(musicReactiveMappings, forKey: .musicReactiveMappings)
+        try container.encode(tripletMusicGains, forKey: .tripletMusicGains)
+    }
+
     mutating func clamp() {
         fractalAudioAmount = max(0.0, min(1.0, fractalAudioAmount))
         fractalBeatPunch = max(0.0, min(1.0, fractalBeatPunch))
+        fractalAudioDamping = max(0.0, min(1.0, fractalAudioDamping))
         bassSensitivity = max(0.0, min(2.0, bassSensitivity))
         midSensitivity = max(0.0, min(2.0, midSensitivity))
         trebleSensitivity = max(0.0, min(2.0, trebleSensitivity))

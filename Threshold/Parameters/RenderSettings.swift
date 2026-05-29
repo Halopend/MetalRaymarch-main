@@ -107,6 +107,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _fractalAudioReactiveEnabled: Bool = loadBool("fractalAudioReactiveEnabled", default: true)
     private var _fractalAudioAmount: Float              = loadFloat("fractalAudioAmount", default: 0.6)
     private var _fractalBeatPunch: Float                = loadFloat("fractalBeatPunch", default: 0.7)
+    private var _fractalAudioDamping: Float             = loadFloat("fractalAudioDamping", default: 0.0)
     private var _musicReactiveMappings: [MusicReactiveMapping] = loadMusicReactiveMappings("musicReactiveMappings")
     private var _tripletMusicGains: [String: Float] = [:]
     
@@ -488,6 +489,15 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(1.0, newValue))
             withLock { _fractalBeatPunch = clamped }
+            persistAudioReactive()
+        }
+    }
+
+    var fractalAudioDamping: Float {
+        get { withLock { _fractalAudioDamping } }
+        set {
+            let clamped = max(0.0, min(1.0, newValue))
+            withLock { _fractalAudioDamping = clamped }
             persistAudioReactive()
         }
     }
@@ -3038,6 +3048,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.fractalAudioReactiveEnabled = _fractalAudioReactiveEnabled
                 c.fractalAudioAmount = _fractalAudioAmount
                 c.fractalBeatPunch = _fractalBeatPunch
+                c.fractalAudioDamping = _fractalAudioDamping
                 c.bassSensitivity = _bassSensitivity
                 c.midSensitivity = _midSensitivity
                 c.trebleSensitivity = _trebleSensitivity
@@ -3052,6 +3063,7 @@ final class RenderSettings: @unchecked Sendable {
                 _fractalAudioReactiveEnabled = newValue.fractalAudioReactiveEnabled
                 _fractalAudioAmount = newValue.fractalAudioAmount
                 _fractalBeatPunch = newValue.fractalBeatPunch
+                _fractalAudioDamping = newValue.fractalAudioDamping
                 _bassSensitivity = newValue.bassSensitivity
                 _midSensitivity = newValue.midSensitivity
                 _trebleSensitivity = newValue.trebleSensitivity

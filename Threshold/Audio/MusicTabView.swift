@@ -187,9 +187,6 @@ struct MusicTabContent: View {
         #endif
         .onDisappear {
             updateVisualizationAddPopoverAdjustment(isPresented: false)
-            #if os(macOS)
-            stopMusicAppCapture()
-            #endif
         }
     }
 
@@ -529,9 +526,14 @@ struct MusicTabContent: View {
                 get: { cache.audioReactive.fractalBeatPunch },
                 set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
             ), range: 0...1)
+
+            sliderRow(label: "Damping", value: Binding(
+                get: { cache.audioReactive.fractalAudioDamping },
+                set: { v in cache.audioReactive.fractalAudioDamping = v; cache.push(\.fractalAudioDamping, value: v) }
+            ), range: 0...1)
         }
         .padding(12)
-        .frame(height: 112, alignment: .topLeading)
+        .frame(minHeight: 148, alignment: .topLeading)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -1446,12 +1448,14 @@ struct MusicTabContent: View {
         let s = preset.settings
         cache.audioReactive.fractalAudioAmount = s.audioAmount
         cache.audioReactive.fractalBeatPunch = s.beatPunch
+        cache.audioReactive.fractalAudioDamping = s.audioDamping
         cache.audioReactive.bassSensitivity = s.bassSensitivity
         cache.audioReactive.midSensitivity = s.midSensitivity
         cache.audioReactive.trebleSensitivity = s.trebleSensitivity
         cache.audioReactive.beatSensitivity = s.beatSensitivity
         cache.push(\.fractalAudioAmount, value: s.audioAmount)
         cache.push(\.fractalBeatPunch, value: s.beatPunch)
+        cache.push(\.fractalAudioDamping, value: s.audioDamping)
         cache.push(\.bassSensitivity, value: s.bassSensitivity)
         cache.push(\.midSensitivity, value: s.midSensitivity)
         cache.push(\.trebleSensitivity, value: s.trebleSensitivity)

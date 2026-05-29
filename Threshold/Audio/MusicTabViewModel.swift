@@ -136,6 +136,7 @@ final class MusicTabViewModel {
             name: trimmed,
             audioAmount: cache.audioReactive.fractalAudioAmount,
             beatPunch: cache.audioReactive.fractalBeatPunch,
+            audioDamping: cache.audioReactive.fractalAudioDamping,
             bassSensitivity: cache.audioReactive.bassSensitivity,
             midSensitivity: cache.audioReactive.midSensitivity,
             trebleSensitivity: cache.audioReactive.trebleSensitivity,
@@ -150,6 +151,7 @@ final class MusicTabViewModel {
     func loadMusicPreset(_ preset: MusicReactivePreset, into cache: UISettingsCache) {
         cache.audioReactive.fractalAudioAmount = preset.audioAmount
         cache.audioReactive.fractalBeatPunch = preset.beatPunch
+        cache.audioReactive.fractalAudioDamping = preset.audioDamping
         cache.audioReactive.bassSensitivity = preset.bassSensitivity
         cache.audioReactive.midSensitivity = preset.midSensitivity
         cache.audioReactive.trebleSensitivity = preset.trebleSensitivity
@@ -158,6 +160,7 @@ final class MusicTabViewModel {
 
         cache.push(\.fractalAudioAmount, value: preset.audioAmount)
         cache.push(\.fractalBeatPunch, value: preset.beatPunch)
+        cache.push(\.fractalAudioDamping, value: preset.audioDamping)
         cache.push(\.bassSensitivity, value: preset.bassSensitivity)
         cache.push(\.midSensitivity, value: preset.midSensitivity)
         cache.push(\.trebleSensitivity, value: preset.trebleSensitivity)

@@ -451,11 +451,35 @@ private final class ThresholdMacRenderer {
     private var musicReactiveDecayByTarget: [MusicReactiveTarget: Float] = [:]
     private var musicReactiveDriftByTarget: [MusicReactiveTarget: Float] = [:]
     private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
+    private var dampedMusicBassLevel: Float = 0
+    private var dampedMusicMidLevel: Float = 0
+    private var dampedMusicTrebleLevel: Float = 0
+    private var dampedMusicBeatLevel: Float = 0
+    private var dampedMusicOverallLevel: Float = 0
+    private var dampedMusicCompositeLevel: Float = 0
     private var cachedMusicReactiveFractalType: FractalModelType?
     private var cachedMusicReactiveTripletGains: [String: Float] = [:]
     private var cachedSlotGainLookup: [Int: Float] = [:]
     private var audioOperationsBuffer: [ParameterOperation] = []
     private var parameterOperationFrameIndex: UInt64 = 0
+
+    @inline(__always)
+    private func applyMusicSourceDamping(current: Float, target: Float, damping: Float, deltaTime: Float) -> Float {
+        let clampedDamping = max(0.0, min(1.0, damping))
+        guard clampedDamping > 0.001 else { return target }
+        let responseTime = 0.02 + clampedDamping * 0.5
+        let blend = 1.0 - exp(-deltaTime / responseTime)
+        return current + (target - current) * blend
+    }
+
+    private func resetMusicSourceDamping() {
+        dampedMusicBassLevel = 0
+        dampedMusicMidLevel = 0
+        dampedMusicTrebleLevel = 0
+        dampedMusicBeatLevel = 0
+        dampedMusicOverallLevel = 0
+        dampedMusicCompositeLevel = 0
+    }
 
     init?(device: MTLDevice,
                     appModel: AppModel,
@@ -767,15 +791,47 @@ private final class ThresholdMacRenderer {
 
         musicReactiveLayerActive = true
 
-        let bass = settings.bassLevel
-        let mid = settings.midLevel
-        let treble = settings.trebleLevel
-        let beat = settings.beatIntensity
+        let damping = settings.fractalAudioDamping
+        let bass = applyMusicSourceDamping(current: dampedMusicBassLevel,
+                           target: settings.bassLevel,
+                           damping: damping,
+                           deltaTime: deltaTime)
+        dampedMusicBassLevel = bass
+
+        let mid = applyMusicSourceDamping(current: dampedMusicMidLevel,
+                          target: settings.midLevel,
+                          damping: damping,
+                          deltaTime: deltaTime)
+        dampedMusicMidLevel = mid
+
+        let treble = applyMusicSourceDamping(current: dampedMusicTrebleLevel,
+                             target: settings.trebleLevel,
+                             damping: damping,
+                             deltaTime: deltaTime)
+        dampedMusicTrebleLevel = treble
+
+        let beat = applyMusicSourceDamping(current: dampedMusicBeatLevel,
+                           target: settings.beatIntensity,
+                           damping: damping,
+                           deltaTime: deltaTime)
+        dampedMusicBeatLevel = beat
+
+        let overall = applyMusicSourceDamping(current: dampedMusicOverallLevel,
+                              target: settings.audioLevel,
+                              damping: damping,
+                              deltaTime: deltaTime)
+        dampedMusicOverallLevel = overall
+
         let globalAmount = settings.fractalAudioAmount * settings.animationActivityFactor
         let beatPunch = settings.fractalBeatPunch
 
         let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
-        let drive = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
+        let driveTarget = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
+        let drive = applyMusicSourceDamping(current: dampedMusicCompositeLevel,
+                            target: driveTarget,
+                            damping: damping,
+                            deltaTime: deltaTime)
+        dampedMusicCompositeLevel = drive
 
         audioOperationsBuffer.removeAll(keepingCapacity: true)
 
@@ -819,7 +875,7 @@ private final class ThresholdMacRenderer {
             case .beat:
                 sourceValue = beat
             case .overall:
-                sourceValue = settings.audioLevel
+                sourceValue = overall
             }
 
             let absAmount = abs(mapping.amount)
@@ -924,6 +980,7 @@ private final class ThresholdMacRenderer {
         musicReactiveDecayByTarget.removeAll()
         musicReactiveDriftByTarget.removeAll()
         musicLFOPhaseByTarget.removeAll()
+        resetMusicSourceDamping()
     }
 
     private func resetDesktopView(settings: RenderSettings) {

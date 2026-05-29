@@ -614,17 +614,33 @@ struct MusicReactivePreset: Codable, Identifiable, Hashable, Sendable {
     var createdAt: Date
     var audioAmount: Float
     var beatPunch: Float
+    var audioDamping: Float
     var bassSensitivity: Float
     var midSensitivity: Float
     var trebleSensitivity: Float
     var beatSensitivity: Float
     var mappings: [MusicReactiveMapping]
 
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case createdAt
+        case audioAmount
+        case beatPunch
+        case audioDamping
+        case bassSensitivity
+        case midSensitivity
+        case trebleSensitivity
+        case beatSensitivity
+        case mappings
+    }
+
     init(id: UUID = UUID(),
          name: String,
          createdAt: Date = Date(),
          audioAmount: Float,
          beatPunch: Float,
+         audioDamping: Float,
          bassSensitivity: Float,
          midSensitivity: Float,
          trebleSensitivity: Float,
@@ -635,11 +651,42 @@ struct MusicReactivePreset: Codable, Identifiable, Hashable, Sendable {
         self.createdAt = createdAt
         self.audioAmount = audioAmount
         self.beatPunch = beatPunch
+        self.audioDamping = audioDamping
         self.bassSensitivity = bassSensitivity
         self.midSensitivity = midSensitivity
         self.trebleSensitivity = trebleSensitivity
         self.beatSensitivity = beatSensitivity
         self.mappings = mappings
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try container.decode(String.self, forKey: .name)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        audioAmount = try container.decode(Float.self, forKey: .audioAmount)
+        beatPunch = try container.decode(Float.self, forKey: .beatPunch)
+        audioDamping = try container.decodeIfPresent(Float.self, forKey: .audioDamping) ?? 0.0
+        bassSensitivity = try container.decode(Float.self, forKey: .bassSensitivity)
+        midSensitivity = try container.decode(Float.self, forKey: .midSensitivity)
+        trebleSensitivity = try container.decode(Float.self, forKey: .trebleSensitivity)
+        beatSensitivity = try container.decode(Float.self, forKey: .beatSensitivity)
+        mappings = try container.decodeIfPresent([MusicReactiveMapping].self, forKey: .mappings) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(audioAmount, forKey: .audioAmount)
+        try container.encode(beatPunch, forKey: .beatPunch)
+        try container.encode(audioDamping, forKey: .audioDamping)
+        try container.encode(bassSensitivity, forKey: .bassSensitivity)
+        try container.encode(midSensitivity, forKey: .midSensitivity)
+        try container.encode(trebleSensitivity, forKey: .trebleSensitivity)
+        try container.encode(beatSensitivity, forKey: .beatSensitivity)
+        try container.encode(mappings, forKey: .mappings)
     }
 }
 
@@ -662,15 +709,15 @@ enum ReactivityPreset: String, CaseIterable {
         }
     }
 
-    /// Core sensitivity tuning: (audioAmount, beatPunch, bassSens, midSens, trebleSens, beatSens)
-    var settings: (audioAmount: Float, beatPunch: Float, bassSensitivity: Float,
+    /// Core sensitivity tuning: (audioAmount, beatPunch, audioDamping, bassSens, midSens, trebleSens, beatSens)
+    var settings: (audioAmount: Float, beatPunch: Float, audioDamping: Float, bassSensitivity: Float,
                    midSensitivity: Float, trebleSensitivity: Float, beatSensitivity: Float) {
         switch self {
-        case .electronic: return (0.75, 0.85, 1.1, 0.8, 0.9, 1.2)
-        case .ambient:    return (0.45, 0.15, 0.6, 0.8, 0.9, 0.3)
-        case .rock:       return (0.65, 0.70, 0.9, 1.0, 0.7, 0.8)
-        case .classical:  return (0.40, 0.20, 0.5, 0.9, 0.8, 0.3)
-        case .hiphop:     return (0.80, 0.90, 1.2, 0.7, 0.5, 1.0)
+        case .electronic: return (0.75, 0.85, 0.12, 1.1, 0.8, 0.9, 1.2)
+        case .ambient:    return (0.45, 0.15, 0.55, 0.6, 0.8, 0.9, 0.3)
+        case .rock:       return (0.65, 0.70, 0.20, 0.9, 1.0, 0.7, 0.8)
+        case .classical:  return (0.40, 0.20, 0.60, 0.5, 0.9, 0.8, 0.3)
+        case .hiphop:     return (0.80, 0.90, 0.16, 1.2, 0.7, 0.5, 1.0)
         }
     }
     

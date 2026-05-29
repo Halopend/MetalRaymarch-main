@@ -1499,12 +1499,14 @@ struct ContentView: View {
         let settings = preset.settings
         cache.audioReactive.fractalAudioAmount = settings.audioAmount
         cache.audioReactive.fractalBeatPunch = settings.beatPunch
+        cache.audioReactive.fractalAudioDamping = settings.audioDamping
         cache.audioReactive.bassSensitivity = settings.bassSensitivity
         cache.audioReactive.midSensitivity = settings.midSensitivity
         cache.audioReactive.trebleSensitivity = settings.trebleSensitivity
         cache.audioReactive.beatSensitivity = settings.beatSensitivity
         cache.push(\.fractalAudioAmount, value: settings.audioAmount)
         cache.push(\.fractalBeatPunch, value: settings.beatPunch)
+        cache.push(\.fractalAudioDamping, value: settings.audioDamping)
         cache.push(\.bassSensitivity, value: settings.bassSensitivity)
         cache.push(\.midSensitivity, value: settings.midSensitivity)
         cache.push(\.trebleSensitivity, value: settings.trebleSensitivity)
