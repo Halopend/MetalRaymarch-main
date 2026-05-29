@@ -625,7 +625,7 @@ struct ContentView: View {
         formatter.dateFormat = "yyyy-MM-dd HH-mm"
         let autoName = "Preset \(formatter.string(from: Date()))"
         let presetName = providedName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalName = (presetName?.isEmpty == false) ? presetName! : autoName
+        let finalName = (presetName?.isEmpty == false) ? (presetName ?? autoName) : autoName
         appModel.presetManager.savePreset(
             name: finalName,
             settings: appModel.renderSettings,
