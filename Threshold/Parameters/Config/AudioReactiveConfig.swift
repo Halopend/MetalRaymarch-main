@@ -58,20 +58,7 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
         tripletMusicGains = try container.decodeIfPresent([String: Float].self, forKey: .tripletMusicGains) ?? [:]
         clamp()
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(fractalAudioReactiveEnabled, forKey: .fractalAudioReactiveEnabled)
-        try container.encode(fractalAudioAmount, forKey: .fractalAudioAmount)
-        try container.encode(fractalBeatPunch, forKey: .fractalBeatPunch)
-        try container.encode(fractalAudioDamping, forKey: .fractalAudioDamping)
-        try container.encode(bassSensitivity, forKey: .bassSensitivity)
-        try container.encode(midSensitivity, forKey: .midSensitivity)
-        try container.encode(trebleSensitivity, forKey: .trebleSensitivity)
-        try container.encode(beatSensitivity, forKey: .beatSensitivity)
-        try container.encode(musicReactiveMappings, forKey: .musicReactiveMappings)
-        try container.encode(tripletMusicGains, forKey: .tripletMusicGains)
-    }
+    // `encode(to:)` is synthesized from the explicit `CodingKeys` above.
 
     mutating func clamp() {
         fractalAudioAmount = max(0.0, min(1.0, fractalAudioAmount))

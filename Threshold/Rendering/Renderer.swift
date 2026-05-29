@@ -177,64 +177,25 @@ actor Renderer {
     let perfLogFrameMsThreshold: Double = 30.0  // ~33 FPS
     private var lastFPSConsoleLogTime: TimeInterval = 0  // For periodic FPS console logging
 
-    // Tracks whether the music layer has been activated so we can clear it when
-    // music reactivity is turned off.
-    private var musicReactiveLayerActive: Bool = false
-    private var musicReactivePhaseByTarget: [MusicReactiveTarget: Float] = [:]
-    private var musicReactiveDecayByTarget: [MusicReactiveTarget: Float] = [:]
-    private var musicReactiveDriftByTarget: [MusicReactiveTarget: Float] = [:]
-    private var musicLFOPhaseByTarget: [MusicReactiveTarget: Float] = [:]
-    private var dampedMusicBassLevel: Float = 0
-    private var dampedMusicMidLevel: Float = 0
-    private var dampedMusicTrebleLevel: Float = 0
-    private var dampedMusicBeatLevel: Float = 0
-    private var dampedMusicOverallLevel: Float = 0
-    private var dampedMusicCompositeLevel: Float = 0
+    // Shared music-reactive engine. Owns all per-target oscillator/envelope state,
+    // damped source levels, the triplet-gain cache, and the reusable operation
+    // buffer. The same engine type backs the macOS render path so the
+    // response-curve / LFO / dispatch math lives in exactly one place.
+    private let musicReactiveEngine = MusicReactiveEngine()
 
-    // Cached slot-gain lookup for music-reactive triplet gains. Rebuilt only
-    // when the active fractal type or triplet-gain dictionary changes — the
-    // per-frame hot path previously recomputed this from scratch (allocating a
-    // fresh dictionary, querying ParameterNodeRegistry, scanning floatFormulaParams)
-    // every frame while audio reactivity was on.
-    private var cachedMusicReactiveFractalType: FractalModelType?
-    private var cachedMusicReactiveTripletGains: [String: Float] = [:]
-    private var cachedSlotGainLookup: [Int: Float] = [:]
-
-    // Reusable audio-operation buffer. Rebuilt per-frame via
-    // `removeAll(keepingCapacity: true)` so the backing storage survives and we
-    // avoid reallocating on every frame when audio reactivity is active.
-    private var audioOperationsBuffer: [ParameterOperation] = []
-
-    private var parameterOperationFrameIndex: UInt64 = 0
     // Lifetime is bounded to init/deinit; the task body still hops back onto the actor.
     nonisolated(unsafe) private var setupTask: Task<Void, Never>?
     // Track detached background builds so they can be cancelled during teardown.
-    nonisolated(unsafe) fileprivate var backgroundRenderPipelineBuildTasks: [String: Task<Void, Never>] = [:]
-    nonisolated(unsafe) fileprivate var backgroundComputePipelineBuildTasks: [String: Task<Void, Never>] = [:]
+    // `internal` (not `fileprivate`) because the Renderer is split across extension
+    // files under Rendering/Core/ that mutate these task maps.
+    nonisolated(unsafe) var backgroundRenderPipelineBuildTasks: [String: Task<Void, Never>] = [:]
+    nonisolated(unsafe) var backgroundComputePipelineBuildTasks: [String: Task<Void, Never>] = [:]
     // At most one hand-tracking dispatch task is in flight due to handTrackingDispatchState.
-    nonisolated(unsafe) fileprivate var handTrackingDispatchTask: Task<Void, Never>?
+    nonisolated(unsafe) var handTrackingDispatchTask: Task<Void, Never>?
 
     var smoothedScale: Float = 1.0
     
     var lastImmersiveSpaceState: AppModel.ImmersiveSpaceState?
-
-    @inline(__always)
-    private func applyMusicSourceDamping(current: Float, target: Float, damping: Float, deltaTime: Float) -> Float {
-        let clampedDamping = max(0.0, min(1.0, damping))
-        guard clampedDamping > 0.001 else { return target }
-        let responseTime = 0.02 + clampedDamping * 0.5
-        let blend = 1.0 - exp(-deltaTime / responseTime)
-        return current + (target - current) * blend
-    }
-
-    private func resetMusicSourceDamping() {
-        dampedMusicBassLevel = 0
-        dampedMusicMidLevel = 0
-        dampedMusicTrebleLevel = 0
-        dampedMusicBeatLevel = 0
-        dampedMusicOverallLevel = 0
-        dampedMusicCompositeLevel = 0
-    }
 
     var mesh: MTKMesh
     
@@ -903,235 +864,24 @@ actor Renderer {
                 settings.audioLevel = totalLevel * inv
             }
 
-            // Music drives fractal geometry AND effects (Fractal Forge-inspired)
+            // Music drives fractal geometry AND effects (Fractal Forge-inspired).
+            // The aggregation above produced the per-band levels; the shared engine
+            // applies damping, response curves, the LFO overlay, and dispatch.
             if settings.fractalAudioReactiveEnabled {
-                musicReactiveLayerActive = true
-
-                let dt = cachedDeltaTime
-                let damping = settings.fractalAudioDamping
-
-                let bass = applyMusicSourceDamping(current: dampedMusicBassLevel,
-                                                   target: settings.bassLevel,
-                                                   damping: damping,
-                                                   deltaTime: dt)
-                dampedMusicBassLevel = bass
-
-                let mid = applyMusicSourceDamping(current: dampedMusicMidLevel,
-                                                  target: settings.midLevel,
-                                                  damping: damping,
-                                                  deltaTime: dt)
-                dampedMusicMidLevel = mid
-
-                let treble = applyMusicSourceDamping(current: dampedMusicTrebleLevel,
-                                                     target: settings.trebleLevel,
-                                                     damping: damping,
-                                                     deltaTime: dt)
-                dampedMusicTrebleLevel = treble
-
-                let beat = applyMusicSourceDamping(current: dampedMusicBeatLevel,
-                                                   target: settings.beatIntensity,
-                                                   damping: damping,
-                                                   deltaTime: dt)
-                dampedMusicBeatLevel = beat
-
-                let overall = applyMusicSourceDamping(current: dampedMusicOverallLevel,
-                                                      target: settings.audioLevel,
-                                                      damping: damping,
-                                                      deltaTime: dt)
-                dampedMusicOverallLevel = overall
-
-                let globalAmount = settings.fractalAudioAmount * settings.animationActivityFactor
-                let beatPunch = settings.fractalBeatPunch
-
-                // Composite drive (default source behavior)
-                let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
-                let driveTarget = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
-                let drive = applyMusicSourceDamping(current: dampedMusicCompositeLevel,
-                                                    target: driveTarget,
-                                                    damping: damping,
-                                                    deltaTime: dt)
-                dampedMusicCompositeLevel = drive
-
-                // Reuse the buffer's backing storage across frames.
-                audioOperationsBuffer.removeAll(keepingCapacity: true)
-
-                let activeFractalType = settings.fractalType
-                let mappings = settings.musicReactiveMappings
-
-                // Build (or reuse) the cached triplet gain lookup:
-                // formulaParamSlot → gain multiplier. Only rebuilt when the active
-                // fractal type or the triplet-gain dictionary actually changes.
-                let tripletGains = settings.tripletMusicGains
-                if cachedMusicReactiveFractalType != activeFractalType ||
-                   cachedMusicReactiveTripletGains != tripletGains {
-                    cachedMusicReactiveFractalType = activeFractalType
-                    cachedMusicReactiveTripletGains = tripletGains
-                    cachedSlotGainLookup.removeAll(keepingCapacity: true)
-
-                    if !tripletGains.isEmpty {
-                        let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: activeFractalType)
-                        let floatParams = MusicReactiveTarget.floatFormulaParams(for: activeFractalType)
-                        for triplet in triplets {
-                            guard let gain = tripletGains[triplet.groupName], gain != 1.0 else { continue }
-                            for formulaIndex in [triplet.xFormulaIndex, triplet.yFormulaIndex, triplet.zFormulaIndex] {
-                                if let slot = floatParams.firstIndex(where: { $0.index == formulaIndex }) {
-                                    cachedSlotGainLookup[slot] = gain
-                                }
-                            }
-                        }
-                    }
-                }
-                let slotGainLookup = cachedSlotGainLookup
-
-                for mapping in mappings where mapping.isEnabled {
-                    // ── 1. Select audio source level (0-1) ──
-                    let sourceValue: Float
-                    switch mapping.source {
-                    case .composite: sourceValue = drive
-                    case .bass: sourceValue = bass
-                    case .mid: sourceValue = mid
-                    case .treble: sourceValue = treble
-                    case .beat: sourceValue = beat
-                    case .overall: sourceValue = overall
-                    }
-
-                    // ── 2. Scale audio intensity ──
-                    let absAmount = abs(mapping.amount)
-                    let sign: Float = mapping.amount >= 0 ? 1.0 : -1.0
-
-                    // ── 3. Compute max deviation (fraction of allowed range) ──
-                    let allowed = mapping.target.allowedRange(for: activeFractalType)
-                    let allowedSpan = allowed.upperBound - allowed.lowerBound
-                    let maxDeviation = allowedSpan * 0.15 * absAmount * globalAmount
-
-                    // ── 4. Apply response curve to produce a bipolar offset ──
-                    // Audio energy modulates the AMPLITUDE of an oscillation centered at zero,
-                    // so the parameter oscillates around the user's manual/animation base value.
-                    let delta: Float
-                    switch mapping.responseCurve {
-                    case .sinusoidal:
-                        // Continuous phase-locked oscillation; audio modulates amplitude.
-                        // When audio is silent → offset = 0 (no drift from base).
-                        // When audio is loud  → offset oscillates ±maxDeviation.
-                        let phaseSpeed: Float = 2.0 + sourceValue * 4.0  // faster when louder
-                        var phase = musicReactivePhaseByTarget[mapping.target] ?? 0
-                        phase += phaseSpeed * dt
-                        phase = phase - floor(phase)
-                        musicReactivePhaseByTarget[mapping.target] = phase
-                        delta = sin(phase * 2.0 * .pi) * sourceValue * maxDeviation * sign
-
-                    case .pulse:
-                        // Fast attack on beat onset, exponential decay.
-                        // Produces a sharp spike that fades, ideal for bloom/glow.
-                        let attack = sourceValue * sourceValue  // quadratic for sharper onset
-                        var decay = musicReactiveDecayByTarget[mapping.target] ?? 0
-                        decay = max(attack, decay * exp(-6.0 * dt))  // ~170ms decay constant
-                        musicReactiveDecayByTarget[mapping.target] = decay
-                        delta = decay * maxDeviation * sign
-
-                    case .drift:
-                        // Heavily smoothed, slow-moving offset.
-                        // Audio energy gently pushes the parameter; the large smoothing
-                        // window makes it lag behind the beat for a "color drift" feel.
-                        let target = sourceValue * maxDeviation * sign
-                        var drifted = musicReactiveDriftByTarget[mapping.target] ?? 0
-                        let driftRate: Float = 2.0  // seconds to converge
-                        drifted += (target - drifted) * min(1.0, dt / driftRate)
-                        musicReactiveDriftByTarget[mapping.target] = drifted
-                        delta = drifted
-
-                    case .hybrid:
-                        // True hybrid: large slow drift + smaller fast vibration.
-                        // hybridCombo controls how pronounced/energetic the fast vibration is.
-                        let combo = max(0.0, min(1.0, mapping.hybridCombo))
-
-                        // Slow large-scale movement (drift backbone)
-                        let target = sourceValue * maxDeviation * sign
-                        var drifted = musicReactiveDriftByTarget[mapping.target] ?? 0
-                        let driftRate: Float = 2.4
-                        drifted += (target - drifted) * min(1.0, dt / driftRate)
-                        musicReactiveDriftByTarget[mapping.target] = drifted
-
-                        // Fast micro-vibration (wave overlay), still music-driven.
-                        let vibrationSpeed: Float = 6.0 + sourceValue * 8.0 + combo * 4.0
-                        var phase = musicReactivePhaseByTarget[mapping.target] ?? 0
-                        phase += vibrationSpeed * dt
-                        phase = phase - floor(phase)
-                        musicReactivePhaseByTarget[mapping.target] = phase
-
-                        let vibrationAmplitude = maxDeviation * sourceValue * (0.08 + 0.35 * combo)
-                        let vibration = sin(phase * 2.0 * .pi) * vibrationAmplitude * sign
-
-                        let combined = drifted + vibration
-                        let limit = maxDeviation * 1.2
-                        delta = max(-limit, min(limit, combined))
-                    }
-
-                    // ── 5. Optional LFO overlay ──
-                    var lfoOffset: Float = 0
-                    if mapping.lfo.enabled {
-                        var phase = musicLFOPhaseByTarget[mapping.target] ?? 0
-                        phase += mapping.lfo.frequency * dt
-                        phase = phase - floor(phase)
-                        musicLFOPhaseByTarget[mapping.target] = phase
-                        lfoOffset = mapping.lfo.shape.evaluate(phase: phase) * mapping.lfo.amplitude * maxDeviation
-                    }
-
-                    let rawTargetValue = delta + lfoOffset
-
-                    // ── 6. Dispatch to parameter system (LayerStack handles smoothing) ──
-                    guard let targetID = mapping.target.parameterTargetID(for: activeFractalType) else { continue }
-                    let offset = rawTargetValue
-
-                    // Apply triplet gain for formula param targets
-                    let finalOffset: Float
-                    if let slot = mapping.target.formulaParamSlot, let gain = slotGainLookup[slot] {
-                        finalOffset = offset * gain
-                    } else {
-                        finalOffset = offset
-                    }
-
-                    audioOperationsBuffer.append(
-                        ParameterOperation(
-                            targetID: targetID,
-                            source: .audio,
-                            // The music layer is itself additive, so it must receive the
-                            // raw offset to apply on top of the current base value.
-                            value: .absolute(finalOffset),
-                            frameIndex: parameterOperationFrameIndex,
-                            smoothing: ParameterOperationSmoothing(
-                                smoothingTime: max(0.02, mapping.smoothingWindow)
-                            )
-                        )
-                    )
-                }
-
-                if !audioOperationsBuffer.isEmpty {
-                    appModel.parameterPipeline.dispatchAudio(audioOperationsBuffer, settings: settings)
-                    parameterOperationFrameIndex &+= 1
-                }
-                
+                let bandLevels = BandLevels(bass: settings.bassLevel,
+                                            mid: settings.midLevel,
+                                            treble: settings.trebleLevel,
+                                            beat: settings.beatIntensity,
+                                            overall: settings.audioLevel)
+                musicReactiveEngine.process(bandLevels: bandLevels,
+                                            settings: settings,
+                                            deltaTime: cachedDeltaTime,
+                                            pipeline: appModel.parameterPipeline)
             } else {
-                if musicReactiveLayerActive {
-                    appModel.parameterPipeline.clearMusicLayers(settings: settings)
-                }
-                musicReactiveLayerActive = false
-                musicReactivePhaseByTarget.removeAll()
-                musicReactiveDecayByTarget.removeAll()
-                musicReactiveDriftByTarget.removeAll()
-                musicLFOPhaseByTarget.removeAll()
-                resetMusicSourceDamping()
+                musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
             }
         } else {
-            if musicReactiveLayerActive {
-                appModel.parameterPipeline.clearMusicLayers(settings: settings)
-            }
-            musicReactiveLayerActive = false
-            musicReactivePhaseByTarget.removeAll()
-            musicReactiveDecayByTarget.removeAll()
-            musicReactiveDriftByTarget.removeAll()
-            musicLFOPhaseByTarget.removeAll()
-            resetMusicSourceDamping()
+            musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
         }
         frameBreakdown.backgroundCpuMs = (CACurrentMediaTime() - backgroundCpuStart) * 1000.0
 

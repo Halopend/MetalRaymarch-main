@@ -8,20 +8,6 @@
 
 import Foundation
 
-enum MusicReactiveMode: String, Codable, Sendable {
-    case relative
-
-    static let allCases: [MusicReactiveMode] = [.relative]
-
-    var displayName: String {
-        "Relative"
-    }
-
-    var helpText: String {
-        "Music adds a sinusoidal offset around the current animation or manual base value"
-    }
-}
-
 /// How audio energy shapes the parameter offset.
 /// Each curve produces a different delta shape from the same source level (0–1).
 enum ResponseCurve: String, CaseIterable, Codable, Sendable {
@@ -321,40 +307,6 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    func defaultRange(for fractalType: FractalModelType) -> ClosedRange<Float> {
-        if let desc = formulaDescriptor(for: fractalType) {
-            // Mandelbulb PolarRotation is most useful around +Y alignment.
-            if fractalType == .mandelbulb, desc.name == "PolarRotation" {
-                let center = Float.pi * 0.5
-                return (center - 0.5)...(center + 0.5)
-            }
-            let spread = (desc.max - desc.min) * 0.2
-            let lo = max(desc.min, desc.default - spread)
-            let hi = min(desc.max, desc.default + spread)
-            return lo...hi
-        }
-        return defaultRange
-    }
-
-    var defaultRange: ClosedRange<Float> {
-        switch self {
-        case .fractalScale: return 2.4...3.4
-        case .colorMix: return 0.2...0.9
-        case .iterations: return 8.0...12.0
-        case .glow: return 0.2...0.9
-        case .fog: return 0.05...0.5
-        case .bloom: return 0.1...0.8
-        case .hueSpeed: return 0.02...0.25
-        case .saturation: return 0.8...2.0
-        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
-             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
-             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
-             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15: return 0.0...1.0
-        case .foldingLimit: return 0.9...1.35
-        case .sphereRadius: return 0.25...0.8
-        }
-    }
-
     var defaultSource: MusicReactiveSource {
         switch self {
         case .fractalScale: return .composite
@@ -456,13 +408,9 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     // MARK: - Default Mapping Factory
 
     func defaultMapping(for fractalType: FractalModelType, enabled: Bool = true) -> MusicReactiveMapping {
-        let range = defaultRange(for: fractalType)
-        return MusicReactiveMapping(
+        MusicReactiveMapping(
             target: self,
             source: defaultSource,
-            rangeMin: range.lowerBound,
-            rangeMax: range.upperBound,
-            responseSpeed: 0.12,
             amount: 1.0,
             isEnabled: enabled
         )
@@ -472,9 +420,6 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         MusicReactiveMapping(
             target: self,
             source: defaultSource,
-            rangeMin: defaultRange.lowerBound,
-            rangeMax: defaultRange.upperBound,
-            responseSpeed: 0.12,
             amount: 1.0,
             isEnabled: enabled
         )
@@ -485,12 +430,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     var id: UUID
     var target: MusicReactiveTarget
     var source: MusicReactiveSource
-    var rangeMin: Float
-    var rangeMax: Float
-    var responseSpeed: Float
     var amount: Float
     var isEnabled: Bool
-    var mode: MusicReactiveMode
     var responseCurve: ResponseCurve
     var lfo: LFOSettings
     var smoothingWindow: Float
@@ -500,12 +441,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     init(id: UUID = UUID(),
          target: MusicReactiveTarget,
          source: MusicReactiveSource,
-         rangeMin: Float,
-         rangeMax: Float,
-         responseSpeed: Float,
          amount: Float,
          isEnabled: Bool,
-         mode: MusicReactiveMode = .relative,
          responseCurve: ResponseCurve? = nil,
          lfo: LFOSettings = .default,
          smoothingWindow: Float = 0.0,
@@ -513,12 +450,8 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.id = id
         self.target = target
         self.source = source
-        self.rangeMin = rangeMin
-        self.rangeMax = rangeMax
-        self.responseSpeed = responseSpeed
         self.amount = amount
         self.isEnabled = isEnabled
-        self.mode = mode
         self.responseCurve = responseCurve ?? target.defaultResponseCurve
         self.lfo = lfo
         self.smoothingWindow = smoothingWindow
@@ -527,28 +460,6 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     }
 
     mutating func sanitizeInPlace() {
-        let allowed = target.allowedRange
-        rangeMin = min(allowed.upperBound, max(allowed.lowerBound, rangeMin))
-        rangeMax = min(allowed.upperBound, max(allowed.lowerBound, rangeMax))
-        if rangeMin > rangeMax {
-            swap(&rangeMin, &rangeMax)
-        }
-        responseSpeed = max(0.01, min(1.0, responseSpeed))
-        amount = max(-3.0, min(3.0, amount))
-        smoothingWindow = max(0.0, min(2.0, smoothingWindow))
-        hybridCombo = max(0.0, min(1.0, hybridCombo))
-        lfo.sanitizeInPlace()
-    }
-
-    /// Sanitize with fractal-type-aware ranges (for formula params).
-    mutating func sanitizeInPlace(for fractalType: FractalModelType) {
-        let allowed = target.allowedRange(for: fractalType)
-        rangeMin = min(allowed.upperBound, max(allowed.lowerBound, rangeMin))
-        rangeMax = min(allowed.upperBound, max(allowed.lowerBound, rangeMax))
-        if rangeMin > rangeMax {
-            swap(&rangeMin, &rangeMax)
-        }
-        responseSpeed = max(0.01, min(1.0, responseSpeed))
         amount = max(-3.0, min(3.0, amount))
         smoothingWindow = max(0.0, min(2.0, smoothingWindow))
         hybridCombo = max(0.0, min(1.0, hybridCombo))
@@ -566,9 +477,11 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
 
     // MARK: - Backward-compatible Codable
 
+    // Only the keys still in use are decoded. Legacy keys (rangeMin/rangeMax/
+    // responseSpeed/mode) in older saved data are simply ignored.
     enum CodingKeys: String, CodingKey {
-        case id, target, source, rangeMin, rangeMax, responseSpeed, amount, isEnabled
-        case mode, responseCurve, lfo, smoothingWindow, hybridCombo
+        case id, target, source, amount, isEnabled
+        case responseCurve, lfo, smoothingWindow, hybridCombo
     }
 
     init(from decoder: Decoder) throws {
@@ -576,20 +489,13 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         self.id = try c.decode(UUID.self, forKey: .id)
         self.target = try c.decode(MusicReactiveTarget.self, forKey: .target)
         self.source = try c.decode(MusicReactiveSource.self, forKey: .source)
-        self.rangeMin = try c.decode(Float.self, forKey: .rangeMin)
-        self.rangeMax = try c.decode(Float.self, forKey: .rangeMax)
-        self.responseSpeed = try c.decode(Float.self, forKey: .responseSpeed)
         self.amount = try c.decode(Float.self, forKey: .amount)
         self.isEnabled = try c.decode(Bool.self, forKey: .isEnabled)
-        // Backward compat: old data may store .absolute mode
-        let rawMode = try c.decodeIfPresent(MusicReactiveMode.self, forKey: .mode) ?? .relative
-        self.mode = .relative
         self.responseCurve = try c.decodeIfPresent(ResponseCurve.self, forKey: .responseCurve)
             ?? target.defaultResponseCurve
         self.lfo = try c.decodeIfPresent(LFOSettings.self, forKey: .lfo) ?? .default
         self.smoothingWindow = try c.decodeIfPresent(Float.self, forKey: .smoothingWindow) ?? 0.0
         self.hybridCombo = try c.decodeIfPresent(Float.self, forKey: .hybridCombo) ?? 0.35
-        _ = rawMode // consumed for backward compat only
         sanitizeInPlace()
     }
 
@@ -597,10 +503,10 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
     static func migrateLegacy(_ mappings: [MusicReactiveMapping]) -> [MusicReactiveMapping] {
         var seen = Set<MusicReactiveTarget>()
         var result: [MusicReactiveMapping] = []
-        for var mapping in mappings {
+        for mapping in mappings {
+            var mapping = mapping
             let newTarget = mapping.target.migrated
             mapping.target = newTarget
-            mapping.mode = .relative
             guard seen.insert(newTarget).inserted else { continue }
             result.append(mapping)
         }
@@ -673,21 +579,7 @@ struct MusicReactivePreset: Codable, Identifiable, Hashable, Sendable {
         beatSensitivity = try container.decode(Float.self, forKey: .beatSensitivity)
         mappings = try container.decodeIfPresent([MusicReactiveMapping].self, forKey: .mappings) ?? []
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encode(createdAt, forKey: .createdAt)
-        try container.encode(audioAmount, forKey: .audioAmount)
-        try container.encode(beatPunch, forKey: .beatPunch)
-        try container.encode(audioDamping, forKey: .audioDamping)
-        try container.encode(bassSensitivity, forKey: .bassSensitivity)
-        try container.encode(midSensitivity, forKey: .midSensitivity)
-        try container.encode(trebleSensitivity, forKey: .trebleSensitivity)
-        try container.encode(beatSensitivity, forKey: .beatSensitivity)
-        try container.encode(mappings, forKey: .mappings)
-    }
+    // `encode(to:)` is synthesized from the explicit `CodingKeys` above.
 }
 
 /// Genre-optimized reactivity presets.

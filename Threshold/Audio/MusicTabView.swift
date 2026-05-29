@@ -162,6 +162,7 @@ struct MusicTabContent: View {
                         ScrollView(.vertical, showsIndicators: true) {
                             VStack(spacing: 10) {
                                 reactivitySection
+                                presetsSection
                                 levelMeters
                             }
                             .padding(.bottom, 10)
@@ -511,6 +512,90 @@ struct MusicTabContent: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.08)))
     }
 
+    // MARK: - Saved Reactivity Presets
+
+    private var presetsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Saved Reactivity Presets", systemImage: "square.stack.3d.up")
+                    .font(.subheadline.bold())
+                Spacer()
+                Text("\(viewModel.musicPresets.count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            // Save row: name field + save button
+            HStack(spacing: 8) {
+                TextField("Preset name", text: $viewModel.musicPresetName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .onSubmit { viewModel.saveMusicPreset(using: cache) }
+
+                Button {
+                    viewModel.saveMusicPreset(using: cache)
+                } label: {
+                    Label("Save", systemImage: "plus.circle.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(viewModel.musicPresetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if viewModel.musicPresets.isEmpty {
+                Text("Save the current amount, beat, damping, sensitivities, and parameter mappings as a reusable preset.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                LazyVStack(spacing: 6) {
+                    ForEach(viewModel.musicPresets) { preset in
+                        presetRow(preset)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
+    }
+
+    private func presetRow(_ preset: MusicReactivePreset) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "waveform")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(preset.name)
+                    .font(.caption.bold())
+                    .lineLimit(1)
+                Text("\(preset.mappings.count) mapping\(preset.mappings.count == 1 ? "" : "s")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("Load") {
+                viewModel.loadMusicPreset(preset, into: cache)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button(role: .destructive) {
+                viewModel.deleteMusicPreset(preset.id)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.caption2)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.25)))
+    }
+
     private var quickMixTile: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Quick Mix")
@@ -590,10 +675,6 @@ struct MusicTabContent: View {
     }
     private var librarySearchBinding: Binding<String> {
         Binding(get: { viewModel.librarySearch }, set: { viewModel.librarySearch = $0 })
-    }
-
-    private var musicPresetNameBinding: Binding<String> {
-        Binding(get: { viewModel.musicPresetName }, set: { viewModel.musicPresetName = $0 })
     }
 
     // MARK: - Service Toggle
