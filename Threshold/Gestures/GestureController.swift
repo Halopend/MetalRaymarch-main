@@ -561,10 +561,10 @@ final class GestureController {
             if case .parameter(let descriptor) = binding,
                let formulaIndex = descriptor.formulaIndex,
                let node = ParameterNodeRegistry.shared.node(for: descriptor) {
-                guard twoHandStateByDigit[digit] != nil else { continue }
+                guard var digitState = twoHandStateByDigit[digit] else { continue }
                 processTwoHandGesture(
                     digit: digit,
-                    state: &twoHandStateByDigit[digit]!,
+                    state: &digitState,
                     currentTarget: FormulaCatalog.getParam(settings.formulaParams, index: formulaIndex),
                     range: node.range,
                     parameterID: node.id
@@ -578,7 +578,8 @@ final class GestureController {
                     self.parameterPipeline.dispatchGesture([op], settings: settings)
                     UsageAnalytics.shared.trackHandGestureUsed()
                 }
-                if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
+                twoHandStateByDigit[digit] = digitState
+                if digitState.isActive { activeDigit = digit }
                 continue
             }
 
@@ -699,10 +700,11 @@ final class GestureController {
 
         let batch = ParameterNodeRegistry.shared.formulaBatch(for: .mandelbox)
         guard let node = batch.floatNodeByFormulaIndex[formulaIndex] else { return }
+        guard var digitState = twoHandStateByDigit[digit] else { return }
 
         processTwoHandGesture(
             digit: digit,
-            state: &twoHandStateByDigit[digit]!,
+            state: &digitState,
             currentTarget: info.target(settings),
             range: info.range(ranges),
             parameterID: node.id
@@ -719,7 +721,8 @@ final class GestureController {
             parameterPipeline.dispatchGesture([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
-        if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
+        twoHandStateByDigit[digit] = digitState
+        if digitState.isActive { activeDigit = digit }
     }
 
     /// Dispatches a two-hand gesture for the universal fractalScale core parameter.
@@ -731,9 +734,10 @@ final class GestureController {
         settings: RenderSettings,
         activeDigit: inout Int
     ) {
+        guard var digitState = twoHandStateByDigit[digit] else { return }
         processTwoHandGesture(
             digit: digit,
-            state: &twoHandStateByDigit[digit]!,
+            state: &digitState,
             currentTarget: settings.effectiveTargetFractalScale,
             range: ranges.fractalScale,
             parameterID: ParameterTargetID.Core.fractalScale
@@ -750,7 +754,8 @@ final class GestureController {
             parameterPipeline.dispatchGesture([op], settings: settings)
             UsageAnalytics.shared.trackHandGestureUsed()
         }
-        if twoHandStateByDigit[digit]!.isActive { activeDigit = digit }
+        twoHandStateByDigit[digit] = digitState
+        if digitState.isActive { activeDigit = digit }
     }
     
     // MARK: - Two-Point Grab Gesture (Configurable Finger, Both Hands)

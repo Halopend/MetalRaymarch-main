@@ -1453,12 +1453,12 @@ final class AnimationManager {
         let recordedFractalType = recordingFractalType
         recordingFractalType = nil
         
-        guard samples.count >= 2 else {
+        guard samples.count >= 2, let lastSample = samples.last else {
             print("⚠️ Live recording too short — need at least 2 samples")
             return nil
         }
         
-        print("🔴 Live session recording stopped — \(samples.count) samples over \(String(format: "%.1f", samples.last!.time))s")
+        print("🔴 Live session recording stopped — \(samples.count) samples over \(String(format: "%.1f", lastSample.time))s")
         
         // Simplify: remove samples where nothing changed significantly
         let simplified = simplifySamples(samples)

@@ -33,6 +33,10 @@ final class AppleMusicManager {
         let trackCount: Int
     }
 
+    // Audio-reactive levels are written on the audio/analysis path and read on the
+    // render thread every frame. @ObservationIgnored + nonisolated(unsafe) avoids
+    // observation overhead and main-actor hops; the benign torn read of a single
+    // Float/Bool on ARM64 is acceptable for these visual-only signals.
     @ObservationIgnored nonisolated(unsafe) private(set) var bassLevel: Float = 0
     @ObservationIgnored nonisolated(unsafe) private(set) var midLevel: Float = 0
     @ObservationIgnored nonisolated(unsafe) private(set) var trebleLevel: Float = 0

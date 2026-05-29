@@ -1072,6 +1072,7 @@ extension Renderer {
         }
 
         let buildTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
             if let pipeline = Renderer.buildComputePipeline(
                 device: device,
                 library: metalLibrary,
@@ -1082,9 +1083,9 @@ extension Renderer {
                 maxRaySteps: maxRaySteps,
                 mandelbulbPower: mandelbulbPower
             ) {
-                await self?.insertBuiltComputePipeline(pipeline, forKey: cacheKey)
+                await self.insertBuiltComputePipeline(pipeline, forKey: cacheKey)
             } else {
-                await self?.markComputePipelineBuildFailed(forKey: cacheKey)
+                await self.markComputePipelineBuildFailed(forKey: cacheKey)
             }
         }
         backgroundComputePipelineBuildTasks[cacheKey] = buildTask

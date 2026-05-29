@@ -148,7 +148,13 @@ extension View {
         interactive: Bool = false
     ) -> some View {
         if #available(iOS 26, macOS 26, visionOS 26, *) {
+            #if os(visionOS)
+            // `glassEffect`/`Glass` are unavailable on visionOS; the system already
+            // renders windows with glass, so fall back to a translucent material.
+            self.background(.ultraThinMaterial, in: shape)
+            #else
             self.glassEffect(DS.resolveGlass(tint: tint, interactive: interactive), in: shape)
+            #endif
         } else {
             self.background(.ultraThinMaterial, in: shape)
         }
@@ -158,12 +164,15 @@ extension View {
 extension DS {
     /// Builds a configured `Glass` value for `dsGlass`. Factored out of the
     /// `@ViewBuilder` body (which cannot contain plain mutating statements).
-    @available(iOS 26, macOS 26, visionOS 26, *)
+    /// `Glass` is unavailable on visionOS, so this helper is gated out there.
+    #if !os(visionOS)
+    @available(iOS 26, macOS 26, *)
     static func resolveGlass(tint: Color?, interactive: Bool) -> Glass {
         var glass: Glass = .regular
         if let tint { glass = glass.tint(tint) }
         if interactive { glass = glass.interactive() }
         return glass
     }
+    #endif
 }
 

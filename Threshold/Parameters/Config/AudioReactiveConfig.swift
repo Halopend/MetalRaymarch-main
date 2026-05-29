@@ -29,19 +29,6 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
 
     // MARK: - Validation
 
-    enum CodingKeys: String, CodingKey {
-        case fractalAudioReactiveEnabled
-        case fractalAudioAmount
-        case fractalBeatPunch
-        case fractalAudioDamping
-        case bassSensitivity
-        case midSensitivity
-        case trebleSensitivity
-        case beatSensitivity
-        case musicReactiveMappings
-        case tripletMusicGains
-    }
-
     init() {}
 
     init(from decoder: Decoder) throws {
@@ -58,7 +45,8 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
         tripletMusicGains = try container.decodeIfPresent([String: Float].self, forKey: .tripletMusicGains) ?? [:]
         clamp()
     }
-    // `encode(to:)` is synthesized from the explicit `CodingKeys` above.
+    // `CodingKeys` and `encode(to:)` are both synthesized; `init(from:)` stays
+    // custom only to supply defaults for missing keys in older saved data.
 
     mutating func clamp() {
         fractalAudioAmount = max(0.0, min(1.0, fractalAudioAmount))
