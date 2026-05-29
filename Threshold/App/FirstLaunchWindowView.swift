@@ -35,7 +35,7 @@ struct FirstLaunchWindowView: View {
             .tabViewStyle(.automatic)
             #endif
         }
-        .frame(minWidth: 680, maxWidth: 760, minHeight: 560, maxHeight: 700)
+        .frame(minWidth: 680, idealWidth: 980, maxWidth: 980, minHeight: 560, idealHeight: 760, maxHeight: 760)
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)

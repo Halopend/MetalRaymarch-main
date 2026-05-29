@@ -11,6 +11,8 @@
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Threshold Fractal Scene</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -23,6 +25,8 @@
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Threshold Music Preset</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -35,6 +39,8 @@
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Threshold Animation</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -47,6 +53,8 @@
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Threshold Music Video Animation</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -59,6 +67,8 @@
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Threshold Custom Formula</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
@@ -123,6 +133,8 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Threshold Fractal Scene</string>
+			<key>UTTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.puppypower.threshold.scene</string>
 			<key>UTTypeTagSpecification</key>
@@ -141,6 +153,8 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Threshold Music Preset</string>
+			<key>UTTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.puppypower.threshold.music-preset</string>
 			<key>UTTypeTagSpecification</key>
@@ -159,6 +173,8 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Threshold Animation</string>
+			<key>UTTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.puppypower.threshold.animation</string>
 			<key>UTTypeTagSpecification</key>
@@ -177,6 +193,8 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Threshold Music Video Animation</string>
+			<key>UTTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.puppypower.threshold.music-animation</string>
 			<key>UTTypeTagSpecification</key>
@@ -195,6 +213,8 @@
 			</array>
 			<key>UTTypeDescription</key>
 			<string>Threshold Custom Formula</string>
+			<key>UTTypeIconFile</key>
+			<string>ThresholdDocumentIcon.icns</string>
 			<key>UTTypeIdentifier</key>
 			<string>com.puppypower.threshold.formula</string>
 			<key>UTTypeTagSpecification</key>
