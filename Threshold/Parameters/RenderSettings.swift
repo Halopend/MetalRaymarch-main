@@ -185,6 +185,9 @@ final class RenderSettings: @unchecked Sendable {
 
     private var _leftHandedMode: Bool = UserDefaults.standard.bool(forKey: "leftHandedMode")
 
+    // macOS-only: orbit the fractal by tilting the laptop (Sudden Motion Sensor).
+    private var _macTiltControlEnabled: Bool = UserDefaults.standard.bool(forKey: "macTiltControlEnabled")
+
     // === SPRING BLOB NAVIGATION ===
     private var _useSpringBlob: Bool = loadGestureBool("useSpringBlob", default: GestureDefaults.useSpringBlob)
     // Spring physics state — driven by translate gesture, ticked in Renderer
@@ -1179,6 +1182,17 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock { _leftHandedMode = newValue }
             UserDefaults.standard.set(newValue, forKey: "leftHandedMode")
+        }
+    }
+
+    /// macOS-only: when enabled, tilting the laptop orbits the fractal via the
+    /// built-in Sudden Motion Sensor (Intel MacBooks only; a no-op where the
+    /// sensor is unavailable).
+    var macTiltControlEnabled: Bool {
+        get { withLock { _macTiltControlEnabled } }
+        set {
+            withLock { _macTiltControlEnabled = newValue }
+            UserDefaults.standard.set(newValue, forKey: "macTiltControlEnabled")
         }
     }
 

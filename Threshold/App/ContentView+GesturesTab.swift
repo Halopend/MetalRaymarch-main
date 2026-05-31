@@ -93,6 +93,18 @@ extension ContentView {
                             onChanged: { cache.push(\.gestureSensitivity, value: cache.gesture.gestureSensitivity) },
                             showToggle: false)
 
+                        #if os(macOS)
+                        Toggle("Tilt to Orbit (Motion Sensor)", isOn: Binding(
+                            get: { appModel.renderSettings.macTiltControlEnabled },
+                            set: { appModel.renderSettings.macTiltControlEnabled = $0 }
+                        ))
+                        .toggleStyle(.switch)
+                        .font(.subheadline)
+                        Text("Tilt the laptop to orbit the fractal using the built-in Sudden Motion Sensor. Available on Intel MacBooks only.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        #endif
+
                         EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",
                             value: $cache.gesture.translationSensitivity, range: 0.2...3.0,
                             enabled: .constant(true),

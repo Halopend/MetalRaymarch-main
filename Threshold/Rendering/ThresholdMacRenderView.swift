@@ -400,6 +400,47 @@ struct ThresholdMacRenderView: NSViewRepresentable {
     }
 }
 
+/// Lock-protected cache of function-constant–specialized `fragmentShaderMono`
+/// pipelines for the macOS renderer. Specializing on iteration/ray-step/fractal
+/// counts lets the Metal compiler fully unroll the `Map()` and `Scene()` loops
+/// and devirtualize the DE dispatch — the same optimization the visionOS
+/// `Renderer` already performs. Builds run asynchronously off the render thread;
+/// the generic pipeline is used until the specialized variant is ready.
+///
+/// `@unchecked Sendable`: all mutable state is guarded by `lock`, so the async
+/// `makeRenderPipelineState` completion handler can safely store results.
+private final class MacSpecializedPipelineCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cache: [String: MTLRenderPipelineState] = [:]
+    private var pending: Set<String> = []
+
+    func pipeline(for key: String) -> MTLRenderPipelineState? {
+        lock.lock(); defer { lock.unlock() }
+        return cache[key]
+    }
+
+    /// Returns `true` if the caller should kick off a build (not cached and not
+    /// already in flight). Marks the key pending so concurrent frames don't
+    /// schedule duplicate compiles.
+    func beginBuildIfNeeded(_ key: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if cache[key] != nil || pending.contains(key) { return false }
+        pending.insert(key)
+        return true
+    }
+
+    func store(_ pipeline: MTLRenderPipelineState, for key: String) {
+        lock.lock(); defer { lock.unlock() }
+        cache[key] = pipeline
+        pending.remove(key)
+    }
+
+    func failBuild(_ key: String) {
+        lock.lock(); defer { lock.unlock() }
+        pending.remove(key)
+    }
+}
+
 private final class ThresholdMacRenderer {
     private enum SetupError: Error {
         case badVertexDescriptor
@@ -410,6 +451,15 @@ private final class ThresholdMacRenderer {
         let bufferIndex: Int
         let buffer: MTLBuffer
         let offset: Int
+    }
+
+    /// Mirrors the `MacMotionParams` struct in Shaders.metal (Stage B temporal
+    /// upscaling). Bound only to the motion-vector pass — never the shared
+    /// `Uniforms`.
+    private struct MacMotionParams {
+        var currentInvViewProj: matrix_float4x4
+        var currentViewProjNoJitter: matrix_float4x4
+        var previousViewProjNoJitter: matrix_float4x4
     }
 
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
@@ -428,6 +478,13 @@ private final class ThresholdMacRenderer {
     private let pipelineState: MTLRenderPipelineState
     private let depthState: MTLDepthStencilState
     private let depthPixelFormat: MTLPixelFormat
+    private let colorPixelFormat: MTLPixelFormat
+    private let vertexDescriptor: MTLVertexDescriptor
+    private let specializedPipelineCache = MacSpecializedPipelineCache()
+    private let spatialUpscaler: MacSpatialUpscaler
+    private let temporalUpscaler: MacTemporalUpscaler
+    private let blitPipelineState: MTLRenderPipelineState?
+    private let motionPipelineState: MTLRenderPipelineState?
     private let clearColor: MTLClearColor
     private let inputController: ThresholdMacInputController
     private let uiUpdateCoordinator: UIUpdateCoordinator
@@ -447,9 +504,26 @@ private final class ThresholdMacRenderer {
     private var drawableSize: CGSize = .zero
     private var depthTexture: MTLTexture?
 
+    // Stage B temporal-upscaling state. Motion vectors reproject world positions
+    // (reconstructed from the offscreen depth) through the previous frame's
+    // un-jittered view-projection; the projection is sub-pixel jittered per frame
+    // so the temporal scaler can resolve detail below native resolution.
+    private var motionCurrentInvViewProj = matrix_identity_float4x4
+    private var motionCurrentViewProjNoJitter = matrix_identity_float4x4
+    private var motionPreviousViewProjNoJitter = matrix_identity_float4x4
+    private var hasPreviousMotionMatrices = false
+    private var currentJitterNDC = SIMD2<Float>.zero
+    private var currentJitterPixels = SIMD2<Float>.zero
+    private var haltonIndex: UInt32 = 0
+    private var wasTemporalActive = false
+
     // Shared music-reactive engine — same type used by the visionOS `Renderer`,
     // so the response-curve / LFO / dispatch math lives in exactly one place.
     private let musicReactiveEngine = MusicReactiveEngine()
+
+    // macOS Sudden Motion Sensor (Intel MacBooks); tilt-to-orbit when enabled.
+    private let motionSensor = MacMotionSensor()
+    private var wasTiltControlEnabled = false
 
     init?(device: MTLDevice,
                     appModel: AppModel,
@@ -461,6 +535,7 @@ private final class ThresholdMacRenderer {
         self.device = device
         self.metalLayer = metalLayer
         self.depthPixelFormat = depthPixelFormat
+        self.colorPixelFormat = colorPixelFormat
         self.clearColor = clearColor
                 self.inputController = inputController
                 self.uiUpdateCoordinator = UIUpdateCoordinator(appModel: appModel)
@@ -471,16 +546,26 @@ private final class ThresholdMacRenderer {
 
         let builtPipeline: MTLRenderPipelineState
         let builtMesh: MTKMesh
+        let builtVertexDescriptor = Self.buildMetalVertexDescriptor()
         do {
-            let vertexDescriptor = Self.buildMetalVertexDescriptor()
-            builtPipeline = try Self.buildRenderPipeline(device: device, colorPixelFormat: colorPixelFormat, depthPixelFormat: depthPixelFormat, vertexDescriptor: vertexDescriptor)
-            builtMesh = try Self.buildMesh(device: device, vertexDescriptor: vertexDescriptor)
+            builtPipeline = try Self.buildRenderPipeline(device: device, colorPixelFormat: colorPixelFormat, depthPixelFormat: depthPixelFormat, vertexDescriptor: builtVertexDescriptor)
+            builtMesh = try Self.buildMesh(device: device, vertexDescriptor: builtVertexDescriptor)
         } catch {
             print("ThresholdMac renderer setup failed: \(error)")
             return nil
         }
         pipelineState = builtPipeline
+        vertexDescriptor = builtVertexDescriptor
         mesh = builtMesh
+
+        spatialUpscaler = MacSpatialUpscaler(device: device,
+                                             colorFormat: colorPixelFormat,
+                                             depthFormat: depthPixelFormat)
+        temporalUpscaler = MacTemporalUpscaler(device: device,
+                                               colorFormat: colorPixelFormat,
+                                               depthFormat: depthPixelFormat)
+        blitPipelineState = Self.buildBlitPipeline(device: device, colorPixelFormat: colorPixelFormat)
+        motionPipelineState = Self.buildMotionPipeline(device: device)
 
         let depthDescriptor = MTLDepthStencilDescriptor()
         depthDescriptor.depthCompareFunction = .less
@@ -512,9 +597,76 @@ private final class ThresholdMacRenderer {
         guard appModel.isAppActive,
               drawableSize.width > 1,
               drawableSize.height > 1,
-              let drawable = metalLayer.nextDrawable(),
-              let renderPassDescriptor = makeRenderPassDescriptor(drawable: drawable) else {
+              let drawable = metalLayer.nextDrawable() else {
             return
+        }
+
+        let drawableWidth = drawable.texture.width
+        let drawableHeight = drawable.texture.height
+
+        // Decide whether to render at reduced resolution and MetalFX-upscale to
+        // the drawable. The offscreen target stays in the drawable's sRGB color
+        // format so the raymarch pipeline needs no changes; only sub-native
+        // scales engage a scaler. Temporal upscaling is preferred when supported
+        // (better stability/detail); the spatial scaler is the fallback.
+        let resolutionScale = appModel.renderSettings.resolutionScale
+        var temporalPass: (color: MTLTexture, depth: MTLTexture, motion: MTLTexture, output: MTLTexture)?
+        var spatialPass: (color: MTLTexture, depth: MTLTexture, output: MTLTexture)?
+        if resolutionScale < 0.985, blitPipelineState != nil {
+            let inputWidth = max(1, Int((Float(drawableWidth) * resolutionScale).rounded()))
+            let inputHeight = max(1, Int((Float(drawableHeight) * resolutionScale).rounded()))
+            // MetalFX temporal supports at most 3× per dimension; clamp the
+            // temporal input up to `output / 3` so the lowest slider settings
+            // stay on the temporal path instead of falling back to spatial.
+            let minTemporalWidth = Int((Double(drawableWidth) / MacTemporalUpscaler.maxScaleFactor).rounded(.up))
+            let minTemporalHeight = Int((Double(drawableHeight) / MacTemporalUpscaler.maxScaleFactor).rounded(.up))
+            let temporalInputWidth = max(inputWidth, minTemporalWidth)
+            let temporalInputHeight = max(inputHeight, minTemporalHeight)
+            if motionPipelineState != nil,
+               temporalUpscaler.prepare(inputWidth: temporalInputWidth,
+                                        inputHeight: temporalInputHeight,
+                                        outputWidth: drawableWidth,
+                                        outputHeight: drawableHeight),
+               let color = temporalUpscaler.colorTexture,
+               let depth = temporalUpscaler.depthTexture,
+               let motion = temporalUpscaler.motionTexture,
+               let output = temporalUpscaler.outputTexture {
+                temporalPass = (color, depth, motion, output)
+            } else if spatialUpscaler.prepare(inputWidth: inputWidth,
+                                              inputHeight: inputHeight,
+                                              outputWidth: drawableWidth,
+                                              outputHeight: drawableHeight),
+                      let color = spatialUpscaler.colorTexture,
+                      let depth = spatialUpscaler.depthTexture,
+                      let output = spatialUpscaler.outputTexture {
+                spatialPass = (color, depth, output)
+            }
+        }
+
+        // Sub-pixel projection jitter only applies on the temporal path (the
+        // scaler needs jittered samples to accumulate detail). Compute it before
+        // `writeUniforms` so `makeUniforms` can bake it into the projection.
+        if temporalPass != nil {
+            haltonIndex = haltonIndex &+ 1
+            let jx = Self.halton(haltonIndex, base: 2) - 0.5
+            let jy = Self.halton(haltonIndex, base: 3) - 0.5
+            currentJitterPixels = SIMD2<Float>(jx, jy)
+            let w = Float(max(temporalUpscaler.inputSize.width, 1))
+            let h = Float(max(temporalUpscaler.inputSize.height, 1))
+            currentJitterNDC = SIMD2<Float>(2.0 * jx / w, 2.0 * jy / h)
+        } else {
+            currentJitterPixels = .zero
+            currentJitterNDC = .zero
+        }
+
+        // The direct (native-resolution) path renders straight into the drawable
+        // and needs the drawable-sized depth target.
+        let directPassDescriptor: MTLRenderPassDescriptor?
+        if temporalPass == nil, spatialPass == nil {
+            guard let descriptor = makeRenderPassDescriptor(drawable: drawable) else { return }
+            directPassDescriptor = descriptor
+        } else {
+            directPassDescriptor = nil
         }
 
         guard inFlightSemaphore.wait(timeout: .now()) == .success else { return }
@@ -531,12 +683,113 @@ private final class ThresholdMacRenderer {
         uniformBufferIndex = (uniformBufferIndex + 1) % uniformBuffers.count
         writeUniforms(to: uniformBuffer, appModel: appModel)
 
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-            commandBuffer.commit()
-            return
+        let activePipeline = resolveActivePipeline(appModel: appModel)
+
+        if let temporalPass, let blitPipelineState, let motionPipelineState {
+            // 1. Raymarch into the low-resolution offscreen target. Depth is
+            //    stored (not discarded) so the motion pass + scaler can read it.
+            let offscreenDescriptor = makeOffscreenRenderPassDescriptor(color: temporalPass.color,
+                                                                        depth: temporalPass.depth,
+                                                                        storeDepth: true)
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: offscreenDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer)
+            encoder.endEncoding()
+
+            // 2. Motion-vector pass: reconstruct world position from depth and
+            //    reproject through the previous frame's view-projection.
+            let motionDescriptor = MTLRenderPassDescriptor()
+            motionDescriptor.colorAttachments[0].texture = temporalPass.motion
+            motionDescriptor.colorAttachments[0].loadAction = .dontCare
+            motionDescriptor.colorAttachments[0].storeAction = .store
+            guard let motionEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: motionDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            motionEncoder.setRenderPipelineState(motionPipelineState)
+            motionEncoder.setFragmentTexture(temporalPass.depth, index: 0)
+            var motionParams = MacMotionParams(currentInvViewProj: motionCurrentInvViewProj,
+                                               currentViewProjNoJitter: motionCurrentViewProjNoJitter,
+                                               previousViewProjNoJitter: motionPreviousViewProjNoJitter)
+            motionEncoder.setFragmentBytes(&motionParams,
+                                           length: MemoryLayout<MacMotionParams>.stride,
+                                           index: 0)
+            motionEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            motionEncoder.endEncoding()
+
+            // 3. MetalFX temporal upscale → full-resolution output. Reset history
+            //    when temporal scaling has just (re)engaged.
+            temporalUpscaler.encode(commandBuffer: commandBuffer,
+                                    jitterPixels: currentJitterPixels,
+                                    forceReset: !wasTemporalActive)
+
+            // 4. Blit the upscaled output to the drawable.
+            let blitDescriptor = MTLRenderPassDescriptor()
+            blitDescriptor.colorAttachments[0].texture = drawable.texture
+            blitDescriptor.colorAttachments[0].loadAction = .dontCare
+            blitDescriptor.colorAttachments[0].storeAction = .store
+            guard let blitEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: blitDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            blitEncoder.setRenderPipelineState(blitPipelineState)
+            blitEncoder.setFragmentTexture(temporalPass.output, index: 0)
+            blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            blitEncoder.endEncoding()
+
+            wasTemporalActive = true
+        } else if let spatialPass, let blitPipelineState {
+            // 1. Raymarch into the low-resolution offscreen target.
+            let offscreenDescriptor = makeOffscreenRenderPassDescriptor(color: spatialPass.color,
+                                                                        depth: spatialPass.depth)
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: offscreenDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer)
+            encoder.endEncoding()
+
+            // 2. MetalFX spatial upscale → full-resolution output.
+            spatialUpscaler.encode(commandBuffer: commandBuffer)
+
+            // 3. Blit the upscaled output to the drawable.
+            let blitDescriptor = MTLRenderPassDescriptor()
+            blitDescriptor.colorAttachments[0].texture = drawable.texture
+            blitDescriptor.colorAttachments[0].loadAction = .dontCare
+            blitDescriptor.colorAttachments[0].storeAction = .store
+            guard let blitEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: blitDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            blitEncoder.setRenderPipelineState(blitPipelineState)
+            blitEncoder.setFragmentTexture(spatialPass.output, index: 0)
+            blitEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            blitEncoder.endEncoding()
+
+            wasTemporalActive = false
+        } else if let directPassDescriptor {
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: directPassDescriptor) else {
+                commandBuffer.commit()
+                return
+            }
+            encodeRaymarch(into: encoder, pipeline: activePipeline, uniformBuffer: uniformBuffer)
+            encoder.endEncoding()
+
+            wasTemporalActive = false
         }
 
-        encoder.setRenderPipelineState(pipelineState)
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+    }
+
+    /// Encodes the raymarch draw into an active render encoder. Shared by the
+    /// direct (native) and offscreen (upscaled) render passes.
+    private func encodeRaymarch(into encoder: MTLRenderCommandEncoder,
+                                pipeline: MTLRenderPipelineState,
+                                uniformBuffer: MTLBuffer) {
+        encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
         for binding in meshBindings {
             encoder.setVertexBuffer(binding.buffer, offset: binding.offset, index: binding.bufferIndex)
@@ -551,10 +804,133 @@ private final class ThresholdMacRenderer {
                                           indexBuffer: submesh.indexBuffer.buffer,
                                           indexBufferOffset: submesh.indexBuffer.offset)
         }
+    }
 
-        encoder.endEncoding()
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
+    private func makeOffscreenRenderPassDescriptor(color: MTLTexture, depth: MTLTexture, storeDepth: Bool = false) -> MTLRenderPassDescriptor {
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = color
+        descriptor.colorAttachments[0].loadAction = .clear
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = clearColor
+        descriptor.depthAttachment.texture = depth
+        descriptor.depthAttachment.loadAction = .clear
+        descriptor.depthAttachment.storeAction = storeDepth ? .store : .dontCare
+        descriptor.depthAttachment.clearDepth = 1.0
+        return descriptor
+    }
+
+    /// Mirrors the visionOS `FunctionConstantConfig.specializedMandelbulbPower`:
+    /// returns the integer Mandelbulb power for `fastPowR` dead-code elimination
+    /// when the power is a near-integer from the supported set, else `nil`.
+    private static func specializedMandelbulbPower(fractalType: FractalModelType,
+                                                   formulaParams: FormulaParams) -> Int32? {
+        guard fractalType == .mandelbulb else { return nil }
+        let rawPower = FormulaCatalog.getParam(formulaParams, index: 0)
+        let rounded = roundf(rawPower)
+        guard abs(rawPower - rounded) < 0.01,
+              [2, 3, 4, 5, 6, 8, 10, 12, 16].contains(Int(rounded)) else {
+            return nil
+        }
+        return Int32(rounded)
+    }
+
+    /// Picks the function-constant–specialized `fragmentShaderMono` pipeline for
+    /// the current settings when available, otherwise the generic pipeline.
+    /// Kicks off an async build the first time a configuration is seen so future
+    /// frames get the fully-unrolled fast path without hitching the render thread.
+    /// Updates `appModel.isUsingSpecializedPipeline` (drives the bolt indicator).
+    private func resolveActivePipeline(appModel: AppModel) -> MTLRenderPipelineState {
+        let settings = appModel.renderSettings
+        let iterations = Int32(settings.fractalIterations)
+        let raySteps = Int32(settings.maxRaySteps)
+        let fractalType = settings.fractalType.rawValue
+        let colorIterations = Int32(settings.colorIterations)
+        let power = Self.specializedMandelbulbPower(
+            fractalType: settings.fractalType,
+            formulaParams: settings.formulaParams
+        )
+
+        let powerKey = power.map { "_P\($0)" } ?? ""
+        let key = "FT\(fractalType)_FI\(iterations)_RS\(raySteps)_CI\(colorIterations)\(powerKey)"
+
+        if let specialized = specializedPipelineCache.pipeline(for: key) {
+            appModel.isUsingSpecializedPipeline = true
+            return specialized
+        }
+
+        // Not ready yet — schedule a background build and use the generic
+        // pipeline for this frame.
+        if specializedPipelineCache.beginBuildIfNeeded(key) {
+            buildSpecializedPipeline(
+                key: key,
+                iterations: iterations,
+                raySteps: raySteps,
+                fractalType: fractalType,
+                colorIterations: colorIterations,
+                power: power
+            )
+        }
+        appModel.isUsingSpecializedPipeline = false
+        return pipelineState
+    }
+
+    /// Asynchronously compiles a specialized `fragmentShaderMono` pipeline and
+    /// stores it in the cache. Function-constant specialization unrolls the
+    /// iteration/ray-step loops and devirtualizes the fractal DE dispatch.
+    private func buildSpecializedPipeline(key: String,
+                                          iterations: Int32,
+                                          raySteps: Int32,
+                                          fractalType: Int32,
+                                          colorIterations: Int32,
+                                          power: Int32?) {
+        let cache = specializedPipelineCache
+        guard let library = device.makeDefaultLibrary(),
+              let vertexFunction = library.makeFunction(name: "screenshotVertexShader") else {
+            cache.failBuild(key)
+            return
+        }
+
+        // Metal function-constant indices (mirrors the visionOS
+        // `FunctionConstantIndex`, which is unavailable on macOS because it
+        // lives in a CompositorServices-only file): 0=fractalIterations,
+        // 6=maxRaySteps, 7=fractalType, 9=colorIterations, 12=mandelbulbPower.
+        let constants = MTLFunctionConstantValues()
+        var fi = iterations
+        constants.setConstantValue(&fi, type: .int, index: 0)
+        var rs = raySteps
+        constants.setConstantValue(&rs, type: .int, index: 6)
+        var ft = fractalType
+        constants.setConstantValue(&ft, type: .int, index: 7)
+        var ci = colorIterations
+        constants.setConstantValue(&ci, type: .int, index: 9)
+        if var p = power {
+            constants.setConstantValue(&p, type: .int, index: 12)
+        }
+
+        let fragmentFunction: MTLFunction
+        do {
+            fragmentFunction = try library.makeFunction(name: "fragmentShaderMono", constantValues: constants)
+        } catch {
+            cache.failBuild(key)
+            return
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = "ThresholdMac Specialized [\(key)]"
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        descriptor.vertexDescriptor = vertexDescriptor
+        descriptor.rasterSampleCount = 1
+        descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
+        descriptor.depthAttachmentPixelFormat = depthPixelFormat
+
+        device.makeRenderPipelineState(descriptor: descriptor) { pipeline, _ in
+            if let pipeline {
+                cache.store(pipeline, for: key)
+            } else {
+                cache.failBuild(key)
+            }
+        }
     }
 
     private func makeRenderPassDescriptor(drawable: CAMetalDrawable) -> MTLRenderPassDescriptor? {
@@ -635,6 +1011,8 @@ private final class ThresholdMacRenderer {
     }
 
     private func applyDesktopInput(appModel: AppModel, settings: RenderSettings, deltaTime: TimeInterval) {
+        applyTiltControl(settings: settings, deltaTime: deltaTime)
+
         let input = inputController.consumeFrame()
 
         if input.shouldResetView {
@@ -776,6 +1154,47 @@ private final class ThresholdMacRenderer {
         musicReactiveEngine.reset(settings: settings, pipeline: appModel.parameterPipeline)
     }
 
+    /// Reads the Sudden Motion Sensor and injects tilt as orbit input when
+    /// tilt-control is enabled. Sustained tilt produces continuous orbit (tilt
+    /// the laptop to spin the fractal; return it level to stop). No-op when the
+    /// sensor is unavailable (Apple Silicon / desktops) or the setting is off.
+    private func applyTiltControl(settings: RenderSettings, deltaTime: TimeInterval) {
+        let enabled = settings.macTiltControlEnabled
+        guard enabled, motionSensor.isAvailable else {
+            wasTiltControlEnabled = enabled
+            return
+        }
+
+        // Recenter on the enable edge so the current pose reads as level.
+        if !wasTiltControlEnabled {
+            motionSensor.calibrate()
+        }
+        wasTiltControlEnabled = enabled
+
+        guard let tilt = motionSensor.read() else { return }
+
+        // Ignore small tilts so a resting laptop doesn't drift.
+        let deadzone: Float = 0.04
+        func shaped(_ v: Float) -> Float {
+            let m = abs(v)
+            guard m > deadzone else { return 0 }
+            return (m - deadzone) * (v < 0 ? -1 : 1)
+        }
+
+        let roll = shaped(tilt.roll)
+        let pitch = shaped(tilt.pitch)
+        guard roll != 0 || pitch != 0 else { return }
+
+        // Map tilt (g-relative) to an equivalent per-frame mouse-orbit delta so
+        // it flows through the same sensitivity pipeline as drag orbiting.
+        // Normalized to 60 fps so the spin rate is frame-rate independent.
+        let frameScale = Float(deltaTime) * 60.0
+        let tiltOrbitGain: Float = 26.0
+        let orbit = SIMD2<Float>(roll * tiltOrbitGain * frameScale,
+                                 pitch * tiltOrbitGain * frameScale)
+        inputController.addOrbit(delta: orbit)
+    }
+
     private func resetDesktopView(settings: RenderSettings) {
         if settings.isAnimationPlaying {
             settings.clearAnimationManualOffsets()
@@ -784,6 +1203,8 @@ private final class ThresholdMacRenderer {
             settings.targetPosition = Self.defaultTargetPosition
         }
         settings.resetDetailTransform()
+        // Discard temporal history so the camera jump doesn't smear.
+        temporalUpscaler.requestReset()
     }
 
     private func updateFPS(deltaTime: TimeInterval) {
@@ -821,6 +1242,22 @@ private final class ThresholdMacRenderer {
         let modelView = viewMatrix * modelMatrix
         let inverseModelView = modelView.inverse
 
+        // Stage B: bake the sub-pixel jitter into the projection (zero when the
+        // temporal path is inactive, so this is a no-op for the other paths) and
+        // cache the matrices the motion-vector pass needs. The reconstruction
+        // inverse uses the *jittered* view-projection (matching the jittered
+        // depth); motion is measured from the *un-jittered* current/previous
+        // view-projections so it carries pure geometric motion.
+        var jitteredProjection = projection
+        jitteredProjection.columns.2.x += currentJitterNDC.x
+        jitteredProjection.columns.2.y += currentJitterNDC.y
+        let viewProjNoJitter = projection * modelView
+        let viewProjJittered = jitteredProjection * modelView
+        motionPreviousViewProjNoJitter = hasPreviousMotionMatrices ? motionCurrentViewProjNoJitter : viewProjNoJitter
+        motionCurrentViewProjNoJitter = viewProjNoJitter
+        motionCurrentInvViewProj = viewProjJittered.inverse
+        hasPreviousMotionMatrices = true
+
         let precomputedFractal = Self.makePrecomputedFractal(from: settings)
         let precomputedLighting = Self.makePrecomputedLighting(time: elapsedTime,
                                                                lightingMode: settings.lightingMode,
@@ -848,7 +1285,7 @@ private final class ThresholdMacRenderer {
         let scaleCorrectedBubbleRadius = settings.safetyBubbleRadius / max(effectiveScale, 0.001)
         let scaleCorrectedFadeWidth = settings.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
 
-        return Uniforms(projectionMatrix: projection,
+        return Uniforms(projectionMatrix: jitteredProjection,
                         modelViewMatrix: modelView,
                         inverseModelViewMatrix: inverseModelView,
                         time: elapsedTime,
@@ -917,6 +1354,58 @@ private final class ThresholdMacRenderer {
         descriptor.depthAttachmentPixelFormat = depthPixelFormat
 
         return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    /// Full-screen blit pipeline that copies the MetalFX upscaled output to the
+    /// drawable. Single-view, no vertex/depth attachments — the vertex shader
+    /// generates an oversized triangle from `vertex_id`.
+    private static func buildBlitPipeline(device: MTLDevice, colorPixelFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
+        guard let library = device.makeDefaultLibrary(),
+              let vertexFunction = library.makeFunction(name: "macBlitVertex"),
+              let fragmentFunction = library.makeFunction(name: "macBlitFragment") else {
+            return nil
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = "ThresholdMac Blit Pipeline"
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        descriptor.rasterSampleCount = 1
+        descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
+        return try? device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    /// Full-screen motion-vector pipeline (Stage B). Reads the offscreen depth
+    /// and writes screen-space motion into an `rg16Float` target for the
+    /// temporal scaler. No depth attachment.
+    private static func buildMotionPipeline(device: MTLDevice) -> MTLRenderPipelineState? {
+        guard let library = device.makeDefaultLibrary(),
+              let vertexFunction = library.makeFunction(name: "macBlitVertex"),
+              let fragmentFunction = library.makeFunction(name: "macMotionFragment") else {
+            return nil
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.label = "ThresholdMac Motion Pipeline"
+        descriptor.vertexFunction = vertexFunction
+        descriptor.fragmentFunction = fragmentFunction
+        descriptor.rasterSampleCount = 1
+        descriptor.colorAttachments[0].pixelFormat = MacTemporalUpscaler.motionFormat
+        return try? device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    /// Radical-inverse Halton sample in `[0, 1)` — sub-pixel jitter sequence for
+    /// temporal upscaling (base 2 for X, base 3 for Y).
+    private static func halton(_ index: UInt32, base: UInt32) -> Float {
+        var result: Float = 0
+        var fraction: Float = 1
+        var i = index
+        while i > 0 {
+            fraction /= Float(base)
+            result += fraction * Float(i % base)
+            i /= base
+        }
+        return result
     }
 
     private static func buildMetalVertexDescriptor() -> MTLVertexDescriptor {

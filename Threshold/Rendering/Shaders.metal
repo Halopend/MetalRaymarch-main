@@ -2828,3 +2828,74 @@ fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[s
     out.depth = sourceTexture.sample(textureSampler, uv, in.eyeIndex);
     return out;
 }
+
+// === macOS single-view blit (MetalFX upscaled output → drawable) ===
+// The Mac renderer upscales into an offscreen bgra8Unorm_srgb texture, then
+// copies it to the drawable with this full-screen-triangle pass. Single-view
+// (no amplification), 2D source — distinct from the stereo array variants above.
+struct MacBlitVertexOut {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+vertex MacBlitVertexOut macBlitVertex(uint vertexID [[vertex_id]]) {
+    MacBlitVertexOut out;
+    float2 p;
+    p.x = (vertexID == 1) ? 3.0 : -1.0;
+    p.y = (vertexID == 2) ? 3.0 : -1.0;
+    out.position = float4(p, 0.0, 1.0);
+    out.texCoord = float2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);
+    return out;
+}
+
+fragment float4 macBlitFragment(MacBlitVertexOut in [[stage_in]],
+                                texture2d<float> source [[texture(0)]]) {
+    constexpr sampler s(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+    return float4(source.sample(s, in.texCoord).rgb, 1.0);
+}
+
+// === macOS temporal-upscaling motion vectors (Stage B) ===
+// Separate Mac-only pass that reconstructs each pixel's world position from the
+// raymarch's offscreen depth (clipPos.z/clipPos.w, standard 0..1) and reprojects
+// it through the previous frame's view-projection to produce a screen-space
+// motion vector for MTLFXTemporalScaler. Deliberately avoids touching the shared
+// `Uniforms`/`fragmentMain` — the matrices arrive in a dedicated small buffer.
+//
+// `currentInvViewProj` is the inverse of the JITTERED current view-projection
+// (matching the jittered depth), so the recovered world point is exact. Motion
+// is then computed from the UN-jittered current/previous view-projections so the
+// vector carries pure geometric motion (MetalFX handles jitter separately).
+struct MacMotionParams {
+    float4x4 currentInvViewProj;        // inverse(jittered P*MV) — depth → world
+    float4x4 currentViewProjNoJitter;   // un-jittered current P*MV
+    float4x4 previousViewProjNoJitter;  // un-jittered previous P*MV
+};
+
+fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
+                                  depth2d<float> depthTex [[texture(0)]],
+                                  constant MacMotionParams& params [[buffer(0)]]) {
+    constexpr sampler depthSampler(mag_filter::nearest, min_filter::nearest,
+                                   address::clamp_to_edge);
+    float depth = depthTex.sample(depthSampler, in.texCoord);
+
+    // No-hit background writes a near-zero depth; reprojecting it yields garbage,
+    // so treat it as static (zero motion → MetalFX keeps the history sample).
+    if (depth < 1e-4) {
+        return float2(0.0);
+    }
+
+    // texCoord (origin top-left) → NDC.
+    float2 ndc = float2(in.texCoord.x * 2.0 - 1.0, 1.0 - in.texCoord.y * 2.0);
+    float4 worldH = params.currentInvViewProj * float4(ndc, depth, 1.0);
+    float3 world = worldH.xyz / worldH.w;
+
+    float4 curC = params.currentViewProjNoJitter * float4(world, 1.0);
+    float4 prevC = params.previousViewProjNoJitter * float4(world, 1.0);
+    float2 curN = curC.xy / curC.w;
+    float2 prevN = prevC.xy / prevC.w;
+
+    // NDC delta → UV delta (0..1). MetalFX `motionVectorScale` multiplies by the
+    // input pixel dimensions to recover pixels. Y is flipped for texture space.
+    float2 motionNDC = curN - prevN;
+    return float2(motionNDC.x * 0.5, -motionNDC.y * 0.5);
+}
