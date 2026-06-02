@@ -629,7 +629,13 @@ extension ContentView {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("MetalFX on visionOS is spatial-only. 75% to 85% is the usual quality/performance sweet spot.")
+                    Group {
+                    #if os(macOS) || os(iOS)
+                        Text("MetalFX uses temporal upscaling when available. 50% to 75% is the usual quality/performance sweet spot.")
+                    #else
+                        Text("MetalFX on visionOS is spatial-only. 75% to 85% is the usual quality/performance sweet spot.")
+                    #endif
+                    }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

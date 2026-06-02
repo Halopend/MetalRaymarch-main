@@ -9,7 +9,7 @@
 import Foundation
 import simd
 
-#if os(macOS)
+#if os(macOS) || os(iOS)
 private let RENDERER_DEBUG = false
 #endif
 

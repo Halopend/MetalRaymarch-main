@@ -86,7 +86,7 @@ struct MetalProjectTestApp: App {
                     appModel.markMenuWindowDismissed()
                 }
         }
-        .defaultSize(width: 1280, height: 720)
+        .defaultSize(width: 1460, height: 820)
         .windowStyle(.plain)
         .windowResizability(.contentSize)
 

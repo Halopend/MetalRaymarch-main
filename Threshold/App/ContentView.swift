@@ -61,6 +61,26 @@ struct ContentView: View {
 
     private let animationKillSwitchDuration: TimeInterval = 0.7
 
+    private var sectionRailWidth: CGFloat {
+    #if os(visionOS)
+        228
+    #elseif os(iOS)
+        208
+    #else
+        170
+    #endif
+    }
+
+    private var immersiveLayoutMinimumWidth: CGFloat {
+    #if os(visionOS)
+        1240
+    #elseif os(iOS)
+        520
+    #else
+        980
+    #endif
+    }
+
     private var activeMusicPermutationCount: Int {
         guard cache.audioReactive.fractalAudioReactiveEnabled else { return 0 }
         return cache.audioReactive.musicReactiveMappings.count
@@ -98,7 +118,7 @@ struct ContentView: View {
     }
 
         private var shouldUseWorkspaceLayout: Bool {
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
         true
     #else
         appModel.immersiveSpaceState == .open
@@ -106,7 +126,7 @@ struct ContentView: View {
         }
 
         private var isMenuContentVisible: Bool {
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
         true
     #else
         appModel.isMenuWindowVisible
@@ -114,7 +134,7 @@ struct ContentView: View {
         }
 
         private var shouldRenderInlineTopDock: Bool {
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
         true
     #else
         false
@@ -122,7 +142,7 @@ struct ContentView: View {
         }
 
         private var supportsGestureEditing: Bool {
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
         false
     #else
         true
@@ -495,11 +515,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-#if os(macOS)
-    .frame(minWidth: 980, minHeight: 576)
-#else
-        .frame(minWidth: 980, minHeight: 576)
-#endif
+    .frame(minWidth: immersiveLayoutMinimumWidth, minHeight: 576)
     }
     
     // MARK: - Top Dock
@@ -656,7 +672,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .frame(width: 170)
+        .frame(width: sectionRailWidth)
         .frame(maxHeight: .infinity, alignment: .top)
     }
 

@@ -1,4 +1,4 @@
-#if os(macOS)
+#if os(macOS) || os(iOS)
 import Metal
 import MetalFX
 import simd
@@ -15,12 +15,9 @@ import simd
 /// driver/format combination rejects it, `prepare` returns `false` and the
 /// caller falls back to the spatial scaler (or direct render).
 final class MacTemporalUpscaler {
-    struct Size: Equatable {
-        var width: Int
-        var height: Int
-    }
+    typealias Size = MetalFXSize
 
-    static let minimumInputShortEdge = 128
+    static let minimumInputShortEdge = MetalFXTextureSupport.minimumInputShortEdge
     static let motionFormat: MTLPixelFormat = .rg16Float
     /// MetalFX temporal scaling supports at most 3× per dimension. Inputs below
     /// `output / maxScaleFactor` are rejected (caller falls back to spatial).
@@ -196,15 +193,13 @@ final class MacTemporalUpscaler {
                              format: MTLPixelFormat,
                              usage: MTLTextureUsage,
                              label: String) -> MTLTexture? {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format,
-                                                                  width: max(width, 1),
-                                                                  height: max(height, 1),
-                                                                  mipmapped: false)
-        descriptor.storageMode = .private
-        descriptor.usage = usage
-        let texture = device.makeTexture(descriptor: descriptor)
-        texture?.label = label
-        return texture
+        MetalFXTextureSupport.makeTexture(device: device,
+                                          width: width,
+                                          height: height,
+                                          format: format,
+                                          usage: usage,
+                                          depthFormat: depthFormat,
+                                          label: label)
     }
 }
 #endif

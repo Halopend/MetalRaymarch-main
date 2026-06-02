@@ -115,7 +115,7 @@ final class MusicService {
             self?.providerStateRevision &+= 1
         }
 
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         appleMusicAdapter = nil
         #else
         // Build and register adapter

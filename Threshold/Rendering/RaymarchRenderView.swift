@@ -1,5 +1,4 @@
-#if os(macOS)
-import AppKit
+#if os(macOS) || os(iOS)
 import Metal
 @preconcurrency import MetalKit
 import ModelIO
@@ -7,6 +6,9 @@ import QuartzCore
 import Synchronization
 import SwiftUI
 import simd
+#if os(macOS)
+import AppKit
+#endif
 
 enum ThresholdMacMovementKey: Hashable, Sendable {
     case forward
@@ -25,6 +27,7 @@ private struct ThresholdMacInputFrame: Sendable {
     var shouldResetView = false
 }
 
+#if os(macOS)
 private protocol ThresholdMacViewportInputDelegate: AnyObject {
     func viewportDidChangeFocus(_ isFocused: Bool)
     func viewportDidOrbit(delta: SIMD2<Float>)
@@ -35,6 +38,7 @@ private protocol ThresholdMacViewportInputDelegate: AnyObject {
     func viewportDidTogglePlayback()
     func viewportDidRequestReset()
 }
+#endif
 
 private final class ThresholdMacInputController: Sendable {
     private struct State {
@@ -129,6 +133,7 @@ private final class ThresholdMacInputController: Sendable {
     }
 }
 
+#if os(macOS)
 private final class ThresholdMacInteractiveView: MTKView {
     private enum DragMode {
         case orbit
@@ -399,6 +404,7 @@ struct ThresholdMacRenderView: NSViewRepresentable {
         }
     }
 }
+#endif
 
 /// Lock-protected cache of function-constant–specialized `fragmentShaderMono`
 /// pipelines for the macOS renderer. Specializing on iteration/ray-step/fractal
@@ -462,6 +468,67 @@ private final class ThresholdMacRenderer {
         var previousViewProjNoJitter: matrix_float4x4
     }
 
+    private struct TemporalInvalidationKey: Equatable {
+        let fractalType: Int32
+        let fractalIterations: Int
+        let maxRaySteps: Int
+        let minDistance: Int32
+        let fractalScale: Int32
+        let foldingLimit: Int32
+        let sphereRadius: Int32
+        let colorIterations: Int32
+        let sphericalInversionMode: Int32
+        let sphericalInversionRadius: Int32
+        let safetyBubbleEnabled: Bool
+        let safetyBubbleRadius: Int32
+        let safetyBubbleShape: Int32
+        let safetyBubbleFadeEnabled: Bool
+        let safetyBubbleFadeWidth: Int32
+        let safetyBubbleStrength: Int32
+        let formulaParams: SIMD16<Int32>
+
+        init(settings: RenderSettingsSnapshot) {
+            fractalType = settings.fractalType.rawValue
+            fractalIterations = settings.fractalIterations
+            maxRaySteps = settings.maxRaySteps
+            minDistance = Self.quantize(settings.minDistance)
+            fractalScale = Self.quantize(settings.fractalScale)
+            foldingLimit = Self.quantize(settings.foldingLimit)
+            sphereRadius = Self.quantize(settings.sphereRadius)
+            colorIterations = Self.quantize(settings.colorIterations)
+            sphericalInversionMode = settings.sphericalInversionMode.rawValue
+            sphericalInversionRadius = Self.quantize(settings.sphericalInversionRadius)
+            safetyBubbleEnabled = settings.safetyBubbleEnabled
+            safetyBubbleRadius = Self.quantize(settings.safetyBubbleRadius)
+            safetyBubbleShape = Self.quantize(settings.safetyBubbleShape)
+            safetyBubbleFadeEnabled = settings.safetyBubbleFadeEnabled
+            safetyBubbleFadeWidth = Self.quantize(settings.safetyBubbleFadeWidth)
+            safetyBubbleStrength = Self.quantize(settings.safetyBubbleStrength)
+            formulaParams = SIMD16<Int32>(
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 0)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 1)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 2)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 3)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 4)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 5)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 6)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 7)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 8)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 9)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 10)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 11)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 12)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 13)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 14)),
+                Self.quantize(FormulaCatalog.getParam(settings.formulaParams, index: 15))
+            )
+        }
+
+        private static func quantize(_ value: Float) -> Int32 {
+            Int32(clamping: Int((value * 10_000).rounded()))
+        }
+    }
+
     private static let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
     private static let maxBuffersInFlight = 2
     private static let defaultTargetPosition = SIMD3<Float>(0.1, 0.1, 0.1)
@@ -516,13 +583,17 @@ private final class ThresholdMacRenderer {
     private var currentJitterPixels = SIMD2<Float>.zero
     private var haltonIndex: UInt32 = 0
     private var wasTemporalActive = false
+    private var temporalInvalidationKey: TemporalInvalidationKey?
 
     // Shared music-reactive engine — same type used by the visionOS `Renderer`,
     // so the response-curve / LFO / dispatch math lives in exactly one place.
     private let musicReactiveEngine = MusicReactiveEngine()
 
-    // macOS Sudden Motion Sensor (Intel MacBooks); tilt-to-orbit when enabled.
-    private let motionSensor = MacMotionSensor()
+    // Tilt-to-orbit sensor. On macOS this is the Intel-MacBook Sudden Motion
+    // Sensor (IOKit); on iPad it is the CoreMotion gyroscope/attitude reader.
+    // Both expose the same `TiltMotionSensor` interface so `applyTiltControl`
+    // is platform-agnostic.
+    private let motionSensor: any TiltMotionSensor = PlatformTiltSensor()
     private var wasTiltControlEnabled = false
 
     init?(device: MTLDevice,
@@ -960,7 +1031,11 @@ private final class ThresholdMacRenderer {
                                                                   height: max(height, 1),
                                                                   mipmapped: false)
         descriptor.usage = .renderTarget
+        #if os(iOS)
+        descriptor.storageMode = .memoryless
+        #else
         descriptor.storageMode = .private
+        #endif
         depthTexture = device.makeTexture(descriptor: descriptor)
         depthTexture?.label = "ThresholdMac Depth"
         return depthTexture
@@ -1004,10 +1079,24 @@ private final class ThresholdMacRenderer {
                                              currentTime: now)
 
         let snapshot = settings.snapshot()
+        updateTemporalInvalidationState(settings: snapshot)
         let uniforms = makeUniforms(settings: snapshot, elapsedTime: Float(now - startTime), deltaTime: Float(deltaTime))
         let pointer = buffer.contents().bindMemory(to: UniformsArray.self, capacity: 1)
         pointer.pointee.uniforms.0 = uniforms
         pointer.pointee.uniforms.1 = uniforms
+    }
+
+    private func updateTemporalInvalidationState(settings: RenderSettingsSnapshot) {
+        let newKey = TemporalInvalidationKey(settings: settings)
+        if let oldKey = temporalInvalidationKey, oldKey != newKey {
+            temporalUpscaler.requestReset()
+            hasPreviousMotionMatrices = false
+        }
+        temporalInvalidationKey = newKey
+
+        if settings.geometryState != .stable || settings.isGeometryGestureActive {
+            temporalUpscaler.requestReset()
+        }
     }
 
     private func applyDesktopInput(appModel: AppModel, settings: RenderSettings, deltaTime: TimeInterval) {
@@ -1160,6 +1249,9 @@ private final class ThresholdMacRenderer {
     /// sensor is unavailable (Apple Silicon / desktops) or the setting is off.
     private func applyTiltControl(settings: RenderSettings, deltaTime: TimeInterval) {
         let enabled = settings.macTiltControlEnabled
+        // No-op on macOS (the SMS samples on demand); on iOS this starts/stops
+        // CoreMotion so it doesn't run while tilt control is off.
+        motionSensor.setActive(enabled)
         guard enabled, motionSensor.isAvailable else {
             wasTiltControlEnabled = enabled
             return
@@ -1237,7 +1329,7 @@ private final class ThresholdMacRenderer {
         let maxViewDistance = max(4.0, min(maxViewDistanceCap, smoothedMaxViewDistance))
 
         let aspect = Float(max(drawableSize.width, 1) / max(drawableSize.height, 1))
-        let projection = Self.makePerspectiveProjection(fovyRadians: Float.pi / 3, aspect: aspect, nearZ: 0.01, farZ: 500.0)
+        let projection = RenderPrecompute.makePerspectiveProjection(fovyRadians: Float.pi / 3, aspect: aspect, nearZ: 0.01, farZ: 500.0)
         let viewMatrix = matrix4x4_translation(0, 0, -3.0)
         let modelView = viewMatrix * modelMatrix
         let inverseModelView = modelView.inverse
@@ -1258,16 +1350,16 @@ private final class ThresholdMacRenderer {
         motionCurrentInvViewProj = viewProjJittered.inverse
         hasPreviousMotionMatrices = true
 
-        let precomputedFractal = Self.makePrecomputedFractal(from: settings)
-        let precomputedLighting = Self.makePrecomputedLighting(time: elapsedTime,
+        let precomputedFractal = RenderPrecompute.makePrecomputedFractal(from: settings)
+        let precomputedLighting = RenderPrecompute.makePrecomputedLighting(time: elapsedTime,
                                                                lightingMode: settings.lightingMode,
                                                                audioLevel: settings.audioLevel,
                                                                bassLevel: settings.bassLevel,
                                                                midLevel: settings.midLevel,
                                                                trebleLevel: settings.trebleLevel,
                                                                beatIntensity: settings.beatIntensity)
-        let precomputedAudio = Self.makePrecomputedAudio(from: settings)
-        var precomputedFog = Self.makePrecomputedFog(from: settings)
+        let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settings)
+        var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settings)
         if isKleinianFamily {
             let baseFog = precomputedFog.fog.x
             if baseFog > 1e-6 {
@@ -1450,98 +1542,199 @@ private final class ThresholdMacRenderer {
 
         return try MTKMesh(mesh: mesh, device: device)
     }
+}
 
-    private static func makePerspectiveProjection(fovyRadians: Float, aspect: Float, nearZ: Float, farZ: Float) -> matrix_float4x4 {
-        let yScale = 1.0 / tan(fovyRadians * 0.5)
-        let xScale = yScale / aspect
-        let zScale = farZ / (nearZ - farZ)
-        let wzScale = nearZ * farZ / (nearZ - farZ)
+#if os(iOS)
+import UIKit
 
-        return matrix_float4x4(columns: (
-            SIMD4<Float>(xScale, 0, 0, 0),
-            SIMD4<Float>(0, yScale, 0, 0),
-            SIMD4<Float>(0, 0, zScale, -1),
-            SIMD4<Float>(0, 0, wzScale, 0)
-        ))
+/// iPad host for the shared `ThresholdMacRenderer`. Wraps an `MTKView` in a
+/// `UIViewRepresentable` and translates touch gestures into the same
+/// orbit / pan / zoom input the macOS trackpad path feeds, so the renderer is
+/// byte-identical across platforms:
+///   • one-finger drag  → orbit
+///   • two-finger drag  → pan
+///   • pinch            → zoom (mirrors the macOS `magnify` convention)
+///
+/// The orbit/pan/zoom sign and gain match the validated macOS conventions;
+/// if motion feels inverted on device, flip the `dy`/`dx` sign in the gesture
+/// handlers — the renderer math is unchanged.
+struct ThresholdiOSRenderView: UIViewRepresentable {
+    let appModel: AppModel
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(appModel: appModel)
     }
 
-    private static func makePrecomputedFractal(from settings: RenderSettingsSnapshot) -> PrecomputedFractalParams {
-        let inverseMinRadius = 1.0 / settings.minDistance
-        var scale = SIMD4<Float>(repeating: settings.fractalScale * inverseMinRadius)
-        scale.w = abs(scale.w)
-
-        let absScaleMinusOne = abs(settings.fractalScale - 1.0)
-        let absScalePower = pow(max(abs(settings.fractalScale), 1e-6), Float(1 - settings.fractalIterations))
-        let sphereRadiusSquared = settings.sphereRadius * settings.sphereRadius
-
-        return PrecomputedFractalParams(scale: scale,
-                                        absScalem1: absScaleMinusOne,
-                                        absScalePow: absScalePower,
-                                        invSphereRadiusSq: 1.0 / sphereRadiusSquared,
-                                        sphereRadiusSq: sphereRadiusSquared)
+    func makeUIView(context: Context) -> MTKView {
+        let device = MTLCreateSystemDefaultDevice()
+        let view = MTKView(frame: .zero, device: device)
+        view.colorPixelFormat = .bgra8Unorm_srgb
+        view.depthStencilPixelFormat = .depth32Float
+        view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
+        view.clearDepth = 1.0
+        view.preferredFramesPerSecond = 60
+        view.enableSetNeedsDisplay = false
+        view.isPaused = false
+        view.framebufferOnly = true
+        view.autoResizeDrawable = true
+        view.isMultipleTouchEnabled = true
+        view.delegate = context.coordinator
+        context.coordinator.attachGestures(to: view)
+        context.coordinator.configure(view)
+        return view
     }
 
-    private static func makePrecomputedLighting(time: Float,
-                                                lightingMode: LightingMode,
-                                                audioLevel: Float,
-                                                bassLevel: Float,
-                                                midLevel: Float,
-                                                trebleLevel: Float,
-                                                beatIntensity: Float) -> PrecomputedLighting {
-        let animatedTime = time * 0.01 + 15.00
-        let spotLightPosition: SIMD3<Float>
-        let lightIntensity: Float
+    func updateUIView(_ uiView: MTKView, context: Context) {
+        context.coordinator.appModel = appModel
+    }
 
-        switch lightingMode {
-        case .staticLight:
-            spotLightPosition = SIMD3<Float>(2.0, 1.5, 2.0)
-            lightIntensity = 1.0
-        case .audioReactive:
-            let basePosition = SIMD3<Float>(1.5, 1.0, 1.5)
-            let bassAmplitude = max(audioLevel, bassLevel) * 2.0
-            let trebleSpeed = 2.0 + trebleLevel * 4.0
-            let audioOffset = SIMD3<Float>(sin(animatedTime * trebleSpeed) * bassAmplitude,
-                                           midLevel * 2.0,
-                                           cos(animatedTime * trebleSpeed) * bassAmplitude)
-            spotLightPosition = basePosition + audioOffset
-            lightIntensity = 0.5 + audioLevel * 1.0 + bassLevel * 0.5
-        case .visualizer:
-            let beatJump = beatIntensity * 3.0
-            let orbitSpeed = 1.5 + midLevel * 3.0
-            spotLightPosition = SIMD3<Float>(
-                sin(animatedTime * orbitSpeed) * (2.0 + bassLevel * 2.0) + beatJump * sin(animatedTime * 8.0),
-                1.0 + trebleLevel * 2.0 + beatIntensity * 1.5,
-                cos(animatedTime * orbitSpeed) * (2.0 + bassLevel * 2.0) + beatJump * cos(animatedTime * 8.0)
-            )
-            lightIntensity = 0.3 + bassLevel * 1.5 + beatIntensity * 0.5
-        case .animated:
-            let pathTime = animatedTime + 0.03
-            let path = SIMD3<Float>(-0.78 + 3.0 * sin(2.14 * pathTime),
-                                    0.05 + 2.5 * sin(0.942 * pathTime + 1.3),
-                                    0.05 + 3.5 * cos(3.594 * pathTime))
-            let offset = SIMD3<Float>(sin(animatedTime * 18.4),
-                                      cos(animatedTime * 17.98),
-                                      sin(animatedTime * 22.53)) * 0.2
-            spotLightPosition = path + offset
-            lightIntensity = 0.9 + sin(animatedTime * 1.5) * 0.15
+    static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
+        uiView.delegate = nil
+        coordinator.tearDown()
+    }
+
+    final class Coordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
+        var appModel: AppModel
+        private let inputController = ThresholdMacInputController()
+        private var renderer: ThresholdMacRenderer?
+
+        // Incremental gesture tracking. UIPanGestureRecognizer reports cumulative
+        // translation; we feed per-callback deltas (points) to match the macOS
+        // per-event delta convention.
+        private var lastOrbitTranslation: CGPoint = .zero
+        private var lastPanTranslation: CGPoint = .zero
+        private var lastPinchScale: CGFloat = 1.0
+        private weak var twoFingerPan: UIPanGestureRecognizer?
+        private weak var pinch: UIPinchGestureRecognizer?
+
+        init(appModel: AppModel) {
+            self.appModel = appModel
+            super.init()
         }
 
-        return PrecomputedLighting(spotLightPosition: spotLightPosition, lightIntensity: lightIntensity)
-    }
+        @MainActor
+        func configure(_ view: MTKView) {
+            appModel.rendererStartupWarmupComplete = false
+            guard let device = view.device,
+                  let metalLayer = view.layer as? CAMetalLayer else { return }
+            metalLayer.device = device
+            metalLayer.pixelFormat = view.colorPixelFormat
+            metalLayer.framebufferOnly = true
+            metalLayer.drawableSize = view.drawableSize
+            renderer = ThresholdMacRenderer(device: device,
+                                            appModel: appModel,
+                                            inputController: inputController,
+                                            metalLayer: metalLayer,
+                                            colorPixelFormat: view.colorPixelFormat,
+                                            depthPixelFormat: view.depthStencilPixelFormat,
+                                            clearColor: view.clearColor)
+            renderer?.drawableSizeDidChange(view.drawableSize)
+            appModel.rendererStartupWarmupComplete = renderer != nil
+        }
 
-    private static func makePrecomputedAudio(from settings: RenderSettingsSnapshot) -> PrecomputedAudio {
-        let maxBand = max(settings.bassLevel, max(settings.midLevel, settings.trebleLevel))
-        let weightedEnergy = settings.bassLevel * 0.6 + settings.midLevel * 0.3 + settings.trebleLevel * 0.1
-        return PrecomputedAudio(bands: SIMD4<Float>(settings.bassLevel, settings.midLevel, settings.trebleLevel, settings.beatIntensity),
-                                energy: SIMD2<Float>(maxBand, weightedEnergy),
-                                pad: .zero)
-    }
+        func attachGestures(to view: UIView) {
+            let orbit = UIPanGestureRecognizer(target: self, action: #selector(handleOrbit(_:)))
+            orbit.minimumNumberOfTouches = 1
+            orbit.maximumNumberOfTouches = 1
+            orbit.delegate = self
 
-    private static func makePrecomputedFog(from settings: RenderSettingsSnapshot) -> PrecomputedFog {
-        let fogIntensity = settings.fogEnabled ? settings.fogIntensity : 0.0
-        let inverseFog = fogIntensity > 1e-6 ? 1.0 / fogIntensity : 0.0
-        return PrecomputedFog(fog: SIMD4<Float>(fogIntensity, inverseFog, 0.0, 0.0),
-                              color: SIMD4<Float>(settings.fogColor.x, settings.fogColor.y, settings.fogColor.z, 0.0))
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            pan.minimumNumberOfTouches = 2
+            pan.maximumNumberOfTouches = 2
+            pan.delegate = self
+            twoFingerPan = pan
+
+            let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            pinchGesture.delegate = self
+            pinch = pinchGesture
+
+            view.addGestureRecognizer(orbit)
+            view.addGestureRecognizer(pan)
+            view.addGestureRecognizer(pinchGesture)
+        }
+
+        func tearDown() {
+            inputController.setFocus(false)
+            renderer = nil
+            Task { @MainActor [appModel] in
+                appModel.rendererStartupWarmupComplete = false
+            }
+        }
+
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            renderer?.drawableSizeDidChange(size)
+        }
+
+        func draw(in view: MTKView) {
+            renderer?.draw(appModel: appModel)
+        }
+
+        @objc private func handleOrbit(_ gesture: UIPanGestureRecognizer) {
+            let translation = gesture.translation(in: gesture.view)
+            switch gesture.state {
+            case .began:
+                lastOrbitTranslation = .zero
+                inputController.setFocus(true)
+            case .changed:
+                let delta = SIMD2<Float>(Float(translation.x - lastOrbitTranslation.x),
+                                         Float(translation.y - lastOrbitTranslation.y))
+                lastOrbitTranslation = translation
+                if simd_length_squared(delta) > 0 {
+                    inputController.addOrbit(delta: delta)
+                }
+            default:
+                lastOrbitTranslation = .zero
+            }
+        }
+
+        @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+            let translation = gesture.translation(in: gesture.view)
+            switch gesture.state {
+            case .began:
+                lastPanTranslation = .zero
+                inputController.setFocus(true)
+            case .changed:
+                let delta = SIMD2<Float>(Float(translation.x - lastPanTranslation.x),
+                                         Float(translation.y - lastPanTranslation.y))
+                lastPanTranslation = translation
+                if simd_length_squared(delta) > 0 {
+                    inputController.addPan(delta: delta)
+                }
+            default:
+                lastPanTranslation = .zero
+            }
+        }
+
+        @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                lastPinchScale = gesture.scale
+                inputController.setFocus(true)
+            case .changed:
+                // Mirror the macOS `magnify` convention: pinch-out (scale > 1)
+                // feeds a negative zoom delta, which the renderer maps to a
+                // larger detail scale (zoom in).
+                let delta = Float(gesture.scale - lastPinchScale)
+                lastPinchScale = gesture.scale
+                if delta != 0 {
+                    inputController.addZoom(delta: -delta * 18.0)
+                }
+            default:
+                lastPinchScale = 1.0
+            }
+        }
+
+        // Allow the two-finger pan and pinch to run together (natural combined
+        // pan + zoom); keep the one-finger orbit exclusive.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            let pair: Set<ObjectIdentifier> = [ObjectIdentifier(gestureRecognizer), ObjectIdentifier(other)]
+            var allowed: Set<ObjectIdentifier> = []
+            if let twoFingerPan { allowed.insert(ObjectIdentifier(twoFingerPan)) }
+            if let pinch { allowed.insert(ObjectIdentifier(pinch)) }
+            return pair.isSubset(of: allowed)
+        }
     }
 }
+#endif
 #endif

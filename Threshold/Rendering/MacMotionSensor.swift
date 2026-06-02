@@ -14,14 +14,7 @@ import simd
 /// The sensor reports three signed 16-bit axes (roughly ±256 per g). We expose a
 /// calibrated tilt relative to the orientation captured at first use, so the
 /// resting laptop pose maps to zero.
-final class MacMotionSensor {
-    /// Calibrated tilt in g-relative units: `.x` = roll (left/right tilt),
-    /// `.y` = pitch (front/back tilt). Zero at the calibration pose.
-    struct Tilt {
-        var roll: Float
-        var pitch: Float
-    }
-
+final class MacMotionSensor: TiltMotionSensor {
     private var connection: io_connect_t = 0
     private let isOpen: Bool
     private var baseline: SIMD3<Float>?
@@ -65,13 +58,13 @@ final class MacMotionSensor {
 
     /// Returns calibrated tilt, or `nil` when the sensor is unavailable or the
     /// read failed. The first successful read also establishes the baseline.
-    func read() -> Tilt? {
+    func read() -> MotionTilt? {
         guard isOpen, let raw = readRaw() else { return nil }
         let base = baseline ?? raw
         if baseline == nil { baseline = raw }
 
         let delta = (raw - base) / Self.countsPerG
-        return Tilt(roll: delta.x, pitch: delta.y)
+        return MotionTilt(roll: delta.x, pitch: delta.y)
     }
 
     /// Reads the three raw axes from the sensor. Returns `nil` on failure.
