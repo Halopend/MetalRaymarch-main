@@ -368,50 +368,95 @@ private final class AudioStreamOutput: NSObject, SCStreamOutput, SCStreamDelegat
         guard let accum = accumBuffer,
               let dstPtr = accum.floatChannelData?[0] else { return }
         let target = Self.analyzerFrameCount
+        let inFrames = Int(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard inFrames > 0 else { return }
 
         do {
             try sampleBuffer.withAudioBufferList { audioBufferList, _ in
-                guard let borrowed = AVAudioPCMBuffer(
-                    pcmFormat: inputFormat,
-                    bufferListNoCopy: audioBufferList.unsafePointer
-                ) else { return }
-                let inFrames = Int(borrowed.frameLength)
-                guard inFrames > 0 else { return }
-
-                // Read first-channel samples (good enough for visualizer use);
-                // SCK typically delivers non-interleaved Float32.
-                guard let srcPtr = borrowed.floatChannelData?[0] else {
-                    logger.error("SCK audio: unsupported format (no float channel data)")
-                    return
-                }
+                guard audioBufferList.count > 0 else { return }
+                guard let srcBase = audioBufferList[0].mData else { return }
                 let stride: Int = inputFormat.isInterleaved ? Int(inputFormat.channelCount) : 1
 
-                var consumed = 0
-                while consumed < inFrames {
-                    let remainingIn = inFrames - consumed
-                    let remainingOut = Int(target - accumFilled)
-                    let copy = min(remainingIn, remainingOut)
-                    let dstStart = Int(accumFilled)
-                    if stride == 1 {
-                        memcpy(dstPtr.advanced(by: dstStart),
-                               srcPtr.advanced(by: consumed),
-                               copy * MemoryLayout<Float>.size)
-                    } else {
-                        // De-interleave: pick L only (channel 0)
-                        for i in 0..<copy {
-                            dstPtr[dstStart + i] = srcPtr[(consumed + i) * stride]
-                        }
-                    }
-                    accumFilled += AVAudioFrameCount(copy)
-                    consumed += copy
+                switch inputFormat.commonFormat {
+                case .pcmFormatFloat32:
+                    let srcPtr = srcBase.assumingMemoryBound(to: Float.self)
+                    copySamples(
+                        from: srcPtr,
+                        frameCount: inFrames,
+                        sourceStride: stride,
+                        target: target,
+                        destination: dstPtr
+                    )
 
-                    if accumFilled >= target {
-                        flushAccumulator()
-                    }
+                case .pcmFormatInt16:
+                    let srcPtr = srcBase.assumingMemoryBound(to: Int16.self)
+                    let scale = 1.0 / Float(Int16.max)
+                    copySamples(
+                        from: srcPtr,
+                        frameCount: inFrames,
+                        sourceStride: stride,
+                        target: target,
+                        destination: dstPtr
+                    ) { Float($0) * scale }
+
+                case .pcmFormatInt32:
+                    let srcPtr = srcBase.assumingMemoryBound(to: Int32.self)
+                    let scale = 1.0 / Float(Int32.max)
+                    copySamples(
+                        from: srcPtr,
+                        frameCount: inFrames,
+                        sourceStride: stride,
+                        target: target,
+                        destination: dstPtr
+                    ) { Float($0) * scale }
+
+                default:
+                    logger.error("SCK audio: unsupported format \(inputFormat.commonFormat.rawValue, privacy: .public)")
+                    return
                 }
             }
         } catch {
             logger.error("SCK audio: withAudioBufferList threw \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func copySamples<T>(
+        from srcPtr: UnsafePointer<T>,
+        frameCount: Int,
+        sourceStride: Int,
+        target: AVAudioFrameCount,
+        destination dstPtr: UnsafeMutablePointer<Float>,
+        transform: (T) -> Float = { value in
+            if let value = value as? Float {
+                return value
+            }
+            fatalError("Unsupported sample type")
+        }
+    ) {
+        var consumed = 0
+        while consumed < frameCount {
+            let remainingIn = frameCount - consumed
+            let remainingOut = Int(target - accumFilled)
+            let copy = min(remainingIn, remainingOut)
+            let dstStart = Int(accumFilled)
+
+            if sourceStride == 1 {
+                for i in 0..<copy {
+                    let sample = transform(srcPtr[consumed + i])
+                    dstPtr[dstStart + i] = sample.isFinite ? sample : 0
+                }
+            } else {
+                for i in 0..<copy {
+                    let sample = transform(srcPtr[(consumed + i) * sourceStride])
+                    dstPtr[dstStart + i] = sample.isFinite ? sample : 0
+                }
+            }
+
+            accumFilled += AVAudioFrameCount(copy)
+            consumed += copy
+            if accumFilled >= target {
+                flushAccumulator()
+            }
         }
     }
 
