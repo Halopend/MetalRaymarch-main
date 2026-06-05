@@ -226,7 +226,7 @@ struct MusicTabContent: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Audio Input Visualizer")
                         .font(.headline)
-                    Text("Use the Mac microphone or selected audio input for reactive visuals. Music.app audio capture is available as an advanced opt-in below.")
+                    Text("Use the Mac microphone or selected audio input for reactive visuals. System audio capture is available as an advanced opt-in below.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -278,7 +278,7 @@ struct MusicTabContent: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Toggle("Advanced Music.app audio capture", isOn: $macMusicAppAudioCaptureEnabled)
+            Toggle("Advanced system audio capture", isOn: $macMusicAppAudioCaptureEnabled)
                 .font(.caption)
                 .onChange(of: macMusicAppAudioCaptureEnabled) { _, isEnabled in
                     replaceMusicAppCaptureTask {
@@ -291,7 +291,7 @@ struct MusicTabContent: View {
                 }
 
             if !macMusicAppAudioCaptureEnabled {
-                Text("Optional Music.app capture uses ScreenCaptureKit and may require Screen Recording or Screen & System Audio Recording permission. It captures Music.app process audio, not a specific window.")
+                Text("Optional system audio capture uses ScreenCaptureKit and may require Screen Recording or Screen & System Audio Recording permission. It captures all app output (whole-system audio), not a specific window.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -305,9 +305,9 @@ struct MusicTabContent: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Music.app Audio Capture")
+                    Text("System Audio Capture")
                         .font(.headline)
-                    Text("Advanced opt-in capture listens to Music.app process audio through ScreenCaptureKit. macOS may ask for Screen Recording or Screen & System Audio Recording permission.")
+                    Text("Advanced opt-in capture listens to all system audio output through ScreenCaptureKit. macOS may ask for Screen Recording or Screen & System Audio Recording permission.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -348,7 +348,7 @@ struct MusicTabContent: View {
                 }
             }
 
-            Text("ScreenCaptureKit can target Music.app as a process, but macOS does not provide reliable per-window audio isolation.")
+            Text("ScreenCaptureKit captures whole-system audio output; macOS does not provide App-Store-safe per-app or per-window audio isolation.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -949,7 +949,7 @@ struct MusicTabContent: View {
                 Image(systemName: musicAppCapture.isCapturing ? "speaker.wave.2.fill" : "music.note")
                     .font(.caption)
                     .foregroundStyle(musicAppCapture.isCapturing ? .green : .secondary)
-                Text("Music.app")
+                Text("System Audio")
                     .font(.subheadline)
                 Spacer()
                 Button(musicAppCapture.isCapturing ? "Stop" : "Start") {
@@ -967,12 +967,12 @@ struct MusicTabContent: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if !musicAppCapture.isMusicAppRunning {
-                Text("Open Music.app to capture its process audio. This cannot isolate one Music window from another.")
+            } else if !musicAppCapture.hasSystemAudioTarget {
+                Text("Grant Screen & System Audio Recording permission to capture system audio. Captures all app output (browsers, Spotify, Music.app, …).")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else if musicAppCapture.isCapturing {
-                Text("Capturing Music.app audio. Start playback to drive the visualizer.")
+                Text("Capturing system audio. Play audio from any app to drive the visualizer.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

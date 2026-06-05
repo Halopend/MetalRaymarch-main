@@ -2,12 +2,15 @@
 //  MusicAppAudioCapture.swift
 //  Threshold
 //
-//  macOS-only: captures audio output from the native Music.app process
-//  via ScreenCaptureKit and feeds it into AudioAnalyzer for FFT analysis.
+//  macOS-only: captures whole-system audio output via ScreenCaptureKit and
+//  feeds it into AudioAnalyzer for FFT analysis.
 //
-//  This is the supported public path for reacting to music played in
-//  the system Music app on macOS. Requires user-granted Screen Recording
-//  permission. Sandbox-safe; no private APIs.
+//  This is the supported public path for reacting to any audio playing on the
+//  Mac (browsers, Spotify, Music.app, games, …). It uses a display-scoped
+//  content filter — NOT an app/PID-scoped one — because per-application capture
+//  requires resolving another process's PID via a mach-lookup the App Sandbox
+//  forbids without an App-Store-rejected entitlement. Requires user-granted
+//  Screen Recording permission. Sandbox-safe; no private APIs.
 //
 
 #if os(macOS)
@@ -26,7 +29,10 @@ final class MusicAppAudioCapture {
 
     private(set) var isCapturing: Bool = false
     private(set) var errorMessage: String?
-    private(set) var isMusicAppRunning: Bool = false
+    /// True when a capture target (a display) is available. With whole-system
+    /// audio capture there is no per-app requirement, so this reflects display
+    /// availability rather than whether any specific app is running.
+    private(set) var hasSystemAudioTarget: Bool = false
 
     // MARK: - Dependencies
 
@@ -41,8 +47,6 @@ final class MusicAppAudioCapture {
     private let sampleQueue = DispatchQueue(label: "com.puppypower.Threshold.MusicAppCapture.audio",
                                             qos: .userInitiated)
 
-    private static let musicBundleID = "com.apple.Music"
-
     private enum ScreenCapturePermissionState {
         case granted
         case grantedNeedsRelaunch
@@ -55,12 +59,12 @@ final class MusicAppAudioCapture {
 
     // MARK: - Availability
 
-    /// Refresh whether the native Music.app process is available for capture.
-    /// Safe to call without Screen Recording permission; on denial
+    /// Refresh whether a capture target (display) is available for whole-system
+    /// audio capture. Safe to call without Screen Recording permission; on denial
     /// `errorMessage` will explain how to grant access.
     func refreshAvailability() async {
         guard CGPreflightScreenCaptureAccess() else {
-            isMusicAppRunning = false
+            hasSystemAudioTarget = false
             errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
             return
         }
@@ -68,16 +72,16 @@ final class MusicAppAudioCapture {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false,
-                onScreenWindowsOnly: true
+                onScreenWindowsOnly: false
             )
 
-            let musicApp = content.applications.first { $0.bundleIdentifier == Self.musicBundleID }
-            isMusicAppRunning = musicApp != nil
+            // Whole-system capture only needs a display, not a specific app.
+            hasSystemAudioTarget = !content.displays.isEmpty
             if errorMessage?.hasPrefix("Screen Recording") == true {
                 errorMessage = nil
             }
         } catch {
-            isMusicAppRunning = false
+            hasSystemAudioTarget = false
             errorMessage = mapStartError(error)
             logger.error("SCShareableContent failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -85,22 +89,24 @@ final class MusicAppAudioCapture {
 
     // MARK: - Capture lifecycle
 
-    /// Start capturing audio from the Music.app process. ScreenCaptureKit
-    /// routes audio at the application level (windows carry video, processes
-    /// carry audio), so the content filter must include Music's
-    /// `SCRunningApplication` — a window-only filter will not deliver audio.
+    /// Start capturing whole-system audio output. ScreenCaptureKit captures the
+    /// entire display's audio when given a display-scoped content filter; we do
+    /// NOT target a specific application because resolving another process's PID
+    /// requires a `mach-lookup` the App Sandbox forbids (and the entitlement that
+    /// would silence it is rejected by the App Store). `excludesCurrentProcessAudio`
+    /// removes our own output so the visualizer never feeds back into itself.
     func reactivateSecurityPermissions() async {
         switch ensureScreenCapturePermission() {
         case .granted:
             await refreshAvailability()
         case .grantedNeedsRelaunch:
-            isMusicAppRunning = false
+            hasSystemAudioTarget = false
             errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
-            logger.info("Screen capture permission granted; waiting for relaunch before reactivating Music.app capture")
+            logger.info("Screen capture permission granted; waiting for relaunch before reactivating system audio capture")
         case .denied:
-            isMusicAppRunning = false
+            hasSystemAudioTarget = false
             errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
-            logger.error("Music.app capture blocked: screen capture permission denied during permission reactivation")
+            logger.error("System audio capture blocked: screen capture permission denied during permission reactivation")
         }
     }
 
@@ -112,15 +118,15 @@ final class MusicAppAudioCapture {
             break
         case .grantedNeedsRelaunch:
             errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
-            logger.info("Screen capture permission granted; waiting for relaunch before starting Music.app capture")
+            logger.info("Screen capture permission granted; waiting for relaunch before starting system audio capture")
             return
         case .denied:
             errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
-            logger.error("Music.app capture blocked: screen capture permission denied")
+            logger.error("System audio capture blocked: screen capture permission denied")
             return
         }
 
-        // Always refresh so we pick up Music.app even if the user launched it
+        // Refresh availability before starting in case permission state changed
         // after the tab first appeared.
         await refreshAvailability()
         guard !Task.isCancelled else { return }
@@ -138,21 +144,20 @@ final class MusicAppAudioCapture {
             return
         }
 
-        guard let musicApp = content.applications.first(where: { $0.bundleIdentifier == Self.musicBundleID }) else {
-            errorMessage = "Music app isn't running. Open Music.app, then try again."
-            return
-        }
         guard let display = content.displays.first else {
             errorMessage = "No display available for capture."
             return
         }
 
-        // Application-scoped filter: captures all audio output from Music.app's
-        // process while keeping the video stream minimal.
+        // Whole-system audio filter: capture the entire display's audio output
+        // instead of a single application. App-specific capture would require
+        // resolving another process's PID via a sandbox-forbidden mach-lookup,
+        // so we scope to the display and let `excludesCurrentProcessAudio` strip
+        // our own audio. This captures audio from every other app (browsers,
+        // Spotify, Music.app, games, …) and stays App-Store-safe.
         let filter = SCContentFilter(
             display: display,
-            including: [musicApp],
-            exceptingWindows: []
+            excludingWindows: []
         )
 
         let config = SCStreamConfiguration()
@@ -197,14 +202,14 @@ final class MusicAppAudioCapture {
             isCapturing = true
             errorMessage = nil
             analyzer.beginExternalCapture(sampleRate: Double(config.sampleRate))
-            logger.info("Music.app audio capture started (app-scoped filter)")
+            logger.info("System audio capture started (display-scoped, whole-system filter)")
         } catch {
             self.stream = nil
             self.output = nil
             self.videoOutput = nil
             isCapturing = false
             errorMessage = mapStartError(error)
-            logger.error("Music.app audio capture failed to start: \(error.localizedDescription, privacy: .public)")
+            logger.error("System audio capture failed to start: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -236,7 +241,7 @@ final class MusicAppAudioCapture {
         if isScreenCapturePermissionError(ns) {
             return screenCapturePermissionMessage(needsRelaunch: CGPreflightScreenCaptureAccess())
         }
-        return "Couldn't start Music app capture: \(error.localizedDescription)"
+        return "Couldn't start system audio capture: \(error.localizedDescription)"
     }
 
     private func ensureScreenCapturePermission() -> ScreenCapturePermissionState {
@@ -253,10 +258,10 @@ final class MusicAppAudioCapture {
 
     private func screenCapturePermissionMessage(needsRelaunch: Bool) -> String {
         if needsRelaunch {
-            return "Screen Recording permission was granted. Quit and reopen Threshold, then start Music.app capture again."
+            return "Screen Recording permission was granted. Quit and reopen Threshold, then start system audio capture again."
         }
 
-        return "Screen Recording or Screen & System Audio Recording permission required to detect Music.app. Enable it in System Settings → Privacy & Security."
+        return "Screen Recording or Screen & System Audio Recording permission required to capture system audio. Enable it in System Settings → Privacy & Security."
     }
 
     private func isScreenCapturePermissionError(_ error: NSError) -> Bool {
