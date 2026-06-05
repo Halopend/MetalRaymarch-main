@@ -47,12 +47,6 @@ final class MusicAppAudioCapture {
     private let sampleQueue = DispatchQueue(label: "com.puppypower.Threshold.MusicAppCapture.audio",
                                             qos: .userInitiated)
 
-    private enum ScreenCapturePermissionState {
-        case granted
-        case grantedNeedsRelaunch
-        case denied
-    }
-
     init(analyzer: AudioAnalyzer) {
         self.analyzer = analyzer
     }
@@ -63,12 +57,9 @@ final class MusicAppAudioCapture {
     /// audio capture. Safe to call without Screen Recording permission; on denial
     /// `errorMessage` will explain how to grant access.
     func refreshAvailability() async {
-        guard CGPreflightScreenCaptureAccess() else {
-            hasSystemAudioTarget = false
-            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
-            return
-        }
-
+        // Probe via SCShareableContent (the real SCK gate) rather than
+        // CGPreflightScreenCaptureAccess(), which gives false negatives for dev
+        // builds and drives the spurious re-prompt loop.
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
                 false,
@@ -82,8 +73,8 @@ final class MusicAppAudioCapture {
             }
         } catch {
             hasSystemAudioTarget = false
-            errorMessage = mapStartError(error)
-            logger.error("SCShareableContent failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
+            logger.error("🎙️[SysAudio] refreshAvailability SCShareableContent failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -96,41 +87,47 @@ final class MusicAppAudioCapture {
     /// would silence it is rejected by the App Store). `excludesCurrentProcessAudio`
     /// removes our own output so the visualizer never feeds back into itself.
     func reactivateSecurityPermissions() async {
-        switch ensureScreenCapturePermission() {
-        case .granted:
-            await refreshAvailability()
-        case .grantedNeedsRelaunch:
-            hasSystemAudioTarget = false
-            errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
-            logger.info("Screen capture permission granted; waiting for relaunch before reactivating system audio capture")
-        case .denied:
-            hasSystemAudioTarget = false
-            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
-            logger.error("System audio capture blocked: screen capture permission denied during permission reactivation")
+        print("🎙️[SysAudio] reactivateSecurityPermissions() called")
+        logger.notice("🎙️[SysAudio] reactivateSecurityPermissions() called")
+        await refreshAvailability()
+        guard !hasSystemAudioTarget else {
+            print("🎙️[SysAudio] permission already usable — target available")
+            return
         }
+
+        // SCShareableContent failed → no access for this binary yet. Trigger the
+        // system prompt exactly once and ask the user to relaunch. We only reach
+        // here on a real SCK denial, avoiding the CGPreflight false-negative loop.
+        let requested = CGRequestScreenCaptureAccess()
+        logger.notice("🎙️[SysAudio] reactivate: CGRequestScreenCaptureAccess() = \(requested, privacy: .public)")
+        print("🎙️[SysAudio] reactivate: CGRequestScreenCaptureAccess() = \(requested)")
+        if requested {
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
+        } else {
+            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
+        }
+        await refreshAvailability()
     }
 
     func start() async {
+        print("🎙️[SysAudio] start() called — isCapturing=\(isCapturing)")
+        logger.notice("🎙️[SysAudio] start() called — isCapturing=\(self.isCapturing, privacy: .public)")
         guard !isCapturing else { return }
 
-        switch ensureScreenCapturePermission() {
-        case .granted:
-            break
-        case .grantedNeedsRelaunch:
-            errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
-            logger.info("Screen capture permission granted; waiting for relaunch before starting system audio capture")
-            return
-        case .denied:
-            errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
-            logger.error("System audio capture blocked: screen capture permission denied")
-            return
-        }
+        // Log the CGPreflight state for diagnostics, but DO NOT hard-gate on it.
+        // For audio-only ScreenCaptureKit capture the canonical permission gate
+        // is whether `SCShareableContent` succeeds — `CGPreflightScreenCaptureAccess()`
+        // checks the *Screen Recording* TCC record, which frequently returns a
+        // false negative for dev builds whose code signature/path differs from
+        // the granted record, causing the "re-prompt every launch" loop. We trust
+        // SCK's own gate instead.
+        let preflight = CGPreflightScreenCaptureAccess()
+        logger.notice("🎙️[SysAudio] CGPreflightScreenCaptureAccess() = \(preflight, privacy: .public) (diagnostic only — not gating)")
+        print("🎙️[SysAudio] CGPreflightScreenCaptureAccess() = \(preflight) (diagnostic only)")
 
-        // Refresh availability before starting in case permission state changed
-        // after the tab first appeared.
-        await refreshAvailability()
-        guard !Task.isCancelled else { return }
-
+        // Probe permission by attempting to enumerate shareable content. This is
+        // the real SCK permission gate: it throws if the user hasn't granted
+        // Screen & System Audio Recording for THIS binary.
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(
@@ -138,16 +135,42 @@ final class MusicAppAudioCapture {
                 onScreenWindowsOnly: false
             )
             guard !Task.isCancelled else { return }
+            print("🎙️[SysAudio] SCShareableContent OK — displays=\(content.displays.count) apps=\(content.applications.count) windows=\(content.windows.count)")
+            logger.notice("🎙️[SysAudio] SCShareableContent OK — displays=\(content.displays.count, privacy: .public) apps=\(content.applications.count, privacy: .public)")
         } catch {
-            errorMessage = mapStartError(error)
-            logger.error("SCShareableContent (start) failed: \(error.localizedDescription, privacy: .public)")
+            // Permission not yet granted for this binary. Trigger the system
+            // prompt exactly once, then ask the user to relaunch. We only reach
+            // here when SCK itself reports no access, so we avoid the spurious
+            // re-prompt that CGPreflight caused.
+            let ns = error as NSError
+            print("🎙️[SysAudio] SCShareableContent FAILED (treating as permission gate): domain=\(ns.domain) code=\(ns.code) — \(error)")
+            logger.error("🎙️[SysAudio] SCShareableContent (start) failed: \(error.localizedDescription, privacy: .public)")
+
+            let requested = CGRequestScreenCaptureAccess()
+            logger.notice("🎙️[SysAudio] CGRequestScreenCaptureAccess() = \(requested, privacy: .public)")
+            print("🎙️[SysAudio] CGRequestScreenCaptureAccess() = \(requested)")
+
+            if requested {
+                errorMessage = screenCapturePermissionMessage(needsRelaunch: true)
+                print("🎙️[SysAudio] Permission just granted — relaunch required.")
+            } else {
+                errorMessage = screenCapturePermissionMessage(needsRelaunch: false)
+                print("🎙️[SysAudio] Permission denied. If Threshold IS listed under Screen Recording, remove it and re-add the running build (TCC binary mismatch).")
+            }
             return
         }
 
+        // Refresh availability now that we know permission is good.
+        await refreshAvailability()
+        guard !Task.isCancelled else { return }
+
         guard let display = content.displays.first else {
             errorMessage = "No display available for capture."
+            print("🎙️[SysAudio] No display available — STOPPING")
+            logger.error("🎙️[SysAudio] No display available for capture")
             return
         }
+        print("🎙️[SysAudio] Using display \(display.displayID) \(display.width)x\(display.height)")
 
         // Whole-system audio filter: capture the entire display's audio output
         // instead of a single application. App-specific capture would require
@@ -189,6 +212,7 @@ final class MusicAppAudioCapture {
             // Drain video frames into a no-op output so SCK doesn't log
             // "stream output NOT found. Dropping frame" repeatedly.
             try stream.addStreamOutput(videoSink, type: .screen, sampleHandlerQueue: sampleQueue)
+            print("🎙️[SysAudio] stream outputs added, calling startCapture()…")
             try await stream.startCapture()
 
             if Task.isCancelled {
@@ -202,14 +226,16 @@ final class MusicAppAudioCapture {
             isCapturing = true
             errorMessage = nil
             analyzer.beginExternalCapture(sampleRate: Double(config.sampleRate))
-            logger.info("System audio capture started (display-scoped, whole-system filter)")
+            logger.notice("🎙️[SysAudio] ✅ startCapture() SUCCEEDED (display-scoped, whole-system). Waiting for audio buffers…")
+            print("🎙️[SysAudio] ✅ startCapture() SUCCEEDED. Now play audio in any app; watch for 'first sample' / 'flush' logs.")
         } catch {
             self.stream = nil
             self.output = nil
             self.videoOutput = nil
             isCapturing = false
             errorMessage = mapStartError(error)
-            logger.error("System audio capture failed to start: \(error.localizedDescription, privacy: .public)")
+            logger.error("🎙️[SysAudio] ❌ startCapture() FAILED: \(error.localizedDescription, privacy: .public)")
+            print("🎙️[SysAudio] ❌ startCapture() FAILED: \(error)")
         }
     }
 
@@ -242,18 +268,6 @@ final class MusicAppAudioCapture {
             return screenCapturePermissionMessage(needsRelaunch: CGPreflightScreenCaptureAccess())
         }
         return "Couldn't start system audio capture: \(error.localizedDescription)"
-    }
-
-    private func ensureScreenCapturePermission() -> ScreenCapturePermissionState {
-        if CGPreflightScreenCaptureAccess() {
-            return .granted
-        }
-
-        if CGRequestScreenCaptureAccess() {
-            return .grantedNeedsRelaunch
-        }
-
-        return .denied
     }
 
     private func screenCapturePermissionMessage(needsRelaunch: Bool) -> String {
@@ -315,7 +329,8 @@ private final class AudioStreamOutput: NSObject, SCStreamOutput, SCStreamDelegat
 
         if !loggedFirstSample {
             loggedFirstSample = true
-            logger.info("SCK audio first sample: sr=\(inputFormat.sampleRate, privacy: .public) ch=\(inputFormat.channelCount, privacy: .public) interleaved=\(inputFormat.isInterleaved, privacy: .public) commonFmt=\(inputFormat.commonFormat.rawValue, privacy: .public)")
+            logger.notice("🎙️[SysAudio] FIRST audio sample: sr=\(inputFormat.sampleRate, privacy: .public) ch=\(inputFormat.channelCount, privacy: .public) interleaved=\(inputFormat.isInterleaved, privacy: .public) commonFmt=\(inputFormat.commonFormat.rawValue, privacy: .public)")
+            print("🎙️[SysAudio] FIRST audio sample received: sr=\(inputFormat.sampleRate) ch=\(inputFormat.channelCount) interleaved=\(inputFormat.isInterleaved) commonFmt=\(inputFormat.commonFormat.rawValue) — capture pipeline IS delivering buffers")
         }
 
         // Build (or rebuild on rate change) a mono Float32 non-interleaved
@@ -343,7 +358,8 @@ private final class AudioStreamOutput: NSObject, SCStreamOutput, SCStreamDelegat
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        logger.error("SCStream stopped with error: \(error.localizedDescription, privacy: .public)")
+        logger.error("🎙️[SysAudio] SCStream stopped with error: \(error.localizedDescription, privacy: .public)")
+        print("🎙️[SysAudio] SCStream stopped with error: \(error)")
     }
 
     // MARK: - Accumulation
@@ -411,7 +427,10 @@ private final class AudioStreamOutput: NSObject, SCStreamOutput, SCStreamDelegat
                     let v = abs(ch0[i])
                     if v > peak { peak = v }
                 }
-                logger.debug("SCK accumulator flush #\(self.sampleCount, privacy: .public) peak=\(peak, privacy: .public)")
+                logger.notice("🎙️[SysAudio] accumulator flush #\(self.sampleCount, privacy: .public) peak=\(peak, privacy: .public)")
+                if self.sampleCount == 1 || self.sampleCount % 300 == 0 {
+                    print("🎙️[SysAudio] flush #\(self.sampleCount) peak=\(peak) \(peak < 0.0001 ? "(SILENT — no audio reaching capture; is something actually playing?)" : "(audio flowing ✅)")")
+                }
             }
         }
 
