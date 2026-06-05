@@ -49,12 +49,19 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
     // custom only to supply defaults for missing keys in older saved data.
 
     mutating func clamp() {
-        fractalAudioAmount = max(0.0, min(1.0, fractalAudioAmount))
-        fractalBeatPunch = max(0.0, min(1.0, fractalBeatPunch))
-        fractalAudioDamping = max(0.0, min(1.0, fractalAudioDamping))
-        bassSensitivity = max(0.0, min(2.0, bassSensitivity))
-        midSensitivity = max(0.0, min(2.0, midSensitivity))
-        trebleSensitivity = max(0.0, min(2.0, trebleSensitivity))
-        beatSensitivity = max(0.0, min(2.0, beatSensitivity))
+        // isFinite guards: range-clamping alone does not protect against NaN/Inf
+        // values that can be restored from a save file corrupted by a power-loss
+        // event (min/max with NaN propagate in Swift's generic Comparable path).
+        fractalAudioAmount  = fractalAudioAmount.isFinite  ? max(0.0, min(1.0, fractalAudioAmount))  : 0.25
+        fractalBeatPunch    = fractalBeatPunch.isFinite    ? max(0.0, min(1.0, fractalBeatPunch))    : 0.3
+        fractalAudioDamping = fractalAudioDamping.isFinite ? max(0.0, min(1.0, fractalAudioDamping)) : 0.0
+        bassSensitivity     = bassSensitivity.isFinite     ? max(0.0, min(2.0, bassSensitivity))     : 1.0
+        midSensitivity      = midSensitivity.isFinite      ? max(0.0, min(2.0, midSensitivity))      : 1.0
+        trebleSensitivity   = trebleSensitivity.isFinite   ? max(0.0, min(2.0, trebleSensitivity))   : 1.0
+        beatSensitivity     = beatSensitivity.isFinite     ? max(0.0, min(2.0, beatSensitivity))     : 1.0
+        // Sanitize per-triplet gain map: remove any NaN/Inf or out-of-range entries.
+        tripletMusicGains = tripletMusicGains.mapValues { v in
+            v.isFinite ? max(0.0, min(4.0, v)) : 1.0
+        }
     }
 }

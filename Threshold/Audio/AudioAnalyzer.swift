@@ -313,6 +313,21 @@ class AudioAnalyzer {
         var rms: Float = 0
         vDSP_rmsqv(samples, 1, &rms, vDSP_Length(frameLength))
 
+        // A non-finite RMS means the capture buffer contains NaN/Inf samples
+        // (possible after wake-from-sleep or power restoration with a bad SCK buffer).
+        // Decay all levels to zero rather than propagating garbage into the render path.
+        guard rms.isFinite else {
+            pendingOverall = 0
+            pendingBass = 0
+            pendingMid = 0
+            pendingTreble = 0
+            if !pendingLevelDispatch {
+                pendingLevelDispatch = true
+                Task { @MainActor in self.drainPendingLevels() }
+            }
+            return
+        }
+
         // ScreenCaptureKit and microphones both produce a small idle noise floor.
         // Gate it here so paused music and silent rooms decay to zero instead of flickering.
         if rms < silenceRMSFloor {
@@ -389,10 +404,11 @@ class AudioAnalyzer {
                 treble = trebleSum / Float(trebleEnd - trebleStart) * trebleBoost
             }
             
-            // Apply gain and compression to bands
-            bass = min(1.0, compressLevel(bass * inputGain))
-            mid = min(1.0, compressLevel(mid * inputGain))
-            treble = min(1.0, compressLevel(treble * inputGain))
+            // Apply gain and compression to bands, guarding against non-finite
+            // FFT output that could arise from pathological sample data.
+            bass = bass.isFinite ? min(1.0, compressLevel(bass * inputGain)) : 0
+            mid = mid.isFinite ? min(1.0, compressLevel(mid * inputGain)) : 0
+            treble = treble.isFinite ? min(1.0, compressLevel(treble * inputGain)) : 0
         }
         
         // Batch level updates: store latest values, dispatch to MainActor only if no dispatch is pending
@@ -427,15 +443,24 @@ class AudioAnalyzer {
         
         let clampedDT = max(0.001, min(0.1, deltaTime))
         refreshSmoothingFactors(clampedDT)
+
+        // Sanitize inputs before smoothing — non-finite values from a malformed
+        // capture buffer should not enter the level trackers.
+        let safeOverall = overall.isFinite ? overall : 0
+        let safeBass    = bass.isFinite    ? bass    : 0
+        let safeMid     = mid.isFinite     ? mid     : 0
+        let safeTreble  = treble.isFinite  ? treble  : 0
         
         // Smooth overall level (fast attack, slow decay)
-        if overall > level {
-            level = level + (overall - level) * cachedAttackFactor
+        if !level.isFinite { level = 0 }
+        if safeOverall > level {
+            level = level + (safeOverall - level) * cachedAttackFactor
         } else {
-            level = level + (overall - level) * cachedDecayFactor
+            level = level + (safeOverall - level) * cachedDecayFactor
         }
         
         // Update peak with slow decay
+        if !peakLevel.isFinite { peakLevel = 0 }
         if level > peakLevel {
             peakLevel = level
         } else {
@@ -443,12 +468,16 @@ class AudioAnalyzer {
         }
         
         // Smooth frequency bands with attack/decay
-        smoothBand(&bassLevel, target: bass, dt: clampedDT)
-        smoothBand(&midLevel, target: mid, dt: clampedDT)
-        smoothBand(&trebleLevel, target: treble, dt: clampedDT)
+        smoothBand(&bassLevel,   target: safeBass,   dt: clampedDT)
+        smoothBand(&midLevel,    target: safeMid,    dt: clampedDT)
+        smoothBand(&trebleLevel, target: safeTreble, dt: clampedDT)
     }
     
     private func smoothBand(_ current: inout Float, target: Float, dt: Float) {
+        // Guard against NaN/Inf entering the smoother — propagation through
+        // exponential smoothing is irreversible without a hard reset.
+        guard target.isFinite else { return }
+        if !current.isFinite { current = 0 }
         if target > current {
             current = current + (target - current) * cachedBandAttackFactor
         } else {
