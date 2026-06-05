@@ -71,11 +71,11 @@ struct ContentView: View {
     #endif
     }
 
-    private var immersiveLayoutMinimumWidth: CGFloat {
+    private var immersiveLayoutMinimumWidth: CGFloat? {
     #if os(visionOS)
         1240
     #elseif os(iOS)
-        520
+        nil
     #else
         980
     #endif
@@ -267,12 +267,12 @@ struct ContentView: View {
         .onChange(of: appModel.immersiveSpaceState) { _, _ in
             // When the renderer is not ready, snap back to Explore so the user
             // never gets stuck on a tab that requires active rendering.
-            if !isRendererNavigationReady, topDockTab != .explore {
+            if shouldGateRendererNavigation, !isRendererNavigationReady, topDockTab != .explore {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
         .onChange(of: appModel.rendererStartupWarmupComplete) { _, isReady in
-            if !isReady, topDockTab != .explore {
+            if shouldGateRendererNavigation, !isReady, topDockTab != .explore {
                 withMotionSensitiveAnimation(.easeInOut(duration: 0.2)) { activateTopDock(.explore) }
             }
         }
@@ -490,7 +490,7 @@ struct ContentView: View {
     
     private var immersiveLayout: some View {
         VStack(spacing: 10) {
-#if os(macOS)
+#if os(macOS) || os(iOS)
             HStack(spacing: 0) {
                 topDockOrnament
                 Spacer(minLength: 0)
@@ -814,13 +814,23 @@ struct ContentView: View {
         syncNavigationChromeFromLegacySelection()
     }
 
-    private var isRendererNavigationReady: Bool {
-#if os(macOS)
+            private var shouldGateRendererNavigation: Bool {
+        #if os(iOS)
+            false
+        #else
+            true
+        #endif
+            }
+
+            private var isRendererNavigationReady: Bool {
+        #if os(iOS)
+            true
+        #elseif os(macOS)
         appModel.rendererStartupWarmupComplete
-#else
+    #else
         appModel.immersiveSpaceState == .open && appModel.rendererStartupWarmupComplete
-#endif
-    }
+    #endif
+        }
 
     func dismissMenuWindowIfNeeded() {
 #if os(visionOS)
@@ -1116,7 +1126,7 @@ struct ContentView: View {
                 case .effects:  effectsTabContent
                 case .music:
                     #if os(macOS)
-                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, musicAppCapture: appModel.musicAppCapture, tabSelection: $musicPanelTab)
+                    MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, systemAudioCapture: appModel.systemAudioCapture, tabSelection: $musicPanelTab)
                     #else
                     MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
                     #endif

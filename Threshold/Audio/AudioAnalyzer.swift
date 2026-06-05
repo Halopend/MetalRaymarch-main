@@ -128,7 +128,11 @@ class AudioAnalyzer {
                 }
             } else {
                 await MainActor.run {
+                    #if os(macOS)
+                    errorMessage = "Microphone access denied. Enable Threshold in System Settings -> Privacy & Security -> Microphone. If you recently changed the bundle identifier, macOS treats it as a new app and you must re-enable access."
+                    #else
                     errorMessage = "Microphone access denied. Enable in Settings."
+                    #endif
                 }
             }
         }
@@ -172,7 +176,7 @@ class AudioAnalyzer {
 
     /// Feed an externally-captured PCM buffer into the FFT pipeline.
     /// Caller must guarantee the buffer is owned (not referencing borrowed
-    /// memory from a CMSampleBuffer); see `MusicAppAudioCapture` for the
+    /// memory from a CMSampleBuffer); see `SystemAudioTapCapture` for the
     /// copying delegate used on macOS.
     func ingestExternalBuffer(_ buffer: AVAudioPCMBuffer) {
         processAudioBuffer(buffer)

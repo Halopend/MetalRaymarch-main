@@ -103,6 +103,8 @@
 	<true/>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Threshold listens to audio from a music app you choose so it can drive audio-reactive visuals. Nothing is recorded or saved.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Threshold uses the microphone for real-time audio-reactive fractal visualization.</string>
 	<key>NSPrincipalClass</key>

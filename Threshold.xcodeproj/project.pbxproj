@@ -63,8 +63,8 @@
 				App/Info.plist,
 				App/ThresholdiOSInfo.plist,
 				App/ThresholdMacInfo.plist,
-				Audio/AppleMusicManager.swift,
-				Audio/AppleMusicServiceAdapter.swift,
+				Audio/AppleMusicManagerMac.swift,
+				Audio/AppleMusicServiceAdapterMac.swift,
 				Rendering/Core/RendererCoreTypes.swift,
 				Rendering/Core/RendererCustomShader.swift,
 				Rendering/Core/RendererDynamicQuality.swift,
@@ -559,6 +559,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = NO;
 				CURRENT_PROJECT_VERSION = 17;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = PMHYFM3SU4;
@@ -569,15 +570,16 @@
 				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_CFBundleName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = Threshold;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
@@ -595,6 +597,7 @@
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				ENABLE_HARDENED_RUNTIME = YES;
 				CURRENT_PROJECT_VERSION = 17;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_ASSET_PATHS = "";
@@ -606,15 +609,16 @@
 				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
 				INFOPLIST_KEY_CFBundleName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.mac;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = Threshold;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
@@ -627,6 +631,7 @@
 		D7E000112E00000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = IOS;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -638,6 +643,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Threshold/App/ThresholdiOSInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
@@ -647,7 +653,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = Threshold;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -664,6 +670,7 @@
 		D7E000122E00000000000001 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = IOS;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -676,6 +683,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Threshold/App/ThresholdiOSInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
@@ -685,7 +693,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1;
-				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
 				PRODUCT_NAME = Threshold;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

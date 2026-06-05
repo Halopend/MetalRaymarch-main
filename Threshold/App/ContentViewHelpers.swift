@@ -20,49 +20,9 @@ enum AdvancedTestScene {
     }
 }
 
-// MARK: - SharePlay Controls View
-
-struct SharePlayControlsView: View {
-    @Bindable var shareSession: FractalShareSession
-    var appModel: AppModel
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                HStack(spacing: 6) {
-                    Circle().fill(statusColor).frame(width: 10, height: 10)
-                    Text(statusText).font(.subheadline).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    Task {
-                        switch shareSession.state {
-                        case .inactive: await shareSession.startSharing()
-                        default: shareSession.stopSharing()
-                        }
-                    }
-                } label: { Label(buttonText, systemImage: buttonIcon) }
-                .buttonStyle(.borderedProminent).tint(buttonTint)
-            }
-            if case .connected = shareSession.state {
-                HStack {
-                    Text("Role:").font(.caption).foregroundStyle(.secondary)
-                    Picker("Role", selection: $shareSession.role) {
-                        ForEach(SharePlayRole.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }.pickerStyle(.segmented).frame(maxWidth: 220)
-                }
-            }
-        }
-        .padding(.horizontal).padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-    }
-    
-    private var statusColor: Color { switch shareSession.state { case .inactive: return .gray; case .waiting: return .yellow; case .connected: return .green; case .error: return .red } }
-    private var statusText: String { switch shareSession.state { case .inactive: return "Not sharing"; case .waiting: return "Waiting for others..."; case .connected(let c): return "\(c) connected"; case .error(let m): return "Error: \(m)" } }
-    private var buttonText: String { switch shareSession.state { case .inactive: return "Share via FaceTime"; default: return "Stop Sharing" } }
-    private var buttonIcon: String { switch shareSession.state { case .inactive: return "shareplay"; default: return "shareplay.slash" } }
-    private var buttonTint: Color { switch shareSession.state { case .inactive: return .blue; default: return .red } }
-}
+// NOTE: SharePlay UI (formerly `SharePlayControlsView`) is intentionally not
+// shipped. The backend (`FractalShareSession` / `FractalShareActivity`) is kept
+// for future use but no view exposes it, so the feature is dormant.
 
 // MARK: - Menu Adjustment Environment
 

@@ -115,14 +115,13 @@ final class MusicService {
             self?.providerStateRevision &+= 1
         }
 
-        #if os(macOS) || os(iOS)
-        appleMusicAdapter = nil
-        #else
-        // Build and register adapter
+        // Each target compiles exactly one AppleMusicServiceAdapter variant:
+        // macOS/iOS use the shared MediaPlayer-backed adapter file, while
+        // visionOS builds the non-mac adapter file. Register it unconditionally
+        // so `activeProvider` and transport/library actions work on every target.
         let amAdapter = AppleMusicServiceAdapter(manager: appleMusic)
         self.appleMusicAdapter = amAdapter
         register(amAdapter)
-        #endif
     }
 
 

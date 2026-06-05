@@ -261,11 +261,9 @@ final class AppleMusicManager {
 
     func startMonitoring(pollInterval: Duration = .milliseconds(200)) {
         guard monitorTask == nil else { return }
-        monitorTask = Task { [weak self] in
+        monitorTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                await MainActor.run {
-                    self?.updateFrame()
-                }
+                self?.updateFrame()
                 try? await Task.sleep(for: pollInterval)
             }
         }
@@ -413,7 +411,7 @@ final class AppleMusicManager {
             object: player,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.updateFrame()
             }
         }
@@ -423,7 +421,7 @@ final class AppleMusicManager {
             object: player,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.updateFrame()
             }
         }
