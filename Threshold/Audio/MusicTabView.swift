@@ -986,12 +986,15 @@ struct MusicTabContent: View {
 
     private func startMusicAppVisualizer(using preset: ReactivityPreset) {
         replaceMusicAppCaptureTask {
-            guard macMusicAppAudioCaptureEnabled else { return }
+            print("🎙️[SysAudio] Start button tapped — enabled=\(macMusicAppAudioCaptureEnabled) capturing=\(musicAppCapture.isCapturing)")
             if !musicAppCapture.isCapturing {
                 await musicAppCapture.start()
             }
             guard !Task.isCancelled else { return }
             guard musicAppCapture.isCapturing else { return }
+            if !macMusicAppAudioCaptureEnabled {
+                macMusicAppAudioCaptureEnabled = true
+            }
             configureMusicAppVisualizer(using: preset)
         }
     }
