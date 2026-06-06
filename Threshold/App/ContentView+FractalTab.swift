@@ -29,40 +29,7 @@ extension ContentView {
                         appModel.dismissMenuWindowForSceneLoad()
                     },
                     onLoadStaticScene: { preset in
-                        Task { @MainActor in
-                            customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
-                            if let formula = preset.embeddedFormula {
-                                let installed = await appModel.installEmbeddedFormulaIfNeededAndWait(formula)
-                                customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene installEmbeddedFormula returned \(installed)")
-                                guard installed else { return }
-                            } else {
-                                appModel.uninstallEmbeddedFormula()
-                            }
-
-                            if preset.embeddedFormula != nil {
-                                await appModel.preparePipelineHandler?(preset)
-                                customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene preparePipelineHandler completed; loading preset NOW")
-                            } else {
-                                Task { await appModel.preparePipelineHandler?(preset) }
-                                customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
-                            }
-                            // Snapshot the currently displayed parameters so the
-                            // load can ease from them toward the new preset.
-                            appModel.renderSettings.beginSceneTransitionSnapshot()
-                            appModel.presetManager.loadPreset(
-                                preset,
-                                into: appModel.renderSettings,
-                                resetEnvironment: true
-                            )
-                            // Ease displayed parameters toward the new preset's
-                            // values over the configured "Same Scene Transition
-                            // Time" instead of snapping instantly.
-                            appModel.renderSettings.commitSceneTransition()
-                            applyPresetGestureOverridesIfNeeded(for: preset)
-                            appModel.gestureController?.syncWithSettings()
-                            appModel.rememberActiveResetPreset(preset)
-                            cache.loadFromSettings()
-                        }
+                        loadStaticScene(preset)
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

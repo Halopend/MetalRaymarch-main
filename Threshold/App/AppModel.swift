@@ -248,6 +248,11 @@ class AppModel {
     // Called when sliders change to pre-compile the needed pipeline
     var preparePipelineForValuesHandler: ((Int, Int) async -> Void)?
 
+    // Loads a jumping-off / static scene preset (set by ContentView). Routes the
+    // keyboard scene-switch shortcut through the same load path the browse UI uses
+    // so transitions, gesture overrides, and the settings cache all stay in sync.
+    @ObservationIgnored var loadStaticSceneRequestHandler: ((FractalPreset) -> Void)?
+
     // Embedded-formula activation handler (set by Renderer).
     // When non-nil, AppModel can ask the renderer to compile + install a custom
     // MTLLibrary for a `.threshfx` formula. Pass `nil` to detach.
@@ -820,6 +825,30 @@ class AppModel {
 
     func clearActiveResetPreset() {
         activeResetPreset = nil
+    }
+
+    /// Loads the jumping-off scene before or after the currently active one,
+    /// wrapping around at the ends. Driven by the keyboard left/right shortcut.
+    @MainActor
+    func cycleJumpingOffScene(forward: Bool) {
+        guard let handler = loadStaticSceneRequestHandler else { return }
+        let scenes = presetManager.presets
+            .filter { $0.name != "__lastState__" && $0.isJumpingOffPreset }
+        guard !scenes.isEmpty else { return }
+
+        let currentIndex = activeResetPreset.flatMap { active in
+            scenes.firstIndex(where: { $0.id == active.id })
+        }
+
+        let nextIndex: Int
+        if let currentIndex {
+            let count = scenes.count
+            nextIndex = ((currentIndex + (forward ? 1 : -1)) % count + count) % count
+        } else {
+            nextIndex = forward ? 0 : scenes.count - 1
+        }
+
+        handler(scenes[nextIndex])
     }
 
     private func canCloseMenuWindowNow() -> Bool {

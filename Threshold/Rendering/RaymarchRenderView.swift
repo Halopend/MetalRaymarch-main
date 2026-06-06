@@ -25,6 +25,9 @@ private struct ThresholdMacInputFrame: Sendable {
     var zoomDelta: Float = 0
     var shouldTogglePlayback = false
     var shouldResetView = false
+    // Net scene-switch steps requested this frame (left/right arrow keys).
+    // Positive = advance, negative = go back.
+    var sceneStep = 0
 }
 
 #if os(macOS)
@@ -37,6 +40,7 @@ private protocol ThresholdMacViewportInputDelegate: AnyObject {
     func viewportDidChangeShift(_ isPressed: Bool)
     func viewportDidTogglePlayback()
     func viewportDidRequestReset()
+    func viewportDidRequestSceneStep(_ step: Int)
 }
 #endif
 
@@ -49,6 +53,7 @@ private final class ThresholdMacInputController: Sendable {
         var zoomDelta: Float = 0
         var shouldTogglePlayback = false
         var shouldResetView = false
+        var sceneStep = 0
     }
 
     private let state = Mutex(State())
@@ -63,6 +68,7 @@ private final class ThresholdMacInputController: Sendable {
             current.zoomDelta = 0
             current.shouldTogglePlayback = false
             current.shouldResetView = false
+            current.sceneStep = 0
         }
     }
 
@@ -112,6 +118,12 @@ private final class ThresholdMacInputController: Sendable {
         }
     }
 
+    func requestSceneStep(_ step: Int) {
+        state.withLock { current in
+            current.sceneStep += step
+        }
+    }
+
     func consumeFrame() -> ThresholdMacInputFrame {
         state.withLock { current in
             let frame = ThresholdMacInputFrame(
@@ -121,13 +133,15 @@ private final class ThresholdMacInputController: Sendable {
                 panDelta: current.panDelta,
                 zoomDelta: current.zoomDelta,
                 shouldTogglePlayback: current.shouldTogglePlayback,
-                shouldResetView: current.shouldResetView
+                shouldResetView: current.shouldResetView,
+                sceneStep: current.sceneStep
             )
             current.orbitDelta = .zero
             current.panDelta = .zero
             current.zoomDelta = 0
             current.shouldTogglePlayback = false
             current.shouldResetView = false
+            current.sceneStep = 0
             return frame
         }
     }
@@ -251,6 +265,25 @@ private final class ThresholdMacInteractiveView: MTKView {
     }
 
     private func handleKey(_ event: NSEvent, isPressed: Bool) -> Bool {
+        // Left/right arrows switch jumping-off scenes. Handled via virtual key
+        // codes (123 = left, 124 = right) since arrow keys carry function-key
+        // unicode rather than plain characters. Fire once per press (not on
+        // auto-repeat) and consume both down and up to suppress the system beep.
+        switch event.keyCode {
+        case 123:
+            if isPressed && !event.isARepeat {
+                inputDelegate?.viewportDidRequestSceneStep(-1)
+            }
+            return true
+        case 124:
+            if isPressed && !event.isARepeat {
+                inputDelegate?.viewportDidRequestSceneStep(1)
+            }
+            return true
+        default:
+            break
+        }
+
         guard let characters = event.charactersIgnoringModifiers?.lowercased(), !characters.isEmpty else {
             return false
         }
@@ -401,6 +434,10 @@ struct ThresholdMacRenderView: NSViewRepresentable {
 
         func viewportDidRequestReset() {
             inputController.requestReset()
+        }
+
+        func viewportDidRequestSceneStep(_ step: Int) {
+            inputController.requestSceneStep(step)
         }
     }
 }
@@ -1106,6 +1143,13 @@ private final class ThresholdMacRenderer {
 
         if input.shouldResetView {
             resetDesktopView(settings: settings)
+        }
+
+        if input.sceneStep != 0 {
+            let forward = input.sceneStep > 0
+            Task { @MainActor [weak appModel] in
+                appModel?.cycleJumpingOffScene(forward: forward)
+            }
         }
 
         if input.shouldTogglePlayback {
