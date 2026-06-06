@@ -734,4 +734,11 @@ extension FractalPreset {
         }
         return !hasMusicReactiveMappings
     }
+
+    /// Whether this preset should participate in desktop left/right scene
+    /// switching. Includes both Jumping Off and Music Reactive presets, while
+    /// excluding custom embedded-formula scenes.
+    var isKeyboardSwitchableStaticPreset: Bool {
+        !isCustomScenePreset
+    }
 }

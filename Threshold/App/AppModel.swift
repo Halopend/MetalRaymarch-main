@@ -248,11 +248,6 @@ class AppModel {
     // Called when sliders change to pre-compile the needed pipeline
     var preparePipelineForValuesHandler: ((Int, Int) async -> Void)?
 
-    // Loads a jumping-off / static scene preset (set by ContentView). Routes the
-    // keyboard scene-switch shortcut through the same load path the browse UI uses
-    // so transitions, gesture overrides, and the settings cache all stay in sync.
-    @ObservationIgnored var loadStaticSceneRequestHandler: ((FractalPreset) -> Void)?
-
     // Embedded-formula activation handler (set by Renderer).
     // When non-nil, AppModel can ask the renderer to compile + install a custom
     // MTLLibrary for a `.threshfx` formula. Pass `nil` to detach.
@@ -827,13 +822,78 @@ class AppModel {
         activeResetPreset = nil
     }
 
-    /// Loads the jumping-off scene before or after the currently active one,
-    /// wrapping around at the ends. Driven by the keyboard left/right shortcut.
+    /// Loads a jumping-off / static scene preset through the full pipeline:
+    /// embedded-formula install, pipeline prep, eased parameter transition,
+    /// gesture overrides, and a settings-changed notification so any live UI
+    /// reloads its cache. Lives on AppModel (not ContentView) so the keyboard
+    /// scene-switch shortcut keeps working while the controls pane is hidden.
+    @MainActor
+    func loadStaticScene(_ preset: FractalPreset) {
+        Task { @MainActor in
+            customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
+            if let formula = preset.embeddedFormula {
+                let installed = await installEmbeddedFormulaIfNeededAndWait(formula)
+                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene installEmbeddedFormula returned \(installed)")
+                guard installed else { return }
+            } else {
+                uninstallEmbeddedFormula()
+            }
+
+            if preset.embeddedFormula != nil {
+                await preparePipelineHandler?(preset)
+                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene preparePipelineHandler completed; loading preset NOW")
+            } else {
+                Task { await preparePipelineHandler?(preset) }
+                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
+            }
+            // Snapshot the currently displayed parameters so the load can ease
+            // from them toward the new preset.
+            renderSettings.beginSceneTransitionSnapshot()
+            presetManager.loadPreset(
+                preset,
+                into: renderSettings,
+                includePerformance: false,
+                resetEnvironment: true
+            )
+            // Ease displayed parameters toward the new preset's values over the
+            // configured "Same Scene Transition Time" instead of snapping.
+            renderSettings.commitSceneTransition()
+            applyPresetGestureOverridesIfNeeded(for: preset)
+            gestureController?.syncWithSettings()
+            rememberActiveResetPreset(preset)
+            NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+        }
+    }
+
+    /// Applies preset-specific gesture binding overrides for known scenes.
+    func applyPresetGestureOverridesIfNeeded(for preset: FractalPreset) {
+        let normalizedName = preset.name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard ["ring around the rosie", "a space ring odyssey"].contains(normalizedName),
+              preset.fractalType == .kleinian else { return }
+
+        let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: .kleinian)
+        guard let minsTriplet = triplets.first(where: { $0.groupName == "Mins" }),
+              let maxsTriplet = triplets.first(where: { $0.groupName == "Maxs" }) else { return }
+
+        renderSettings.setBinding(
+            .parameterTriplet(minsTriplet),
+            for: GestureSlot(hand: .left, finger: .middle)
+        )
+        renderSettings.setBinding(
+            .parameterTriplet(maxsTriplet),
+            for: GestureSlot(hand: .right, finger: .middle)
+        )
+    }
+
+    /// Loads the previous or next built-in static scene (Jumping Off or Music
+    /// Reactive), wrapping around at the ends. Driven by the keyboard
+    /// left/right shortcut.
     @MainActor
     func cycleJumpingOffScene(forward: Bool) {
-        guard let handler = loadStaticSceneRequestHandler else { return }
         let scenes = presetManager.presets
-            .filter { $0.name != "__lastState__" && $0.isJumpingOffPreset }
+            .filter { $0.name != "__lastState__" && $0.isKeyboardSwitchableStaticPreset }
         guard !scenes.isEmpty else { return }
 
         let currentIndex = activeResetPreset.flatMap { active in
@@ -848,8 +908,9 @@ class AppModel {
             nextIndex = forward ? 0 : scenes.count - 1
         }
 
-        handler(scenes[nextIndex])
+        loadStaticScene(scenes[nextIndex])
     }
+
 
     private func canCloseMenuWindowNow() -> Bool {
         CACurrentMediaTime() - lastMenuWindowOpenedAt >= menuWindowRetoggleGuardInterval

@@ -241,9 +241,6 @@ struct ContentView: View {
             appModel.openSavePresetMenuHandler = {
                 showSaveDestinationSheet = true
             }
-            appModel.loadStaticSceneRequestHandler = { preset in
-                loadStaticScene(preset)
-            }
             cache.startSync(with: appModel.renderSettings, appModel: appModel)
             normalizeDesktopSelectionIfNeeded()
             syncNavigationChromeFromLegacySelection()
@@ -251,7 +248,6 @@ struct ContentView: View {
         .onDisappear {
             cache.stopSync()
             appModel.openSavePresetMenuHandler = nil
-            appModel.loadStaticSceneRequestHandler = nil
             animationKillSwitchTask?.cancel()
             animationKillSwitchTask = nil
         }
@@ -346,9 +342,8 @@ struct ContentView: View {
                 into: appModel.renderSettings,
                 resetEnvironment: true
             )
-            applyPresetGestureOverridesIfNeeded(for: preset)
-            appModel.gestureController?.syncWithSettings()
-        } else {
+            appModel.applyPresetGestureOverridesIfNeeded(for: preset)
+            appModel.gestureController?.syncWithSettings()        } else {
             appModel.gestureController?.applyFractalDefaults()
         }
         cache.loadFromSettings()
@@ -381,68 +376,6 @@ struct ContentView: View {
             fractalType: appModel.renderSettings.fractalType,
             gradientState: appModel.renderSettings.gradientState,
             lightingPreset: appModel.renderSettings.lightingPreset
-        )
-    }
-
-    /// Loads a jumping-off / static scene preset through the full pipeline:
-    /// embedded-formula install, pipeline prep, eased parameter transition,
-    /// gesture overrides, and settings-cache sync. Shared by the browse UI tap
-    /// and the keyboard scene-switch shortcut.
-    func loadStaticScene(_ preset: FractalPreset) {
-        Task { @MainActor in
-            customSceneDiagnostic("🔬 [CSDiag] ContentView.loadStaticScene name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
-            if let formula = preset.embeddedFormula {
-                let installed = await appModel.installEmbeddedFormulaIfNeededAndWait(formula)
-                customSceneDiagnostic("🔬 [CSDiag] ContentView.loadStaticScene installEmbeddedFormula returned \(installed)")
-                guard installed else { return }
-            } else {
-                appModel.uninstallEmbeddedFormula()
-            }
-
-            if preset.embeddedFormula != nil {
-                await appModel.preparePipelineHandler?(preset)
-                customSceneDiagnostic("🔬 [CSDiag] ContentView.loadStaticScene preparePipelineHandler completed; loading preset NOW")
-            } else {
-                Task { await appModel.preparePipelineHandler?(preset) }
-                customSceneDiagnostic("🔬 [CSDiag] ContentView.loadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
-            }
-            // Snapshot the currently displayed parameters so the
-            // load can ease from them toward the new preset.
-            appModel.renderSettings.beginSceneTransitionSnapshot()
-            appModel.presetManager.loadPreset(
-                preset,
-                into: appModel.renderSettings,
-                resetEnvironment: true
-            )
-            // Ease displayed parameters toward the new preset's
-            // values over the configured "Same Scene Transition
-            // Time" instead of snapping instantly.
-            appModel.renderSettings.commitSceneTransition()
-            applyPresetGestureOverridesIfNeeded(for: preset)
-            appModel.gestureController?.syncWithSettings()
-            appModel.rememberActiveResetPreset(preset)
-            cache.loadFromSettings()
-        }
-    }
-
-    func applyPresetGestureOverridesIfNeeded(for preset: FractalPreset) {
-        let normalizedName = preset.name
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        guard ["ring around the rosie", "a space ring odyssey"].contains(normalizedName),
-              preset.fractalType == .kleinian else { return }
-
-        let triplets = ParameterNodeRegistry.shared.gestureBindableTriplets(for: .kleinian)
-        guard let minsTriplet = triplets.first(where: { $0.groupName == "Mins" }),
-              let maxsTriplet = triplets.first(where: { $0.groupName == "Maxs" }) else { return }
-
-        appModel.renderSettings.setBinding(
-            .parameterTriplet(minsTriplet),
-            for: GestureSlot(hand: .left, finger: .middle)
-        )
-        appModel.renderSettings.setBinding(
-            .parameterTriplet(maxsTriplet),
-            for: GestureSlot(hand: .right, finger: .middle)
         )
     }
 
