@@ -1,4 +1,4 @@
-import Foundation
+ import Foundation
 import os
 import simd
 
@@ -2328,6 +2328,85 @@ final class RenderSettings: @unchecked Sendable {
     
     /// Maximum speed for position (meters per second) - higher to allow responsive flicking
     private let maxPositionSpeed: Float = 12.0
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SCENE TRANSITION ("Same Scene Transition Time")
+    // One-shot eased blend of the displayed parameters toward a newly loaded
+    // scene/preset's values. A preset normally snaps the displayed values to the
+    // new target instantly; arming a transition restores the pre-switch values
+    // and eases them toward the new target over `_sceneTransitionDuration`,
+    // overriding the default smoothing time and speed caps for that window.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configured transition time in seconds (slider-driven). `0` = instant.
+    private var _sceneTransitionDuration: Float = 0
+    /// Snapshot taken before a preset load is applied.
+    private var _sceneTransitionArmed = false
+    /// Whether an eased transition is currently in progress.
+    private var _sceneTransitionActive = false
+    private var _sceneTransitionElapsed: Float = 0
+    private var _stMinDistance: Float = 0
+    private var _stFoldingLimit: Float = 0
+    private var _stSphereRadius: Float = 0
+    private var _stFractalScale: Float = 0
+    private var _stPosition = SIMD3<Float>(repeating: 0)
+    private var _stWorldRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    private var _stDetailScale: Float = 1
+
+    /// Configured "Same Scene Transition Time" in seconds. Clamped to 0...10.
+    var sceneTransitionDuration: Float {
+        get { withLock { _sceneTransitionDuration } }
+        set { withLock { _sceneTransitionDuration = max(0, min(10, newValue)) } }
+    }
+
+    /// Snapshot the currently displayed transform/shape parameters before a new
+    /// scene/preset is applied. Pair with `commitSceneTransition()`.
+    func beginSceneTransitionSnapshot() {
+        withLock {
+            _stMinDistance = _minDistance
+            _stFoldingLimit = _foldingLimit
+            _stSphereRadius = _sphereRadius
+            _stFractalScale = _fractalScale
+            _stPosition = _position
+            _stWorldRotation = _worldRotation
+            _stDetailScale = _detailScale
+            _sceneTransitionArmed = true
+        }
+    }
+
+    /// Begin easing from the snapshot toward the freshly applied targets. The
+    /// preset load already set both current and target to the new values, so we
+    /// restore current to the snapshot and let `interpolateToTargets` ease back.
+    func commitSceneTransition() {
+        withLock {
+            guard _sceneTransitionArmed else { return }
+            _sceneTransitionArmed = false
+
+            // Skip when disabled or while the keyframe animation system owns the
+            // displayed values (it drives them directly, bypassing this path).
+            guard _sceneTransitionDuration > 0, !_isAnimationPlaying else {
+                _sceneTransitionActive = false
+                return
+            }
+
+            _minDistance = _stMinDistance
+            _foldingLimit = _stFoldingLimit
+            _sphereRadius = _stSphereRadius
+            _fractalScale = _stFractalScale
+            _position = _stPosition
+            _worldRotation = _stWorldRotation
+            _detailScale = _stDetailScale
+
+            _velocityMinDistance = 0
+            _velocityFoldingLimit = 0
+            _velocitySphereRadius = 0
+            _velocityFractalScale = 0
+            _velocityPosition = .zero
+
+            _sceneTransitionActive = true
+            _sceneTransitionElapsed = 0
+        }
+    }
     
     /// Critically-damped smooth damp function (like Unity's SmoothDamp)
     /// Smoothly moves a value toward a target with velocity tracking and limits
@@ -2380,6 +2459,23 @@ final class RenderSettings: @unchecked Sendable {
     private func _interpolateToTargets_locked(deltaTime: Float) {
             // Guard against bad deltaTime values that could cause instability
             let clampedDT = max(0.001, min(0.1, deltaTime))  // 10ms to 100ms range
+
+            // Scene-transition override: ease toward the new target over the
+            // configured duration instead of the default snappy smoothing.
+            let stActive = _sceneTransitionActive
+            // smoothDamp reaches ~95% of the distance in ~2× its smoothTime, so
+            // halve the requested duration to make the perceived settle time match.
+            let effSmoothTime = stActive ? max(0.05, _sceneTransitionDuration * 0.5) : smoothTime
+            let effMaxSpeed = stActive ? Float(1e9) : maxSpeed
+            let effMaxPositionSpeed = stActive ? Float(1e9) : maxPositionSpeed
+            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : 12.0
+            if stActive {
+                _sceneTransitionElapsed += clampedDT
+                // Safety timeout so the override always releases.
+                if _sceneTransitionElapsed >= max(0.1, _sceneTransitionDuration) * 2.0 {
+                    _sceneTransitionActive = false
+                }
+            }
             
             // ═══════════════════════════════════════════════════════════════════════════
             // ANIMATION OFFSET DECAY: When animation is playing and no gesture is
@@ -2457,6 +2553,8 @@ final class RenderSettings: @unchecked Sendable {
             let isConverged = totalDistSq < convergenceThreshold && totalVelSq < velocityThreshold
             
             if isConverged {
+                // Transition (if any) has settled — release the override.
+                _sceneTransitionActive = false
                 // Snap to exact targets and zero velocities to prevent micro-drift
                 _minDistance = _targetMinDistance
                 _foldingLimit = _targetFoldingLimit
@@ -2515,8 +2613,8 @@ final class RenderSettings: @unchecked Sendable {
                 current: _minDistance,
                 target: _targetMinDistance,
                 velocity: &_velocityMinDistance,
-                smoothTime: smoothTime,
-                maxSpeed: maxSpeed,
+                smoothTime: effSmoothTime,
+                maxSpeed: effMaxSpeed,
                 deltaTime: clampedDT
             )
             
@@ -2524,8 +2622,8 @@ final class RenderSettings: @unchecked Sendable {
                 current: _foldingLimit,
                 target: _targetFoldingLimit,
                 velocity: &_velocityFoldingLimit,
-                smoothTime: smoothTime,
-                maxSpeed: maxSpeed,
+                smoothTime: effSmoothTime,
+                maxSpeed: effMaxSpeed,
                 deltaTime: clampedDT
             )
             
@@ -2533,8 +2631,8 @@ final class RenderSettings: @unchecked Sendable {
                 current: _sphereRadius,
                 target: _targetSphereRadius,
                 velocity: &_velocitySphereRadius,
-                smoothTime: smoothTime,
-                maxSpeed: maxSpeed,
+                smoothTime: effSmoothTime,
+                maxSpeed: effMaxSpeed,
                 deltaTime: clampedDT
             )
             
@@ -2542,8 +2640,8 @@ final class RenderSettings: @unchecked Sendable {
                 current: _fractalScale,
                 target: _targetFractalScale,
                 velocity: &_velocityFractalScale,
-                smoothTime: smoothTime,
-                maxSpeed: maxSpeed,
+                smoothTime: effSmoothTime,
+                maxSpeed: effMaxSpeed,
                 deltaTime: clampedDT
             )
             
@@ -2552,29 +2650,29 @@ final class RenderSettings: @unchecked Sendable {
                 current: _position.x,
                 target: _targetPosition.x,
                 velocity: &_velocityPosition.x,
-                smoothTime: smoothTime,
-                maxSpeed: maxPositionSpeed,
+                smoothTime: effSmoothTime,
+                maxSpeed: effMaxPositionSpeed,
                 deltaTime: clampedDT
             )
             _position.y = smoothDamp(
                 current: _position.y,
                 target: _targetPosition.y,
                 velocity: &_velocityPosition.y,
-                smoothTime: smoothTime,
-                maxSpeed: maxPositionSpeed,
+                smoothTime: effSmoothTime,
+                maxSpeed: effMaxPositionSpeed,
                 deltaTime: clampedDT
             )
             _position.z = smoothDamp(
                 current: _position.z,
                 target: _targetPosition.z,
                 velocity: &_velocityPosition.z,
-                smoothTime: smoothTime,
-                maxSpeed: maxPositionSpeed,
+                smoothTime: effSmoothTime,
+                maxSpeed: effMaxPositionSpeed,
                 deltaTime: clampedDT
             )
             
             // Smooth interpolation for world rotation (slerp) and grab scale (exp lerp)
-            let rotLerpT = 1.0 - exp(-12.0 * clampedDT)  // Same speed as main smoothing
+            let rotLerpT = 1.0 - exp(-rotRate * clampedDT)  // Same speed as main smoothing
             _worldRotation = simd_slerp(_worldRotation, _targetWorldRotation, rotLerpT)
             // Re-normalize only when drift exceeds threshold (saves sqrt per frame)
             let rotLenSq = simd_length_squared(_worldRotation.vector)

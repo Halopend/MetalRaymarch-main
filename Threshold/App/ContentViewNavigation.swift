@@ -19,6 +19,7 @@ enum SidebarTab: String, CaseIterable {
     case coloring = "Coloring"
     case effects = "Effects"
     case music = "Music"
+    case transition = "Transition"
     case gestures = "Gestures"
     case settings = "Settings"
     
@@ -29,6 +30,7 @@ enum SidebarTab: String, CaseIterable {
         case .coloring: return "paintpalette.fill"
         case .effects:  return "wand.and.stars"
         case .music:    return "music.note"
+        case .transition: return "timer"
         case .gestures: return "hand.draw"
         case .settings: return "gearshape.fill"
         }
@@ -98,6 +100,7 @@ enum VisualizationsRailSection: String, CaseIterable {
     case grading = "Grading"
     case motion = "Cycling"
     case atmosphere = "Atmosphere"
+    case transition = "Transition"
     case reactive = "Reactive"
 
     var title: String {
@@ -116,6 +119,7 @@ enum VisualizationsRailSection: String, CaseIterable {
         case .grading: return "camera.filters"
         case .motion: return "sparkles"
         case .atmosphere: return "cloud.fog.fill"
+        case .transition: return "timer"
         case .reactive: return "waveform.path.ecg"
         }
     }
@@ -186,6 +190,7 @@ enum PinnedRailControl: String, CaseIterable {
     case visualizationsGrading
     case visualizationsMotion
     case visualizationsAtmosphere
+    case visualizationsTransition
     case visualizationsReactive
     case musicPlayback
     case musicSongs
@@ -207,6 +212,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .visualizationsGrading: return VisualizationsRailSection.grading.title
         case .visualizationsMotion: return VisualizationsRailSection.motion.title
         case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.title
+        case .visualizationsTransition: return VisualizationsRailSection.transition.title
         case .visualizationsReactive: return VisualizationsRailSection.reactive.title
         case .musicPlayback: return MusicRailSection.playback.title
         case .musicSongs: return MusicRailSection.songs.title
@@ -230,6 +236,7 @@ enum PinnedRailControl: String, CaseIterable {
         case .visualizationsGrading: return VisualizationsRailSection.grading.icon
         case .visualizationsMotion: return VisualizationsRailSection.motion.icon
         case .visualizationsAtmosphere: return VisualizationsRailSection.atmosphere.icon
+        case .visualizationsTransition: return VisualizationsRailSection.transition.icon
         case .visualizationsReactive: return VisualizationsRailSection.reactive.icon
         case .musicPlayback: return MusicRailSection.playback.icon
         case .musicSongs: return MusicRailSection.songs.icon

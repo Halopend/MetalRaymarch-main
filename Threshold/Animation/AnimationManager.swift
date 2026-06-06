@@ -156,6 +156,29 @@ final class AnimationManager {
     func markIterationBudgetUserOverridden() {
         userIterationBudgetOverride = true
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SCENE TRANSITION (smoothed scene switching)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    @ObservationIgnored private static let sceneTransitionDurationKey = "AnimationManager.sceneTransitionDuration"
+
+    /// Seconds to ease live parameters toward a newly selected scene's starting
+    /// point ("Same Scene Transition Time"). `0` = instant switch (legacy
+    /// behavior). The actual easing is performed by `RenderSettings` when a new
+    /// scene/preset is loaded; this property is the persisted slider value and
+    /// is forwarded to the render settings so the smoothing knows the duration.
+    var sceneTransitionDuration: TimeInterval = {
+        if UserDefaults.standard.object(forKey: AnimationManager.sceneTransitionDurationKey) == nil {
+            return 0.5
+        }
+        return UserDefaults.standard.double(forKey: AnimationManager.sceneTransitionDurationKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(sceneTransitionDuration, forKey: Self.sceneTransitionDurationKey)
+            renderSettings?.sceneTransitionDuration = Float(sceneTransitionDuration)
+        }
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // PLAYBACK STATE
@@ -408,12 +431,14 @@ final class AnimationManager {
     
     init(renderSettings: RenderSettings? = nil) {
         self.renderSettings = renderSettings
+        renderSettings?.sceneTransitionDuration = Float(sceneTransitionDuration)
         loadScenes()
         rebuildScenes()
     }
     
     func setRenderSettings(_ settings: RenderSettings) {
         self.renderSettings = settings
+        settings.sceneTransitionDuration = Float(sceneTransitionDuration)
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1097,7 +1122,7 @@ final class AnimationManager {
             uiPlayhead = playhead
         }
     }
-    
+
     /// Apply a keyframe's values to render settings
     /// During playback, we set IMMEDIATE values (bypassing smoothing) for responsive animation.
     /// Targets are also updated so hand gestures can blend in when animation stops.

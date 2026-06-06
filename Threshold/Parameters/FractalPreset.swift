@@ -708,4 +708,30 @@ extension FractalPreset {
     var hasMusicReactiveMappings: Bool {
         !(musicReactiveMappings?.isEmpty ?? true)
     }
+
+    /// Names that should appear in the "Jumping Off" browse tab even though they
+    /// carry music-reactive mappings. Shared by the browse UI and the keyboard
+    /// scene-switch cycling so both classify presets identically.
+    static let jumpingOffNameOverrides: Set<String> = [
+        "mandel box flower",
+        "replace that",
+        "the lovely bones",
+        "definitely aliens",
+        "ladybug two",
+        "ring around the rosie",
+        "a space ring odyssey"
+    ]
+
+    /// Whether this preset belongs to the "Jumping Off" (static starting point)
+    /// collection. Custom embedded-formula presets are excluded.
+    var isJumpingOffPreset: Bool {
+        guard !isCustomScenePreset else { return false }
+        let normalizedName = name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if FractalPreset.jumpingOffNameOverrides.contains(normalizedName) {
+            return true
+        }
+        return !hasMusicReactiveMappings
+    }
 }

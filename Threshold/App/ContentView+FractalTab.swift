@@ -46,11 +46,18 @@ extension ContentView {
                                 Task { await appModel.preparePipelineHandler?(preset) }
                                 customSceneDiagnostic("🔬 [CSDiag] ContentView.onLoadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
                             }
+                            // Snapshot the currently displayed parameters so the
+                            // load can ease from them toward the new preset.
+                            appModel.renderSettings.beginSceneTransitionSnapshot()
                             appModel.presetManager.loadPreset(
                                 preset,
                                 into: appModel.renderSettings,
                                 resetEnvironment: true
                             )
+                            // Ease displayed parameters toward the new preset's
+                            // values over the configured "Same Scene Transition
+                            // Time" instead of snapping instantly.
+                            appModel.renderSettings.commitSceneTransition()
                             applyPresetGestureOverridesIfNeeded(for: preset)
                             appModel.gestureController?.syncWithSettings()
                             appModel.rememberActiveResetPreset(preset)

@@ -902,6 +902,8 @@ struct ContentView: View {
         case .atmosphere:
             selectedTab = .effects
             effectsSubTab = .static
+        case .transition:
+            selectedTab = .transition
         case .reactive:
             selectedTab = .music
             musicPanelTab = .visualizations
@@ -959,6 +961,8 @@ struct ContentView: View {
             return topDockTab == .visualizations && visualizationsRailSection == .motion && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsAtmosphere:
             return topDockTab == .visualizations && visualizationsRailSection == .atmosphere && selectedTab != .gestures && selectedTab != .settings
+        case .visualizationsTransition:
+            return topDockTab == .visualizations && visualizationsRailSection == .transition && selectedTab != .gestures && selectedTab != .settings
         case .visualizationsReactive:
             return topDockTab == .visualizations && visualizationsRailSection == .reactive && selectedTab != .gestures && selectedTab != .settings
         case .musicPlayback:
@@ -1001,6 +1005,8 @@ struct ContentView: View {
                 activateVisualizationsSection(.motion)
             case .visualizationsAtmosphere:
                 activateVisualizationsSection(.atmosphere)
+            case .visualizationsTransition:
+                activateVisualizationsSection(.transition)
             case .visualizationsReactive:
                 activateVisualizationsSection(.reactive)
             case .musicPlayback:
@@ -1040,6 +1046,7 @@ struct ContentView: View {
         case .grading: return .visualizationsGrading
         case .motion: return .visualizationsMotion
         case .atmosphere: return .visualizationsAtmosphere
+        case .transition: return .visualizationsTransition
         case .reactive: return .visualizationsReactive
         }
     }
@@ -1107,6 +1114,9 @@ struct ContentView: View {
                 }
                 #endif
             }
+        case .transition:
+            topDockTab = .visualizations
+            visualizationsRailSection = .transition
         case .gestures, .settings:
             break
         }
@@ -1130,6 +1140,12 @@ struct ContentView: View {
                     #else
                     MusicTabContent(cache: cache, musicService: appModel.musicService, audioAnalyzer: appModel.audioAnalyzer, renderSettings: appModel.renderSettings, tabSelection: $musicPanelTab)
                     #endif
+                case .transition:
+                    if let animationManager = appModel.animationManager {
+                        TransitionTabContent(animationManager: animationManager)
+                    } else {
+                        EmptyView()
+                    }
                 case .gestures:
                     if supportsGestureEditing {
                         gesturesTabContent

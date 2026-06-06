@@ -48,16 +48,6 @@ private enum FractalSceneSelection: Equatable {
 }
 
 struct FractalGridView: View {
-    private static let jumpingOffNameOverrides: Set<String> = [
-        "mandel box flower",
-        "replace that",
-        "the lovely bones",
-        "definitely aliens",
-        "ladybug two",
-        "ring around the rosie",
-        "a space ring odyssey"
-    ]
-
     var cache: UISettingsCache
     let gestureController: GestureController?
     let animationManager: AnimationManager?
@@ -348,18 +338,7 @@ struct FractalGridView: View {
     }
 
     private func isJumpingOffPreset(_ preset: FractalPreset) -> Bool {
-        // Custom-formula presets belong exclusively in the Custom Scenes tab.
-        guard !preset.isCustomScenePreset else { return false }
-
-        let normalizedName = preset.name
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        if Self.jumpingOffNameOverrides.contains(normalizedName) {
-            return true
-        }
-
-        return !preset.hasMusicReactiveMappings
+        preset.isJumpingOffPreset
     }
 
     private func jumpingOffPresets() -> [FractalPreset] {
