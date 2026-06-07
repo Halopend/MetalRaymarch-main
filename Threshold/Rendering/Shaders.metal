@@ -1515,11 +1515,14 @@ FORCE_INLINE FloorCircleHit evaluateFloorCircle(float3 rayOrigin,
     float3 radialVector = floorPoint - floorCenterRadius.xyz;
     radialVector -= planeNormal * dot(radialVector, planeNormal);
     float radialDistance = length(radialVector);
-    float edgeWidth = max(radius * 0.015f, 0.025f);
-    float fill = 1.0f - smoothstep(radius - edgeWidth, radius, radialDistance);
-    float rim = 1.0f - smoothstep(edgeWidth * 0.35f, edgeWidth * 1.8f, abs(radialDistance - radius));
+    float edgeWidth = max(radius * 0.04f, 0.055f);
+    float glassFalloff = 1.0f - smoothstep(radius - edgeWidth, radius, radialDistance);
+    float thicknessBand = 1.0f - smoothstep(edgeWidth * 0.35f, edgeWidth * 2.4f, abs(radialDistance - radius));
+    float innerCaustic = 0.5f + 0.5f * sin((radialDistance / max(radius, 0.001f)) * 24.0f);
+    float fill = glassFalloff * (0.18f + innerCaustic * 0.05f);
+    float rim = thicknessBand * 0.44f;
 
-    hit.alpha = saturate(fill * 0.16f + rim * 0.34f);
+    hit.alpha = saturate(fill + rim);
     hit.distance = floorDistance;
     return hit;
 }
@@ -1528,8 +1531,12 @@ FORCE_INLINE half3 compositeFloorCircle(half3 color, FloorCircleHit hit) {
     if (hit.alpha <= 0.0f) return color;
 
     half floorAlpha = half(saturate(hit.alpha));
-    half3 floorColor = half3(0.38h, 0.68h, 1.0h);
-    return mix(color, floorColor, floorAlpha);
+    half luminance = dot(color, half3(0.2126h, 0.7152h, 0.0722h));
+    half3 refractedFractal = mix(color, half3(luminance), 0.18h);
+    half3 glassTint = half3(0.58h, 0.86h, 1.0h);
+    half3 glassColor = mix(refractedFractal, glassTint, 0.38h);
+    half3 highlight = half3(1.0h, 1.0h, 1.0h) * floorAlpha * 0.16h;
+    return mix(color, glassColor + highlight, floorAlpha);
 }
 
 // =============================================================================

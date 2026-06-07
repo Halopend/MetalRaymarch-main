@@ -26,15 +26,14 @@ struct RendererFramePreparation {
 
 private enum FloorCircleGeometry {
     static let fallbackEyeHeightMeters: Float = 1.55
-    static let minimumRadiusMeters: Float = 3.0
-    static let floorAngleRadians: Float = 22.0 * Float.pi / 180.0
 }
 
 extension Renderer {
     private static func makeFloorCircleUniforms(
         modelMatrix: matrix_float4x4,
         effectiveScale: Float,
-        deviceTransform: matrix_float4x4
+        deviceTransform: matrix_float4x4,
+        platformRadius: Float
     ) -> (plane: SIMD4<Float>, centerRadius: SIMD4<Float>) {
         let headWorldPosition = SIMD3<Float>(
             deviceTransform.columns.3.x,
@@ -62,8 +61,7 @@ extension Renderer {
             -simd_dot(floorNormalModel, floorCenterModel)
         )
 
-        let angleRadiusMeters = eyeHeightMeters / max(tanf(FloorCircleGeometry.floorAngleRadians), 0.001)
-        let floorRadiusMeters = max(FloorCircleGeometry.minimumRadiusMeters, angleRadiusMeters)
+        let floorRadiusMeters = max(0.5, platformRadius)
         let floorRadiusModel = floorRadiusMeters / max(effectiveScale, 0.001)
         let floorCenterRadius = SIMD4<Float>(floorCenterModel.x, floorCenterModel.y, floorCenterModel.z, floorRadiusModel)
 
@@ -127,7 +125,8 @@ extension Renderer {
         let floorCircle = Self.makeFloorCircleUniforms(
             modelMatrix: modelMatrix,
             effectiveScale: effectiveScale,
-            deviceTransform: deviceTransform
+            deviceTransform: deviceTransform,
+            platformRadius: settingsSnapshot.platformRadius
         )
 
         // One-time logging of device anchor to verify position tracking is working

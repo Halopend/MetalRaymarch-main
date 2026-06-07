@@ -244,6 +244,32 @@ extension ContentView {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
 
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Platform", systemImage: "circle.hexagongrid.fill")
+                        .font(.headline)
+                    Spacer()
+                    Text(String(format: "%.1f m", cache.display.platformRadius))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Controls the glass floor field in the immersive space. The fractal color blends through it so the platform reads as a thick transparent surface.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                EffectSliderRow(icon: "circle.dotted", label: "Radius",
+                    value: Binding(
+                        get: { cache.display.platformRadius },
+                        set: { cache.display.platformRadius = $0 }
+                    ), range: 0.5...3.0,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitPlatformRadius() },
+                    showToggle: false)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
+
             sphericalInversionSection
 
             // ── Detail (Grab Gesture Transform) ──────────────────────────────

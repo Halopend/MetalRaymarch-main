@@ -256,7 +256,7 @@ enum FractalBrowserCatalog {
                 FractalTypeBrowserInfo(
                     type: .mandelboxSphereProjection,
                     subtitle: "Mandelbox with post-fold spherical projection",
-                    historicalInfo: "A production accident yielded a compelling sphere-projected Mandelbox silhouette; this variant keeps that behavior as a controllable formula.",
+                    historicalInfo: "A production accident yielded a compelling sphere-projected Mandelbox silhouette; halopend shaped the behavior into this controllable formula variant.",
                     variants: []
                 )
             ]

@@ -4,7 +4,7 @@
 //
 //  Mandelbox variant with explicit radial projection after sphere fold.
 //  Inspired by the "Accidental Sphere Projection" behavior from the legacy
-//  shader map path around commit f50fe1f9.
+//  shader map path around commit f50fe1f9. Formula variant credited to halopend.
 //
 //  params[0]=MinDistance, [1]=FoldingLimit, [2]=SphereRadius,
 //  [3]=Scale, [4]=ProjectionBlend, [5]=ProjectionRadius

@@ -355,6 +355,10 @@ final class UISettingsCache {
         settings.sphericalInversionRadius = display.sphericalInversionRadius
     }
 
+    func commitPlatformRadius() {
+        settings?.platformRadius = display.platformRadius
+    }
+
     func commitGradientCycleEffect() {
         push(\.gradientCycleEffect, value: lighting.gradientCycleEffect)
     }

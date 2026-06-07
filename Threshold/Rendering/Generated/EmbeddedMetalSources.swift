@@ -1640,7 +1640,7 @@ FORCE_INLINE float DE_BoxSphereFolder_Dist(float3 pos, FormulaParams fp, float3x
 //
 //  Mandelbox variant with explicit radial projection after sphere fold.
 //  Inspired by the "Accidental Sphere Projection" behavior from the legacy
-//  shader map path around commit f50fe1f9.
+//  shader map path around commit f50fe1f9. Formula variant credited to halopend.
 //
 //  params[0]=MinDistance, [1]=FoldingLimit, [2]=SphereRadius,
 //  [3]=Scale, [4]=ProjectionBlend, [5]=ProjectionRadius
@@ -3301,11 +3301,14 @@ FORCE_INLINE FloorCircleHit evaluateFloorCircle(float3 rayOrigin,
     float3 radialVector = floorPoint - floorCenterRadius.xyz;
     radialVector -= planeNormal * dot(radialVector, planeNormal);
     float radialDistance = length(radialVector);
-    float edgeWidth = max(radius * 0.015f, 0.025f);
-    float fill = 1.0f - smoothstep(radius - edgeWidth, radius, radialDistance);
-    float rim = 1.0f - smoothstep(edgeWidth * 0.35f, edgeWidth * 1.8f, abs(radialDistance - radius));
+    float edgeWidth = max(radius * 0.04f, 0.055f);
+    float glassFalloff = 1.0f - smoothstep(radius - edgeWidth, radius, radialDistance);
+    float thicknessBand = 1.0f - smoothstep(edgeWidth * 0.35f, edgeWidth * 2.4f, abs(radialDistance - radius));
+    float innerCaustic = 0.5f + 0.5f * sin((radialDistance / max(radius, 0.001f)) * 24.0f);
+    float fill = glassFalloff * (0.18f + innerCaustic * 0.05f);
+    float rim = thicknessBand * 0.44f;
 
-    hit.alpha = saturate(fill * 0.16f + rim * 0.34f);
+    hit.alpha = saturate(fill + rim);
     hit.distance = floorDistance;
     return hit;
 }
@@ -3314,8 +3317,12 @@ FORCE_INLINE half3 compositeFloorCircle(half3 color, FloorCircleHit hit) {
     if (hit.alpha <= 0.0f) return color;
 
     half floorAlpha = half(saturate(hit.alpha));
-    half3 floorColor = half3(0.38h, 0.68h, 1.0h);
-    return mix(color, floorColor, floorAlpha);
+    half luminance = dot(color, half3(0.2126h, 0.7152h, 0.0722h));
+    half3 refractedFractal = mix(color, half3(luminance), 0.18h);
+    half3 glassTint = half3(0.58h, 0.86h, 1.0h);
+    half3 glassColor = mix(refractedFractal, glassTint, 0.38h);
+    half3 highlight = half3(1.0h, 1.0h, 1.0h) * floorAlpha * 0.16h;
+    return mix(color, glassColor + highlight, floorAlpha);
 }
 
 // =============================================================================
@@ -3378,6 +3385,46 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
     return max(saturate(res), 0.2f);
 }
 
+// === Temporal-reprojection shared helpers (extracted from adaptiveHierarchical8x8) ===
+// These centralize three patterns that were previously duplicated across the
+// kernel's reprojection, tile-seed, and empty-tile probes. Each is a pure
+// function whose float-op sequence is identical to the inlined originals, so
+// results are bit-for-bit unchanged.
+
+// Unproject a viewport-pixel coordinate to a model-space point on the near ray.
+// Mirrors the fragment-shader unprojection exactly, including the asymmetric
+// per-eye frustum w-guard used on visionOS.
+FORCE_INLINE float3 reconstructModelPoint(float2 pixelCoord, constant TileUniforms& uniforms) {
+    float2 ndc = (pixelCoord / uniforms.resolution) * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);
+    float4 viewPoint4 = uniforms.invProjMatrix * clipPos;
+    float viewPointW = abs(viewPoint4.w) > 1e-6f
+        ? viewPoint4.w
+        : (viewPoint4.w >= 0.0f ? 1e-6f : -1e-6f);
+    float3 viewPoint = viewPoint4.xyz / viewPointW;
+    return (uniforms.invViewMatrix * float4(viewPoint, 1.0)).xyz;
+}
+
+// Project a model-space point into the previous frame and return its texture UV
+// (Metal convention, Y flipped). Caller is responsible for bounds-checking.
+FORCE_INLINE float2 reprojectToPrevUV(float3 worldPoint, constant TileUniforms& uniforms) {
+    float4 prevClip = uniforms.previousViewProjMatrix * float4(worldPoint, 1.0);
+    float2 prevNDC = prevClip.xy / prevClip.w;
+    float2 prevUV = prevNDC * 0.5 + 0.5;
+    prevUV.y = 1.0 - prevUV.y;
+    return prevUV;
+}
+
+// Fold one previous-frame depth sample into a running (hit-count, nearest-depth)
+// accumulator, ignoring miss/background samples.
+FORCE_INLINE void accumulateDepthSample(float d, thread int& hitCount, thread float& minHitDepth) {
+    if (d > 0.0f && d < kRayMissThreshold) {
+        hitCount++;
+        minHitDepth = min(minHitDepth, d);
+    }
+}
+
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
 // Three-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
 // Dramatically reduces total Map() evaluations while maintaining quality
@@ -3419,21 +3466,10 @@ kernel void adaptiveHierarchical8x8(
     // === GMT-FRACTALS PATTERN: Halton Sub-Pixel Jitter for Temporal AA ===
     pixelCenter += uniforms.jitterOffset;
     
-    float2 ndc = (pixelCenter / uniforms.resolution) * 2.0 - 1.0;
-    ndc.y = -ndc.y;
-    
     float3 cameraPos = uniforms.cameraPos;
 
     // Match the fragment path exactly for visionOS's asymmetric per-eye frusta.
-    // Treat the inverse-projected clip position as a point, divide by w, then
-    // transform that point back into model space before building the ray.
-    float4 clipPos = float4(ndc.x, ndc.y, 0.0, 1.0);
-    float4 viewPoint4 = uniforms.invProjMatrix * clipPos;
-    float viewPointW = abs(viewPoint4.w) > 1e-6f
-        ? viewPoint4.w
-        : (viewPoint4.w >= 0.0f ? 1e-6f : -1e-6f);
-    float3 viewPoint = viewPoint4.xyz / viewPointW;
-    float3 modelPoint = (uniforms.invViewMatrix * float4(viewPoint, 1.0)).xyz;
+    float3 modelPoint = reconstructModelPoint(pixelCenter, uniforms);
     float3 rd = normalize(modelPoint - cameraPos);
     
     int lodIterations = max(uniforms.fractalIterations, 2);
@@ -3477,10 +3513,7 @@ kernel void adaptiveHierarchical8x8(
         //    a reference depth (e.g., 1.0), project through prevVP to get
         //    previous UV. This is approximate but works well for small motions.
         float3 refPoint = cameraPos + rd * 1.0;
-        float4 prevClip = uniforms.previousViewProjMatrix * float4(refPoint, 1.0);
-        float2 prevNDC = prevClip.xy / prevClip.w;
-        float2 prevUV = prevNDC * 0.5 + 0.5;
-        prevUV.y = 1.0 - prevUV.y;  // Flip Y (Metal texture convention)
+        float2 prevUV = reprojectToPrevUV(refPoint, uniforms);  // Metal texture convention (Y flipped)
         
         // 3. Check if the reprojected UV is within bounds
         if (prevUV.x >= 0.0 && prevUV.x <= 1.0 && prevUV.y >= 0.0 && prevUV.y <= 1.0) {
@@ -3494,10 +3527,7 @@ kernel void adaptiveHierarchical8x8(
                 // 4. Iterative refinement: reproject with the sampled depth
                 //    to get a more accurate UV, then re-sample.
                 float3 betterPoint = cameraPos + rd * prevDepth;
-                float4 betterClip = uniforms.previousViewProjMatrix * float4(betterPoint, 1.0);
-                float2 betterNDC = betterClip.xy / betterClip.w;
-                float2 betterUV = betterNDC * 0.5 + 0.5;
-                betterUV.y = 1.0 - betterUV.y;
+                float2 betterUV = reprojectToPrevUV(betterPoint, uniforms);
                 
                 if (betterUV.x >= 0.0 && betterUV.x <= 1.0 && betterUV.y >= 0.0 && betterUV.y <= 1.0) {
                     uint2 betterPixel = uint2(betterUV * uniforms.resolution);
@@ -3628,15 +3658,7 @@ kernel void adaptiveHierarchical8x8(
             int bsMissCount = 0;
             for (int i = 0; i < 5; ++i) {
                 float2 px = float2(tileId * ADAPTIVE_TILE_SIZE) + bsOffsets[i];
-                float2 ndcBS = (px / uniforms.resolution) * 2.0 - 1.0;
-                ndcBS.y = -ndcBS.y;
-                float4 bsClip = float4(ndcBS.x, ndcBS.y, 0.0, 1.0);
-                float4 bsView4 = uniforms.invProjMatrix * bsClip;
-                float bsViewW = abs(bsView4.w) > 1e-6f
-                    ? bsView4.w
-                    : (bsView4.w >= 0.0f ? 1e-6f : -1e-6f);
-                float3 bsView = bsView4.xyz / bsViewW;
-                float3 bsModelPoint = (uniforms.invViewMatrix * float4(bsView, 1.0)).xyz;
+                float3 bsModelPoint = reconstructModelPoint(px, uniforms);
                 float3 bsRd = normalize(bsModelPoint - marchOrigin);
                 float bsT = rayIntersectBoundingSphere(marchOrigin, bsRd, float3(0.0), uniforms.boundingSphereRadius);
                 if (bsT < 0.0) bsMissCount++;
@@ -3663,59 +3685,15 @@ kernel void adaptiveHierarchical8x8(
             int superHistoryHits = 0;
             float superMinHitDepth = kRayMissThreshold + 100.0f;
 
-            float s0 = prevDepthTexture.read(superTileCenterPx, uniforms.eyeIndex).x;
-            if (s0 > 0.0f && s0 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s0);
-            }
-
-            float s1 = prevDepthTexture.read(superTileBase, uniforms.eyeIndex).x;
-            if (s1 > 0.0f && s1 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s1);
-            }
-
-            float s2 = prevDepthTexture.read(uint2(superTileEnd.x, superTileBase.y), uniforms.eyeIndex).x;
-            if (s2 > 0.0f && s2 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s2);
-            }
-
-            float s3 = prevDepthTexture.read(uint2(superTileBase.x, superTileEnd.y), uniforms.eyeIndex).x;
-            if (s3 > 0.0f && s3 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s3);
-            }
-
-            float s4 = prevDepthTexture.read(superTileEnd, uniforms.eyeIndex).x;
-            if (s4 > 0.0f && s4 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s4);
-            }
-
-            float s5 = prevDepthTexture.read(uint2(superTileCenterPx.x, superTileBase.y), uniforms.eyeIndex).x;
-            if (s5 > 0.0f && s5 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s5);
-            }
-
-            float s6 = prevDepthTexture.read(uint2(superTileCenterPx.x, superTileEnd.y), uniforms.eyeIndex).x;
-            if (s6 > 0.0f && s6 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s6);
-            }
-
-            float s7 = prevDepthTexture.read(uint2(superTileBase.x, superTileCenterPx.y), uniforms.eyeIndex).x;
-            if (s7 > 0.0f && s7 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s7);
-            }
-
-            float s8 = prevDepthTexture.read(uint2(superTileEnd.x, superTileCenterPx.y), uniforms.eyeIndex).x;
-            if (s8 > 0.0f && s8 < kRayMissThreshold) {
-                superHistoryHits++;
-                superMinHitDepth = min(superMinHitDepth, s8);
-            }
+            accumulateDepthSample(prevDepthTexture.read(superTileCenterPx, uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(superTileBase, uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(superTileEnd.x, superTileBase.y), uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(superTileBase.x, superTileEnd.y), uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(superTileEnd, uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(superTileCenterPx.x, superTileBase.y), uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(superTileCenterPx.x, superTileEnd.y), uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(superTileBase.x, superTileCenterPx.y), uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(superTileEnd.x, superTileCenterPx.y), uniforms.eyeIndex).x, superHistoryHits, superMinHitDepth);
 
             // 9-sample super-tile seed: tighten threshold + backoff to avoid
             // skipping closer geometry across 32x32 depth discontinuities.
@@ -3737,35 +3715,11 @@ kernel void adaptiveHierarchical8x8(
             int tileHistoryHits = 0;
             float tileMinHitDepth = kRayMissThreshold + 100.0f;
 
-            float d0 = prevDepthTexture.read(tileCenterPx, uniforms.eyeIndex).x;
-            if (d0 > 0.0f && d0 < kRayMissThreshold) {
-                tileHistoryHits++;
-                tileMinHitDepth = min(tileMinHitDepth, d0);
-            }
-
-            float d1 = prevDepthTexture.read(tileBase, uniforms.eyeIndex).x;
-            if (d1 > 0.0f && d1 < kRayMissThreshold) {
-                tileHistoryHits++;
-                tileMinHitDepth = min(tileMinHitDepth, d1);
-            }
-
-            float d2 = prevDepthTexture.read(uint2(tileEnd.x, tileBase.y), uniforms.eyeIndex).x;
-            if (d2 > 0.0f && d2 < kRayMissThreshold) {
-                tileHistoryHits++;
-                tileMinHitDepth = min(tileMinHitDepth, d2);
-            }
-
-            float d3 = prevDepthTexture.read(uint2(tileBase.x, tileEnd.y), uniforms.eyeIndex).x;
-            if (d3 > 0.0f && d3 < kRayMissThreshold) {
-                tileHistoryHits++;
-                tileMinHitDepth = min(tileMinHitDepth, d3);
-            }
-
-            float d4 = prevDepthTexture.read(tileEnd, uniforms.eyeIndex).x;
-            if (d4 > 0.0f && d4 < kRayMissThreshold) {
-                tileHistoryHits++;
-                tileMinHitDepth = min(tileMinHitDepth, d4);
-            }
+            accumulateDepthSample(prevDepthTexture.read(tileCenterPx, uniforms.eyeIndex).x, tileHistoryHits, tileMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(tileBase, uniforms.eyeIndex).x, tileHistoryHits, tileMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(tileEnd.x, tileBase.y), uniforms.eyeIndex).x, tileHistoryHits, tileMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(uint2(tileBase.x, tileEnd.y), uniforms.eyeIndex).x, tileHistoryHits, tileMinHitDepth);
+            accumulateDepthSample(prevDepthTexture.read(tileEnd, uniforms.eyeIndex).x, tileHistoryHits, tileMinHitDepth);
 
             // Require multiple agreeing history samples to avoid stale-start artifacts.
             // 3-of-5 (was 2-of-5) + tighter 0.6 backoff (was 0.8) prevents 8x8
@@ -3809,15 +3763,7 @@ kernel void adaptiveHierarchical8x8(
                 int cornerEmpty = 0;
                 for (int c = 0; c < 5; ++c) {
                     float2 cornerPx = float2(tileId * ADAPTIVE_TILE_SIZE) + cornerOffsets[c];
-                    float2 cornerNDC = (cornerPx / uniforms.resolution) * 2.0 - 1.0;
-                    cornerNDC.y = -cornerNDC.y;
-                    float4 cClip = float4(cornerNDC.x, cornerNDC.y, 0.0, 1.0);
-                    float4 cView4 = uniforms.invProjMatrix * cClip;
-                    float cViewW = abs(cView4.w) > 1e-6f
-                        ? cView4.w
-                        : (cView4.w >= 0.0f ? 1e-6f : -1e-6f);
-                    float3 cView = cView4.xyz / cViewW;
-                    float3 cModelPoint = (uniforms.invViewMatrix * float4(cView, 1.0)).xyz;
+                    float3 cModelPoint = reconstructModelPoint(cornerPx, uniforms);
                     float3 cOrigin = uniforms.cameraPos;
                     float3 cRd = normalize(cModelPoint - cOrigin);
                     applySphericalInversionRay(cOrigin, cRd, uniforms.sphericalInversionMode, uniforms.sphericalInversionRadius);
@@ -4674,6 +4620,77 @@ fragment DepthOutput depthUpscaleFragmentStereo(FormatConversionVertexOut in [[s
     }
     out.depth = sourceTexture.sample(textureSampler, uv, in.eyeIndex);
     return out;
+}
+
+// === macOS single-view blit (MetalFX upscaled output → drawable) ===
+// The Mac renderer upscales into an offscreen bgra8Unorm_srgb texture, then
+// copies it to the drawable with this full-screen-triangle pass. Single-view
+// (no amplification), 2D source — distinct from the stereo array variants above.
+struct MacBlitVertexOut {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+vertex MacBlitVertexOut macBlitVertex(uint vertexID [[vertex_id]]) {
+    MacBlitVertexOut out;
+    float2 p;
+    p.x = (vertexID == 1) ? 3.0 : -1.0;
+    p.y = (vertexID == 2) ? 3.0 : -1.0;
+    out.position = float4(p, 0.0, 1.0);
+    out.texCoord = float2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);
+    return out;
+}
+
+fragment float4 macBlitFragment(MacBlitVertexOut in [[stage_in]],
+                                texture2d<float> source [[texture(0)]]) {
+    constexpr sampler s(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+    return float4(source.sample(s, in.texCoord).rgb, 1.0);
+}
+
+// === macOS temporal-upscaling motion vectors (Stage B) ===
+// Separate Mac-only pass that reconstructs each pixel's world position from the
+// raymarch's offscreen depth (clipPos.z/clipPos.w, standard 0..1) and reprojects
+// it through the previous frame's view-projection to produce a screen-space
+// motion vector for MTLFXTemporalScaler. Deliberately avoids touching the shared
+// `Uniforms`/`fragmentMain` — the matrices arrive in a dedicated small buffer.
+//
+// `currentInvViewProj` is the inverse of the JITTERED current view-projection
+// (matching the jittered depth), so the recovered world point is exact. Motion
+// is then computed from the UN-jittered current/previous view-projections so the
+// vector carries pure geometric motion (MetalFX handles jitter separately).
+struct MacMotionParams {
+    float4x4 currentInvViewProj;        // inverse(jittered P*MV) — depth → world
+    float4x4 currentViewProjNoJitter;   // un-jittered current P*MV
+    float4x4 previousViewProjNoJitter;  // un-jittered previous P*MV
+};
+
+fragment float2 macMotionFragment(MacBlitVertexOut in [[stage_in]],
+                                  depth2d<float> depthTex [[texture(0)]],
+                                  constant MacMotionParams& params [[buffer(0)]]) {
+    constexpr sampler depthSampler(mag_filter::nearest, min_filter::nearest,
+                                   address::clamp_to_edge);
+    float depth = depthTex.sample(depthSampler, in.texCoord);
+
+    // No-hit background writes a near-zero depth; reprojecting it yields garbage,
+    // so treat it as static (zero motion → MetalFX keeps the history sample).
+    if (depth < 1e-4) {
+        return float2(0.0);
+    }
+
+    // texCoord (origin top-left) → NDC.
+    float2 ndc = float2(in.texCoord.x * 2.0 - 1.0, 1.0 - in.texCoord.y * 2.0);
+    float4 worldH = params.currentInvViewProj * float4(ndc, depth, 1.0);
+    float3 world = worldH.xyz / worldH.w;
+
+    float4 curC = params.currentViewProjNoJitter * float4(world, 1.0);
+    float4 prevC = params.previousViewProjNoJitter * float4(world, 1.0);
+    float2 curN = curC.xy / curC.w;
+    float2 prevN = prevC.xy / prevC.w;
+
+    // NDC delta → UV delta (0..1). MetalFX `motionVectorScale` multiplies by the
+    // input pixel dimensions to recover pixels. Y is flipped for texture space.
+    float2 motionNDC = curN - prevN;
+    return float2(motionNDC.x * 0.5, -motionNDC.y * 0.5);
 }
 
 """#

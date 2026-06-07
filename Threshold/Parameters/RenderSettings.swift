@@ -95,6 +95,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
     private var _sphericalInversionMode: SphericalInversionMode = .off
     private var _sphericalInversionRadius: Float = 2.0
+    private var _platformRadius: Float = 3.0
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
     private var _bassLevel: Float = 0.0             // Bass frequency energy (0-1)
     private var _midLevel: Float = 0.0              // Mid frequency energy (0-1)
@@ -421,6 +422,14 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _sphericalInversionRadius } }
         set {
             withLock { _sphericalInversionRadius = max(0.2, min(12.0, newValue)) }
+            persistDisplay()
+        }
+    }
+
+    var platformRadius: Float {
+        get { withLock { _platformRadius } }
+        set {
+            withLock { _platformRadius = max(0.5, min(3.0, newValue)) }
             persistDisplay()
         }
     }
@@ -1922,6 +1931,7 @@ final class RenderSettings: @unchecked Sendable {
                 lightingMode: _lightingMode,
                 sphericalInversionMode: _sphericalInversionMode,
                 sphericalInversionRadius: _sphericalInversionRadius,
+                platformRadius: _platformRadius,
                 audioLevel: _audioLevel,
                 bassLevel: _bassLevel,
                 midLevel: _midLevel,
@@ -3293,6 +3303,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.lightingMode = _lightingMode
                 c.sphericalInversionMode = _sphericalInversionMode
                 c.sphericalInversionRadius = _sphericalInversionRadius
+                c.platformRadius = _platformRadius
                 return c
             }
         }
@@ -3303,6 +3314,7 @@ final class RenderSettings: @unchecked Sendable {
                 _lightingMode = newValue.lightingMode
                 _sphericalInversionMode = newValue.sphericalInversionMode
                 _sphericalInversionRadius = max(0.2, min(12.0, newValue.sphericalInversionRadius))
+                _platformRadius = max(0.5, min(3.0, newValue.platformRadius))
             }
         }
     }
