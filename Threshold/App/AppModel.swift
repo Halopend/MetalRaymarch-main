@@ -204,6 +204,7 @@ class AppModel {
 
     @ObservationIgnored private var activeRenderLoopTask: Task<Void, Never>?
     @ObservationIgnored private var activeRenderLoopID: UUID?
+    @ObservationIgnored nonisolated(unsafe) private var cloudFolderObserver: NSObjectProtocol?
 
     @discardableResult
     func beginRenderLoopRegistration() -> UUID {
@@ -438,7 +439,7 @@ class AppModel {
         // iCloudBackup.resolveContainer() runs async; we listen for the notification
         // it posts when the URL first becomes available, and also do a quick poll
         // in case resolution happened before we registered the observer.
-        NotificationCenter.default.addObserver(
+        cloudFolderObserver = NotificationCenter.default.addObserver(
             forName: ICloudBackupManager.cloudFolderResolvedNotification,
             object: nil,
             queue: .main
@@ -1201,6 +1202,12 @@ class AppModel {
         }
 
         UserDefaults.standard.set(true, forKey: migrationKey)
+    }
+
+    deinit {
+        if let token = cloudFolderObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
 }

@@ -61,6 +61,14 @@ struct ContentView: View {
 
     private let animationKillSwitchDuration: TimeInterval = 0.7
 
+    private static let presetDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd HH-mm"
+        return f
+    }()
+
     private var sectionRailWidth: CGFloat {
     #if os(visionOS)
         228
@@ -355,11 +363,7 @@ struct ContentView: View {
     }
 
     private func saveCurrentAsPreset(named providedName: String? = nil, includeGeneratedPreview: Bool = false) {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "yyyy-MM-dd HH-mm"
-        let autoName = "Preset \(formatter.string(from: Date()))"
+        let autoName = "Preset \(Self.presetDateFormatter.string(from: Date()))"
         let presetName = providedName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = (presetName?.isEmpty == false) ? (presetName ?? autoName) : autoName
         appModel.presetManager.savePreset(

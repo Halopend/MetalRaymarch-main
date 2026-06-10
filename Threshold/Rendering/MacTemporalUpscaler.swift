@@ -169,6 +169,11 @@ final class MacTemporalUpscaler {
               let motionTexture,
               let outputTexture else { return }
 
+        // Set reset BEFORE textures: newer MetalFX SDK versions clear tracked
+        // texture state when reset=true, so textures must be (re-)assigned after.
+        scaler.reset = needsReset || forceReset
+        needsReset = false
+
         scaler.colorTexture = colorTexture
         scaler.depthTexture = depthTexture
         scaler.motionTexture = motionTexture
@@ -182,8 +187,6 @@ final class MacTemporalUpscaler {
         // Motion vectors are stored as UV-space deltas; scale to input pixels.
         scaler.motionVectorScaleX = Float(inputSize.width)
         scaler.motionVectorScaleY = Float(inputSize.height)
-        scaler.reset = needsReset || forceReset
-        needsReset = false
 
         scaler.encode(commandBuffer: commandBuffer)
     }

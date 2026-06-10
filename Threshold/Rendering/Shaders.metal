@@ -2281,9 +2281,20 @@ kernel void adaptiveHierarchical8x8(
 //   3: outputTex      – TAA output this frame (rgba16Float, full-res 2D array)
 //                       fed into the existing RCAS resolve pass instead of MetalFX output
 // =============================================================================
+// IEC 61966-2-1 sRGB → linear decode. Used by the TAA kernel because
+// access::read on a bgra8Unorm_srgb texture returns raw (gamma-encoded) bytes;
+// sRGB sampling in compute via access::sample is not guaranteed on all visionOS
+// GPU driver configurations, so we decode manually to stay on solid ground.
+FORCE_INLINE float3 taa_srgbToLinear(float3 c) {
+    c = saturate(c);
+    float3 lo = c / 12.92;
+    float3 hi = powr(max(c, float3(0.04045)) * (1.0 / 1.055) + (0.055 / 1.055), float3(2.4));
+    return select(hi, lo, c < 0.04045);
+}
+
 kernel void taaResolve(
     uint2 gid [[thread_position_in_grid]],
-    texture2d_array<float, access::sample> currentTex    [[texture(0)]],
+    texture2d_array<float, access::read>   currentTex    [[texture(0)]],
     texture2d_array<float, access::sample> histReadTex   [[texture(1)]],
     texture2d_array<float, access::write>  histWriteTex  [[texture(2)]],
     texture2d_array<float, access::write>  outputTex     [[texture(3)]],
@@ -2296,21 +2307,20 @@ kernel void taaResolve(
     float2 rcpRes = 1.0 / float2(texSize);
     float2 uv = (float2(gid) + 0.5) * rcpRes;
 
-    // Nearest sampler for current frame (sRGB textures auto-decode via sampler in fragment/compute)
-    constexpr sampler nearSampler(filter::nearest, address::clamp_to_edge);
     // Bilinear sampler for history (rgba16Float, linear; bilinear for sub-pixel reprojection)
     constexpr sampler linSampler(filter::linear, address::clamp_to_edge);
 
-    // === Current frame color (sRGB → linear via sampler decode) ===
-    float3 current = currentTex.sample(nearSampler, uv, eye).rgb;
+    // === Current frame color (access::read, then manual sRGB decode → linear) ===
+    float3 current = taa_srgbToLinear(currentTex.read(gid, eye).rgb);
 
     // === 3×3 neighbourhood min/max for variance clamp (prevents ghosting) ===
     float3 nMin = current, nMax = current;
+    const int2 texSizeM1 = int2(texSize) - 1;
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
             if (dx == 0 && dy == 0) continue;
-            float2 uvN = (float2(gid) + float2(dx, dy) + 0.5) * rcpRes;
-            float3 s = currentTex.sample(nearSampler, uvN, eye).rgb;
+            uint2 coord = uint2(clamp(int2(gid) + int2(dx, dy), int2(0), texSizeM1));
+            float3 s = taa_srgbToLinear(currentTex.read(coord, eye).rgb);
             nMin = min(nMin, s);
             nMax = max(nMax, s);
         }

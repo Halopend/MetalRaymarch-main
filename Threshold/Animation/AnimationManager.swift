@@ -1600,11 +1600,15 @@ final class AnimationManager {
         return result
     }
     
+    private static let timestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "HH-mm-ss"
+        return f
+    }()
+
     private func formattedTimestamp() -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "HH-mm-ss"
-        return formatter.string(from: Date())
+        return Self.timestampFormatter.string(from: Date())
     }
 }

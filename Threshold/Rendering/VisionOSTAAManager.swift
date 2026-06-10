@@ -1,6 +1,10 @@
 #if canImport(CompositorServices)
 import Metal
 
+private enum VisionOSTAAError: Error {
+    case metalLibraryUnavailable
+}
+
 // Manages double-buffered history textures and the TAA resolve compute pipeline
 // for the visionOS renderer. MTLFXTemporalScaler is unavailable on visionOS;
 // this is the hand-rolled equivalent using rgba16Float ping-pong history and a
@@ -39,7 +43,7 @@ final class VisionOSTAAManager {
         self.device = device
         guard let library = device.makeDefaultLibrary(),
               let fn = library.makeFunction(name: "taaResolve") else {
-            throw RendererError.metalLibraryUnavailable
+            throw VisionOSTAAError.metalLibraryUnavailable
         }
         pipeline = try device.makeComputePipelineState(function: fn)
     }
@@ -73,8 +77,7 @@ final class VisionOSTAAManager {
         }
         guard historyTextures.count == 2 else { return false }
 
-        let outDesc = desc.copy() as! MTLTextureDescriptor
-        outputTexture = device.makeTexture(descriptor: outDesc)
+        outputTexture = device.makeTexture(descriptor: desc)
         outputTexture?.label = "TAA Output"
         return outputTexture != nil
     }

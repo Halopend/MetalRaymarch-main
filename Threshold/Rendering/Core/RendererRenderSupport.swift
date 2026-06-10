@@ -167,13 +167,11 @@ extension Renderer {
                             previousViewProjMatrix: prevVP,
                             blendFactor: blendFactor
                         )
+                        if viewIndex < previousViewProjMatrices.count {
+                            previousViewProjMatrices[viewIndex] = eye.projection * eye.modelView
+                        }
                     }
                     taa.advanceHistory()
-                    // Update previousViewProjMatrices for next frame's reprojection
-                    for viewIndex in 0..<min(viewCount, previousViewProjMatrices.count) {
-                        previousViewProjMatrices[viewIndex] = framePreparation.perEye[viewIndex].projection
-                            * framePreparation.perEye[viewIndex].modelView
-                    }
                     taaOutputOverride = taa.outputTexture
                 }
             }
@@ -305,10 +303,6 @@ extension Renderer {
             candidates.append(Candidate(drawable: drawable, width: width, height: height, area: width * height))
         }
 
-        guard let maxArea = candidates.map(\.area).max(), maxArea > 0 else {
-            return drawables[0]
-        }
-
         var bestIndex = 0
         var bestArea = candidates[0].area
         for (index, candidate) in candidates.enumerated() {
@@ -329,12 +323,12 @@ extension Renderer {
                 let vp = c.drawable.views.first?.textureMap.viewport ?? MTLViewport()
                 let vpW = Int(max(1.0, vp.width))
                 let vpH = Int(max(1.0, vp.height))
-                let q = sqrt(c.area / maxArea)
+                let q = sqrt(c.area / bestArea)
                 print("   [\(i)] tex=\(Int(c.width))x\(Int(c.height)) vp=\(vpW)x\(vpH) q≈\(String(format: "%.2f", q))")
             }
             let chosen = candidates[bestIndex]
             let chosenVP = chosen.drawable.views.first?.textureMap.viewport ?? MTLViewport()
-            let chosenQ = sqrt(chosen.area / maxArea)
+            let chosenQ = sqrt(chosen.area / bestArea)
             print("   → selected [\(bestIndex)] tex=\(Int(chosen.width))x\(Int(chosen.height)) vp=\(Int(max(1.0, chosenVP.width)))x\(Int(max(1.0, chosenVP.height))) q≈\(String(format: "%.2f", chosenQ))")
         }
 
