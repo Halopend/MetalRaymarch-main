@@ -1,6 +1,15 @@
 import SwiftUI
 import AVKit
 
+/// Five-page welcome flow:
+///   0. Safety (photosensitive-epilepsy warning, must acknowledge)
+///   1. Welcome (what Threshold is, what the app does)
+///   2. Hand controls (movement video + handedness)
+///   3. Fingers (per-finger actions + menu toggle, read-only)
+///   4. Sharing (analytics on by default; user can opt out + username)
+///
+/// All four navigation dots and back/next buttons update the same
+/// `currentPage` state, so the flow is a single TabView.
 struct FirstLaunchWindowView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.colorScheme) private var colorScheme
@@ -8,34 +17,43 @@ struct FirstLaunchWindowView: View {
     @Environment(\.dismissWindow) private var dismissWindow
 
     @AppStorage("hasCompletedIntroOnboarding") private var hasCompletedIntroOnboarding = false
+
+    /// Per-page state, kept here because the page views are local to this
+    /// struct and don't need to survive a re-render.
+    @State private var currentPage = 0
+    @State private var acknowledgedFlash = false
+    @State private var leftHanded = false
     @State private var shareAnalytics = UsageAnalytics.shared.analyticsEnabled
     @State private var communityDisplayName = UsageAnalytics.shared.communityDisplayName
-    @State private var showAnalyticsDetail = false
-    @State private var currentPage = 0
+
+    private let pageCount = 5
 
     var body: some View {
         VStack(spacing: 0) {
-            // Page indicator
+            // Page indicator (5 dots, current one is accent).
             HStack(spacing: 8) {
-                ForEach(0..<3, id: \.self) { i in
+                ForEach(0..<pageCount, id: \.self) { i in
                     Circle()
                         .fill(i == currentPage ? Color.accentColor : Color.secondary.opacity(0.3))
                         .frame(width: 8, height: 8)
+                        .accessibilityLabel("Page \(i + 1) of \(pageCount)")
                 }
             }
             .padding(.top, 16)
             .padding(.bottom, 8)
 
             TabView(selection: $currentPage) {
-                welcomePage.tag(0)
-                navigationPage.tag(1)
-                analyticsPage.tag(2)
+                safetyPage.tag(0)
+                welcomePage.tag(1)
+                controlsPage.tag(2)
+                fingersPage.tag(3)
+                sharingPage.tag(4)
             }
             #if os(visionOS)
             .tabViewStyle(.automatic)
             #endif
         }
-        .frame(minWidth: 680, idealWidth: 980, maxWidth: 980, minHeight: 560, idealHeight: 760, maxHeight: 760)
+        .frame(minWidth: 680, idealWidth: 980, maxWidth: 980, minHeight: 600, idealHeight: 820, maxHeight: 820)
         .background(windowSurfaceFill, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -47,6 +65,7 @@ struct FirstLaunchWindowView: View {
         .onAppear {
             shareAnalytics = UsageAnalytics.shared.analyticsEnabled
             communityDisplayName = UsageAnalytics.shared.communityDisplayName
+            leftHanded = appModel.renderSettings.leftHandedMode
         }
     }
 
@@ -56,6 +75,80 @@ struct FirstLaunchWindowView: View {
 
     private var windowSurfaceStroke: Color {
         colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
+    }
+
+    // MARK: - Page 0: Safety
+
+    private var safetyPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Heads up: flashing lights", systemImage: "bolt.trianglebadge.exclamationmark.fill")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text("Some Threshold scenes contain rapidly changing colors, gradients, and audio-driven flashes that may be uncomfortable for people sensitive to flashing or strobing light.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Big, unmistakable warning panel.
+            HStack(alignment: .top, spacing: 12) {
+                FlashingLightIndicator()
+                    .font(.system(size: 36))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Photosensitive-epilepsy warning")
+                        .font(.headline)
+                    Text("A small fraction of users may experience seizures or loss of consciousness when exposed to flashing lights or patterns, even without a prior history. Symptoms include dizziness, nausea, vision changes, twitching, and disorientation. If you experience any of these, stop using Threshold and consult a doctor.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.10)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+            )
+
+            // The music-reactive system can also produce rapid flashes at
+            // high audio levels. Make this explicit so the user knows it's
+            // not only the visuals.
+            IntroTipRow(
+                icon: "waveform.path.ecg",
+                title: "Audio-reactive flashes",
+                detail: "When music-reactive mappings are enabled, bass hits and beat onsets can drive the lights to flash in time with the audio. Lower the audio amount or disable the mapping if this is uncomfortable."
+            )
+
+            // Acknowledgement gate. The Next button is disabled until this
+            // is checked, so the user can't skip the warning. Use a real
+            // checkbox on macOS (where `ToggleStyle.checkbox` exists) and
+            // a prominent toggle on every other platform.
+#if os(macOS)
+            Toggle(isOn: $acknowledgedFlash) {
+                Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
+                    .font(.subheadline.weight(.medium))
+            }
+            .toggleStyle(.checkbox)
+            .tint(.orange)
+#else
+            Toggle(isOn: $acknowledgedFlash) {
+                Text("I understand that some scenes may contain flashing lights and audio-driven flashes.")
+                    .font(.subheadline.weight(.medium))
+            }
+            .tint(.orange)
+#endif
+
+            Spacer()
+
+            HStack {
+                Spacer()
+                Button("Next") { withAnimation { currentPage = 1 } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!acknowledgedFlash)
+            }
+        }
+        .padding(20)
     }
 
     // MARK: - Page 1: Welcome
@@ -79,17 +172,17 @@ struct FirstLaunchWindowView: View {
                 IntroTipRow(
                     icon: "hand.raised.fingers.spread",
                     title: "Hand Gesture Controls",
-                    detail: "Pinch, grab, and sculpt fractal parameters using natural hand tracking."
-                )
-                IntroTipRow(
-                    icon: "waveform.path.ecg",
-                    title: "Audio Reactive",
-                    detail: "Connect to Apple Music and watch fractals pulse with the beat."
+                    detail: "Pinch, grab, and sculpt fractal parameters using natural hand tracking. More on the next pages."
                 )
                 IntroTipRow(
                     icon: "arrow.counterclockwise.circle",
                     title: "Reset + Create",
                     detail: "Tap Reset to jump back to your saved baseline. Hold Reset to save the current setup as a new reset point or create a named preset."
+                )
+                IntroTipRow(
+                    icon: "person.2.wave.2",
+                    title: "Sharing is on by default",
+                    detail: "Threshold can share your settings with the community so they can become future collections. You can opt out anytime in Settings > Sharing."
                 )
             }
             .padding(12)
@@ -98,17 +191,19 @@ struct FirstLaunchWindowView: View {
             Spacer()
 
             HStack {
+                Button("Back") { withAnimation { currentPage = 0 } }
+                    .buttonStyle(.bordered)
                 Spacer()
-                Button("Next") { withAnimation { currentPage = 1 } }
+                Button("Next") { withAnimation { currentPage = 2 } }
                     .buttonStyle(.borderedProminent)
             }
         }
         .padding(20)
     }
 
-    // MARK: - Page 2: Navigation Tutorial
+    // MARK: - Page 2: Hand Controls + Handedness
 
-    private var navigationPage: some View {
+    private var controlsPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Movement and Scale")
@@ -139,21 +234,222 @@ struct FirstLaunchWindowView: View {
                     detail: "Move hands apart to scale up, together to scale down, and rotate your hands to orbit."
                 )
                 IntroTipRow(
-                    icon: "menucard",
-                    title: "Menu Tutorial Next",
-                    detail: "The menu system gets its own walkthrough video next. You can still customize the menu toggle gesture in Settings > General."
+                    icon: "hand.point.up.left.fill",
+                    title: "Choose your dominant hand",
+                    detail: "Some per-finger tap defaults are mirrored for left-handed users. You can change this anytime in Settings > Display."
                 )
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.green.opacity(0.06)))
 
+            // Handedness picker. Sets `RenderSettings.leftHandedMode`
+            // immediately on toggle (not just on completion), so the
+            // Settings tab reflects the user's choice if they bail out
+            // and re-open it.
+            HStack(spacing: 12) {
+                Image(systemName: leftHanded ? "hand.raised.fingers.spread" : "hand.raised.fingers.spread.fill")
+                    .font(.title3)
+                    .foregroundStyle(leftHanded ? .indigo : .blue)
+                Picker("Dominant hand", selection: $leftHanded) {
+                    Label("Right", systemImage: "hand.raised.fingers.spread.fill").tag(false)
+                    Label("Left",  systemImage: "hand.raised.fingers.spread").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 320)
+                .onChange(of: leftHanded) { _, newValue in
+                    appModel.renderSettings.leftHandedMode = newValue
+                }
+            }
+
             Spacer()
 
             HStack {
-                Button("Back") { withAnimation { currentPage = 0 } }
+                Button("Back") { withAnimation { currentPage = 1 } }
                     .buttonStyle(.bordered)
                 Spacer()
-                Button("Next") { withAnimation { currentPage = 2 } }
+                Button("Next") { withAnimation { currentPage = 3 } }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Page 3: Per-Finger Actions (read-only)
+
+    /// Shows the user which finger currently triggers which action, and
+    /// which gesture opens/closes the menu. The chips are read-only here
+    /// — full editing lives in Settings > Gestures. The intro just makes
+    /// the mapping obvious so the user knows what to expect.
+    private var fingersPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Each finger is its own shortcut")
+                    .font(.title2.weight(.bold))
+                Text("Tap any finger to your palm to trigger its assigned action. Below are your current assignments — change them anytime in Settings > Gestures.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // The five left-hand fingers, in tap-to-palm order. Names
+            // and icons mirror `GestureSettingsView.perFingerNames` /
+            // `perFingerIcons` for visual consistency with the editor.
+            VStack(spacing: 6) {
+                ForEach(0..<5, id: \.self) { finger in
+                    fingerAssignmentRow(finger: finger)
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.06)))
+
+            // Menu toggle — a single prominent row showing the current
+            // mode. This is the gesture the user will use the most, so
+            // it gets its own highlighted card.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: appModel.renderSettings.menuToggleGestureMode.icon)
+                        .font(.title3)
+                        .foregroundStyle(.purple)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Menu toggle")
+                            .font(.headline)
+                        Text(appModel.renderSettings.menuToggleGestureMode.displayName)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.purple)
+                    }
+                    Spacer()
+                }
+                Text("Use this gesture to show or hide the menu. Customize the gesture, hold duration, and thresholds in Settings > Gestures.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.10)))
+
+            Spacer()
+
+            HStack {
+                Button("Back") { withAnimation { currentPage = 2 } }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Next") { withAnimation { currentPage = 4 } }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+    }
+
+    /// One row of the per-finger assignment list on Page 3. Shows the
+    /// finger name + icon, then the current action as a small chip.
+    private func fingerAssignmentRow(finger: Int) -> some View {
+        let names = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
+        let icons = ["hand.thumbsup.fill", "1.circle.fill", "2.circle.fill", "3.circle.fill", "4.circle.fill"]
+        let action = finger < appModel.renderSettings.perFingerTapLeftActions.count
+            ? appModel.renderSettings.perFingerTapLeftActions[finger]
+            : .none
+        return HStack(spacing: 10) {
+            Image(systemName: icons[finger])
+                .font(.title3)
+                .foregroundStyle(.purple)
+                .frame(width: 28)
+            Text(names[finger])
+                .font(.subheadline.weight(.medium))
+            Spacer()
+            // The chip uses a low-emphasis background so the user reads
+            // it as a label, not a button.
+            HStack(spacing: 4) {
+                Image(systemName: action.icon)
+                Text(action.displayName)
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(action == .none ? .secondary : .primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(action == .none
+                               ? Color.secondary.opacity(0.10)
+                               : Color.purple.opacity(0.18))
+            )
+        }
+    }
+
+    // MARK: - Page 4: Sharing (opt-out)
+
+    private var sharingPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sharing is on by default")
+                    .font(.title2.weight(.bold))
+                Text("Threshold can share your settings so they may be added to future community collections. No account, no email, no location. You can turn this off below or anytime in Settings > Sharing.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: shareAnalytics ? "person.3.fill" : "person.slash")
+                        .font(.title3)
+                        .foregroundStyle(shareAnalytics ? .blue : .secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(shareAnalytics ? "Sharing with the community" : "Sharing is off")
+                            .font(.headline)
+                        Text(shareAnalytics
+                             ? "Your settings can be reviewed for future community features."
+                             : "Tap below to turn sharing back on.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Toggle(isOn: $shareAnalytics) {
+                    Text(shareAnalytics ? "Sharing is on (turn off)" : "Sharing is off (turn on)")
+                }
+                .tint(.blue)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Display Name (optional)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextField("Leave blank to share anonymously", text: $communityDisplayName)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled(true)
+                    Text("Used only for community credits. Stays on this device — never leaves your Mac. Leave blank to share anonymously.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("What you're sharing:", systemImage: "checkmark.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("• Settings snapshots that can become community collections\n• Aggregated usage stats (e.g. which fractals are popular)\n• Your display name, if you add one, for attribution")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Label("What we don't collect:", systemImage: "xmark.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                    Text("• No account is created\n• No Apple ID, email, or location\n• No photos, recordings, or personal files")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.06)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.blue.opacity(0.15), lineWidth: 1)
+            )
+
+            Spacer()
+
+            HStack {
+                Button("Back") { withAnimation { currentPage = 3 } }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Start Exploring", action: completeOnboarding)
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -170,115 +466,16 @@ struct FirstLaunchWindowView: View {
         )
     }
 
-    // MARK: - Page 3: Analytics Consent
-
-    private var analyticsPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Share with the Community")
-                    .font(.title2.weight(.bold))
-                Text("Optional, off by default, no sign-up required, and a user name is optional.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            // Prominent opt-in card
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    Image(systemName: "person.3.fill")
-                        .font(.title3)
-                        .foregroundStyle(.blue)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Contribute to Future Community Collections")
-                            .font(.headline)
-                        Text("Opt in to share your favorite setups with the Threshold community. A user name is optional.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("User Name (Optional)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    TextField("Add a user name (optional)", text: $communityDisplayName)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled(true)
-
-                    Text("Choosing a user name does not create an account. Leave it blank if you prefer to share anonymously.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Toggle("Share with the community", isOn: $shareAnalytics)
-                    .tint(.blue)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("What you're opting into:", systemImage: "checkmark.circle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• If you add a user name, it can be used for attribution\n• Aggregated usage stats still help us improve performance and features")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    Label("What this does not do:", systemImage: "xmark.circle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                    Text("• No account is created\n• No Apple ID, email, or location is required\n• No photos, recordings, or personal files are uploaded\n• You can leave this off and use Threshold normally")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Button {
-                    showAnalyticsDetail.toggle()
-                } label: {
-                    HStack {
-                        Text("Technical details")
-                            .font(.caption2)
-                        Image(systemName: showAnalyticsDetail ? "chevron.up" : "chevron.down")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-
-                if showAnalyticsDetail {
-                    Text("Threshold stores aggregated session metrics in Apple's CloudKit public database to help steer future releases. Your community name is optional and stored locally on this device only if you choose to add one for future attribution. You can change this anytime in Settings > General.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .padding(8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
-                }
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.06)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.blue.opacity(0.15), lineWidth: 1)
-            )
-
-            Text("You can skip this, start using Threshold immediately, and change it later in Settings > General.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
-            Spacer()
-
-            HStack {
-                Button("Back") { withAnimation { currentPage = 1 } }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("Start Exploring", action: completeOnboarding)
-                    .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(20)
-    }
+    // MARK: - Completion
 
     private func completeOnboarding() {
+        // Persist the three pieces of state the user just configured:
+        // sharing toggle, username, and handedness. The acknowledgement
+        // checkbox is intentionally not persisted — it's a one-time
+        // consent, not a setting.
         UsageAnalytics.shared.communityDisplayName = communityDisplayName
         UsageAnalytics.shared.analyticsEnabled = shareAnalytics
+        appModel.renderSettings.leftHandedMode = leftHanded
         hasCompletedIntroOnboarding = true
         openWindow(id: appModel.menuWindowID)
         dismissWindow(id: AppModel.onboardingWindowID)

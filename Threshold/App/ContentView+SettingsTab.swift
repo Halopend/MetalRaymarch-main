@@ -14,113 +14,160 @@ extension ContentView {
     // MARK: - Settings Tab
     // ═══════════════════════════════════════════════════════════════════════════
     
+    /// Settings tab — split into five inner sub-tabs (Display, Gestures,
+    /// Sharing, Export, Advanced) for faster navigation. Driven by
+    /// `@AppStorage("ContentView.settingsSubTab") settingsSubTab` on
+    /// `ContentView` so the user's last selection persists across launches.
     var settingsTabContent: some View {
         VStack(spacing: 0) {
+            // Segmented tab picker. Wrapped in a top bar with a small
+            // "Show Welcome Again" affordance on the trailing edge so users
+            // can replay the onboarding from settings.
+            HStack(spacing: 12) {
+                Picker("Settings section", selection: $settingsSubTab) {
+                    ForEach(SettingsSubTab.allCases) { tab in
+                        Label(tab.rawValue, systemImage: tab.icon).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("Choose a settings section")
+
+                Button {
+                    openWindow(id: AppModel.onboardingWindowID)
+                } label: {
+                    Label("Show Welcome", systemImage: "questionmark.circle")
+                        .labelStyle(.iconOnly)
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .help("Replay the welcome and onboarding")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
+            Divider()
+
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 12) {
-                    settingsSectionBlock(
-                        title: SettingsSubTab.general.rawValue,
-                        systemImage: "gearshape.2.fill"
-                    ) {
-                        settingsGeneralContent
-                    }
-
-                    settingsSectionBlock(
-                        title: SettingsSubTab.exportShare.rawValue,
-                        systemImage: "square.and.arrow.up.fill"
-                    ) {
-                        settingsExportContent
-                    }
-
-                    settingsSectionBlock(
-                        title: SettingsSubTab.devTools.rawValue,
-                        systemImage: "wrench.and.screwdriver.fill"
-                    ) {
-                        settingsAdvancedContent
+                Group {
+                    switch settingsSubTab {
+                    case .display:   settingsDisplayContent
+                    case .gestures:  settingsGesturesContent
+                    case .sharing:   settingsSharingContent
+                    case .export:    settingsExportContent
+                    case .advanced:  settingsAdvancedContent
                     }
                 }
-                .padding(.horizontal, 16).padding(.vertical, 8)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
     }
 
-    private func settingsSectionBlock<Content: View>(title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-                .foregroundStyle(.primary)
+    // MARK: - Display sub-view
 
-            content()
-        }
-    }
-    
-    private var settingsGeneralContent: some View {
+    /// Display-focused settings: Platform (visionOS), handedness, lighting,
+    /// HUD toggles, and resolution. Extracted from the old "General" tab
+    /// so the user has one place to find visual / display-related knobs.
+    private var settingsDisplayContent: some View {
         VStack(spacing: 12) {
-            // Experimental features section
-            experimentalFeaturesSection
+            // Platform — only relevant on visionOS. On iOS/macOS the
+            // immersive floor field is never rendered, so the section is
+            // hidden entirely.
+#if os(visionOS)
+            platformSection
+#endif
 
-            // Community sharing section
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("Community Sharing", systemImage: "person.3.fill").font(.headline)
-                    Spacer()
-                }
+            // Handedness lives in display, not gestures: it affects which
+            // hand the renderer treats as the dominant one and the user
+            // expects to find it next to other "how I look at the scene"
+            // controls.
+            handednessSection
 
-                Text("Optional. Share your setups with the Threshold community without creating an account.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle("Share with the community", isOn: Binding(
-                    get: { UsageAnalytics.shared.analyticsEnabled },
-                    set: { UsageAnalytics.shared.analyticsEnabled = $0 }
-                ))
-
-                Text("By opting in, you are letting us review your settings so they may be added to the community later on your behalf and may appear in original or altered form.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-
-                Text("You can use Threshold normally without sharing anything, and you can change this later in Settings.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-
-                if UsageAnalytics.shared.analyticsEnabled {
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Display Name (Optional)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        TextField("Leave blank to share anonymously", text: Binding(
-                            get: { UsageAnalytics.shared.communityDisplayName },
-                            set: { UsageAnalytics.shared.communityDisplayName = $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled(true)
-
-                        Text("Used only for community credits. Leave blank to share anonymously.")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            .padding(DS.Spacing.md)
-            .dsSectionBackground(.blue, radius: DS.Radius.control)
-
-            // iCloud Drive section
-            iCloudDriveSection
+            // Experimental display features (kept here, not in Advanced,
+            // because they're visual toggles the user can flip while the
+            // scene is running).
+            experimentalDisplaySection
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    // MARK: Experimental Features
-    // ─────────────────────────────────────────────────────────────────
+    /// VisionOS-only glass-floor platform settings. Mirrors the
+    /// `ContentView+FractalTab` block but is the canonical home for these
+    /// controls now that Settings has a Display sub-tab.
+#if os(visionOS)
+    private var platformSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Platform", systemImage: "circle.hexagongrid.fill")
+                    .font(.headline)
+                Spacer()
+                if cache.display.platformEnabled {
+                    Text(String(format: "%.1f m", cache.display.platformRadius))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Show Platform", isOn: Binding(
+                    get: { cache.display.platformEnabled },
+                    set: { cache.display.platformEnabled = $0 }
+                ))
+                .labelsHidden()
+                .tint(.cyan)
+            }
 
-    @ViewBuilder
-    private var experimentalFeaturesSection: some View {
+            Text("Renders a glass floor in the immersive space. The fractal color blends through it so the platform reads as a thick transparent surface. Disable for a clean floor-less view.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if cache.display.platformEnabled {
+                EffectSliderRow(icon: "circle.dotted", label: "Radius",
+                    value: Binding(
+                        get: { cache.display.platformRadius },
+                        set: { cache.display.platformRadius = $0 }
+                    ), range: 0.5...3.0,
+                    enabled: .constant(true),
+                    onChanged: { cache.commitPlatformRadius() },
+                    showToggle: false)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
+    }
+#endif
+
+    /// Hand-dominance picker. Affects which hand the renderer treats as
+    /// the dominant one for asymmetric controls (e.g. the "menu" hand).
+    private var handednessSection: some View {
+        let handedBinding = Binding<Bool>(
+            get: { appModel.renderSettings.leftHandedMode },
+            set: { appModel.renderSettings.leftHandedMode = $0 }
+        )
+        return VStack(alignment: .leading, spacing: 8) {
+            Label("Handedness", systemImage: "hand.point.up.left.fill")
+                .font(.headline)
+            Picker("Dominant hand", selection: handedBinding) {
+                Label("Right", systemImage: "hand.raised.fingers.spread.fill").tag(false)
+                Label("Left",  systemImage: "hand.raised.fingers.spread").tag(true)
+            }
+            .pickerStyle(.segmented)
+            Text("Choose your dominant hand. Some per-finger tap defaults are mirrored automatically.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.07)))
+    }
+
+    /// Display-flavored experimental toggles. The custom-shenes enable is
+    /// a display-runtime knob (it gates whether the renderer tries to
+    /// compile user-supplied shaders), so it lives here.
+    private var experimentalDisplaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Label("Experimental", systemImage: "flask.fill").font(.headline)
+                Label("Experimental Display", systemImage: "flask.fill")
+                    .font(.headline)
                 Text("BETA")
                     .font(.caption2.weight(.bold))
                     .padding(.horizontal, 6)
@@ -145,6 +192,113 @@ extension ContentView {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
     }
+
+    // MARK: - Gestures sub-view
+
+    /// Gestures sub-view. Hands off to the dedicated gestures tab for
+    /// the full per-finger / per-hand editor; this surface only shows a
+    /// pointer to where the user can find it. A future iteration can
+    /// inline the most-used controls here.
+    private var settingsGesturesContent: some View {
+        VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Gesture editor lives in its own tab", systemImage: "hand.draw.fill")
+                    .font(.headline)
+                Text("Per-hand, per-finger, and gesture-sensitivity controls are grouped in the dedicated Gestures tab. Use the tab bar to jump there directly.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    selectedTab = .gestures
+                } label: {
+                    Label("Open Gestures Tab", systemImage: "hand.draw")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.07)))
+        }
+    }
+
+    // MARK: - Sharing sub-view
+
+    /// Sharing sub-view: Community Sharing (analytics + username) and
+    /// iCloud Drive backup. Sharing is **on by default** — the user must
+    /// opt out by turning the toggle off. The username is independent
+    /// and is always shown so the user can set an attribution handle
+    /// without enabling sharing.
+    private var settingsSharingContent: some View {
+        VStack(spacing: 12) {
+            communitySharingSection
+            iCloudDriveSection
+        }
+    }
+
+    private var communitySharingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Community Sharing", systemImage: "person.3.fill")
+                    .font(.headline)
+                Spacer()
+                Image(systemName: UsageAnalytics.shared.analyticsEnabled
+                      ? "checkmark.circle.fill"
+                      : "minus.circle")
+                    .foregroundStyle(UsageAnalytics.shared.analyticsEnabled ? .green : .secondary)
+                    .help(UsageAnalytics.shared.analyticsEnabled
+                          ? "Sharing is on"
+                          : "Sharing is off")
+            }
+
+            // Flipped copy: "on by default" is the headline.
+            Text("On by default. Disable below to opt out. No account is created and no Apple ID, email, or location is required.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle(isOn: Binding(
+                get: { UsageAnalytics.shared.analyticsEnabled },
+                set: { UsageAnalytics.shared.analyticsEnabled = $0 }
+            )) {
+                Label(
+                    UsageAnalytics.shared.analyticsEnabled ? "Sharing with the community" : "Sharing is off",
+                    systemImage: UsageAnalytics.shared.analyticsEnabled ? "person.3.fill" : "person.slash"
+                )
+            }
+            .tint(.blue)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Display Name (optional)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("Leave blank to share anonymously", text: Binding(
+                    get: { UsageAnalytics.shared.communityDisplayName },
+                    set: { UsageAnalytics.shared.communityDisplayName = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled(true)
+                Text("Used only for community credits. Stays on this device — never leaves your Mac. Leave blank to share anonymously.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Label("What you're opting into:", systemImage: "checkmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("• Your settings can be reviewed for future community features\n• Shared setups may appear later in original or altered form\n• If you add a user name, it can be used for attribution\n• Aggregated usage stats help us improve performance and features")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(DS.Spacing.md)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.07)))
+    }
+
+    // (Old `settingsGeneralContent` removed — the settings tab now
+    // dispatches to `settingsDisplayContent` / `settingsGesturesContent`
+    // / `settingsSharingContent` / `settingsExportContent` /
+    // `settingsAdvancedContent` based on the segmented sub-tab picker.)
 
     // ─────────────────────────────────────────────────────────────────
     // MARK: iCloud Drive

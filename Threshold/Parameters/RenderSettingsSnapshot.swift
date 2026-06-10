@@ -17,6 +17,7 @@ struct RenderSettingsSnapshot {
     let sphericalInversionMode: SphericalInversionMode
     let sphericalInversionRadius: Float
     let platformRadius: Float
+    let platformEnabled: Bool
     let audioLevel: Float
     let bassLevel: Float
     let midLevel: Float

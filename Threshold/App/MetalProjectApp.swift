@@ -55,6 +55,7 @@ struct MetalProjectTestApp: App {
         Window(appModel.menuWindowID, id: appModel.menuWindowID) {
             ContentView()
                 .environment(appModel)
+                .background(ImmersiveSpaceAutoOpener().environment(appModel))
                 .onAppear {
                     // Dismiss any secondary windows that may have been restored
                     // by the system from a previous session. Without this, windows

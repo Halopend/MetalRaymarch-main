@@ -136,7 +136,12 @@ final class UsageAnalytics {
     private static let communityDisplayNameKey = "CommunityDisplayName"
     
     static var persistedAnalyticsEnabled: Bool {
-        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? false
+        // Sharing is opt-out: first-launch users get sharing enabled by
+        // default. The `object(forKey:) == nil` check is what distinguishes
+        // "never set" (first launch) from "explicitly turned off" (an
+        // existing user who later set it to false). Returning `true` for
+        // the first-launch case is the entire default-flip.
+        UserDefaults.standard.object(forKey: analyticsEnabledKey) as? Bool ?? true
     }
 
     // CloudKit is initialized on first use so analytics-disabled launches
@@ -219,7 +224,11 @@ final class UsageAnalytics {
     }
     
     private init() {
-        // Default to disabled — user must explicitly opt in
+        // Default to enabled — user can opt out via Settings > Sharing or
+        // by toggling it on the welcome screen. `persistedAnalyticsEnabled`
+        // returns `true` for users who have never set the key (first
+        // launch); users who explicitly turned it off in a previous build
+        // will see it stay off.
         self.analyticsEnabled = Self.persistedAnalyticsEnabled
         self.storedCommunityDisplayName = Self.normalizedCommunityDisplayName(
             UserDefaults.standard.string(forKey: Self.communityDisplayNameKey) ?? ""

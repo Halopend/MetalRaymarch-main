@@ -34,7 +34,7 @@ struct ContentView: View {
     @AppStorage("ContentView.musicRailSection") private var musicRailSection: MusicRailSection = .playback
     @AppStorage("ContentView.skipOuterNavigationSync") private var skipOuterNavigationSync = false
     // Persist last-selected tab and sub-tabs across launches.
-    @AppStorage("ContentView.selectedTab") private var selectedTab: SidebarTab = .fractal
+    @AppStorage("ContentView.selectedTab") var selectedTab: SidebarTab = .fractal
     @AppStorage("FractalGridView.innerTab") var fractalBrowseTab: FractalBrowseTab = .jumpingOff
     @AppStorage("ContentView.fractalSubTab") var fractalSubTab: FractalSubTab = .shape
     @AppStorage("ContentView.shapeInnerTab") var shapeInnerTab: ShapeInnerTab = .parameters
@@ -42,7 +42,7 @@ struct ContentView: View {
     @AppStorage("ContentView.coloringSubTab") var coloringSubTab: ColoringSubTab = .gradient
     @AppStorage("ContentView.effectsSubTab") var effectsSubTab: EffectsSubTab = .dynamic
     @AppStorage("MusicTabContent.innerTab") private var musicPanelTab: MusicPanelTab = .music
-    @AppStorage("ContentView.settingsSubTab") private var settingsSubTab: SettingsSubTab = .general
+    @AppStorage("ContentView.settingsSubTab") var settingsSubTab: SettingsSubTab = .display
     @AppStorage("ContentView.pinnedRailControls") private var pinnedRailControlsRaw: String = ""
     @State var showStopsPopover = false
     @State private var showSaveDestinationSheet = false
@@ -190,7 +190,7 @@ struct ContentView: View {
     var body: some View {
         @Bindable var appModel = appModel
 
-        let isShortcutOrnamentVisible = !shouldRenderInlineTopDock && appModel.immersiveSpaceState != .closed && appModel.isMenuWindowVisible
+        let isShortcutOrnamentVisible = !shouldRenderInlineTopDock && appModel.immersiveSpaceState != .closed && appModel.isMenuWindowVisible && isRendererNavigationReady
 
         Group {
             if shouldUseWorkspaceLayout {
@@ -450,18 +450,19 @@ struct ContentView: View {
             }
 
             ToggleImmersiveSpaceButton()
-            if isTransitioning {
-                VStack(spacing: 8) {
-                    ProgressView()
-                    Text("Compiling shaders — first launch may take a moment…")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .transition(.opacity)
+
+            VStack(spacing: 8) {
+                ProgressView()
+                Text("Compiling shaders — first launch may take a moment…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
+            .opacity(isTransitioning ? 1 : 0)
+            .animation(.easeInOut(duration: 0.2), value: isTransitioning)
         }
         .padding(30)
-        .frame(minWidth: 300, idealWidth: 360, maxWidth: isTransitioning ? 400 : 360, minHeight: 220)
+        .frame(minWidth: 300, idealWidth: 360, maxWidth: 360, minHeight: 280)
     }
     
     // MARK: - Immersive Layout (Sidebar + Content)
@@ -499,10 +500,7 @@ struct ContentView: View {
     // MARK: - Top Dock
 
     private var topDockBar: some View {
-        // Only show Shape, Visualizations, and Music once the immersive space is
-        // fully open and startup pipeline warmup has finished — they require an
-        // active, ready render session to be meaningful.
-        let visibleTabs = TopDockTab.allCases.filter { $0 == .explore || isRendererNavigationReady }
+        let visibleTabs = TopDockTab.allCases
         return HStack(spacing: 10) {
             ForEach(visibleTabs, id: \.self) { tab in
                 Button {

@@ -1639,6 +1639,17 @@ FORCE_INLINE void accumulateDepthSample(float d, thread int& hitCount, thread fl
     }
 }
 
+// sRGB encode for compute kernel output.
+// Fragment shaders writing to bgra8Unorm_srgb attachments get hardware linear→sRGB
+// encoding for free. Compute kernel writes bypass that hardware stage, so we apply
+// the IEC 61966-2-1 piecewise function manually before writing.
+FORCE_INLINE float3 linearToSRGB(float3 c) {
+    c = saturate(c);
+    float3 lo = c * 12.92;
+    float3 hi = powr(c, float3(1.0 / 2.4)) * 1.055 - 0.055;
+    return select(hi, lo, c < 0.0031308);
+}
+
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
 // Three-level cascade: super-coarse (1 thread) → coarse (4 threads) → fine (64 threads)
 // Dramatically reduces total Map() evaluations while maintaining quality
@@ -2030,7 +2041,7 @@ kernel void adaptiveHierarchical8x8(
         col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), 0.0h);
         FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, kRayMissThreshold + 100.0f, uniforms.floorPlane, uniforms.floorCenterRadius);
         col = compositeFloorCircle(col, floorHit);
-        float4 currentColor = float4(float3(col), 1.0);
+        float4 currentColor = float4(linearToSRGB(float3(col)), 1.0);
         outputTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
         // Write miss depth so next frame knows this pixel was empty
         curDepthTexture.write(float4(kRayMissThreshold + 100.0, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
@@ -2226,7 +2237,7 @@ kernel void adaptiveHierarchical8x8(
         }
     }
     
-    float4 finalColor = float4(float3(col), 1.0);
+    float4 finalColor = float4(linearToSRGB(float3(col)), 1.0);
 
     // === COHERENT-PACKET LAYER-OF-ACCEPTANCE OVERLAY (Stage 0) ===
     // Applied after shading so the tint is unambiguous. Engages whenever the
@@ -2250,6 +2261,104 @@ kernel void adaptiveHierarchical8x8(
     }
 
     outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
+}
+
+// =============================================================================
+// CUSTOM TAA — Temporal Anti-Aliasing / accumulation resolve
+//
+// MTLFXTemporalScaler is unavailable on visionOS. This kernel provides the
+// equivalent: it blends the current (jittered) frame with a reprojected history
+// buffer, accumulating sub-pixel Halton samples across frames for free
+// super-sampling quality.
+//
+// Pipeline position (fragment path):
+//   low-res render (jittered) → MetalFX spatial → [this kernel] → RCAS resolve → drawable
+//
+// Texture bindings:
+//   0: currentTex     – MetalFX output (bgra8Unorm_srgb, full-res 2D array)
+//   1: histReadTex    – Previous TAA result (rgba16Float, full-res 2D array, ping-pong read)
+//   2: histWriteTex   – New TAA result to persist (rgba16Float, full-res 2D array, ping-pong write)
+//   3: outputTex      – TAA output this frame (rgba16Float, full-res 2D array)
+//                       fed into the existing RCAS resolve pass instead of MetalFX output
+// =============================================================================
+kernel void taaResolve(
+    uint2 gid [[thread_position_in_grid]],
+    texture2d_array<float, access::sample> currentTex    [[texture(0)]],
+    texture2d_array<float, access::sample> histReadTex   [[texture(1)]],
+    texture2d_array<float, access::write>  histWriteTex  [[texture(2)]],
+    texture2d_array<float, access::write>  outputTex     [[texture(3)]],
+    constant TAATileUniforms& uniforms                   [[buffer(0)]]
+) {
+    uint2 texSize = uint2(uniforms.resolution);
+    if (gid.x >= texSize.x || gid.y >= texSize.y) return;
+
+    uint eye = uniforms.eyeIndex;
+    float2 rcpRes = 1.0 / float2(texSize);
+    float2 uv = (float2(gid) + 0.5) * rcpRes;
+
+    // Nearest sampler for current frame (sRGB textures auto-decode via sampler in fragment/compute)
+    constexpr sampler nearSampler(filter::nearest, address::clamp_to_edge);
+    // Bilinear sampler for history (rgba16Float, linear; bilinear for sub-pixel reprojection)
+    constexpr sampler linSampler(filter::linear, address::clamp_to_edge);
+
+    // === Current frame color (sRGB → linear via sampler decode) ===
+    float3 current = currentTex.sample(nearSampler, uv, eye).rgb;
+
+    // === 3×3 neighbourhood min/max for variance clamp (prevents ghosting) ===
+    float3 nMin = current, nMax = current;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dy == 0) continue;
+            float2 uvN = (float2(gid) + float2(dx, dy) + 0.5) * rcpRes;
+            float3 s = currentTex.sample(nearSampler, uvN, eye).rgb;
+            nMin = min(nMin, s);
+            nMax = max(nMax, s);
+        }
+    }
+
+    // === Reproject current pixel into previous frame to find history UV ===
+    // UV → NDC (Metal: Y up in NDC, Y down in texture space)
+    float2 ndc = uv * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+
+    // NDC → view space (near plane z=0)
+    float4 viewPoint4 = uniforms.invProjMatrix * float4(ndc, 0.0, 1.0);
+    float vw = abs(viewPoint4.w) > 1e-6 ? viewPoint4.w : 1e-6;
+    float3 viewPt = viewPoint4.xyz / vw;
+
+    // View → model space
+    float3 modelPt = (uniforms.invViewMatrix * float4(viewPt, 1.0)).xyz;
+
+    // Model → previous frame clip space
+    float4 prevClip = uniforms.previousViewProjMatrix * float4(modelPt, 1.0);
+
+    bool reprojectValid = abs(prevClip.w) > 1e-5;
+    float2 prevUV = float2(0.5);
+    if (reprojectValid) {
+        float2 prevNDC = prevClip.xy / prevClip.w;
+        prevUV = prevNDC * 0.5 + 0.5;
+        prevUV.y = 1.0 - prevUV.y;
+        reprojectValid = all(prevUV >= float2(0.0)) && all(prevUV <= float2(1.0));
+    }
+
+    // === Sample history and variance-clamp to prevent ghosting ===
+    float3 history;
+    float blend;
+    if (reprojectValid) {
+        history = histReadTex.sample(linSampler, prevUV, eye).rgb;
+        history = clamp(history, nMin, nMax);
+        blend = uniforms.blendFactor;
+    } else {
+        // Pixel moved off-screen — no valid history, fully trust current
+        history = current;
+        blend = 1.0;
+    }
+
+    // === Temporal blend: history × (1−blend) + current × blend ===
+    float3 result = mix(history, current, blend);
+
+    histWriteTex.write(float4(result, 1.0), gid, eye);
+    outputTex.write(float4(result, 1.0), gid, eye);
 }
 
 // === SPRING BLOB NAVIGATION WIDGET ===
@@ -2857,7 +2966,7 @@ vertex MacBlitVertexOut macBlitVertex(uint vertexID [[vertex_id]]) {
 
 fragment float4 macBlitFragment(MacBlitVertexOut in [[stage_in]],
                                 texture2d<float> source [[texture(0)]]) {
-    constexpr sampler s(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+    constexpr sampler s(mag_filter::nearest, min_filter::nearest, address::clamp_to_edge);
     return float4(source.sample(s, in.texCoord).rgb, 1.0);
 }
 

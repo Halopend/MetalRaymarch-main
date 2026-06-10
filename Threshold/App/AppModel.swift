@@ -49,6 +49,15 @@ class AppModel {
     static let fractalBrowserWindowID = "FractalBrowserWindow"
     static let animationEditorWindowID = "AnimationEditorWindow"
     static let fractalSettingsDidChangeNotification = Notification.Name("AppModel.fractalSettingsDidChange")
+
+    /// Posted by AppModel when an external-file import needs the immersive
+    /// space to be opened (e.g. a `.threshfx` was imported while the user
+    /// was on the menu, and the renderer needs to come up to compile the
+    /// custom MTLLibrary). The view that owns
+    /// `@Environment(\.openImmersiveSpace)` observes this and calls it.
+    /// The user-info dict carries an optional `presetID` (UUID string) so
+    /// a view that's about to navigate elsewhere can dedupe.
+    static let requestOpenImmersiveSpaceNotification = Notification.Name("AppModel.requestOpenImmersiveSpace")
     
     enum ImmersiveSpaceState {
         case closed
@@ -255,14 +264,29 @@ class AppModel {
         didSet {
             guard let handler = activateEmbeddedFormulaHandler else { return }
             let formula = activeEmbeddedFormula
+            let queuedPreset = pendingPresetForActivation
             Task { @MainActor in
                 do {
                     try await handler(formula)
+                    // If a preset was queued behind a deferred activation,
+                    // apply it now. This is the late-binding path that
+                    // handles imports that happened *before* the user
+                    // entered the immersive space: the queued Task in
+                    // `queuePresetApplyAfterFormulaActivation` may have
+                    // already timed out, but the renderer's startup
+                    // triggered this didSet, so the formula is now compiled
+                    // and we can apply the preset.
+                    if let queued = queuedPreset,
+                       queued.embeddedFormula?.shortHash == formula?.shortHash {
+                        pendingPresetForActivation = nil
+                        await applyLoadedScene(queued, options: [])
+                    }
                 } catch {
                     self.errorReporter.report(.preset(.importFailed(
                         "Failed to compile custom shader: \(error.localizedDescription)"
                     )))
                     self.uninstallEmbeddedFormula()
+                    self.pendingPresetForActivation = nil
                 }
             }
         }
@@ -277,6 +301,14 @@ class AppModel {
     /// redundant recompilation when the same formula is referenced multiple times
     /// across previews/imports.
     @ObservationIgnored var activeEmbeddedFormulaHash: String?
+
+    /// Preset that was queued behind a deferred formula activation (e.g. a
+    /// `.threshfx` imported before the user entered the immersive space).
+    /// Set by `loadStaticScene` when the install is `.deferred`, and
+    /// consumed by the `activateEmbeddedFormulaHandler.didSet` once the
+    /// renderer has compiled the formula. Cleared on success, on failure,
+    /// and on every successful direct (non-deferred) load.
+    @ObservationIgnored var pendingPresetForActivation: FractalPreset?
     
     /// Prepare the shader pipeline for specific iteration and ray step values
     /// Call this when slider values change to avoid compilation hitches
@@ -513,25 +545,13 @@ class AppModel {
                 externalPreviewRestoreEmbeddedFormula = activeEmbeddedFormula
                 externalPreviewCapturedEmbeddedFormula = true
             }
-            guard let formula = preset.embeddedFormula else {
-                customSceneDiagnostic("🔬 [CSDiag] previewExternalImport BUILT-IN preset path (no embeddedFormula) — dispatching prewarm Task + applying preset synchronously")
-                installEmbeddedFormulaIfNeeded(nil)
-                Task { await preparePipelineHandler?(preset) }
-                preset.apply(to: renderSettings, resetEnvironment: true)
-                gestureController?.syncWithSettings()
-                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
-                return
-            }
-            customSceneDiagnostic("🔬 [CSDiag] previewExternalImport CUSTOM preset path — will activate formula then preparePipeline then apply")
+            // Defer to the shared scene-load helper so external previews get
+            // the same eased transition + gesture overrides as keyboard loads.
+            // Guard against stale previews being applied if the user has already
+            // moved on to a different import request.
             Task { @MainActor in
-                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
-                customSceneDiagnostic("🔬 [CSDiag] previewExternalImport activateEmbeddedFormulaForSceneLoad returned \(activated)")
-                guard activated, activeExternalPreviewID == request.id else { return }
-                await preparePipelineHandler?(preset)
-                customSceneDiagnostic("🔬 [CSDiag] previewExternalImport preparePipelineHandler completed; applying preset NOW")
-                preset.apply(to: renderSettings, resetEnvironment: true)
-                gestureController?.syncWithSettings()
-                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+                guard activeExternalPreviewID == request.id else { return }
+                loadStaticScene(preset, options: [])
             }
 
         case .animation(let scene):
@@ -549,8 +569,17 @@ class AppModel {
                 return
             }
             Task { @MainActor in
-                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
-                guard activated, activeExternalPreviewID == request.id else { return }
+                let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
+                let ready: Bool
+                switch installResult {
+                case .ready:
+                    ready = true
+                case .deferred:
+                    ready = await waitForRendererAndActivate(formula)
+                case .failed:
+                    ready = false
+                }
+                guard ready, activeExternalPreviewID == request.id else { return }
                 animationManager?.currentScene = scene
             }
         }
@@ -561,36 +590,12 @@ class AppModel {
         switch request.payload {
         case .preset(let preset):
             customSceneDiagnostic("🔬 [CSDiag] importExternalFile .preset name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
-            guard let formula = preset.embeddedFormula else {
-                uninstallEmbeddedFormula()
-                let importedPreset = presetManager.importPreset(preset)
-                Task { await preparePipelineHandler?(importedPreset) }
-                presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
-                gestureController?.syncWithSettings()
-                rememberActiveResetPreset(importedPreset)
-                saveLastState()
-                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
-                clearExternalPreview(restorePreviewedState: false)
-                pendingExternalImport = nil
-                ensureWindowContentVisible()
-                return
-            }
-            Task { @MainActor in
-                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
-                customSceneDiagnostic("🔬 [CSDiag] importExternalFile activateEmbeddedFormulaForSceneLoad returned \(activated)")
-                guard activated else { return }
-                let importedPreset = presetManager.importPreset(preset)
-                await preparePipelineHandler?(importedPreset)
-                customSceneDiagnostic("🔬 [CSDiag] importExternalFile preparePipelineHandler completed; loading preset NOW")
-                presetManager.loadPreset(importedPreset, into: renderSettings, resetEnvironment: true)
-                gestureController?.syncWithSettings()
-                rememberActiveResetPreset(importedPreset)
-                saveLastState()
-                NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
-                clearExternalPreview(restorePreviewedState: false)
-                pendingExternalImport = nil
-                ensureWindowContentVisible()
-            }
+            // External imports are the only path that needs to (a) persist the
+            // preset to the user's library, (b) write the new state to
+            // lastState.json, and (c) close the import sheet. The shared helper
+            // handles all of those when asked, otherwise behaves like the
+            // in-app scene load.
+            loadStaticScene(preset, options: [.saveToLibrary, .persistLastState, .closeExternalSheet])
             return
 
         case .animation(let scene):
@@ -604,8 +609,17 @@ class AppModel {
                 return
             }
             Task { @MainActor in
-                let activated = await activateEmbeddedFormulaForSceneLoad(formula)
-                guard activated else { return }
+                let installResult = await activateEmbeddedFormulaForSceneLoad(formula)
+                let ready: Bool
+                switch installResult {
+                case .ready:
+                    ready = true
+                case .deferred:
+                    ready = await waitForRendererAndActivate(formula)
+                case .failed:
+                    ready = false
+                }
+                guard ready else { return }
                 let importedScene = animationManager?.importScene(scene)
                 animationManager?.currentScene = importedScene
                 clearExternalPreview(restorePreviewedState: false)
@@ -822,46 +836,239 @@ class AppModel {
         activeResetPreset = nil
     }
 
+    /// Optional side-effects to run around a scene load. Defaults match the
+    /// in-app / keyboard scene-switch path; external file imports opt in to
+    /// persistence + sheet cleanup.
+    struct StaticSceneLoadOptions: OptionSet {
+        let rawValue: Int
+        static let saveToLibrary = StaticSceneLoadOptions(rawValue: 1 << 0)
+        static let persistLastState = StaticSceneLoadOptions(rawValue: 1 << 1)
+        static let closeExternalSheet = StaticSceneLoadOptions(rawValue: 1 << 2)
+    }
+
     /// Loads a jumping-off / static scene preset through the full pipeline:
     /// embedded-formula install, pipeline prep, eased parameter transition,
     /// gesture overrides, and a settings-changed notification so any live UI
-    /// reloads its cache. Lives on AppModel (not ContentView) so the keyboard
-    /// scene-switch shortcut keeps working while the controls pane is hidden.
+    /// reloads its cache. Shared by the keyboard scene-switch shortcut, the
+    /// in-app browse UI, and external file imports (`.threshscene`/`.threshfx`)
+    /// so all entry points stay in lockstep.
     @MainActor
-    func loadStaticScene(_ preset: FractalPreset) {
+    func loadStaticScene(
+        _ preset: FractalPreset,
+        options: StaticSceneLoadOptions = []
+    ) {
+        let source = options.isEmpty ? "keyboard" : "external"
         Task { @MainActor in
-            customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
+            customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene source=\(source) name='\(preset.name)' ft=\(preset.fractalType.rawValue) embeddedFormula=\(preset.embeddedFormula?.name ?? "nil")")
             if let formula = preset.embeddedFormula {
-                let installed = await installEmbeddedFormulaIfNeededAndWait(formula)
-                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene installEmbeddedFormula returned \(installed)")
-                guard installed else { return }
+                let installResult = await installEmbeddedFormulaIfNeededAndWait(formula)
+                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene installEmbeddedFormula returned \(installResult)")
+                if installResult == .failed { return }
+                if installResult == .deferred {
+                    // Renderer isn't up yet (typical: .threshfx opened from
+                    // Finder before the user entered the immersive space).
+                    // The formula is registered in the catalogs and
+                    // `activeEmbeddedFormula` is set, but the renderer's
+                    // activation handler is nil, so we can't compile the
+                    // MTLLibrary yet. The renderer will pick this up the
+                    // moment it starts (its startup reads
+                    // `activeEmbeddedFormula` and calls the activation
+                    // handler), so we just queue the preset-apply behind the
+                    // handler and return immediately. The user can enter the
+                    // scene at their own pace and the scene will load.
+                    queuePresetApplyAfterFormulaActivation(preset, options: options)
+                    return
+                }
             } else {
                 uninstallEmbeddedFormula()
             }
+            // Direct (non-deferred) load: clear any leftover queued preset
+            // from a previous deferred import, so a stale queued preset
+            // can't fire on the next handler binding.
+            pendingPresetForActivation = nil
+            await applyLoadedScene(preset, options: options)
+        }
+    }
 
-            if preset.embeddedFormula != nil {
-                await preparePipelineHandler?(preset)
-                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene preparePipelineHandler completed; loading preset NOW")
-            } else {
-                Task { await preparePipelineHandler?(preset) }
-                customSceneDiagnostic("🔬 [CSDiag] AppModel.loadStaticScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
-            }
-            // Snapshot the currently displayed parameters so the load can ease
-            // from them toward the new preset.
-            renderSettings.beginSceneTransitionSnapshot()
-            presetManager.loadPreset(
-                preset,
-                into: renderSettings,
-                includePerformance: false,
-                resetEnvironment: true
+    /// Wait for `activateEmbeddedFormulaHandler` to bind, then apply the
+    /// supplied preset. Surfaces a clear status message in the meantime so
+    /// the user knows the import succeeded and they need to enter the scene
+    /// to see it. Used as the deferred-activation follow-up to
+    /// `loadStaticScene`.
+    @MainActor
+    private func queuePresetApplyAfterFormulaActivation(
+        _ preset: FractalPreset,
+        options: StaticSceneLoadOptions,
+        timeout: TimeInterval = 10
+    ) {
+        // Persist + close the import sheet immediately so the user gets
+        // visual feedback that the import succeeded. The *visual* scene
+        // application (parameters, gesture overrides, eased transition) is
+        // what waits for the renderer to come up.
+        if options.contains(.saveToLibrary) {
+            _ = presetManager.importPreset(preset)
+        }
+        if options.contains(.persistLastState) {
+            saveLastState()
+        }
+        if options.contains(.closeExternalSheet) {
+            clearExternalPreview(restorePreviewedState: false)
+            pendingExternalImport = nil
+            ensureWindowContentVisible()
+        }
+        // Stash the preset so the activateEmbeddedFormulaHandler.didSet
+        // (and the renderer's startup deferred-activation block) can apply
+        // it once the formula has actually been compiled in the renderer.
+        // This handles the case where the user enters the scene *after* our
+        // 10s timeout has expired: the renderer's startup picks up
+        // `activeEmbeddedFormula` and the didSet consumes the queued preset.
+        pendingPresetForActivation = preset
+        // Auto-open the immersive space if the user is on the menu (or in
+        // any state other than already-open). The view that owns
+        // @Environment(\.openImmersiveSpace) observes the notification and
+        // triggers the open. This is the only way to bridge the import
+        // sheet (AppModel-level) to the SwiftUI environment value.
+        if immersiveSpaceState != .open {
+            NotificationCenter.default.post(
+                name: AppModel.requestOpenImmersiveSpaceNotification,
+                object: nil,
+                userInfo: ["presetID": preset.id.uuidString]
             )
-            // Ease displayed parameters toward the new preset's values over the
-            // configured "Same Scene Transition Time" instead of snapping.
-            renderSettings.commitSceneTransition()
-            applyPresetGestureOverridesIfNeeded(for: preset)
-            gestureController?.syncWithSettings()
-            rememberActiveResetPreset(preset)
-            NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+        }
+        Task { @MainActor in
+            customSceneDiagnostic("🔬 [CSDiag] queuePresetApplyAfterFormulaActivation name='\(preset.name)' hash=\(preset.embeddedFormula?.shortHash ?? "nil")")
+            let deadline = Date().addingTimeInterval(timeout)
+            while activateEmbeddedFormulaHandler == nil {
+                if Date() > deadline {
+                    errorReporter.report(.preset(.importFailed(
+                        "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
+                    )))
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            }
+            // Handler is now bound. Activate the formula, then run the
+            // standard preset-apply path. The renderer's startup also runs
+            // its own one-shot activation on `activeEmbeddedFormula`; the
+            // activation is a no-op when hash + library already match.
+            if let handler = activateEmbeddedFormulaHandler,
+               let formula = preset.embeddedFormula {
+                do {
+                    try await handler(formula)
+                } catch {
+                    errorReporter.report(.preset(.importFailed(
+                        "Failed to compile custom shader: \(error.localizedDescription)"
+                    )))
+                    uninstallEmbeddedFormula()
+                    pendingPresetForActivation = nil
+                    return
+                }
+            }
+            // If didSet hasn't already drained pendingPresetForActivation
+            // (it may have, since it fires whenever the handler is bound),
+            // apply the preset now and clear the slot.
+            if pendingPresetForActivation != nil {
+                pendingPresetForActivation = nil
+                await applyLoadedScene(preset, options: [])
+            }
+        }
+    }
+
+    /// The shared tail of `loadStaticScene` and
+    /// `queuePresetApplyAfterFormulaActivation`. Runs the eased preset
+    /// transition, gesture overrides, and sheet/library/lastState cleanup
+    /// exactly once per scene load. Caller is responsible for ensuring the
+    /// formula is compiled before invoking this.
+    @MainActor
+    private func applyLoadedScene(
+        _ preset: FractalPreset,
+        options: StaticSceneLoadOptions
+    ) async {
+        if preset.embeddedFormula != nil {
+            await preparePipelineHandler?(preset)
+            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler completed; loading preset NOW")
+        } else {
+            Task { await preparePipelineHandler?(preset) }
+            customSceneDiagnostic("🔬 [CSDiag] applyLoadedScene preparePipelineHandler dispatched (fire-and-forget); loading preset NOW")
+        }
+        // Snapshot the currently displayed parameters so the load can ease
+        // from them toward the new preset.
+        renderSettings.beginSceneTransitionSnapshot()
+        presetManager.loadPreset(
+            preset,
+            into: renderSettings,
+            includePerformance: false,
+            resetEnvironment: true
+        )
+        // Ease displayed parameters toward the new preset's values over the
+        // configured "Same Scene Transition Time" instead of snapping.
+        renderSettings.commitSceneTransition()
+        applyPresetGestureOverridesIfNeeded(for: preset)
+        gestureController?.syncWithSettings()
+        rememberActiveResetPreset(preset)
+        if options.contains(.saveToLibrary) {
+            _ = presetManager.importPreset(preset)
+        }
+        if options.contains(.persistLastState) {
+            saveLastState()
+        }
+        NotificationCenter.default.post(name: AppModel.fractalSettingsDidChangeNotification, object: nil)
+        if options.contains(.closeExternalSheet) {
+            clearExternalPreview(restorePreviewedState: false)
+            pendingExternalImport = nil
+            ensureWindowContentVisible()
+        }
+    }
+
+    /// Wait for the renderer's custom-shader activation handler to bind, then
+    /// ask it to compile and install the supplied formula's MTLLibrary.
+    ///
+    /// On visionOS the handler binds as soon as the user enters the immersive
+    /// space (see `Renderer.startRenderLoop`); on iOS / macOS the renderer
+    /// runs as soon as the main view appears, so the handler is usually
+    /// already present by the time a user-driven import happens.
+    ///
+    /// We poll the handler — not `rendererStartupWarmupComplete` — because the
+    /// handler is the *minimum* signal that "the renderer is alive and can
+    /// accept activations." Warmup is a stronger signal (compute pipelines
+    /// cached) but it can lag by several seconds; the handler binds first.
+    ///
+    /// If the user never enters the immersive space, we give up after
+    /// `timeout` seconds and return `false` — the renderer-side deferred
+    /// activation block will still pick up `activeEmbeddedFormula` if/when
+    /// the user later enters the scene, so the formula is not lost.
+    @MainActor
+    func waitForRendererAndActivate(_ formula: EmbeddedFormula, timeout: TimeInterval = 10) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while activateEmbeddedFormulaHandler == nil {
+            if Date() > deadline {
+                errorReporter.report(.preset(.importFailed(
+                    "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
+                )))
+                return false
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        }
+        guard let handler = activateEmbeddedFormulaHandler else {
+            // Lost the race: the renderer torn down between our poll and now.
+            errorReporter.report(.preset(.importFailed(
+                "Custom scene is queued. Enter the immersive space to compile and render the custom shader."
+            )))
+            return false
+        }
+        // The renderer's startup also re-reads activeEmbeddedFormula and
+        // activates it the moment the handler binds, but call again here to
+        // cover the case where our poll won the race. The activation is a
+        // no-op when the hash + library already match.
+        do {
+            try await handler(formula)
+            return true
+        } catch {
+            errorReporter.report(.preset(.importFailed(
+                "Failed to compile custom shader: \(error.localizedDescription)"
+            )))
+            uninstallEmbeddedFormula()
+            return false
         }
     }
 

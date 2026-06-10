@@ -128,18 +128,62 @@ extension Renderer {
     func finishFragmentPass(
         commandBuffer: MTLCommandBuffer,
         drawable: LayerRenderer.Drawable,
-        fragmentPassPlan: RendererFragmentPassPlan
+        fragmentPassPlan: RendererFragmentPassPlan,
+        framePreparation: RendererFramePreparation,
+        settingsSnapshot: RenderSettingsSnapshot
     ) {
 #if canImport(MetalFX)
         guard let bundle = fragmentPassPlan.metalFXBundle else { return }
 
         do {
             try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
+
+            // TAA: blend the MetalFX spatial output with the accumulated history
+            // to get sub-pixel detail from Halton-jittered frames at no extra render cost.
+            var taaOutputOverride: MTLTexture? = nil
+            if let taa = taaManager,
+               let metalFXOutput = bundle.manager.outputTexture {
+                let w = metalFXOutput.width, h = metalFXOutput.height
+                let viewCount = drawable.views.count
+                if taa.prepare(width: w, height: h, viewCount: viewCount) {
+                    let blendFactor: Float = {
+                        switch settingsSnapshot.geometryState {
+                        case .stable: return 0.1   // 10% current: maximum accumulation quality
+                        case .settling: return 0.3 // Moderate blend while parameters converge
+                        default: return 0.5        // Dynamic / gesture active
+                        }
+                    }()
+                    for viewIndex in 0..<viewCount {
+                        let eye = framePreparation.perEye[viewIndex]
+                        let prevVP = previousViewProjMatrices.count > viewIndex
+                            ? previousViewProjMatrices[viewIndex]
+                            : matrix_identity_float4x4
+                        taa.encode(
+                            commandBuffer: commandBuffer,
+                            currentTex: metalFXOutput,
+                            viewIndex: viewIndex,
+                            invProjMatrix: eye.projection.inverse,
+                            invViewMatrix: eye.inverseModelView,
+                            previousViewProjMatrix: prevVP,
+                            blendFactor: blendFactor
+                        )
+                    }
+                    taa.advanceHistory()
+                    // Update previousViewProjMatrices for next frame's reprojection
+                    for viewIndex in 0..<min(viewCount, previousViewProjMatrices.count) {
+                        previousViewProjMatrices[viewIndex] = framePreparation.perEye[viewIndex].projection
+                            * framePreparation.perEye[viewIndex].modelView
+                    }
+                    taaOutputOverride = taa.outputTexture
+                }
+            }
+
             resolveMetalFXOutputToDrawable(
                 commandBuffer: commandBuffer,
                 metalFX: bundle.manager,
                 drawable: drawable,
-                resolutionScale: fragmentPassPlan.resolutionScale
+                resolutionScale: fragmentPassPlan.resolutionScale,
+                taaOutputOverride: taaOutputOverride
             )
         } catch {
             if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
@@ -149,7 +193,7 @@ extension Renderer {
             metalFXManager = nil
         }
 #else
-        _ = (commandBuffer, drawable, fragmentPassPlan)
+        _ = (commandBuffer, drawable, fragmentPassPlan, framePreparation, settingsSnapshot)
 #endif
     }
 
@@ -573,14 +617,16 @@ extension Renderer {
         commandBuffer: MTLCommandBuffer,
         metalFX: MetalFXManager,
         drawable: LayerRenderer.Drawable,
-        resolutionScale: Float
+        resolutionScale: Float,
+        taaOutputOverride: MTLTexture? = nil
     ) {
         guard layerRenderer.configuration.layout == .layered,
               drawable.colorTextures.count == 1,
               drawable.depthTextures.count == 1,
               let colorPipeline = metalFXColorResolvePipeline,
               let depthPipeline = metalFXDepthResolvePipeline,
-              let outputTexture = metalFX.outputTexture,
+              // Use TAA result when available; fall back to MetalFX output for RCAS.
+              let outputTexture = taaOutputOverride ?? metalFX.outputTexture,
               let depthTexture = metalFX.depthTexture else {
             blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
             return
@@ -615,11 +661,12 @@ extension Renderer {
         // Phase 2.6: Adaptive RCAS strength. At resolutionScale ≈ 1.0 there is
         // almost nothing to sharpen, and the 5-tap RCAS branch in the fragment
         // shader is wasted GPU time — zero it out so the shader's early-out
-        // skips it entirely. Ramp linearly from 0 at scale=0.95 to ~0.85 at
-        // scale=0.33 (matches the previous fixed default at low scale).
-        let upscaleAmount = max(0.0, min(1.0, (0.95 - resolutionScale) / 0.62))
+        // skips it entirely. Ramp from 0 the moment any upscale engages
+        // (scale=1.0) up to ~0.95 at the most aggressive scale (0.33) so the
+        // spatial-upscaled image stays crisp across the whole slider range.
+        let upscaleAmount = max(0.0, min(1.0, (1.0 - resolutionScale) / 0.67))
         var params = MetalFXResolveParams()
-        params.rcasStrength = upscaleAmount * 0.85
+        params.rcasStrength = upscaleAmount * 0.95
 
         // Preserve compositor foveation mapping in resolve passes; without this,
         // viewport-space sampling can appear zoomed/cropped per eye.

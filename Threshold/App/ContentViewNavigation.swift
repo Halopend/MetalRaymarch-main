@@ -250,7 +250,37 @@ enum FractalSubTab: String, CaseIterable { case browse = "Browse", shape = "Shap
 enum ShapeInnerTab: String, CaseIterable { case parameters = "Parameters", formula = "Formula" }
 enum ColoringSubTab: String, CaseIterable { case gradient = "Gradient", mapping = "Mapping", grading = "Grading" }
 enum EffectsSubTab: String, CaseIterable { case dynamic = "Dynamic Color", `static` = "Atmosphere" }
-enum SettingsSubTab: String, CaseIterable { case general = "General", exportShare = "Export", devTools = "Dev Tools" }
+/// Inner tabs of the Settings panel. Drives the segmented picker in
+/// `ContentView.settingsTabContent` and the corresponding switch dispatch.
+enum SettingsSubTab: String, CaseIterable, Identifiable {
+    case display   = "Display"
+    case gestures  = "Gestures"
+    case sharing   = "Sharing"
+    case export    = "Export"
+    case advanced  = "Advanced"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .display:   return "rectangle.on.rectangle.angled"
+        case .gestures:  return "hand.draw"
+        case .sharing:   return "person.2.wave.2"
+        case .export:    return "square.and.arrow.up"
+        case .advanced:  return "wrench.and.screwdriver"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .display:   return "Platform, lighting, and visual toggles"
+        case .gestures:  return "Hand and finger gesture controls"
+        case .sharing:   return "Community sharing and iCloud Drive"
+        case .export:    return "Export and share scenes"
+        case .advanced:  return "Profiler, stats, and experimental features"
+        }
+    }
+}
 
 // Used by SaveDestinationSheet (ContentViewComponents.swift); kept internal.
 enum SaveChoice: String, CaseIterable {

@@ -244,31 +244,50 @@ extension ContentView {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
 
+            // Platform section: only relevant on visionOS. The same controls
+            // also live in Settings > Display, which is the canonical home
+            // (and includes a "Show Platform" toggle). The in-Fractal copy
+            // is a quick-adjust affordance while tweaking in the immersive
+            // scene and is hidden entirely on iOS / macOS.
+#if os(visionOS)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Label("Platform", systemImage: "circle.hexagongrid.fill")
                         .font(.headline)
                     Spacer()
-                    Text(String(format: "%.1f m", cache.display.platformRadius))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    if cache.display.platformEnabled {
+                        Text(String(format: "%.1f m", cache.display.platformRadius))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Toggle("Show", isOn: Binding(
+                        get: { cache.display.platformEnabled },
+                        set: { cache.display.platformEnabled = $0 }
+                    ))
+                    .labelsHidden()
+                    .tint(.cyan)
+                    .controlSize(.mini)
                 }
 
-                Text("Controls the glass floor field in the immersive space. The fractal color blends through it so the platform reads as a thick transparent surface.")
+                Text("Controls the glass floor field in the immersive space. The fractal color blends through it so the platform reads as a thick transparent surface. Toggle off for a clean floor-less view.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                EffectSliderRow(icon: "circle.dotted", label: "Radius",
-                    value: Binding(
-                        get: { cache.display.platformRadius },
-                        set: { cache.display.platformRadius = $0 }
-                    ), range: 0.5...3.0,
-                    enabled: .constant(true),
-                    onChanged: { cache.commitPlatformRadius() },
-                    showToggle: false)
+                if cache.display.platformEnabled {
+                    EffectSliderRow(icon: "circle.dotted", label: "Radius",
+                        value: Binding(
+                            get: { cache.display.platformRadius },
+                            set: { cache.display.platformRadius = $0 }
+                        ), range: 0.5...3.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitPlatformRadius() },
+                        showToggle: false)
+                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
+#endif
 
             sphericalInversionSection
 

@@ -91,9 +91,22 @@ actor Renderer {
     // ═══════════════════════════════════════════════════════════════════════════
     private var temporalDepthTextures: [MTLTexture?] = [nil, nil]  // ping-pong
     private var temporalDepthIndex: Int = 0                         // which is "current write"
-    private var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
+    var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
     private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
     private var temporalDepthSize: SIMD2<Int> = .zero
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CUSTOM TAA (Temporal Anti-Aliasing)
+    // MTLFXTemporalScaler is unavailable on visionOS; this provides equivalent
+    // quality by accumulating sub-pixel jittered samples across frames using a
+    // hand-rolled neighbourhood-variance-clamped exponential blend.
+    // Engages automatically whenever MetalFX spatial upscaling is active.
+    // ═══════════════════════════════════════════════════════════════════════════
+    var taaManager: VisionOSTAAManager?
+    // Halton sequence index for sub-pixel jitter (advanced each frame).
+    var taaHaltonIndex: UInt32 = 0
+    // Current frame's jitter in input-pixel units, baked into the fragment uniforms.
+    var taaCurrentJitter: SIMD2<Float> = .zero
     
     // Cached view amplification mappings — avoids per-frame array allocation
     var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []
@@ -318,8 +331,12 @@ actor Renderer {
         // fence cost is negligible and reuse is safe across frames.
         metalFXFence = device.makeFence()
         metalFXFence?.label = "MetalFX Fragment→Scaler"
+
+        // Custom TAA — initialise best-effort; nil means TAA is skipped this session.
+        taaManager = try? VisionOSTAAManager(device: device)
+        if RENDERER_DEBUG { print(taaManager != nil ? "✓ TAA manager ready" : "⚠️ TAA unavailable (taaResolve kernel not found)") }
         #endif
-        
+
         // === BUILD SPECIALIZED PIPELINES FOR QUALITY PRESETS ===
         // Key optimization: Map() inner loop (50-100+ calls per pixel) can be fully unrolled
         // when FC_FRACTAL_ITERATIONS is defined as a compile-time constant.
@@ -893,6 +910,27 @@ actor Renderer {
         let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
         frameBreakdown.updateGameStateMs = (CACurrentMediaTime() - updateGameStateStart) * 1000.0
 
+        // TAA: Advance the Halton sub-pixel jitter each frame and bake it into the
+        // fragment-shader uniforms so each frame's render is offset by a different
+        // fraction of a pixel. TAA accumulates these across frames for free SSAA.
+        #if canImport(MetalFX)
+        if taaManager != nil, settingsSnapshot.resolutionScale < 0.999 {
+            taaHaltonIndex = taaHaltonIndex &+ 1
+            let jx = Self.halton(taaHaltonIndex, base: 2) - 0.5
+            let jy = Self.halton(taaHaltonIndex, base: 3) - 0.5
+            taaCurrentJitter = SIMD2<Float>(jx, jy)
+            // Patch jitterOffset in the already-written uniforms (UnsafeMutablePointer<UniformsArray>).
+            uniforms[uniformBufferIndex].uniforms.0.jitterOffset = taaCurrentJitter
+            uniforms[uniformBufferIndex].uniforms.1.jitterOffset = taaCurrentJitter
+            // Reset TAA history whenever geometry is unstable (parameter changes, gestures).
+            if settingsSnapshot.geometryState != .stable || settingsSnapshot.isGeometryGestureActive {
+                taaManager?.requestReset()
+            }
+        } else {
+            taaCurrentJitter = .zero
+        }
+        #endif
+
         // Begin submission only once CPU updates are complete.
         // Every path from here MUST call drawable.encodePresent() before endSubmission() fires.
         frame.startSubmission()
@@ -1064,7 +1102,9 @@ actor Renderer {
         finishFragmentPass(
             commandBuffer: commandBuffer,
             drawable: drawable,
-            fragmentPassPlan: fragmentPassPlan
+            fragmentPassPlan: fragmentPassPlan,
+            framePreparation: framePreparation,
+            settingsSnapshot: settingsSnapshot
         )
         
         frameBreakdown.renderPathEncodeMs = (CACurrentMediaTime() - renderEncodeStart) * 1000.0
@@ -1582,5 +1622,19 @@ actor Renderer {
             
             print("╚═══════════════════════════════════════════════════════════════╝\n")
         }
+    }
+
+    // Radical-inverse Halton low-discrepancy sequence for sub-pixel TAA jitter.
+    // Shared by both the compute path (RaymarchRenderView) and this renderer.
+    static func halton(_ index: UInt32, base: UInt32) -> Float {
+        var result: Float = 0
+        var fraction: Float = 1
+        var i = index
+        while i > 0 {
+            fraction /= Float(base)
+            result += fraction * Float(i % base)
+            i /= base
+        }
+        return result
     }
 }

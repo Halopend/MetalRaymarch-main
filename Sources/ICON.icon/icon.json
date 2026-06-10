@@ -1,0 +1,115 @@
+{
+  "fill" : "automatic",
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "blend-mode" : "plus-lighter",
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "Front Alt.png",
+          "name" : "Front Alt"
+        },
+        {
+          "blend-mode" : "normal",
+          "fill" : {
+            "solid" : "display-p3:0.17207,0.01490,0.00000,1.00000"
+          },
+          "glass" : false,
+          "hidden" : false,
+          "image-name" : "Front Alt.png",
+          "name" : "Front Alt",
+          "opacity" : 0.84
+        },
+        {
+          "glass-specializations" : [
+            {
+              "value" : true
+            },
+            {
+              "appearance" : "dark",
+              "value" : true
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "group.png",
+          "name" : "group",
+          "opacity" : 1
+        },
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.96673,0.93694,1.00000,1.00000",
+              "display-p3:0.96783,0.73824,0.93021,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.15999412020917125,
+                "y" : 0.11467907588051333
+              },
+              "stop" : {
+                "x" : 0.7547125673860683,
+                "y" : 0.8562946278092989
+              }
+            }
+          },
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "Front@2x.png",
+          "name" : "Front@2x",
+          "position" : {
+            "scale" : 0.6,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode" : "plus-lighter",
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.00000,1.00000,0.24236,1.00000",
+              "display-p3:0.96783,0.00000,0.44727,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.15999412020917125,
+                "y" : 0.11467907588051333
+              },
+              "stop" : {
+                "x" : 0.7547125673860683,
+                "y" : 0.8562946278092989
+              }
+            }
+          },
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "Front@2x.png",
+          "name" : "Front@2x",
+          "position" : {
+            "scale" : 0.6,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
