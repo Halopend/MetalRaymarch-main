@@ -306,4 +306,18 @@ extension EmbeddedFormulaContainer {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(self)
     }
+
+    /// Writes this container to a shareable `.threshfx` file in the temp directory.
+    @MainActor
+    func exportToFile() -> URL? {
+        let fileName = "\(PresetManager.sanitizedExportFileNameStem(formula.name)).threshfx"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        do {
+            try encode().write(to: url)
+            return url
+        } catch {
+            print("Failed to export formula: \(error)")
+            return nil
+        }
+    }
 }

@@ -56,8 +56,7 @@ struct ContentView: View {
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false
-    @State var exportShareURL: URL?
-    @State var showExportShare = false
+    @State var exportShareItem: ExportShareItem?
 
     private let animationKillSwitchDuration: TimeInterval = 0.7
 

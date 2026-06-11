@@ -9,6 +9,13 @@
 
 import SwiftUI
 
+/// Identifiable wrapper so the export share sheet is presented via
+/// `sheet(item:)` — guarantees the URL exists when the sheet body builds.
+struct ExportShareItem: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
 extension ContentView {
     // ═══════════════════════════════════════════════════════════════════════════
     // MARK: - Settings Tab
@@ -463,8 +470,7 @@ extension ContentView {
                             embeddedFormula: appModel.activeEmbeddedFormula
                         )
                         if let url = appModel.presetManager.exportPreset(preset) {
-                            exportShareURL = url
-                            showExportShare = true
+                            exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
                         Label("Export Preset (.threshscene)", systemImage: "doc.badge.arrow.up")
@@ -484,8 +490,7 @@ extension ContentView {
                         )
                         preset.musicReactiveMappings = appModel.renderSettings.musicReactiveMappings
                         if let url = appModel.presetManager.exportPreset(preset) {
-                            exportShareURL = url
-                            showExportShare = true
+                            exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
                         Label("Export Music Preset (.threshmp)", systemImage: "music.note.list")
@@ -497,6 +502,96 @@ extension ContentView {
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(themeColor.opacity(0.06)))
+
+            // ── Saved Presets Export ─────────────────────────────────────
+            VStack(spacing: 8) {
+                HStack {
+                    Label("Saved Presets", systemImage: "square.stack.3d.up")
+                        .font(.headline)
+                    Spacer()
+                }
+                Text("Export saved presets. Presets with audio mappings export as music presets.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if appModel.presetManager.presets.isEmpty {
+                    Text("No saved presets.")
+                        .foregroundStyle(.tertiary)
+                        .font(.subheadline)
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(appModel.presetManager.presets) { preset in
+                        let hasMusic = !(preset.musicReactiveMappings?.isEmpty ?? true)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(preset.name).font(.subheadline.weight(.medium))
+                                HStack(spacing: 6) {
+                                    Text(hasMusic ? ".threshmp" : ".threshscene")
+                                    if hasMusic {
+                                        Label("Music", systemImage: "music.note")
+                                    }
+                                    if preset.embeddedFormula != nil {
+                                        Label("Formula", systemImage: "function")
+                                    }
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                if let url = appModel.presetManager.exportPreset(preset) {
+                                    exportShareItem = ExportShareItem(url: url)
+                                }
+                            } label: {
+                                Image(systemName: "square.and.arrow.up")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(themeColor.opacity(0.06)))
+
+            // ── Custom Formula Export ────────────────────────────────────
+            if let formula = appModel.activeEmbeddedFormula {
+                VStack(spacing: 8) {
+                    HStack {
+                        Label("Custom Formula", systemImage: "function")
+                            .font(.headline)
+                        Spacer()
+                    }
+                    Text("Export the active custom formula as a standalone shader file.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(formula.name).font(.subheadline.weight(.medium))
+                            if let author = formula.author, !author.isEmpty {
+                                Text("by \(author)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button {
+                            if let url = EmbeddedFormulaContainer(formula: formula).exportToFile() {
+                                exportShareItem = ExportShareItem(url: url)
+                            }
+                        } label: {
+                            Label("Export Formula (.threshfx)", systemImage: "doc.badge.arrow.up")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                    }
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.orange.opacity(0.06)))
+            }
 
             // ── Animation Scene Export ───────────────────────────────────
             VStack(spacing: 8) {
@@ -533,8 +628,7 @@ extension ContentView {
                                 Spacer()
                                 Button {
                                     if let url = mgr.exportSceneToFile(scene) {
-                                        exportShareURL = url
-                                        showExportShare = true
+                                        exportShareItem = ExportShareItem(url: url)
                                     }
                                 } label: {
                                     Image(systemName: "square.and.arrow.up")
@@ -565,18 +659,21 @@ extension ContentView {
                     formatRow(ext: ".threshanim", desc: "Animation scene (keyframe sequence)")
                     formatRow(ext: ".threshanimv", desc: "Animation + music (music video)")
                     formatRow(ext: ".threshmp", desc: "Music-reactive preset (audio mappings)")
+                    formatRow(ext: ".threshfx", desc: "Custom formula (standalone shader)")
                 }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
         }
-        .sheet(isPresented: $showExportShare) {
-            if let url = exportShareURL {
-                ShareLink(item: url) {
+        .sheet(item: $exportShareItem) { item in
+            VStack(spacing: 12) {
+                Text(item.url.lastPathComponent)
+                    .font(.subheadline.weight(.medium))
+                ShareLink(item: item.url) {
                     Label("Share File", systemImage: "square.and.arrow.up")
                 }
-                .padding()
             }
+            .padding()
         }
     }
 
