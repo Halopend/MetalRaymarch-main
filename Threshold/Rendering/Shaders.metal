@@ -1239,6 +1239,32 @@ FORCE_INLINE bool relaxedStepUpdate(float h,
     return sorFail;
 }
 
+// Per-type over-relaxation ceiling. Over-stepping is only provably safe when
+// the DE is a true lower bound: box/sphere-fold estimators qualify, but the
+// log-DE types (Mandelbulb / Julia variants) and the fudge-factored Kleinian
+// family can locally OVERESTIMATE, where the overstep-failure test cannot
+// fire and rays tunnel through thin features. Custom .threshfx DEs are
+// arbitrary user code, so they keep the pre-detection 1.2 ceiling that
+// existing shared scenes were authored against. With FC_FRACTAL_TYPE set the
+// switch folds to a constant at pipeline-compile time.
+FORCE_INLINE float relaxedOmegaCap(int type) {
+    switch (type) {
+    case FractalTypeMandelbox:
+    case FractalTypeMenger:
+    case FractalTypeOctahedron:
+    case FractalTypeMengerSphere:
+    case FractalTypeBoxSphereFolder:
+    case FractalTypeMandelboxSphereProjection:
+        return 1.4f;
+    case FractalTypeMandelbulb:
+    case FractalTypeMandelbulbJulia:
+    case FractalTypeQuaternionJulia:
+        return 1.1f;
+    default: // Kleinian family, custom formulas, future types
+        return 1.2f;
+    }
+}
+
 // Raymarch that caches orbit state on hit for reuse in normals/colors
 FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault)
 {
@@ -1277,11 +1303,9 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     // === RELAXED SPHERE TRACING (Keinert et al., "Enhanced Sphere Tracing") ===
     // Take omega× over-relaxed steps; relaxedStepUpdate() retreats inside the
     // last safe sphere when consecutive unbounding spheres stop overlapping.
-    // The failure check guarantees no skipped surfaces ONLY when the DE is a
-    // true lower bound (Mandelbox-style fold estimators). Mandelbulb's analytic
-    // r·log(r)/dr estimate can OVERESTIMATE near poles / fixed points / high
-    // powers, where the test cannot fire — so Mandelbulb keeps a tight cap.
-    float omega = max(isMandelbulb ? min(stepMultiplier, 1.1f) : stepMultiplier, 1.0f);
+    // The ceiling is per fractal type — see relaxedOmegaCap() for why log-DE
+    // and Kleinian/custom estimators must stay closer to 1.
+    float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
     float prevH = 0.0;
     float stepLen = 0.0;
 
@@ -1343,9 +1367,9 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     int maxSteps = max(int(float(baseMaxSteps) * quality * stepScale), 8);
     float endT = startT + 2.0;
 
-    // Relaxed sphere tracing with overstep-failure detection (see SceneWithCache,
-    // including why Mandelbulb's omega stays capped).
-    float omega = max(isMandelbulb ? min(stepMultiplier, 1.1f) : stepMultiplier, 1.0f);
+    // Relaxed sphere tracing with overstep-failure detection; per-type ceiling
+    // (see relaxedOmegaCap for why log-DE/Kleinian/custom stay closer to 1).
+    float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
     float prevH = 0.0;
     float stepLen = 0.0;
 

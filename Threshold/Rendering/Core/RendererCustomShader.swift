@@ -59,6 +59,10 @@ extension Renderer {
     /// (built-in fractal types unaffected).
     func activateEmbeddedFormula(_ formula: EmbeddedFormula?) async throws {
         customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") newHash=\(formula?.shortHash ?? "nil") currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
+        // All custom formulas share FractalTypeCustom, so the warm-start gate's
+        // geometry key cannot tell two .threshfx DEs apart — depth rendered by
+        // the outgoing formula must never seed the incoming one's marches.
+        warmStartGate.invalidate()
         guard let formula else {
             // Deactivate.
             if customShaderLibrary != nil {
