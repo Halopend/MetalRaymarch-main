@@ -132,6 +132,10 @@ actor Renderer {
     // to compile can't hot-loop the compiler.
     var customLibrarySelfHealInFlight = false
     var lastCustomLibrarySelfHealAttempt: TimeInterval = 0
+
+    // MRU list of custom-formula hashes whose specialized pipelines stay
+    // cached (see retainCustomShaderPipelines). Front = most recent.
+    var recentCustomFormulaHashes: [String] = []
     
     // Cached view amplification mappings — avoids per-frame array allocation
     var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []
