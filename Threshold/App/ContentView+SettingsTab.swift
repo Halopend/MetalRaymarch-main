@@ -469,7 +469,7 @@ extension ContentView {
                             name: "Export",
                             embeddedFormula: appModel.activeEmbeddedFormula
                         )
-                        if let url = appModel.presetManager.exportPreset(preset) {
+                        exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                             exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
@@ -489,7 +489,8 @@ extension ContentView {
                             embeddedFormula: appModel.activeEmbeddedFormula
                         )
                         preset.musicReactiveMappings = appModel.renderSettings.musicReactiveMappings
-                        if let url = appModel.presetManager.exportPreset(preset) {
+                        let musicPreset = preset
+                        exportOffMain({ PresetManager.exportPresetFile(musicPreset) }) { url in
                             exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
@@ -540,7 +541,7 @@ extension ContentView {
                             }
                             Spacer()
                             Button {
-                                if let url = appModel.presetManager.exportPreset(preset) {
+                                exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                                     exportShareItem = ExportShareItem(url: url)
                                 }
                             } label: {
@@ -579,7 +580,8 @@ extension ContentView {
                         }
                         Spacer()
                         Button {
-                            if let url = EmbeddedFormulaContainer(formula: formula).exportToFile() {
+                            let container = EmbeddedFormulaContainer(formula: formula)
+                            exportOffMain({ container.exportToFile() }) { url in
                                 exportShareItem = ExportShareItem(url: url)
                             }
                         } label: {
@@ -627,7 +629,7 @@ extension ContentView {
                                 }
                                 Spacer()
                                 Button {
-                                    if let url = mgr.exportSceneToFile(scene) {
+                                    exportOffMain({ AnimationManager.exportSceneFile(scene) }) { url in
                                         exportShareItem = ExportShareItem(url: url)
                                     }
                                 } label: {
@@ -655,11 +657,10 @@ extension ContentView {
                     Spacer()
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    formatRow(ext: ".threshscene", desc: "Fractal preset (settings snapshot)")
-                    formatRow(ext: ".threshanim", desc: "Animation scene (keyframe sequence)")
-                    formatRow(ext: ".threshanimv", desc: "Animation + music (music video)")
-                    formatRow(ext: ".threshmp", desc: "Music-reactive preset (audio mappings)")
-                    formatRow(ext: ".threshfx", desc: "Custom formula (standalone shader)")
+                    // Single source of truth shared with the export writers.
+                    ForEach(ThresholdExportFormat.allCases, id: \.ext) { format in
+                        formatRow(ext: ".\(format.ext)", desc: format.summary)
+                    }
                 }
             }
             .padding(10)

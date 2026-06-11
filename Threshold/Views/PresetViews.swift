@@ -379,7 +379,7 @@ struct PresetsListView: View {
                         }
                         Spacer()
                         Button {
-                            if let url = animationManager.exportSceneToFile(scene) {
+                            exportOffMain({ AnimationManager.exportSceneFile(scene) }) { url in
                                 shareItem = ShareItem(url: url)
                             }
                         } label: {
@@ -453,7 +453,7 @@ struct PresetsListView: View {
                         refreshPresets()
                     },
                     onExport: {
-                        if let url = presetManager.exportPreset(preset) {
+                        exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                             shareItem = ShareItem(url: url)
                         }
                     }
@@ -474,7 +474,7 @@ struct PresetsListView: View {
                     }
 
                     Button {
-                        if let url = presetManager.exportPreset(preset) {
+                        exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                             shareItem = ShareItem(url: url)
                         }
                     } label: {

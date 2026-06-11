@@ -1217,6 +1217,28 @@ struct SceneResult {
     OrbitCache cache;   // Cached orbit state from final hit position
 };
 
+// One step of relaxed sphere tracing (Keinert et al.). Returns true when the
+// previous over-relaxed step overshot (consecutive unbounding spheres no
+// longer overlap): stepLen turns negative to retreat inside the last safe
+// sphere and omega drops to 1 for the rest of the ray. On a normal step,
+// advances stepLen to h·omega. The caller must skip hit registration on a
+// failed step — the sample sits past a possibly-skipped gap.
+FORCE_INLINE bool relaxedStepUpdate(float h,
+                                    thread float& omega,
+                                    thread float& prevH,
+                                    thread float& stepLen)
+{
+    bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
+    if (UNLIKELY(sorFail)) {
+        stepLen -= omega * stepLen;
+        omega = 1.0f;
+    } else {
+        stepLen = h * omega;
+    }
+    prevH = h;
+    return sorFail;
+}
+
 // Raymarch that caches orbit state on hit for reuse in normals/colors
 FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault)
 {
@@ -1253,12 +1275,13 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
 
     // === RELAXED SPHERE TRACING (Keinert et al., "Enhanced Sphere Tracing") ===
-    // Take omega× over-relaxed steps. If consecutive unbounding spheres stop
-    // overlapping, the skipped gap may contain surface: retreat back inside the
-    // last safe sphere and continue conservatively (omega = 1 for this ray).
-    // The failure check makes hits identical to omega = 1 marching, so the full
-    // stepMultiplier is safe for every fractal type, including Mandelbulb.
-    float omega = max(stepMultiplier, 1.0f);
+    // Take omega× over-relaxed steps; relaxedStepUpdate() retreats inside the
+    // last safe sphere when consecutive unbounding spheres stop overlapping.
+    // The failure check guarantees no skipped surfaces ONLY when the DE is a
+    // true lower bound (Mandelbox-style fold estimators). Mandelbulb's analytic
+    // r·log(r)/dr estimate can OVERESTIMATE near poles / fixed points / high
+    // powers, where the test cannot fire — so Mandelbulb keeps a tight cap.
+    float omega = max(isMandelbulb ? min(stepMultiplier, 1.1f) : stepMultiplier, 1.0f);
     float prevH = 0.0;
     float stepLen = 0.0;
 
@@ -1273,15 +1296,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
 
-        bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
-        if (UNLIKELY(sorFail)) {
-            // Retreat inside the previous unbounding sphere; conservative from here.
-            stepLen -= omega * stepLen;
-            omega = 1.0f;
-        } else {
-            stepLen = h * omega;
-        }
-        prevH = h;
+        bool sorFail = relaxedStepUpdate(h, omega, prevH, stepLen);
 
         if(UNLIKELY(h < threshold) && !sorFail)
         {
@@ -1328,8 +1343,9 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     int maxSteps = max(int(float(baseMaxSteps) * quality * stepScale), 8);
     float endT = startT + 2.0;
 
-    // Relaxed sphere tracing with overstep-failure detection (see SceneWithCache).
-    float omega = max(stepMultiplier, 1.0f);
+    // Relaxed sphere tracing with overstep-failure detection (see SceneWithCache,
+    // including why Mandelbulb's omega stays capped).
+    float omega = max(isMandelbulb ? min(stepMultiplier, 1.1f) : stepMultiplier, 1.0f);
     float prevH = 0.0;
     float stepLen = 0.0;
 
@@ -1342,14 +1358,7 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
 
-        bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
-        if (UNLIKELY(sorFail)) {
-            stepLen -= omega * stepLen;
-            omega = 1.0f;
-        } else {
-            stepLen = h * omega;
-        }
-        prevH = h;
+        bool sorFail = relaxedStepUpdate(h, omega, prevH, stepLen);
 
         if(UNLIKELY(h < threshold) && !sorFail)
         {
@@ -2394,7 +2403,20 @@ kernel void taaResolve(
     // instead of a fixed plane makes reprojection correct under head
     // *translation* as well as rotation, so history survives natural head
     // motion instead of being variance-clamped away.
+    //
+    // Closest-depth dilation (5-tap cross, one low-res texel apart): at fractal
+    // silhouettes a full-res pixel can straddle the low-res depth edge, and the
+    // per-frame jitter wobbles which side a raw point-sample lands on. Taking
+    // the NEAREST surface in the neighbourhood (max in reverse-Z) keeps edge
+    // pixels reprojecting with the foreground's motion, so their history
+    // survives instead of being variance-clamped into shimmer.
+    float2 depthTexel = 1.0 / float2(max(sceneDepthTex.get_width(), 1u),
+                                     max(sceneDepthTex.get_height(), 1u));
     float depthZ = sceneDepthTex.sample(pointSampler, uv, eye);
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2( depthTexel.x, 0.0), eye));
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2(-depthTexel.x, 0.0), eye));
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2(0.0,  depthTexel.y), eye));
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2(0.0, -depthTexel.y), eye));
     float4 viewPoint4 = uniforms.invProjMatrix * float4(ndc, depthZ, 1.0);
     float vw = abs(viewPoint4.w) > 1e-6 ? viewPoint4.w : 1e-6;
     float3 viewPt = viewPoint4.xyz / vw;
@@ -2565,12 +2587,12 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // fall back to the full march, so the warm start can never change WHAT is
     // hit — only how fast we find it.
     SceneResult sceneResult;
+    bool needFullMarch = true;
     if (FC_WARM_START_ON && warmStartT > 0.0f) {
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
-        if (sceneResult.distGlow.x >= kRayMissThreshold) {
-            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
-        }
-    } else {
+        needFullMarch = sceneResult.distGlow.x >= kRayMissThreshold;
+    }
+    if (needFullMarch) {
         sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
     }
     ret = sceneResult.distGlow;

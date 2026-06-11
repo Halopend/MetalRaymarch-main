@@ -79,15 +79,26 @@ def export_schema(trace_path: str, schema: str, run_number: int = 1) -> str:
     return out_path
 
 
-def iter_metal_application_intervals(xml_path: str) -> Iterable[IntervalRow]:
-    # Streaming parse to handle big XML files.
-    context = ET.iterparse(xml_path, events=("end",))
+def _iter_resolved_rows(xml_path: str) -> Iterable[ET.Element]:
+    """Stream <row> elements from an xctrace XML export with fmt refs resolved.
 
-    # xctrace export uses <tag id="X" fmt="..."> then later <tag ref="X"/>.
-    # Cache fmt strings by (tag, id) so we can resolve refs while streaming.
+    xctrace writes <tag id="X" fmt="..."> once and <tag ref="X"/> for every
+    later occurrence. This caches fmt strings by (tag, id) while streaming and
+    stamps them onto each row's children and grandchildren before yielding, so
+    consumers only extract fields. Each row element is cleared after the
+    consumer resumes the generator, keeping memory bounded on huge exports.
+    """
+    context = ET.iterparse(xml_path, events=("end",))
     fmt_cache: Dict[Tuple[str, str], str] = {}
 
-    for event, elem in context:
+    def resolve(node: ET.Element) -> None:
+        ref = node.get("ref")
+        if ref and not node.get("fmt"):
+            cached = fmt_cache.get((node.tag, ref))
+            if cached is not None:
+                node.set("fmt", cached)
+
+    for _event, elem in context:
         # Cache any element that defines an id+fmt, so later ref nodes can resolve.
         elem_id = elem.get("id")
         elem_fmt = elem.get("fmt")
@@ -97,6 +108,19 @@ def iter_metal_application_intervals(xml_path: str) -> Iterable[IntervalRow]:
         if elem.tag != "row":
             continue
 
+        for child in list(elem):
+            resolve(child)
+            for sub in list(child):
+                resolve(sub)
+
+        yield elem
+        # Clear to keep memory bounded (runs after the consumer has extracted
+        # this row's fields and resumed the generator).
+        elem.clear()
+
+
+def iter_metal_application_intervals(xml_path: str) -> Iterable[IntervalRow]:
+    for elem in _iter_resolved_rows(xml_path):
         start_ns = 0
         duration_ns = 0
         process_fmt = ""
@@ -109,13 +133,6 @@ def iter_metal_application_intervals(xml_path: str) -> Iterable[IntervalRow]:
         # Children are typed nodes like <start-time>, <duration>, <process>, <formatted-label>, ...
         for child in list(elem):
             tag = child.tag
-            # Resolve referenced nodes like <process ref="3"/> to their cached fmt.
-            ref = child.get("ref")
-            if ref and not child.get("fmt"):
-                cached = fmt_cache.get((tag, ref))
-                if cached is not None:
-                    child.set("fmt", cached)
-
             if tag == "start-time":
                 start_ns = _fmt_to_int(child.text)
             elif tag == "duration":
@@ -132,11 +149,6 @@ def iter_metal_application_intervals(xml_path: str) -> Iterable[IntervalRow]:
                 label_fmt = child.get("fmt") or ""
                 # Often contains a nested <metal-object-label> that is a nicer grouping key
                 for sub in list(child):
-                    sub_ref = sub.get("ref")
-                    if sub_ref and not sub.get("fmt"):
-                        cached = fmt_cache.get((sub.tag, sub_ref))
-                        if cached is not None:
-                            sub.set("fmt", cached)
                     if sub.tag == "metal-object-label":
                         object_label_fmt = sub.get("fmt") or (sub.text or "")
                         break
@@ -152,23 +164,9 @@ def iter_metal_application_intervals(xml_path: str) -> Iterable[IntervalRow]:
             depth=depth,
         )
 
-        # Clear to keep memory bounded
-        elem.clear()
-
 
 def iter_metal_gpu_intervals(xml_path: str) -> Iterable[GPUIntervalRow]:
-    context = ET.iterparse(xml_path, events=("end",))
-    fmt_cache: Dict[Tuple[str, str], str] = {}
-
-    for _event, elem in context:
-        elem_id = elem.get("id")
-        elem_fmt = elem.get("fmt")
-        if elem_id and elem_fmt:
-            fmt_cache[(elem.tag, elem_id)] = elem_fmt
-
-        if elem.tag != "row":
-            continue
-
+    for elem in _iter_resolved_rows(xml_path):
         start_ns = 0
         duration_ns = 0
         latency_ns = 0
@@ -183,12 +181,6 @@ def iter_metal_gpu_intervals(xml_path: str) -> Iterable[GPUIntervalRow]:
 
         for child in list(elem):
             tag = child.tag
-            ref = child.get("ref")
-            if ref and not child.get("fmt"):
-                cached = fmt_cache.get((tag, ref))
-                if cached is not None:
-                    child.set("fmt", cached)
-
             if tag == "start-time":
                 start_ns = _fmt_to_int(child.text)
             elif tag == "duration":
@@ -223,8 +215,6 @@ def iter_metal_gpu_intervals(xml_path: str) -> Iterable[GPUIntervalRow]:
             label_fmt=label_fmt,
             depth=depth,
         )
-
-        elem.clear()
 
 
 def percentile(values: List[float], p: float) -> float:

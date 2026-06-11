@@ -115,14 +115,13 @@ actor Renderer {
     // step budget, full-march fallback on miss). These track whether last
     // frame's depth is trustworthy for that.
     // ═══════════════════════════════════════════════════════════════════════════
-    // False whenever the previous frame didn't render fragment+MetalFX depth
-    // (adaptive compute, Buddhabrot, direct path, MetalFX failure).
-    var fragmentWarmStartValid = false
-    // Depth from a different distance field must never seed warm starts: this
-    // hashes everything that shapes the geometry (fractal type, iterations,
-    // scales, formula params, inversion settings, min distance), so any
-    // same-fractal geometry edit also invalidates the history.
-    var lastWarmStartGeometrySignature: Int = .min
+    // Single owner of warm-start validity (see WarmStartGate in
+    // RendererCoreTypes.swift): paths that don't write fragment depth call
+    // invalidate(), the MetalFX path records the geometry key on success, and
+    // the per-frame uniform patch asks allowsWarmStart(). Continuous geometry
+    // params are compared with a per-frame tolerance so smooth-damp and audio
+    // morphs don't permanently disable the optimization.
+    var warmStartGate = WarmStartGate()
     // Bound on the direct (non-MetalFX) path where pipelines still declare the
     // prev-depth argument; never sampled there (warmStartEnabled == 0).
     var warmStartDummyDepthTexture: MTLTexture?
@@ -997,7 +996,7 @@ actor Renderer {
                 if rendered {
                     // Buddhabrot frames don't write fragment depth — next
                     // fragment frame must not warm-start from stale history.
-                    fragmentWarmStartValid = false
+                    warmStartGate.invalidate()
                     drawable.encodePresent(commandBuffer: commandBuffer)
                     shouldSignalInFlightSemaphore = false
                     commandBuffer.commit()
@@ -1023,7 +1022,7 @@ actor Renderer {
             if computeRendered {
                 // Adaptive-compute frames don't write fragment depth — next
                 // fragment frame must not warm-start from stale history.
-                fragmentWarmStartValid = false
+                warmStartGate.invalidate()
                 drawable.encodePresent(commandBuffer: commandBuffer)
                 shouldSignalInFlightSemaphore = false
                 commandBuffer.commit()
@@ -1057,17 +1056,14 @@ actor Renderer {
         #if canImport(MetalFX)
         if let bundle = fragmentPassPlan.metalFXBundle {
             let res = SIMD2<Float>(Float(bundle.inputWidth), Float(bundle.inputHeight))
-            // Geometry must be unchanged AND settled: a depth history built
-            // from a different distance field (same fractal, new scale /
-            // iterations / formula params / min distance) would let rays march
-            // past newly exposed closer surfaces.
-            let geometrySettled = settingsSnapshot.geometryState == .stable
-                && !settingsSnapshot.isGeometryGestureActive
-            let warmStartOK: Int32 = (fragmentWarmStartValid
-                && bundle.manager.depthHistoryValid
-                && settingsSnapshot.sphericalInversionMode.rawValue == 0
-                && geometrySettled
-                && Self.warmStartGeometrySignature(settingsSnapshot) == lastWarmStartGeometrySignature) ? 1 : 0
+            // WarmStartGate compares the snapshot against the geometry key
+            // recorded when the depth history was written: discrete changes
+            // (fractal type, iterations, inversion) are hard cuts, continuous
+            // params get a small per-frame tolerance — the 0.9×/−0.3 start
+            // margin and full-march fallback absorb bounded one-frame morphs,
+            // so gestures and music reactivity keep the warm start alive.
+            let warmStartOK: Int32 = (bundle.manager.depthHistoryValid
+                && warmStartGate.allowsWarmStart(for: settingsSnapshot)) ? 1 : 0
             uniforms[uniformBufferIndex].uniforms.0.renderResolution = res
             uniforms[uniformBufferIndex].uniforms.1.renderResolution = res
             uniforms[uniformBufferIndex].uniforms.0.warmStartEnabled = warmStartOK
@@ -1139,7 +1135,7 @@ actor Renderer {
         let warmStartDepth = warmStartDummyDepthTexture
         #endif
         if let warmStartDepth {
-            renderEncoder.setFragmentTexture(warmStartDepth, index: 1) // TextureIndexPrevDepth
+            renderEncoder.setFragmentTexture(warmStartDepth, index: FragmentTextureIndex.prevDepth.rawValue)
         }
 
         let viewports = fragmentPassPlan.viewports
