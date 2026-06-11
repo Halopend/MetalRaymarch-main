@@ -125,6 +125,13 @@ actor Renderer {
     // Bound on the direct (non-MetalFX) path where pipelines still declare the
     // prev-depth argument; never sampled there (warmStartEnabled == 0).
     var warmStartDummyDepthTexture: MTLTexture?
+
+    // Custom-formula self-heal bookkeeping (see scheduleCustomLibrarySelfHeal
+    // in RendererCustomShader.swift): set while a recovery activation is in
+    // flight, with a minimum spacing between attempts so a formula that fails
+    // to compile can't hot-loop the compiler.
+    var customLibrarySelfHealInFlight = false
+    var lastCustomLibrarySelfHealAttempt: TimeInterval = 0
     
     // Cached view amplification mappings — avoids per-frame array allocation
     var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []

@@ -15,8 +15,47 @@
 
 import Foundation
 import Metal
+import QuartzCore
 
 extension Renderer {
+
+    // MARK: - Self-heal
+
+    /// Last-resort recovery for frames that arrive with `fractalType == .custom`
+    /// but no compiled custom library. That state means a preset referencing a
+    /// `.threshfx` formula was applied before (or its activation was lost
+    /// across) the renderer's activation — cold-start file opens, immersive
+    /// space re-entry rebinding handlers, or preview/import interleavings can
+    /// all order that way, and without recovery the scene renders fog/sky
+    /// forever. The formula stays registered on AppModel, so the renderer can
+    /// simply re-activate it itself: any ordering bug degrades to a brief sky
+    /// flash instead of a dead scene. Debounced to one attempt per second so a
+    /// formula that genuinely fails to compile cannot hot-loop the compiler.
+    func scheduleCustomLibrarySelfHeal() {
+        let now = CACurrentMediaTime()
+        guard !customLibrarySelfHealInFlight,
+              now - lastCustomLibrarySelfHealAttempt > 1.0 else { return }
+        customLibrarySelfHealInFlight = true
+        lastCustomLibrarySelfHealAttempt = now
+
+        Task { [weak self] in
+            guard let self else { return }
+            let formula = await MainActor.run { self.appModel.activeEmbeddedFormula }
+            if let formula {
+                do {
+                    try await self.activateEmbeddedFormula(formula)
+                    print("🔧 [CustomScene] Self-heal: recompiled '\(formula.name)' after a frame requested it with no library installed")
+                } catch {
+                    print("❌ [CustomScene] Self-heal activation failed for '\(formula.name)': \(error)")
+                }
+            }
+            await self.finishCustomLibrarySelfHeal()
+        }
+    }
+
+    private func finishCustomLibrarySelfHeal() {
+        customLibrarySelfHealInFlight = false
+    }
 
     // MARK: - State
 
