@@ -118,8 +118,11 @@ actor Renderer {
     // False whenever the previous frame didn't render fragment+MetalFX depth
     // (adaptive compute, Buddhabrot, direct path, MetalFX failure).
     var fragmentWarmStartValid = false
-    // Depth from a different fractal type must never seed warm starts.
-    var lastWarmStartFractalType: Int32 = -1
+    // Depth from a different distance field must never seed warm starts: this
+    // hashes everything that shapes the geometry (fractal type, iterations,
+    // scales, formula params, inversion settings, min distance), so any
+    // same-fractal geometry edit also invalidates the history.
+    var lastWarmStartGeometrySignature: Int = .min
     // Bound on the direct (non-MetalFX) path where pipelines still declare the
     // prev-depth argument; never sampled there (warmStartEnabled == 0).
     var warmStartDummyDepthTexture: MTLTexture?
@@ -1054,10 +1057,17 @@ actor Renderer {
         #if canImport(MetalFX)
         if let bundle = fragmentPassPlan.metalFXBundle {
             let res = SIMD2<Float>(Float(bundle.inputWidth), Float(bundle.inputHeight))
+            // Geometry must be unchanged AND settled: a depth history built
+            // from a different distance field (same fractal, new scale /
+            // iterations / formula params / min distance) would let rays march
+            // past newly exposed closer surfaces.
+            let geometrySettled = settingsSnapshot.geometryState == .stable
+                && !settingsSnapshot.isGeometryGestureActive
             let warmStartOK: Int32 = (fragmentWarmStartValid
                 && bundle.manager.depthHistoryValid
                 && settingsSnapshot.sphericalInversionMode.rawValue == 0
-                && settingsSnapshot.fractalType.rawValue == lastWarmStartFractalType) ? 1 : 0
+                && geometrySettled
+                && Self.warmStartGeometrySignature(settingsSnapshot) == lastWarmStartGeometrySignature) ? 1 : 0
             uniforms[uniformBufferIndex].uniforms.0.renderResolution = res
             uniforms[uniformBufferIndex].uniforms.1.renderResolution = res
             uniforms[uniformBufferIndex].uniforms.0.warmStartEnabled = warmStartOK
