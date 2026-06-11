@@ -208,10 +208,19 @@ extension Renderer {
             let scaleCorrectedBubbleRadius = settingsSnapshot.safetyBubbleRadius / max(effectiveScale, 0.001)
             let scaleCorrectedFadeWidth = settingsSnapshot.safetyBubbleFadeWidth / max(effectiveScale, 0.001)
 
+            // Previous frame's view-proj (model → prev clip) for the temporal
+            // depth warm-start. updateGameState runs before finishFragmentPass
+            // rotates these, so they still hold last frame's matrices here.
+            let prevViewProj = viewIndex < previousViewProjMatrices.count
+                ? previousViewProjMatrices[viewIndex]
+                : matrix_identity_float4x4
+
             // Get fovea center from the view's texture map (normalized 0-1)
             return Uniforms(projectionMatrix: projection,
                             modelViewMatrix: modelView,
                             inverseModelViewMatrix: inverseModelView,
+                            previousViewProjMatrix: prevViewProj,
+                            previousInvViewProjMatrix: prevViewProj.inverse,
                             time: frameTime,
                             minDistance: settingsSnapshot.minDistance,
                             fractalScale: settingsSnapshot.fractalScale,
@@ -234,6 +243,9 @@ extension Renderer {
                             colorIterations: settingsSnapshot.colorIterations,
                             limitFlash: settingsSnapshot.limitFlash,
                             activeGesture: Int32(settingsSnapshot.activeGestureIndex),
+                            // Patched after prepareFragmentPassPlan once the MetalFX
+                            // input size (renderResolution) is known.
+                            warmStartEnabled: 0,
                             fractalType: settingsSnapshot.fractalType.rawValue,
                             lightingSoftness: settingsSnapshot.lightingSoftness,
                             sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
@@ -248,7 +260,7 @@ extension Renderer {
                             springVisible: (settingsSnapshot.springActive || simd_length(settingsSnapshot.springDisplacement) > 0.001) ? 1 : 0,
                             springRestRadius: 0.06,
                             jitterOffset: .zero,
-                            _pad_uniforms: [0, 0],
+                            renderResolution: [1, 1],
                             floorPlane: floorCircle.plane,
                             floorCenterRadius: floorCircle.centerRadius,
                             formulaParams: settingsSnapshot.formulaParams,

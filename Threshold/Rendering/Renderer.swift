@@ -107,6 +107,22 @@ actor Renderer {
     var taaHaltonIndex: UInt32 = 0
     // Current frame's jitter in input-pixel units, baked into the fragment uniforms.
     var taaCurrentJitter: SIMD2<Float> = .zero
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TEMPORAL DEPTH WARM-START (fragment path)
+    // The fragment raymarch reprojects last frame's MetalFX depth to start each
+    // ray just in front of the previously-hit surface (narrow window, reduced
+    // step budget, full-march fallback on miss). These track whether last
+    // frame's depth is trustworthy for that.
+    // ═══════════════════════════════════════════════════════════════════════════
+    // False whenever the previous frame didn't render fragment+MetalFX depth
+    // (adaptive compute, Buddhabrot, direct path, MetalFX failure).
+    var fragmentWarmStartValid = false
+    // Depth from a different fractal type must never seed warm starts.
+    var lastWarmStartFractalType: Int32 = -1
+    // Bound on the direct (non-MetalFX) path where pipelines still declare the
+    // prev-depth argument; never sampled there (warmStartEnabled == 0).
+    var warmStartDummyDepthTexture: MTLTexture?
     
     // Cached view amplification mappings — avoids per-frame array allocation
     var cachedViewMappings: [MTLVertexAmplificationViewMapping] = []
@@ -336,6 +352,19 @@ actor Renderer {
         taaManager = try? VisionOSTAAManager(device: device)
         if RENDERER_DEBUG { print(taaManager != nil ? "✓ TAA manager ready" : "⚠️ TAA unavailable (taaResolve kernel not found)") }
         #endif
+
+        // 1×1 placeholder for the warm-start prev-depth argument on frames where
+        // MetalFX is inactive (never sampled: warmStartEnabled stays 0).
+        let dummyDepthDesc = MTLTextureDescriptor()
+        dummyDepthDesc.textureType = .type2DArray
+        dummyDepthDesc.pixelFormat = .depth32Float
+        dummyDepthDesc.width = 1
+        dummyDepthDesc.height = 1
+        dummyDepthDesc.arrayLength = 2
+        dummyDepthDesc.storageMode = .private
+        dummyDepthDesc.usage = [.shaderRead, .renderTarget]
+        warmStartDummyDepthTexture = device.makeTexture(descriptor: dummyDepthDesc)
+        warmStartDummyDepthTexture?.label = "WarmStart Dummy Depth"
 
         // === BUILD SPECIALIZED PIPELINES FOR QUALITY PRESETS ===
         // Key optimization: Map() inner loop (50-100+ calls per pixel) can be fully unrolled
@@ -963,6 +992,9 @@ actor Renderer {
                 )
                 
                 if rendered {
+                    // Buddhabrot frames don't write fragment depth — next
+                    // fragment frame must not warm-start from stale history.
+                    fragmentWarmStartValid = false
                     drawable.encodePresent(commandBuffer: commandBuffer)
                     shouldSignalInFlightSemaphore = false
                     commandBuffer.commit()
@@ -986,6 +1018,9 @@ actor Renderer {
             )
             
             if computeRendered {
+                // Adaptive-compute frames don't write fragment depth — next
+                // fragment frame must not warm-start from stale history.
+                fragmentWarmStartValid = false
                 drawable.encodePresent(commandBuffer: commandBuffer)
                 shouldSignalInFlightSemaphore = false
                 commandBuffer.commit()
@@ -1012,6 +1047,23 @@ actor Renderer {
             settingsSnapshot: settingsSnapshot,
             framePath: framePath
         )
+
+        // === TEMPORAL DEPTH WARM-START: patch per-frame uniforms ===
+        // The MetalFX input size is only known once the pass plan exists, so the
+        // warm-start fields are patched here (same pattern as the TAA jitter).
+        #if canImport(MetalFX)
+        if let bundle = fragmentPassPlan.metalFXBundle {
+            let res = SIMD2<Float>(Float(bundle.inputWidth), Float(bundle.inputHeight))
+            let warmStartOK: Int32 = (fragmentWarmStartValid
+                && bundle.manager.depthHistoryValid
+                && settingsSnapshot.sphericalInversionMode.rawValue == 0
+                && settingsSnapshot.fractalType.rawValue == lastWarmStartFractalType) ? 1 : 0
+            uniforms[uniformBufferIndex].uniforms.0.renderResolution = res
+            uniforms[uniformBufferIndex].uniforms.1.renderResolution = res
+            uniforms[uniformBufferIndex].uniforms.0.warmStartEnabled = warmStartOK
+            uniforms[uniformBufferIndex].uniforms.1.warmStartEnabled = warmStartOK
+        }
+        #endif
 
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: fragmentPassPlan.renderPassDescriptor) else {
             if RENDERER_DEBUG { print("⚠️ Failed to create render encoder; skipping frame") }
@@ -1066,6 +1118,19 @@ actor Renderer {
         
         // Also bind uniforms buffer for fragment shader since it now needs access to uniforms
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset:uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
+
+        // Previous-frame depth for the temporal march warm-start. Pipelines built
+        // via buildRenderPipelineWithDevice declare this argument (FC_WARM_START);
+        // when MetalFX is inactive the dummy satisfies validation and is never
+        // sampled (warmStartEnabled == 0).
+        #if canImport(MetalFX)
+        let warmStartDepth = fragmentPassPlan.metalFXBundle?.manager.previousDepthTexture ?? warmStartDummyDepthTexture
+        #else
+        let warmStartDepth = warmStartDummyDepthTexture
+        #endif
+        if let warmStartDepth {
+            renderEncoder.setFragmentTexture(warmStartDepth, index: 1) // TextureIndexPrevDepth
+        }
 
         let viewports = fragmentPassPlan.viewports
         renderEncoder.setViewports(viewports)

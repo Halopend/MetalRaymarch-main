@@ -39,7 +39,8 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
-    TextureIndexColor    = 0
+    TextureIndexColor    = 0,
+    TextureIndexPrevDepth = 1   // Previous-frame depth for temporal march warm-start
 };
 
 // Function constant indices for shader specialization
@@ -59,6 +60,7 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexShareShadows        = 10, // bool: Share shadows (set in shader)
     FCIndexShadowsEnabled      = 11, // bool: Toggle shadow computation
     FCIndexMandelbulbPower     = 12, // int: Bake Mandelbulb power for fastPowR optimization
+    FCIndexWarmStart           = 13, // bool: Compile in temporal-depth march warm-start (visionOS fragment path)
 };
 
 // Fractal type selection
@@ -212,6 +214,9 @@ typedef struct
     matrix_float4x4 projectionMatrix;
     matrix_float4x4 modelViewMatrix;
     matrix_float4x4 inverseModelViewMatrix;
+    // === TEMPORAL DEPTH WARM-START (fragment path) ===
+    matrix_float4x4 previousViewProjMatrix;     // Prev frame projection*modelView (model space → prev clip)
+    matrix_float4x4 previousInvViewProjMatrix;  // Inverse of the above (prev clip → model space)
     float time;
     float minDistance;
     float fractalScale;
@@ -231,6 +236,7 @@ typedef struct
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
+    int warmStartEnabled;    // 1 = previous-frame depth texture is valid for march warm-start
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode; // 0=off, 1=outward-in ray inversion
@@ -249,7 +255,7 @@ typedef struct
     float springRestRadius;           // Blob rest radius in NDC units
     
     vector_float2 jitterOffset; // Sub-pixel jitter in pixels (±0.5 range)
-    vector_float2 _pad_uniforms; // Align to 16 bytes
+    vector_float2 renderResolution; // Render-target size in pixels (warm-start UV); also pads to 16 bytes
     vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     

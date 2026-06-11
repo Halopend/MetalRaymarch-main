@@ -45,7 +45,12 @@ final class VisionOSTAAManager {
               let fn = library.makeFunction(name: "taaResolve") else {
             throw VisionOSTAAError.metalLibraryUnavailable
         }
-        pipeline = try device.makeComputePipelineState(function: fn)
+        let p = try device.makeComputePipelineState(function: fn)
+        // The cooperative tile load dispatches exact 16×16 threadgroups.
+        guard p.maxTotalThreadsPerThreadgroup >= Self.tileSize * Self.tileSize else {
+            throw VisionOSTAAError.metalLibraryUnavailable
+        }
+        pipeline = p
     }
 
     // Call once per frame before encode(). Returns false if texture allocation failed.
@@ -85,13 +90,20 @@ final class VisionOSTAAManager {
     // Force history discard on the next encode (camera cut, parameter change, etc.)
     func requestReset() { needsReset = true }
 
+    // Threadgroup edge length of the taaResolve kernel's cooperative tile.
+    // Must match TAA_TILE in Shaders.metal.
+    private static let tileSize = 16
+
     // Encode the TAA resolve pass for one eye.
     // currentTex: the MetalFX spatial output (bgra8Unorm_srgb, full-res 2D array).
+    // sceneDepthTex: the low-res raymarch depth target (sampled in UV space) so
+    //                reprojection uses real per-pixel depth, not a fixed plane.
     // blendFactor: 0.1 when stable, 0.3-0.5 while parameters are settling. Overridden
     //              with 1.0 when needsReset is set.
     func encode(
         commandBuffer: MTLCommandBuffer,
         currentTex: MTLTexture,
+        sceneDepthTex: MTLTexture,
         viewIndex: Int,
         invProjMatrix: matrix_float4x4,
         invViewMatrix: matrix_float4x4,
@@ -108,10 +120,11 @@ final class VisionOSTAAManager {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         encoder.label = "TAA Resolve Eye \(viewIndex)"
         encoder.setComputePipelineState(pipeline)
-        encoder.setTexture(currentTex, index: 0)
-        encoder.setTexture(histRead,   index: 1)
-        encoder.setTexture(histWrite,  index: 2)
-        encoder.setTexture(output,     index: 3)
+        encoder.setTexture(currentTex,    index: 0)
+        encoder.setTexture(histRead,      index: 1)
+        encoder.setTexture(histWrite,     index: 2)
+        encoder.setTexture(output,        index: 3)
+        encoder.setTexture(sceneDepthTex, index: 4)
 
         var u = TAATileUniforms(
             invProjMatrix:          invProjMatrix,
@@ -123,11 +136,13 @@ final class VisionOSTAAManager {
         )
         encoder.setBytes(&u, length: MemoryLayout<TAATileUniforms>.stride, index: 0)
 
-        let w = pipeline.threadExecutionWidth
-        let h = pipeline.maxTotalThreadsPerThreadgroup / w
-        encoder.dispatchThreads(
-            MTLSize(width: size.x, height: size.y, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1)
+        // The kernel's cooperative tile load requires exact tileSize×tileSize
+        // threadgroups; out-of-bounds threads still participate in the load
+        // and are bounds-checked at write time.
+        let tile = Self.tileSize
+        encoder.dispatchThreadgroups(
+            MTLSize(width: (size.x + tile - 1) / tile, height: (size.y + tile - 1) / tile, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: tile, height: tile, depth: 1)
         )
         encoder.endEncoding()
     }

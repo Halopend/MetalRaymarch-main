@@ -47,6 +47,14 @@ extension Renderer {
             var shareShadows = true
             constants.setConstantValue(&shareShadows, type: .bool, index: 10)
         }
+        if fragmentFunctionName == "fragmentShader" {
+            // FC_WARM_START (index 13): compile in the temporal-depth march
+            // warm-start (prev-depth texture argument + reprojection). Runtime
+            // engagement is still gated per frame via uniforms.warmStartEnabled.
+            // Screenshot and Mac pipelines bypass this helper and compile it out.
+            var warmStart = true
+            constants.setConstantValue(&warmStart, type: .bool, index: 13) // FCIndexWarmStart
+        }
         fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()

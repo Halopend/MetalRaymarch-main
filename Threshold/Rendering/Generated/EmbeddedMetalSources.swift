@@ -55,7 +55,8 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
-    TextureIndexColor    = 0
+    TextureIndexColor    = 0,
+    TextureIndexPrevDepth = 1   // Previous-frame depth for temporal march warm-start
 };
 
 // Function constant indices for shader specialization
@@ -75,6 +76,7 @@ typedef NS_ENUM(EnumBackingType, FunctionConstantIndex)
     FCIndexShareShadows        = 10, // bool: Share shadows (set in shader)
     FCIndexShadowsEnabled      = 11, // bool: Toggle shadow computation
     FCIndexMandelbulbPower     = 12, // int: Bake Mandelbulb power for fastPowR optimization
+    FCIndexWarmStart           = 13, // bool: Compile in temporal-depth march warm-start (visionOS fragment path)
 };
 
 // Fractal type selection
@@ -228,6 +230,9 @@ typedef struct
     matrix_float4x4 projectionMatrix;
     matrix_float4x4 modelViewMatrix;
     matrix_float4x4 inverseModelViewMatrix;
+    // === TEMPORAL DEPTH WARM-START (fragment path) ===
+    matrix_float4x4 previousViewProjMatrix;     // Prev frame projection*modelView (model space → prev clip)
+    matrix_float4x4 previousInvViewProjMatrix;  // Inverse of the above (prev clip → model space)
     float time;
     float minDistance;
     float fractalScale;
@@ -247,6 +252,7 @@ typedef struct
     float colorIterations;   // How many iterations contribute to color
     float limitFlash;        // Edge flash when gesture hits limit (0-1)
     int activeGesture;       // Currently active gesture (0=none, 1=index, 2=middle, 3=ring, 4=pinky)
+    int warmStartEnabled;    // 1 = previous-frame depth texture is valid for march warm-start
     int fractalType;         // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode; // 0=off, 1=outward-in ray inversion
@@ -265,7 +271,7 @@ typedef struct
     float springRestRadius;           // Blob rest radius in NDC units
     
     vector_float2 jitterOffset; // Sub-pixel jitter in pixels (±0.5 range)
-    vector_float2 _pad_uniforms; // Align to 16 bytes
+    vector_float2 renderResolution; // Render-target size in pixels (warm-start UV); also pads to 16 bytes
     vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     
@@ -356,6 +362,19 @@ typedef struct
     PrecomputedFog precomputedFog;                // Fog helpers
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
+
+// === CUSTOM TAA (Temporal Anti-Aliasing) UNIFORMS ===
+// Used by the visionOS `taaResolve` compute kernel.
+// MTLFXTemporalScaler is unavailable on visionOS; this drives a hand-rolled
+// TAA pass that accumulates jittered sub-pixel samples across frames.
+typedef struct {
+    matrix_float4x4 invProjMatrix;           // Current frame inverse projection (per-eye)
+    matrix_float4x4 invViewMatrix;           // Current frame inverse model-view (per-eye)
+    matrix_float4x4 previousViewProjMatrix;  // Previous frame model-view-projection (per-eye)
+    vector_float2   resolution;              // Full output dimensions (pixels)
+    float           blendFactor;             // Current:history ratio — 0.1 steady, 1.0 on reset
+    uint32_t        eyeIndex;                // 0 = left, 1 = right
+} TAATileUniforms;
 
 // Include Buddhabrot types so they're visible through the bridging header
 #include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
@@ -1888,6 +1907,12 @@ constant bool FC_SHADOWS_ENABLED [[function_constant(11)]];
 // branches in fastPowR and constant-folds power multiplications in the inner loop.
 constant int FC_MANDELBULB_POWER [[function_constant(12)]];
 
+// Temporal-depth march warm-start (visionOS fragment path). When unset (Mac,
+// screenshot, quad-shared pipelines) the prev-depth texture argument and the
+// warm-start code are compiled out entirely.
+constant bool FC_WARM_START [[function_constant(13)]];
+constant bool FC_WARM_START_ON = is_function_constant_defined(FC_WARM_START) ? FC_WARM_START : false;
+
 // Include the fractal formula library (non-Mandelbox DE functions + dispatch)
 // Must be after metal_stdlib, ShaderTypes.h, and function constants so that
 // formula headers can reference FC_* constants (e.g. FC_MANDELBULB_POWER).
@@ -3026,24 +3051,44 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     }
     
     float glow = 0.0;
-    
+
     // When FC_MAX_RAY_STEPS is defined, baseMaxSteps is compile-time constant
     // and compiler can make optimal unrolling decisions per quality preset
     const int baseMaxSteps = is_function_constant_defined(FC_MAX_RAY_STEPS) ? FC_MAX_RAY_STEPS : maxStepsParam;
     int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
-    
+
+    // === RELAXED SPHERE TRACING (Keinert et al., "Enhanced Sphere Tracing") ===
+    // Take omega× over-relaxed steps. If consecutive unbounding spheres stop
+    // overlapping, the skipped gap may contain surface: retreat back inside the
+    // last safe sphere and continue conservatively (omega = 1 for this ray).
+    // The failure check makes hits identical to omega = 1 marching, so the full
+    // stepMultiplier is safe for every fractal type, including Mandelbulb.
+    float omega = max(stepMultiplier, 1.0f);
+    float prevH = 0.0;
+    float stepLen = 0.0;
+
     for(int j = 0; j < maxSteps; j++)
     {
         // Mandelbulb needs ~4x finer threshold (its DE returns much smaller values).
         float threshold = isMandelbulb
             ? fma(t, 0.0002f, 0.00012f) + (1.0f - quality) * 0.001f
             : fma(t, 0.0008f, 0.0005f)  + (1.0f - quality) * 0.003f;
-        
+
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
-        
-        if(UNLIKELY(h < threshold))
+
+        bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
+        if (UNLIKELY(sorFail)) {
+            // Retreat inside the previous unbounding sphere; conservative from here.
+            stepLen -= omega * stepLen;
+            omega = 1.0f;
+        } else {
+            stepLen = h * omega;
+        }
+        prevH = h;
+
+        if(UNLIKELY(h < threshold) && !sorFail)
         {
             // Re-iterate with full orbit cache + Jacobian for normals/colors.
             OrbitCache hitCache;
@@ -3052,18 +3097,13 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
             result.distGlow = float2(t, saturate(glow * 0.25));
             return result;
         }
-        
+
         if (UNLIKELY(t > maxRayDistance)) break;
-        
+
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
-        // STEP OVER-RELAXATION (GMT-fractals technique)
-        // stepMultiplier > 1.0 takes larger steps, converging faster at the risk
-        // of stepping through thin features. 1.2-1.5 is safe for Mandelbox;
-        // Mandelbulb DE is conservative enough for mild 1.05× over-relaxation
-        // which saves ~5% march steps without visible artifact.
-        t += h * (isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier);
+        t += stepLen;
     }
-    
+
     result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
     return result;
 }
@@ -3092,7 +3132,12 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     float stepScale = (startT > 1.0f) ? 0.25f : 0.5f;
     int maxSteps = max(int(float(baseMaxSteps) * quality * stepScale), 8);
     float endT = startT + 2.0;
-    
+
+    // Relaxed sphere tracing with overstep-failure detection (see SceneWithCache).
+    float omega = max(stepMultiplier, 1.0f);
+    float prevH = 0.0;
+    float stepLen = 0.0;
+
     for(int j = 0; j < maxSteps; j++)
     {
         float threshold = isMandelbulb
@@ -3101,8 +3146,17 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         float3 p = fma(rD, float3(t), rO);
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
-        
-        if(UNLIKELY(h < threshold))
+
+        bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
+        if (UNLIKELY(sorFail)) {
+            stepLen -= omega * stepLen;
+            omega = 1.0f;
+        } else {
+            stepLen = h * omega;
+        }
+        prevH = h;
+
+        if(UNLIKELY(h < threshold) && !sorFail)
         {
             // Re-iterate with full orbit cache for normals/colors.
             OrbitCache hitCache;
@@ -3111,13 +3165,11 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
             result.distGlow = float2(t, saturate(glow * 0.25));
             return result;
         }
-        
+
         if (UNLIKELY(t > endT)) break;
-        
+
         glow = fma(saturate(0.04 - h), glowIntensity, glow);
-        // STEP OVER-RELAXATION (GMT-fractals technique)
-        // Mild 1.05× over-relaxation for Mandelbulb — saves ~5% march steps.
-        t += h * (isMandelbulb ? min(stepMultiplier, 1.05f) : stepMultiplier);
+        t += stepLen;
     }
     
     result.distGlow = float2(kRayMissThreshold + 100.0, saturate(glow * 0.25));
@@ -3423,6 +3475,17 @@ FORCE_INLINE void accumulateDepthSample(float d, thread int& hitCount, thread fl
         hitCount++;
         minHitDepth = min(minHitDepth, d);
     }
+}
+
+// sRGB encode for compute kernel output.
+// Fragment shaders writing to bgra8Unorm_srgb attachments get hardware linear→sRGB
+// encoding for free. Compute kernel writes bypass that hardware stage, so we apply
+// the IEC 61966-2-1 piecewise function manually before writing.
+FORCE_INLINE float3 linearToSRGB(float3 c) {
+    c = saturate(c);
+    float3 lo = c * 12.92;
+    float3 hi = powr(c, float3(1.0 / 2.4)) * 1.055 - 0.055;
+    return select(hi, lo, c < 0.0031308);
 }
 
 // === ADAPTIVE HIERARCHICAL 8x8 TILE KERNEL ===
@@ -3816,7 +3879,7 @@ kernel void adaptiveHierarchical8x8(
         col = PostEffectsWithScheme(col, texCoord, uniforms.colorScheme, uniforms.precomputedAudio, half(uniforms.limitFlash), 0.0h);
         FloorCircleHit floorHit = evaluateFloorCircle(cameraPos, rd, kRayMissThreshold + 100.0f, uniforms.floorPlane, uniforms.floorCenterRadius);
         col = compositeFloorCircle(col, floorHit);
-        float4 currentColor = float4(float3(col), 1.0);
+        float4 currentColor = float4(linearToSRGB(float3(col)), 1.0);
         outputTexture.write(currentColor, pixelCoord, uniforms.eyeIndex);
         // Write miss depth so next frame knows this pixel was empty
         curDepthTexture.write(float4(kRayMissThreshold + 100.0, 0, 0, 0), pixelCoord, uniforms.eyeIndex);
@@ -4012,7 +4075,7 @@ kernel void adaptiveHierarchical8x8(
         }
     }
     
-    float4 finalColor = float4(float3(col), 1.0);
+    float4 finalColor = float4(linearToSRGB(float3(col)), 1.0);
 
     // === COHERENT-PACKET LAYER-OF-ACCEPTANCE OVERLAY (Stage 0) ===
     // Applied after shading so the tint is unambiguous. Engages whenever the
@@ -4036,6 +4099,144 @@ kernel void adaptiveHierarchical8x8(
     }
 
     outputTexture.write(finalColor, pixelCoord, uniforms.eyeIndex);
+}
+
+// =============================================================================
+// CUSTOM TAA — Temporal Anti-Aliasing / accumulation resolve
+//
+// MTLFXTemporalScaler is unavailable on visionOS. This kernel provides the
+// equivalent: it blends the current (jittered) frame with a reprojected history
+// buffer, accumulating sub-pixel Halton samples across frames for free
+// super-sampling quality.
+//
+// Pipeline position (fragment path):
+//   low-res render (jittered) → MetalFX spatial → [this kernel] → RCAS resolve → drawable
+//
+// Texture bindings:
+//   0: currentTex     – MetalFX output (bgra8Unorm_srgb, full-res 2D array)
+//   1: histReadTex    – Previous TAA result (rgba16Float, full-res 2D array, ping-pong read)
+//   2: histWriteTex   – New TAA result to persist (rgba16Float, full-res 2D array, ping-pong write)
+//   3: outputTex      – TAA output this frame (rgba16Float, full-res 2D array)
+//                       fed into the existing RCAS resolve pass instead of MetalFX output
+// =============================================================================
+// IEC 61966-2-1 sRGB → linear decode. Used by the TAA kernel because
+// access::read on a bgra8Unorm_srgb texture returns raw (gamma-encoded) bytes;
+// sRGB sampling in compute via access::sample is not guaranteed on all visionOS
+// GPU driver configurations, so we decode manually to stay on solid ground.
+FORCE_INLINE float3 taa_srgbToLinear(float3 c) {
+    c = saturate(c);
+    float3 lo = c / 12.92;
+    float3 hi = powr(max(c, float3(0.04045)) * (1.0 / 1.055) + (0.055 / 1.055), float3(2.4));
+    return select(hi, lo, c < 0.04045);
+}
+
+// Threadgroup tile geometry: 16×16 threads, each tile cooperatively loads its
+// 18×18 halo of decoded texels so every texel is sRGB-decoded exactly ONCE
+// instead of ~9× (once per neighbouring pixel's variance-clamp window).
+#define TAA_TILE 16
+#define TAA_HALO (TAA_TILE + 2)
+
+kernel void taaResolve(
+    uint2 gid  [[thread_position_in_grid]],
+    uint2 lid  [[thread_position_in_threadgroup]],
+    uint2 tgid [[threadgroup_position_in_grid]],
+    texture2d_array<float, access::read>   currentTex    [[texture(0)]],
+    texture2d_array<float, access::sample> histReadTex   [[texture(1)]],
+    texture2d_array<float, access::write>  histWriteTex  [[texture(2)]],
+    texture2d_array<float, access::write>  outputTex     [[texture(3)]],
+    depth2d_array<float, access::sample>   sceneDepthTex [[texture(4)]],
+    constant TAATileUniforms& uniforms                   [[buffer(0)]]
+) {
+    threadgroup float3 tile[TAA_HALO][TAA_HALO];
+
+    uint2 texSize = uint2(uniforms.resolution);
+    uint eye = uniforms.eyeIndex;
+    const int2 texSizeM1 = int2(texSize) - 1;
+
+    // === Cooperative tile load: 18×18 texels, decoded once each ===
+    // All threads participate (no early return before the barrier).
+    {
+        int2 tileOrigin = int2(tgid) * TAA_TILE - 1;
+        uint linearId = lid.y * TAA_TILE + lid.x;
+        for (uint slot = linearId; slot < TAA_HALO * TAA_HALO; slot += TAA_TILE * TAA_TILE) {
+            int2 offs = int2(slot % TAA_HALO, slot / TAA_HALO);
+            uint2 coord = uint2(clamp(tileOrigin + offs, int2(0), texSizeM1));
+            tile[offs.y][offs.x] = taa_srgbToLinear(currentTex.read(coord, eye).rgb);
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (gid.x >= texSize.x || gid.y >= texSize.y) return;
+
+    float2 rcpRes = 1.0 / float2(texSize);
+    float2 uv = (float2(gid) + 0.5) * rcpRes;
+
+    // Bilinear sampler for history (rgba16Float, linear; bilinear for sub-pixel reprojection)
+    constexpr sampler linSampler(filter::linear, address::clamp_to_edge);
+    constexpr sampler pointSampler(filter::nearest, address::clamp_to_edge);
+
+    // === Current frame color + 3×3 neighbourhood min/max from the shared tile ===
+    const int2 lp = int2(lid) + 1;
+    float3 current = tile[lp.y][lp.x];
+    float3 nMin = current, nMax = current;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            if (dx == 0 && dy == 0) continue;
+            float3 s = tile[lp.y + dy][lp.x + dx];
+            nMin = min(nMin, s);
+            nMax = max(nMax, s);
+        }
+    }
+
+    // === Reproject current pixel into previous frame to find history UV ===
+    // UV → NDC (Metal: Y up in NDC, Y down in texture space)
+    float2 ndc = uv * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+
+    // NDC → view space at the pixel's REAL scene depth. The raymarch writes
+    // clip-space z/w for hits (and a tiny far-plane value for misses), and the
+    // low-res depth target is sampled here in normalized UV. Using true depth
+    // instead of a fixed plane makes reprojection correct under head
+    // *translation* as well as rotation, so history survives natural head
+    // motion instead of being variance-clamped away.
+    float depthZ = sceneDepthTex.sample(pointSampler, uv, eye);
+    float4 viewPoint4 = uniforms.invProjMatrix * float4(ndc, depthZ, 1.0);
+    float vw = abs(viewPoint4.w) > 1e-6 ? viewPoint4.w : 1e-6;
+    float3 viewPt = viewPoint4.xyz / vw;
+
+    // View → model space
+    float3 modelPt = (uniforms.invViewMatrix * float4(viewPt, 1.0)).xyz;
+
+    // Model → previous frame clip space
+    float4 prevClip = uniforms.previousViewProjMatrix * float4(modelPt, 1.0);
+
+    bool reprojectValid = abs(prevClip.w) > 1e-5;
+    float2 prevUV = float2(0.5);
+    if (reprojectValid) {
+        float2 prevNDC = prevClip.xy / prevClip.w;
+        prevUV = prevNDC * 0.5 + 0.5;
+        prevUV.y = 1.0 - prevUV.y;
+        reprojectValid = all(prevUV >= float2(0.0)) && all(prevUV <= float2(1.0));
+    }
+
+    // === Sample history and variance-clamp to prevent ghosting ===
+    float3 history;
+    float blend;
+    if (reprojectValid) {
+        history = histReadTex.sample(linSampler, prevUV, eye).rgb;
+        history = clamp(history, nMin, nMax);
+        blend = uniforms.blendFactor;
+    } else {
+        // Pixel moved off-screen — no valid history, fully trust current
+        history = current;
+        blend = 1.0;
+    }
+
+    // === Temporal blend: history × (1−blend) + current × blend ===
+    float3 result = mix(history, current, blend);
+
+    histWriteTex.write(float4(result, 1.0), gid, eye);
+    outputTex.write(float4(result, 1.0), gid, eye);
 }
 
 // === SPRING BLOB NAVIGATION WIDGET ===
@@ -4133,7 +4334,8 @@ FORCE_INLINE half3 compositeSpringBlob(half3 col, float2 uv, Uniforms uniforms) 
 inline FragmentOutput fragmentMain(ColorInOut in,
                                    Uniforms uniforms,
                                    float2 fragCoord,
-                                   float time)
+                                   float time,
+                                   float warmStartT = -1.0f)
 {
     FragmentOutput output;
     
@@ -4160,8 +4362,22 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     half3 col = half3(0.0h);
     float2 ret;
     OrbitCache hitCache = makeEmptyOrbitCache();
-    
-    SceneResult sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
+
+    // === TEMPORAL DEPTH WARM-START ===
+    // When the caller reprojected a valid previous-frame hit distance, march a
+    // narrow window around it with a reduced step budget (typically ~5-10 steps
+    // instead of hundreds). On a window miss (disocclusion / stale history) we
+    // fall back to the full march, so the warm start can never change WHAT is
+    // hit — only how fast we find it.
+    SceneResult sceneResult;
+    if (FC_WARM_START_ON && warmStartT > 0.0f) {
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
+        if (sceneResult.distGlow.x >= kRayMissThreshold) {
+            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
+        }
+    } else {
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
+    }
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
 
@@ -4258,21 +4474,81 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     return output;
 }
 
+// Reproject this pixel's ray into the previous frame's depth buffer and return
+// a conservative march start distance, or -1 when no valid history exists.
+// Mirrors the warm-start scheme already proven in adaptiveHierarchical8x8:
+// same-pixel probe → refine via reprojection → start at 0.9× the hit distance
+// (SceneWithCacheFromStart additionally backs off another 0.3 units).
+FORCE_INLINE float computeWarmStartT(
+    float2 fragCoord,
+    uint eyeIndex,
+    constant Uniforms& uniforms,
+    float3 marchOrigin,
+    float3 marchDir,
+    depth2d_array<float, access::sample> prevDepthTex)
+{
+    if (uniforms.warmStartEnabled == 0) return -1.0f;
+
+    constexpr sampler warmSampler(filter::nearest, address::clamp_to_edge);
+    // Miss pixels write ~1e-7 (far in reverse-Z); treat anything at or below
+    // that as "no surface" history.
+    constexpr float kValidDepthMin = 5e-7f;
+
+    float2 uv = fragCoord / uniforms.renderResolution;
+    float dSame = prevDepthTex.sample(warmSampler, uv, eyeIndex);
+    if (dSame <= kValidDepthMin) return -1.0f;
+
+    // Same-pixel probe: previous clip → model space point.
+    float2 ndc0 = float2(fma(uv.x, 2.0f, -1.0f), -fma(uv.y, 2.0f, -1.0f));
+    float4 m0 = uniforms.previousInvViewProjMatrix * float4(ndc0, dSame, 1.0f);
+    if (abs(m0.w) <= 1e-6f) return -1.0f;
+    float tGuess = dot(m0.xyz / m0.w - marchOrigin, marchDir);
+    if (tGuess <= 0.0f) return -1.0f;
+
+    // Refine: project the guess point on OUR ray into the previous frame and
+    // read the depth where it actually landed.
+    float3 probe = fma(marchDir, float3(tGuess), marchOrigin);
+    float4 prevClip = uniforms.previousViewProjMatrix * float4(probe, 1.0f);
+    if (prevClip.w <= 1e-5f) return -1.0f;
+    float2 prevNDC = prevClip.xy / prevClip.w;
+    float2 prevUV = float2(fma(prevNDC.x, 0.5f, 0.5f), fma(prevNDC.y, -0.5f, 0.5f));
+    if (any(prevUV < 0.0f) || any(prevUV > 1.0f)) return -1.0f;
+
+    float dRef = prevDepthTex.sample(warmSampler, prevUV, eyeIndex);
+    if (dRef <= kValidDepthMin) return -1.0f;
+    float4 m1 = uniforms.previousInvViewProjMatrix * float4(prevNDC, dRef, 1.0f);
+    if (abs(m1.w) <= 1e-6f) return -1.0f;
+    float tRef = dot(m1.xyz / m1.w - marchOrigin, marchDir);
+    if (tRef <= 0.0f || tRef >= kRayMissThreshold) return -1.0f;
+
+    return tRef * 0.9f;
+}
+
 fragment FragmentOutput fragmentShader(ColorInOut in [[stage_in]],
                                constant UniformsArray & uniformsArray [[buffer(BufferIndexUniforms)]],
-                               ushort ampId [[amplification_id]])
+                               ushort ampId [[amplification_id]],
+                               depth2d_array<float, access::sample> prevDepthTex [[texture(TextureIndexPrevDepth), function_constant(FC_WARM_START_ON)]])
 {
-    Uniforms uniforms = uniformsArray.uniforms[ampId];
+    constant Uniforms& uniforms = uniformsArray.uniforms[ampId];
     float2 fragCoord = in.position.xy;
-    
+
     // === GMT-FRACTALS: Halton Sub-Pixel Jitter ===
     // Apply sub-pixel jitter for temporal AA when geometry is stable.
     // This shifts the ray slightly each frame, providing free supersampling
     // via the display's temporal integration at 90Hz.
     fragCoord += uniforms.jitterOffset;
-    
+
+    float warmStartT = -1.0f;
+    if (FC_WARM_START_ON) {
+        // Warm start only runs without spherical inversion (CPU gates the flag),
+        // so the unwarped camera ray here matches fragmentMain's march ray.
+        float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
+        float3 rd = normalize(in.modelPos - cameraPos);
+        warmStartT = computeWarmStartT(fragCoord, ampId, uniforms, cameraPos, rd, prevDepthTex);
+    }
+
     // Render fractal
-    return fragmentMain(in, uniforms, fragCoord, uniforms.time);
+    return fragmentMain(in, uniforms, fragCoord, uniforms.time, warmStartT);
 }
 
 fragment FragmentOutput fragmentShaderMono(ColorInOut in [[stage_in]],
@@ -4643,7 +4919,7 @@ vertex MacBlitVertexOut macBlitVertex(uint vertexID [[vertex_id]]) {
 
 fragment float4 macBlitFragment(MacBlitVertexOut in [[stage_in]],
                                 texture2d<float> source [[texture(0)]]) {
-    constexpr sampler s(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+    constexpr sampler s(mag_filter::nearest, min_filter::nearest, address::clamp_to_edge);
     return float4(source.sample(s, in.texCoord).rgb, 1.0);
 }
 

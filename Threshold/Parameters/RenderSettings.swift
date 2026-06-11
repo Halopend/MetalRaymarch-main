@@ -2598,8 +2598,10 @@ final class RenderSettings: @unchecked Sendable {
                 } else if _geometryState == .stable {
                     _geometryStableFrameCount += 1
                 }
-                // Step multiplier stays at 1.2 when converged (already settled)
-                let targetStepMultiplier: Float = 1.2
+                // Step multiplier stays high when converged (already settled).
+                // The march loops now run Keinert overstep-failure detection, so
+                // over-relaxation is hit-identical to 1.0 — 1.4 is safe everywhere.
+                let targetStepMultiplier: Float = 1.4
                 _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
             } else {
             
@@ -2774,12 +2776,16 @@ final class RenderSettings: @unchecked Sendable {
             // ═══════════════════════════════════════════════════════════════════════════
             // GMT-FRACTALS: ADAPTIVE STEP MULTIPLIER
             // Over-relaxation factor adjusts based on geometry stability:
-            // - Parameters changing: 1.0 (safe, no over-stepping thin features)
-            // - Parameters settled: 1.2 (moderate convergence speedup)
+            // - Parameters changing: 1.2
+            // - Parameters settled: 1.4
+            // The march loops run Keinert overstep-failure detection (retreat +
+            // conservative fallback when unbounding spheres stop overlapping), so
+            // over-relaxation can never skip a surface that 1.0 would hit — the
+            // multiplier is purely a speed knob now, safe even during interaction.
             // Uses allGeometrySettled directly instead of _isGeometryGestureActive,
             // which may not be wired to all gesture sources.
             // ═══════════════════════════════════════════════════════════════════════════
-            let targetStepMultiplier: Float = allGeometrySettled ? 1.2 : 1.0
+            let targetStepMultiplier: Float = allGeometrySettled ? 1.4 : 1.2
             // Smooth transition to avoid popping
             _stepMultiplier += (targetStepMultiplier - _stepMultiplier) * 0.1
             

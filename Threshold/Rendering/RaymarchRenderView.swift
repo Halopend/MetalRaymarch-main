@@ -1460,6 +1460,10 @@ private final class ThresholdMacRenderer {
         return Uniforms(projectionMatrix: jitteredProjection,
                         modelViewMatrix: modelView,
                         inverseModelViewMatrix: inverseModelView,
+                        // Warm start is visionOS-only (FC_WARM_START compiled out
+                        // of the Mac pipelines); these stay inert here.
+                        previousViewProjMatrix: matrix_identity_float4x4,
+                        previousInvViewProjMatrix: matrix_identity_float4x4,
                         time: elapsedTime,
                         minDistance: settings.minDistance,
                         fractalScale: settings.fractalScale,
@@ -1479,6 +1483,7 @@ private final class ThresholdMacRenderer {
                         colorIterations: settings.colorIterations,
                         limitFlash: settings.limitFlash,
                         activeGesture: Int32(settings.activeGestureIndex),
+                        warmStartEnabled: 0,
                         fractalType: settings.fractalType.rawValue,
                         lightingSoftness: settings.lightingSoftness,
                         sphericalInversionMode: settings.sphericalInversionMode.rawValue,
@@ -1493,7 +1498,7 @@ private final class ThresholdMacRenderer {
                         springVisible: (settings.springActive || simd_length(settings.springDisplacement) > 0.001) ? 1 : 0,
                         springRestRadius: 0.06,
                         jitterOffset: .zero,
-                        _pad_uniforms: [0, 0],
+                        renderResolution: [1, 1],
                         floorPlane: SIMD4<Float>(0, 1, 0, 0),
                         floorCenterRadius: SIMD4<Float>(0, 0, 0, 0),
                         formulaParams: settings.formulaParams,

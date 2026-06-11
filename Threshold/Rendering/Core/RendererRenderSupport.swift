@@ -133,7 +133,12 @@ extension Renderer {
         settingsSnapshot: RenderSettingsSnapshot
     ) {
 #if canImport(MetalFX)
-        guard let bundle = fragmentPassPlan.metalFXBundle else { return }
+        guard let bundle = fragmentPassPlan.metalFXBundle else {
+            // Direct render: no MetalFX depth was written this frame, so the
+            // next fragment frame must not warm-start from stale history.
+            fragmentWarmStartValid = false
+            return
+        }
 
         do {
             try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
@@ -142,7 +147,8 @@ extension Renderer {
             // to get sub-pixel detail from Halton-jittered frames at no extra render cost.
             var taaOutputOverride: MTLTexture? = nil
             if let taa = taaManager,
-               let metalFXOutput = bundle.manager.outputTexture {
+               let metalFXOutput = bundle.manager.outputTexture,
+               let sceneDepth = bundle.manager.depthTexture {
                 let w = metalFXOutput.width, h = metalFXOutput.height
                 let viewCount = drawable.views.count
                 if taa.prepare(width: w, height: h, viewCount: viewCount) {
@@ -161,19 +167,25 @@ extension Renderer {
                         taa.encode(
                             commandBuffer: commandBuffer,
                             currentTex: metalFXOutput,
+                            sceneDepthTex: sceneDepth,
                             viewIndex: viewIndex,
                             invProjMatrix: eye.projection.inverse,
                             invViewMatrix: eye.inverseModelView,
                             previousViewProjMatrix: prevVP,
                             blendFactor: blendFactor
                         )
-                        if viewIndex < previousViewProjMatrices.count {
-                            previousViewProjMatrices[viewIndex] = eye.projection * eye.modelView
-                        }
                     }
                     taa.advanceHistory()
                     taaOutputOverride = taa.outputTexture
                 }
+            }
+
+            // Rotate per-eye view-proj history unconditionally (TAA reprojection
+            // AND the fragment warm-start both consume it next frame, even on
+            // frames where the TAA manager is unavailable).
+            for viewIndex in 0..<min(drawable.views.count, previousViewProjMatrices.count) {
+                let eye = framePreparation.perEye[viewIndex]
+                previousViewProjMatrices[viewIndex] = eye.projection * eye.modelView
             }
 
             resolveMetalFXOutputToDrawable(
@@ -183,12 +195,18 @@ extension Renderer {
                 resolutionScale: fragmentPassPlan.resolutionScale,
                 taaOutputOverride: taaOutputOverride
             )
+
+            // This frame's depth becomes next frame's warm-start history.
+            bundle.manager.advanceDepthHistory()
+            fragmentWarmStartValid = true
+            lastWarmStartFractalType = settingsSnapshot.fractalType.rawValue
         } catch {
             if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
                 print("⚠️ MetalFX spatial upscale failed: \(error). Falling back to direct rendering next frame.")
                 hasLoggedMetalFXFallback = true
             }
             metalFXManager = nil
+            fragmentWarmStartValid = false
         }
 #else
         _ = (commandBuffer, drawable, fragmentPassPlan, framePreparation, settingsSnapshot)
