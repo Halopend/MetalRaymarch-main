@@ -1,0 +1,815 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		D8A000072D00000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D7D716892CEAC4B100CEEA51 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D7D716B62CEAC4B200CEEA51;
+			remoteInfo = ThresholdMac;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		D7D716912CEAC4B100CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7D716B12CEAC4B200CEEA51 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D7E0000A2E00000000000001 /* Threshold.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Threshold.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D8A000012D00000000000001 /* ThresholdTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThresholdTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D7D716932CEAC4B100CEEA52 /* Exceptions for "Threshold" folder in "Threshold" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				App/Info.plist,
+				App/ThresholdiOSInfo.plist,
+				App/ThresholdMacInfo.plist,
+			);
+			target = D7D716902CEAC4B100CEEA51 /* Threshold */;
+		};
+		D7D716B22CEAC4B200CEEA51 /* Exceptions for "Threshold" folder in "ThresholdMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				App/Info.plist,
+				App/ThresholdiOSInfo.plist,
+				App/ThresholdMacInfo.plist,
+				Audio/AppleMusicManager.swift,
+				Audio/AppleMusicServiceAdapter.swift,
+				Rendering/Core/RendererCoreTypes.swift,
+				Rendering/Core/RendererCustomShader.swift,
+				Rendering/Core/RendererDynamicQuality.swift,
+				Rendering/Core/RendererFrameLoopHelpers.swift,
+				Rendering/Core/RendererGameState.swift,
+				Rendering/Core/RendererLoopSupport.swift,
+				Rendering/Core/RendererPipelineCache.swift,
+				Rendering/Core/RendererPipelineHelpers.swift,
+				Rendering/Core/RendererPrecomputeHelpers.swift,
+				Rendering/Core/RendererRenderSupport.swift,
+				Rendering/Core/RendererScreenshot.swift,
+				Rendering/Core/RendererSetupAndSession.swift,
+				Rendering/Renderer.swift,
+			);
+			target = D7D716B62CEAC4B200CEEA51 /* ThresholdMac */;
+		};
+		D7E000132E00000000000001 /* Exceptions for "Threshold" folder in "ThresholdiOS" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				App/Info.plist,
+				App/ThresholdiOSInfo.plist,
+				App/ThresholdMacInfo.plist,
+				Audio/AppleMusicManagerMac.swift,
+				Audio/AppleMusicServiceAdapterMac.swift,
+				Rendering/Core/RendererCoreTypes.swift,
+				Rendering/Core/RendererCustomShader.swift,
+				Rendering/Core/RendererDynamicQuality.swift,
+				Rendering/Core/RendererFrameLoopHelpers.swift,
+				Rendering/Core/RendererGameState.swift,
+				Rendering/Core/RendererLoopSupport.swift,
+				Rendering/Core/RendererPipelineCache.swift,
+				Rendering/Core/RendererPipelineHelpers.swift,
+				Rendering/Core/RendererPrecomputeHelpers.swift,
+				Rendering/Core/RendererRenderSupport.swift,
+				Rendering/Core/RendererScreenshot.swift,
+				Rendering/Core/RendererSetupAndSession.swift,
+				Rendering/Renderer.swift,
+			);
+			target = D7E0000F2E00000000000001 /* ThresholdiOS */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		D7D716932CEAC4B100CEEA51 /* Threshold */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D7D716932CEAC4B100CEEA52 /* Exceptions for "Threshold" folder in "Threshold" target */,
+				D7D716B22CEAC4B200CEEA51 /* Exceptions for "Threshold" folder in "ThresholdMac" target */,
+				D7E000132E00000000000001 /* Exceptions for "Threshold" folder in "ThresholdiOS" target */,
+			);
+			path = Threshold;
+			sourceTree = "<group>";
+		};
+		D8A000022D00000000000001 /* ThresholdTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ThresholdTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D7D7168E2CEAC4B100CEEA51 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7D716B42CEAC4B200CEEA51 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7E0000D2E00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D7D716882CEAC4B100CEEA51 = {
+			isa = PBXGroup;
+			children = (
+				D7D716932CEAC4B100CEEA51 /* Threshold */,
+				D8A000022D00000000000001 /* ThresholdTests */,
+				D7D716922CEAC4B100CEEA51 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D7D716922CEAC4B100CEEA51 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D7D716912CEAC4B100CEEA51 /* Threshold.app */,
+				D7D716B12CEAC4B200CEEA51 /* Threshold.app */,
+				D8A000012D00000000000001 /* ThresholdTests.xctest */,
+				D7E0000A2E00000000000001 /* Threshold.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D7D716902CEAC4B100CEEA51 /* Threshold */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D7D716AC2CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "Threshold" */;
+			buildPhases = (
+				D7D7168D2CEAC4B100CEEA51 /* Sources */,
+				D7D7168E2CEAC4B100CEEA51 /* Frameworks */,
+				D7D7168F2CEAC4B100CEEA51 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D7D716932CEAC4B100CEEA51 /* Threshold */,
+			);
+			name = Threshold;
+			packageProductDependencies = (
+			);
+			productName = MetalProject;
+			productReference = D7D716912CEAC4B100CEEA51 /* Threshold.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D7D716B62CEAC4B200CEEA51 /* ThresholdMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D7D716B92CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "ThresholdMac" */;
+			buildPhases = (
+				D7D716B32CEAC4B200CEEA51 /* Sources */,
+				D7D716B42CEAC4B200CEEA51 /* Frameworks */,
+				D7D716B52CEAC4B200CEEA51 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D7D716932CEAC4B100CEEA51 /* Threshold */,
+			);
+			name = ThresholdMac;
+			packageProductDependencies = (
+			);
+			productName = Threshold;
+			productReference = D7D716B12CEAC4B200CEEA51 /* Threshold.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D7E0000F2E00000000000001 /* ThresholdiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D7E000102E00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdiOS" */;
+			buildPhases = (
+				D7E0000C2E00000000000001 /* Sources */,
+				D7E0000D2E00000000000001 /* Frameworks */,
+				D7E0000E2E00000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D7D716932CEAC4B100CEEA51 /* Threshold */,
+			);
+			name = ThresholdiOS;
+			packageProductDependencies = (
+			);
+			productName = ThresholdiOS;
+			productReference = D7E0000A2E00000000000001 /* Threshold.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D8A000062D00000000000001 /* ThresholdTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D8A0000B2D00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdTests" */;
+			buildPhases = (
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D8A000082D00000000000001 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D8A000022D00000000000001 /* ThresholdTests */,
+			);
+			name = ThresholdTests;
+			packageProductDependencies = (
+			);
+			productName = ThresholdTests;
+			productReference = D8A000012D00000000000001 /* ThresholdTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D7D716892CEAC4B100CEEA51 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1610;
+				LastUpgradeCheck = 2650;
+				TargetAttributes = {
+					D7D716902CEAC4B100CEEA51 = {
+						CreatedOnToolsVersion = 16.1;
+					};
+					D7D716B62CEAC4B200CEEA51 = {
+						CreatedOnToolsVersion = 16.1;
+					};
+					D7E0000F2E00000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					D8A000062D00000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = D7D716B62CEAC4B200CEEA51;
+					};
+				};
+			};
+			buildConfigurationList = D7D7168C2CEAC4B100CEEA51 /* Build configuration list for PBXProject "Threshold" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D7D716882CEAC4B100CEEA51;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D7D716922CEAC4B100CEEA51 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D7D716902CEAC4B100CEEA51 /* Threshold */,
+				D7D716B62CEAC4B200CEEA51 /* ThresholdMac */,
+				D7E0000F2E00000000000001 /* ThresholdiOS */,
+				D8A000062D00000000000001 /* ThresholdTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D7D7168F2CEAC4B100CEEA51 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7D716B52CEAC4B200CEEA51 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7E0000E2E00000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D7D7168D2CEAC4B100CEEA51 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7D716B32CEAC4B200CEEA51 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7E0000C2E00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D8A000082D00000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D7D716B62CEAC4B200CEEA51 /* ThresholdMac */;
+			targetProxy = D8A000072D00000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		D7D716AD2CEAC4B200CEEA51 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_USE_OPTIMIZATION_PROFILE = YES;
+				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_PREVIEWS = YES;
+				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
+				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				EXECUTABLE_NAME = Threshold;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
+				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(TARGET_NAME)/Rendering/ShaderTypes.h";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		D7D716AE2CEAC4B200CEEA51 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_USE_OPTIMIZATION_PROFILE = YES;
+				CODE_SIGN_ENTITLEMENTS = Threshold/Threshold.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_PREVIEWS = YES;
+				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
+				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				EXECUTABLE_NAME = Threshold;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(TARGET_NAME)/App/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
+				INFOPLIST_KEY_NSHandsTrackingUsageDescription = "Hand tracking is used to interact with some parameters.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_NSWorldSensingUsageDescription = "This app uses world sensing to track hand gestures for controlling the fractal visualization.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SUPPORTED_PLATFORMS = "xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(TARGET_NAME)/Rendering/ShaderTypes.h";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 7;
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		D7D716AF2CEAC4B200CEEA51 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = Threshold/Threshold.entitlements;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				MTL_HEADER_SEARCH_PATHS = "$(inherited)";
+				MTL_LANGUAGE_REVISION = Metal31;
+				MTL_OPTIMIZATION_LEVEL = default;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = xros;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				XROS_DEPLOYMENT_TARGET = 2.1;
+			};
+			name = Debug;
+		};
+		D7D716B02CEAC4B200CEEA51 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_ENTITLEMENTS[sdk=xros*]" = Threshold/Threshold.entitlements;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				MTL_HEADER_SEARCH_PATHS = "$(inherited)";
+				MTL_LANGUAGE_REVISION = Metal31;
+				MTL_OPTIMIZATION_LEVEL = "-O3";
+				SDKROOT = xros;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+				XROS_DEPLOYMENT_TARGET = 2.1;
+			};
+			name = Release;
+		};
+		D7D716B72CEAC4B200CEEA51 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = OSX;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
+				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_CFBundleName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
+				PRODUCT_NAME = Threshold;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Threshold/Rendering/ShaderTypes.h;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		D7D716B82CEAC4B200CEEA51 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = OSX;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdMac.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
+				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Threshold/App/ThresholdMacInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_CFBundleName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSAppleMusicUsageDescription = "Threshold uses Apple Music to let you browse your library, select songs and playlists, and drive audio-reactive visuals.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
+				PRODUCT_NAME = Threshold;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Threshold/Rendering/ShaderTypes.h;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		D7E000112E00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = IOS;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_PREVIEWS = YES;
+				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
+				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Threshold/App/ThresholdiOSInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
+				PRODUCT_NAME = Threshold;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Threshold/Rendering/ShaderTypes.h;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		D7E000122E00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = IOS;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Threshold/ThresholdiOS.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				ENABLE_PREVIEWS = YES;
+				EXCLUDED_RESOURCE_FILE_NAMES = App/Info.plist;
+				EXCLUDED_SOURCE_FILE_NAMES = App/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Threshold/App/ThresholdiOSInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Threshold;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Threshold uses the microphone for real-time audio-reactive fractal visualization.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIStatusBarHidden = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.Threshold;
+				PRODUCT_NAME = Threshold;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Threshold/Rendering/ShaderTypes.h;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+		D8A000092D00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Threshold.app/Contents/MacOS/Threshold";
+				TEST_TARGET_NAME = ThresholdMac;
+			};
+			name = Debug;
+		};
+		D8A0000A2D00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 18;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = PMHYFM3SU4;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.puppypower.ThresholdTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Threshold.app/Contents/MacOS/Threshold";
+				TEST_TARGET_NAME = ThresholdMac;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D7D7168C2CEAC4B100CEEA51 /* Build configuration list for PBXProject "Threshold" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7D716AF2CEAC4B200CEEA51 /* Debug */,
+				D7D716B02CEAC4B200CEEA51 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D7D716AC2CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "Threshold" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7D716AD2CEAC4B200CEEA51 /* Debug */,
+				D7D716AE2CEAC4B200CEEA51 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D7D716B92CEAC4B200CEEA51 /* Build configuration list for PBXNativeTarget "ThresholdMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7D716B72CEAC4B200CEEA51 /* Debug */,
+				D7D716B82CEAC4B200CEEA51 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D7E000102E00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7E000112E00000000000001 /* Debug */,
+				D7E000122E00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D8A0000B2D00000000000001 /* Build configuration list for PBXNativeTarget "ThresholdTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D8A000092D00000000000001 /* Debug */,
+				D8A0000A2D00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D7D716892CEAC4B100CEEA51 /* Project object */;
+}

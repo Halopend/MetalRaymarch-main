@@ -1,0 +1,87 @@
+//
+//  FractalModelType.swift
+//  Threshold
+//
+//  Fractal type enum matching ShaderTypes.h FractalType enum
+//
+
+import Foundation
+import simd
+
+enum FractalModelType: Int32, CaseIterable {
+    case mandelbox         = 0
+    case mandelbulb        = 1
+    case menger            = 2
+    case mandelbulbJulia   = 5
+    case quaternionJulia   = 6
+    case octahedron        = 11
+    case mengerSphere      = 14
+    case theliPseudoKleinian = 15
+    case kleinian              = 17
+    case boxSphereFolder         = 20
+    case mandelboxSphereProjection = 21
+    /// Sentinel for runtime-compiled DE shaders (.threshfx). Mirrors
+    /// `FractalTypeCustom` in ShaderTypes.h. The single active embedded formula
+    /// is registered with `FractalTypeRegistry` and `FormulaCatalog` at load time.
+    case custom                  = 1000
+    
+    /// Descriptor from the registry — all metadata is defined there.
+    var descriptor: FractalTypeDescriptor { FractalTypeRegistry.descriptor(for: self) }
+
+    var displayName: String { descriptor.displayName }
+    
+    var supportedCoreGestureActions: [FingerGestureAction] { descriptor.supportedCoreGestureActions }
+    var icon: String { descriptor.icon }
+    var category: String { descriptor.category }
+    var supportedEffectTags: Set<EffectTag> { descriptor.supportedEffectTags }
+
+    /// Quick check whether a given effect tag is meaningful for this fractal.
+    func supports(_ tag: EffectTag) -> Bool { descriptor.supportedEffectTags.contains(tag) }
+
+    func defaultFormulaParams() -> FormulaParams {
+        if FormulaCatalog.shared.descriptor(for: self) != nil {
+            return FormulaCatalog.shared.buildParams(for: self)
+        }
+        return descriptor.defaultFormulaParams()
+    }
+}
+
+extension FractalModelType {
+    /// Types shown in the UI picker (descriptor.isSelectableInUI == true).
+    static let selectableCases: [FractalModelType] = allCases.filter { $0.descriptor.isSelectableInUI }
+}
+
+// MARK: - Human-Readable Codable
+
+extension FractalModelType: Codable {
+    private var codableString: String { descriptor.codableString }
+
+    private static let stringMap: [String: FractalModelType] = {
+        var map: [String: FractalModelType] = [:]
+        for c in FractalModelType.allCases { map[c.codableString] = c }
+        return map
+    }()
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let str = try? container.decode(String.self) {
+            if let value = Self.stringMap[str] {
+                self = value
+                return
+            }
+        }
+        if let raw = try? container.decode(Int32.self) {
+            if let value = FractalModelType(rawValue: raw) {
+                self = value
+                return
+            }
+        }
+        throw DecodingError.dataCorruptedError(
+            in: container, debugDescription: "Invalid FractalModelType value")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(codableString)
+    }
+}

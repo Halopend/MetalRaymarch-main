@@ -1,0 +1,689 @@
+{
+  "version": 1,
+  "formulas": [
+    {
+      "id": "mandelbox",
+      "name": "Mandelbox",
+      "fractalType": 0,
+      "category": "Box Folds",
+      "description": "Classic Mandelbox — box fold + sphere fold geometry.",
+      "author": "Tom Lowe",
+      "params": [
+        {
+          "index": 0,
+          "name": "Min Distance",
+          "default": 0.8,
+          "min": -5.0,
+          "max": 15.0,
+          "step": 0.01,
+          "bundle": "fractalCore"
+        },
+        {
+          "index": 1,
+          "name": "Folding Limit",
+          "default": 1.0,
+          "min": -10.0,
+          "max": 30.0,
+          "step": 0.01,
+          "bundle": "fractalCore"
+        },
+        {
+          "index": 2,
+          "name": "Sphere Radius",
+          "default": 0.5,
+          "min": -5.0,
+          "max": 8.0,
+          "step": 0.01,
+          "bundle": "fractalCore"
+        }
+      ]
+    },
+    {
+      "id": "mandelboxSphereProjection",
+      "name": "Mandelbox Sphere Projection",
+      "fractalType": 21,
+      "category": "Box Folds",
+      "description": "Mandelbox variant with radial projection applied after sphere fold.",
+      "author": "Tom Lowe",
+      "params": [
+        {
+          "index": 0,
+          "name": "Min Distance",
+          "default": 0.8,
+          "min": -5.0,
+          "max": 15.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "Folding Limit",
+          "default": 1.0,
+          "min": -10.0,
+          "max": 30.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "Sphere Radius",
+          "default": 0.5,
+          "min": 0.01,
+          "max": 8.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "Scale",
+          "default": 2.8,
+          "min": -5.0,
+          "max": 5.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "Projection Blend",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 1.0,
+          "step": 0.01
+        },
+        {
+          "index": 5,
+          "name": "Projection Radius",
+          "default": 1.0,
+          "min": 0.01,
+          "max": 6.0,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "mandelbulb",
+      "name": "Mandelbulb",
+      "fractalType": 1,
+      "category": "Power / Quaternion",
+      "description": "Power-based 3D Mandelbrot. Higher powers produce more lobes.",
+      "author": "Daniel White & Paul Nylander",
+      "params": [
+        {
+          "index": 0,
+          "name": "Power",
+          "default": 8.0,
+          "min": 2.0,
+          "max": 32.0,
+          "step": 0.5
+        },
+        {
+          "index": 1,
+          "name": "Bailout",
+          "default": 4.0,
+          "min": 1.0,
+          "max": 64.0,
+          "step": 1.0
+        },
+        {
+          "index": 2,
+          "name": "DerivBias",
+          "default": 1.0,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.1
+        },
+        {
+          "index": 4,
+          "name": "PolarRotation",
+          "default": 0,
+          "min": -3.14,
+          "max": 3.14,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "mandelbulbJulia",
+      "name": "Mandelbulb Julia",
+      "fractalType": 5,
+      "category": "Power / Quaternion",
+      "description": "Julia-mode Mandelbulb with fixed C constant for symmetric bulb forms.",
+      "author": "Daniel White & Paul Nylander",
+      "params": [
+        {
+          "index": 0,
+          "name": "Power",
+          "default": 8.0,
+          "min": 2.0,
+          "max": 32.0,
+          "step": 0.5
+        },
+        {
+          "index": 1,
+          "name": "Bailout",
+          "default": 4.0,
+          "min": 1.0,
+          "max": 64.0,
+          "step": 1.0
+        },
+        {
+          "index": 2,
+          "name": "DerivBias",
+          "default": 1.0,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.1
+        },
+        {
+          "index": 4,
+          "name": "PolarRotation",
+          "default": 0,
+          "min": -3.14,
+          "max": 3.14,
+          "step": 0.01
+        },
+        {
+          "index": 8,
+          "name": "Julia",
+          "default": 1,
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "isBool": true,
+          "isHidden": true
+        },
+        {
+          "index": 9,
+          "name": "JuliaC.x",
+          "default": 0.2,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 10,
+          "name": "JuliaC.y",
+          "default": -0.15,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 11,
+          "name": "JuliaC.z",
+          "default": 0.35,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "menger",
+      "name": "Menger Sponge",
+      "fractalType": 2,
+      "category": "Kaleidoscopic IFS",
+      "description": "Classic Menger sponge — recursive box with cross-shaped holes.",
+      "author": "Karl Menger",
+      "params": [
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 3.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "quaternionJulia",
+      "name": "Quaternion Julia",
+      "fractalType": 6,
+      "category": "Power / Quaternion",
+      "description": "4D quaternion Julia set sliced in 3D.",
+      "author": "Alan Norton",
+      "params": [
+        {
+          "index": 0,
+          "name": "C.x",
+          "default": -0.2,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "C.y",
+          "default": 0.8,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "C.z",
+          "default": 0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "C.w",
+          "default": 0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "Threshold",
+          "default": 10.0,
+          "min": 1.0,
+          "max": 100.0,
+          "step": 1.0
+        }
+      ]
+    },
+    {
+      "id": "octahedron",
+      "name": "Octahedron",
+      "fractalType": 11,
+      "category": "Kaleidoscopic IFS",
+      "description": "Octahedron IFS — abs folds with scale + offset.",
+      "author": "Knighty",
+      "params": [
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 2.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "mengerSphere",
+      "name": "Menger Sphere",
+      "fractalType": 14,
+      "category": "Kaleidoscopic IFS",
+      "description": "Menger Sphere — menger folds with optional spherification.",
+      "author": "Knighty",
+      "params": [
+        {
+          "index": 0,
+          "name": "Scale",
+          "default": 3.0,
+          "min": 1.0,
+          "max": 6.0,
+          "step": 0.1
+        },
+        {
+          "index": 1,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 2,
+          "name": "Offset.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 3,
+          "name": "Offset.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 4,
+          "name": "Spherify",
+          "default": 0,
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "isBool": true
+        }
+      ]
+    },
+    {
+      "id": "theliPseudoKleinian",
+      "name": "Theli Pseudo Kleinian",
+      "fractalType": 15,
+      "category": "Hybrid Folds",
+      "description": "Scale-1 Julia-box fold combined with a Menger-style base shape.",
+      "author": "Theli-at",
+      "params": [
+        {
+          "index": 0,
+          "name": "Size",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "CSize.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "CSize.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "CSize.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "C.x",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 5,
+          "name": "C.y",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 6,
+          "name": "C.z",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 7,
+          "name": "DEoffset",
+          "default": 0.0,
+          "min": 0.0,
+          "max": 0.1,
+          "step": 0.001
+        },
+        {
+          "index": 8,
+          "name": "Offset.x",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 9,
+          "name": "Offset.y",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 10,
+          "name": "Offset.z",
+          "default": 0.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 11,
+          "name": "MnIterations",
+          "default": 2.0,
+          "min": 0.0,
+          "max": 20.0,
+          "step": 1.0
+        },
+        {
+          "index": 12,
+          "name": "MnScale",
+          "default": 3.0,
+          "min": 0.0,
+          "max": 4.0,
+          "step": 0.05
+        },
+        {
+          "index": 13,
+          "name": "MnOffset.x",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 14,
+          "name": "MnOffset.y",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05
+        },
+        {
+          "index": 15,
+          "name": "MnOffset.z",
+          "default": 1.0,
+          "min": 0.0,
+          "max": 2.0,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "kleinian",
+      "name": "Kleinian",
+      "fractalType": 17,
+      "category": "Hybrid Folds",
+      "description": "Knighty's Pseudo Kleinian — box fold + sphere inversion with cylindrical cross-section.",
+      "author": "Knighty",
+      "params": [
+        {
+          "index": 0,
+          "name": "Mins.x",
+          "default": -0.3252,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "Mins.y",
+          "default": -0.7862,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "Mins.z",
+          "default": -0.0948,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "SphFold",
+          "default": 0.69,
+          "min": 0.01,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "Maxs.x",
+          "default": 0.35,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 5,
+          "name": "Maxs.y",
+          "default": 1.0,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 6,
+          "name": "Maxs.z",
+          "default": 1.22,
+          "min": -2.0,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 7,
+          "name": "CrossR",
+          "default": 0.84,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "boxSphereFolder",
+      "name": "Box Sphere Folder",
+      "fractalType": 20,
+      "category": "Hybrid Folds",
+      "description": "Abs-fold + sphere inversion with tunable clamp range and scale — compact IFS variant.",
+      "author": "Fractalforums community",
+      "params": [
+        {
+          "index": 0,
+          "name": "Offset.x",
+          "default": 1.0,
+          "min": -3.0,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 1,
+          "name": "Offset.y",
+          "default": 1.0,
+          "min": -3.0,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 2,
+          "name": "Offset.z",
+          "default": 1.0,
+          "min": -3.0,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 3,
+          "name": "BoxFold",
+          "default": 1.0,
+          "min": 0.01,
+          "max": 3.0,
+          "step": 0.01
+        },
+        {
+          "index": 4,
+          "name": "MinR2",
+          "default": 0.25,
+          "min": 0.01,
+          "max": 2.0,
+          "step": 0.01
+        },
+        {
+          "index": 5,
+          "name": "MaxR2",
+          "default": 1.0,
+          "min": 0.1,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 6,
+          "name": "Scale",
+          "default": 1.15,
+          "min": 0.1,
+          "max": 4.0,
+          "step": 0.01
+        },
+        {
+          "index": 7,
+          "name": "ShapeR",
+          "default": 1.2,
+          "min": 0.01,
+          "max": 4.0,
+          "step": 0.01
+        }
+      ]
+    }
+  ]
+}
