@@ -157,7 +157,9 @@ extension Renderer {
             bassLevel: settingsSnapshot.bassLevel,
             midLevel: settingsSnapshot.midLevel,
             trebleLevel: settingsSnapshot.trebleLevel,
-            beatIntensity: settingsSnapshot.beatIntensity
+            beatIntensity: settingsSnapshot.beatIntensity,
+            vibrance: settingsSnapshot.colorSchemeParams.vibrance,
+            lightingSoftness: settingsSnapshot.lightingSoftness
         )
         let precomputedAudio = Self.makePrecomputedAudio(from: settingsSnapshot)
         var precomputedFog = Self.makePrecomputedFog(from: settingsSnapshot)

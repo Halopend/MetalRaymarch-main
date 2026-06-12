@@ -1437,7 +1437,9 @@ private final class ThresholdMacRenderer {
                                                                bassLevel: settings.bassLevel,
                                                                midLevel: settings.midLevel,
                                                                trebleLevel: settings.trebleLevel,
-                                                               beatIntensity: settings.beatIntensity)
+                                                               beatIntensity: settings.beatIntensity,
+                                                               vibrance: settings.colorSchemeParams.vibrance,
+                                                               lightingSoftness: settings.lightingSoftness)
         let precomputedAudio = RenderPrecompute.makePrecomputedAudio(from: settings)
         var precomputedFog = RenderPrecompute.makePrecomputedFog(from: settings)
         if isKleinianFamily {

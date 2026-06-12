@@ -12,14 +12,16 @@ extension Renderer {
         RenderPrecompute.makePrecomputedFractal(from: settings)
     }
 
-    static func makePrecomputedLighting(time: Float, lightingMode: LightingMode, audioLevel: Float, bassLevel: Float = 0, midLevel: Float = 0, trebleLevel: Float = 0, beatIntensity: Float = 0) -> PrecomputedLighting {
+    static func makePrecomputedLighting(time: Float, lightingMode: LightingMode, audioLevel: Float, bassLevel: Float = 0, midLevel: Float = 0, trebleLevel: Float = 0, beatIntensity: Float = 0, vibrance: Float = 0, lightingSoftness: Float = 0) -> PrecomputedLighting {
         RenderPrecompute.makePrecomputedLighting(time: time,
                                                  lightingMode: lightingMode,
                                                  audioLevel: audioLevel,
                                                  bassLevel: bassLevel,
                                                  midLevel: midLevel,
                                                  trebleLevel: trebleLevel,
-                                                 beatIntensity: beatIntensity)
+                                                 beatIntensity: beatIntensity,
+                                                 vibrance: vibrance,
+                                                 lightingSoftness: lightingSoftness)
     }
 
     static func makePrecomputedAudio(from settings: RenderSettingsSnapshot) -> PrecomputedAudio {

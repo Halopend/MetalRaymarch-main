@@ -47,14 +47,24 @@ enum RenderPrecompute {
         )
     }
 
-    /// Precompute lighting parameters (eliminates per-pixel `CameraPath` trig).
+    /// Sun direction constants for the vibrance/softness lighting blend.
+    /// MUST match `sunDirSoft` / `sunDirSharp` in Shaders.metal (the GPU keeps
+    /// its own copies for the compute paths' documentation; the blend itself
+    /// is evaluated only here now).
+    static let sunDirSoft = SIMD3<Float>(0.3235, 0.0924, 0.2773)
+    static let sunDirSharp = SIMD3<Float>(0.7420, 0.2119, 0.6360)
+
+    /// Precompute lighting parameters (eliminates per-pixel `CameraPath` trig
+    /// and the per-pixel vibrance/softness sun blend, which are frame-uniform).
     static func makePrecomputedLighting(time: Float,
                                         lightingMode: LightingMode,
                                         audioLevel: Float,
                                         bassLevel: Float = 0,
                                         midLevel: Float = 0,
                                         trebleLevel: Float = 0,
-                                        beatIntensity: Float = 0) -> PrecomputedLighting {
+                                        beatIntensity: Float = 0,
+                                        vibrance: Float = 0,
+                                        lightingSoftness: Float = 0) -> PrecomputedLighting {
         let gTime = time * 0.01 + 15.00
 
         let spotLightPosition: SIMD3<Float>
@@ -103,9 +113,25 @@ enum RenderPrecompute {
             lightIntensity = 0.9 + sin(gTime * 1.5) * 0.15
         }
 
+        // === Vibrance/softness blend (hoisted from per-pixel
+        // computeBlendedLighting in Shaders.metal) ===
+        // Current system: vibrance drives sun direction + intensity; classic
+        // system: fixed direction/diffuse. lightingSoftness blends between.
+        let clampedSoftness = min(max(lightingSoftness, 0), 1)
+        let sunDirNew = Self.sunDirSoft + (Self.sunDirSharp - Self.sunDirSoft) * vibrance
+        let intensityScaleNew: Float = 0.7 + (1.2 - 0.7) * vibrance
+        let sunDir = sunDirNew + (Self.sunDirSoft - sunDirNew) * clampedSoftness
+        let sunDiffuseScale: Float = 0.15 + (0.2 - 0.15) * clampedSoftness
+        let intensityScale = intensityScaleNew + (1.0 - intensityScaleNew) * clampedSoftness
+        let specPower: Float = 20.0 + (110.0 - 20.0) * (1.0 - clampedSoftness)
+
         return PrecomputedLighting(
             spotLightPosition: spotLightPosition,
-            lightIntensity: lightIntensity
+            lightIntensity: lightIntensity * intensityScale,
+            sunDir: sunDir,
+            sunDiffuseScale: sunDiffuseScale,
+            specPower: specPower,
+            _padLighting: .zero
         )
     }
 

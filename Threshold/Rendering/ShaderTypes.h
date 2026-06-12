@@ -184,12 +184,17 @@ typedef struct
 } PrecomputedFractalParams;
 
 // === PRECOMPUTED LIGHTING ===
-// Spotlight position and intensity depend only on time and lighting mode.
-// Computing these per-pixel wastes GPU cycles on identical results.
+// Spotlight position/intensity depend only on time + lighting mode, and the
+// vibrance/softness sun blend depends only on frame-uniform settings.
+// Computing any of these per-pixel wastes GPU cycles on identical results.
 typedef struct
 {
     vector_float3 spotLightPosition;  // Precomputed spotlight world position
-    float lightIntensity;             // Precomputed light intensity multiplier
+    float lightIntensity;             // BLENDED intensity (mode base × vibrance/softness scale)
+    vector_float3 sunDir;             // Blended sun direction (soft ↔ sharp by vibrance/softness)
+    float sunDiffuseScale;            // Blended sun diffuse scale
+    float specPower;                  // mix(20, 110, saturate(1 - lightingSoftness))
+    vector_float2 _padLighting;       // Pad struct to a 16-byte multiple
 } PrecomputedLighting;
 
 // === PRECOMPUTED AUDIO ===

@@ -259,34 +259,11 @@ FORCE_INLINE void applySphericalInversionRay(thread float3 &origin, thread float
 }
 
 // === LIGHTING BLEND: Classic (soft) ↔ Current (vibrance-driven sharp) ===
-// lightingSoftness: 0 = current vibrance-driven system, 1 = classic fixed lighting
-// This allows smooth blending between the old lighting look and the new one.
-struct LightingParams {
-    float3 sunDir;
-    float sunDiffuseScale;
-    float lightIntensity;
-};
-
-FORCE_INLINE LightingParams computeBlendedLighting(float vibrance, float lightingSoftness, float baseLightIntensity) {
-    LightingParams params;
-    
-    // Current system: vibrance drives sun direction and intensity
-    float3 sunDirNew = mix(sunDirSoft, sunDirSharp, vibrance);
-    float sunDiffuseNew = 0.15f;        // Slightly lower than classic for sharper look when vibrant
-    float intensityScaleNew = mix(0.7f, 1.2f, vibrance);
-    
-    // Classic system: fixed sun direction, fixed diffuse, no intensity scaling
-    float3 sunDirClassic = sunDirSoft;  // Original un-normalized direction
-    float sunDiffuseClassic = 0.2f;     // Original fixed value
-    float intensityScaleClassic = 1.0f; // No scaling in classic mode
-    
-    // Blend between current and classic based on softness for smooth transitions
-    params.sunDir = mix(sunDirNew, sunDirClassic, lightingSoftness);
-    params.sunDiffuseScale = mix(sunDiffuseNew, sunDiffuseClassic, lightingSoftness);
-    params.lightIntensity = baseLightIntensity * mix(intensityScaleNew, intensityScaleClassic, lightingSoftness);
-    
-    return params;
-}
+// The vibrance/softness sun blend is frame-uniform, so it is evaluated once
+// per frame on the CPU (RenderPrecompute.makePrecomputedLighting — its
+// sunDirSoft/sunDirSharp constants MUST mirror the ones above) and arrives
+// in uniforms.precomputedLighting as sunDir / sunDiffuseScale /
+// lightIntensity (pre-scaled) / specPower.
 
 // === BOUNDING SPHERE EARLY EXIT ===
 // Returns -1 if ray misses sphere, otherwise returns entry distance
@@ -2180,13 +2157,10 @@ kernel void adaptiveHierarchical8x8(
         float3 spot = spotData.xyz;
         float atten = spotData.w;
         
-        // Blended lighting: classic soft ↔ vibrance-driven sharp
-        LightingParams lp = computeBlendedLighting(
-            uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
-            uniforms.precomputedLighting.lightIntensity);
-        float3 sunDir = lp.sunDir;
-        float sunDiffuseScale = lp.sunDiffuseScale;
-        float lightIntensity = lp.lightIntensity;
+        // Blended lighting (precomputed on CPU — frame-uniform)
+        float3 sunDir = uniforms.precomputedLighting.sunDir;
+        float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
+        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         
         const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
             ? FC_SHARE_SHADOWS
@@ -2268,7 +2242,7 @@ kernel void adaptiveHierarchical8x8(
         float3 V = -marchDir;
         float NoV = saturate(dot(nor, V));
         float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
-        float specPower = mix(20.0f, 110.0f, saturate(1.0f - uniforms.lightingSoftness));
+        float specPower = uniforms.precomputedLighting.specPower;
         float3 Hspot = normalize(spot + V);
         float3 Hsun = normalize(sunDir + V);
         float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
@@ -2638,13 +2612,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             float3 spot = spotData.xyz;
             float atten = spotData.w;
             
-            // Blended lighting: classic soft ↔ vibrance-driven sharp
-            LightingParams lp = computeBlendedLighting(
-                uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
-                uniforms.precomputedLighting.lightIntensity);
-            float3 sunDir = lp.sunDir;
-            float sunDiffuseScale = lp.sunDiffuseScale;
-            float lightIntensity = lp.lightIntensity;
+            // Blended lighting (precomputed on CPU — frame-uniform)
+            float3 sunDir = uniforms.precomputedLighting.sunDir;
+            float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
+            float lightIntensity = uniforms.precomputedLighting.lightIntensity;
 
             int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
             // Shadow params still need per-pixel bubble center, but use precomputed fractal values
@@ -2671,7 +2642,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 float3 V = -marchDir;
                 float NoV = saturate(dot(nor, V));
                 float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
-                float specPower = mix(20.0f, 110.0f, saturate(1.0f - uniforms.lightingSoftness));
+                float specPower = uniforms.precomputedLighting.specPower;
                 float3 Hspot = normalize(spot + V);
                 float3 Hsun = normalize(sunDir + V);
                 float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
@@ -2895,14 +2866,11 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         float3 spot = spotData.xyz;
         float atten = spotData.w;
         
-        // Blended lighting: classic soft ↔ vibrance-driven sharp
-        LightingParams lp = computeBlendedLighting(
-            uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
-            uniforms.precomputedLighting.lightIntensity);
-        float3 sunDir = lp.sunDir;
-        float sunDiffuseScale = lp.sunDiffuseScale;
-        float lightIntensity = lp.lightIntensity;
-        
+        // Blended lighting (precomputed on CPU — frame-uniform)
+        float3 sunDir = uniforms.precomputedLighting.sunDir;
+        float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
+        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
+
         if (shareShadows) {
             if (quadLaneId == 0) {
                 shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
