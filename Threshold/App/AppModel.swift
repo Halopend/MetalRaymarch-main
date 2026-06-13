@@ -58,7 +58,9 @@ class AppModel {
     /// The user-info dict carries an optional `presetID` (UUID string) so
     /// a view that's about to navigate elsewhere can dedupe.
     static let requestOpenImmersiveSpaceNotification = Notification.Name("AppModel.requestOpenImmersiveSpace")
-    
+
+    static nonisolated(unsafe) var shared: AppModel?
+
     enum ImmersiveSpaceState {
         case closed
         case inTransition
@@ -364,6 +366,7 @@ class AppModel {
     }
     
     init() {
+        AppModel.shared = self
         ParameterRoutingValidation.validateStartupRouting()
 
         // Initialize unified music service first since it's a non-optional constant
