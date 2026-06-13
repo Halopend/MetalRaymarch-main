@@ -59,6 +59,8 @@ actor Renderer {
     var lastComputeRS: Int = -1
     var lastComputePower: Int32?
     var lastComputeCustomHash: String?
+    var lastComputeBubble: Bool?
+    var lastComputePacket: Bool?
     var lastSelectedComputePipeline: MTLComputePipelineState?
 
     // === UI UPDATE COORDINATION ===
@@ -690,6 +692,7 @@ actor Renderer {
     var lastSelectFT: Int32 = -1
     var lastSelectPower: Int32?
     var lastSelectCustomHash: String?
+    var lastSelectBubble: Bool?
     var lastSelectedPipeline: MTLRenderPipelineState?
     var lastSelectedIsSpecialized: Bool = false
     

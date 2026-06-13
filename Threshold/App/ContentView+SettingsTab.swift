@@ -93,6 +93,12 @@ extension ContentView {
             // controls.
             handednessSection
 
+            // Touch indicators — only meaningful where fingers touch the
+            // render view directly.
+#if os(iOS)
+            touchIndicatorsSection
+#endif
+
             // Experimental display features (kept here, not in Advanced,
             // because they're visual toggles the user can flip while the
             // scene is running).
@@ -138,6 +144,28 @@ extension ContentView {
                     onChanged: { cache.commitPlatformRadius() },
                     showToggle: false)
             }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))
+    }
+#endif
+
+    /// iOS-only toggle for the fingertip glow indicators drawn over the
+    /// render view (cyan = orbit, violet = pan/zoom).
+#if os(iOS)
+    private var touchIndicatorsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $showTouchIndicators) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Touch Indicators", systemImage: "hand.tap.fill")
+                        .font(.headline)
+                    Text("Shows a glowing dot under each finger on the fractal view, tinted by gesture: cyan while orbiting, violet while panning or zooming.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(.cyan)
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.cyan.opacity(0.07)))

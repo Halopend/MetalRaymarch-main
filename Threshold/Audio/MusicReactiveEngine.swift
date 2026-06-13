@@ -87,6 +87,11 @@ final class MusicReactiveEngine {
     /// when music reactivity is turned off.
     private(set) var layerActive: Bool = false
 
+    /// Last observed scene-load generation. Drift/decay/phase state accumulated
+    /// against the previous preset must not carry into a freshly loaded one —
+    /// stale drift offsets immediately shove the new preset off its values.
+    private var lastSceneLoadGeneration: UInt64?
+
     // MARK: - Public API
 
     /// Compute additive music-reactive parameter offsets from the given band
@@ -103,6 +108,12 @@ final class MusicReactiveEngine {
                  deltaTime dt: Float,
                  pipeline: ParameterPipeline) {
         layerActive = true
+
+        let sceneGeneration = settings.sceneLoadGeneration
+        if let last = lastSceneLoadGeneration, last != sceneGeneration {
+            clearCurveState()
+        }
+        lastSceneLoadGeneration = sceneGeneration
 
         let damping = max(0.0, min(1.0, settings.fractalAudioDamping))
 

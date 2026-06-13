@@ -1654,7 +1654,7 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> MTKView {
         let device = MTLCreateSystemDefaultDevice()
-        let view = MTKView(frame: .zero, device: device)
+        let view = TouchVisualizingMTKView(frame: .zero, device: device)
         view.colorPixelFormat = .bgra8Unorm_srgb
         view.depthStencilPixelFormat = .depth32Float
         view.clearColor = MTLClearColor(red: 0.005, green: 0.006, blue: 0.008, alpha: 1.0)
@@ -1724,15 +1724,20 @@ struct ThresholdiOSRenderView: UIViewRepresentable {
             orbit.minimumNumberOfTouches = 1
             orbit.maximumNumberOfTouches = 1
             orbit.delegate = self
+            // Keep raw touches flowing to the view so the touch
+            // visualization overlay can track fingers through the gesture.
+            orbit.cancelsTouchesInView = false
 
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.minimumNumberOfTouches = 2
             pan.maximumNumberOfTouches = 2
             pan.delegate = self
+            pan.cancelsTouchesInView = false
             twoFingerPan = pan
 
             let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             pinchGesture.delegate = self
+            pinchGesture.cancelsTouchesInView = false
             pinch = pinchGesture
 
             view.addGestureRecognizer(orbit)

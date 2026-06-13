@@ -213,7 +213,8 @@ struct LightingEffectsSection: View {
                             cache.commitHueRotationEffect()
                         }
                     })
-                    
+                    MusicDriftIndicatorRow(cache: cache, target: .hueSpeed)
+
                     HStack {
                         Text("Intensity")
                         Spacer()

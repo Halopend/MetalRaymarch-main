@@ -25,6 +25,7 @@ enum FunctionConstantIndex: Int {
     case shadowsEnabled = 11  // GMT-fractals: compile-out entire shadow computation
     case mandelbulbPower = 12  // Bakes integer power for fastPowR dead-code elimination
     case warmStart = 13  // Compiles in the temporal-depth march warm-start (FC_WARM_START)
+    case coherentPacketEnabled = 14  // Compiles out the coherent-packet experiment when false (compute kernel)
 }
 
 // Fragment texture binding slots - must match [[texture(n)]] in Shaders.metal

@@ -23,18 +23,21 @@ struct EffectsStaticView: View {
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.glowEffect.enabled }, set: { cache.lighting.glowEffect.enabled = $0 }),
                     onChanged: { cache.commitGlowEffect() })
+                MusicDriftIndicatorRow(cache: cache, target: .glow)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "sun.max.fill", label: "Bloom",
                     value: Binding(get: { cache.lighting.bloomEffect.strength }, set: { cache.lighting.bloomEffect.strength = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.bloomEffect.enabled }, set: { cache.lighting.bloomEffect.enabled = $0 }),
                     onChanged: { cache.commitBloomEffect() })
+                MusicDriftIndicatorRow(cache: cache, target: .bloom)
                 Divider().padding(.leading, 114)
                 EffectSliderRow(icon: "cloud.fog.fill", label: "Fog",
                     value: Binding(get: { cache.lighting.fogEffect.intensity }, set: { cache.lighting.fogEffect.intensity = $0 }),
                     range: 0...1,
                     enabled: Binding(get: { cache.lighting.fogEffect.enabled }, set: { cache.lighting.fogEffect.enabled = $0 }),
                     onChanged: { cache.commitFogEffect() })
+                MusicDriftIndicatorRow(cache: cache, target: .fog)
                 Divider().padding(.leading, 114)
                 FogColorPickerRow(
                     title: "Fog Tint",
@@ -116,6 +119,7 @@ struct EffectsDynamicView: View {
                     range: 0...0.5,
                     enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
                     onChanged: { cache.commitHueRotationEffect() })
+                MusicDriftIndicatorRow(cache: cache, target: .hueSpeed)
                 EffectSliderRow(icon: "circle.lefthalf.filled", label: "Hue Intensity",
                     value: Binding(get: { cache.lighting.hueRotationEffect.intensity }, set: { cache.lighting.hueRotationEffect.intensity = $0 }),
                     range: 0...1,

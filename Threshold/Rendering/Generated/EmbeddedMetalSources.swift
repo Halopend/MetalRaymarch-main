@@ -1918,6 +1918,13 @@ constant int FC_MANDELBULB_POWER [[function_constant(12)]];
 constant bool FC_WARM_START [[function_constant(13)]];
 constant bool FC_WARM_START_ON = is_function_constant_defined(FC_WARM_START) ? FC_WARM_START : false;
 
+// Coherent-packet experiment toggle (adaptiveHierarchical8x8 only). When baked
+// false (the default settings state), the warm-start probe, the shadow
+// normal-coherence gate, and the layer-of-acceptance debug overlay are all
+// dead-code-eliminated. Unset (generic/shared pipelines) falls back to the
+// runtime uniform so cache-miss fallbacks stay correct.
+constant bool FC_COHERENT_PACKET [[function_constant(14)]];
+
 // Include the fractal formula library (non-Mandelbox DE functions + dispatch)
 // Must be after metal_stdlib, ShaderTypes.h, and function constants so that
 // formula headers can reference FC_* constants (e.g. FC_MANDELBULB_POWER).
@@ -3650,7 +3657,9 @@ kernel void adaptiveHierarchical8x8(
     //   2 = coherent-packet warm-start ACCEPTED as tight startT
     //   3 = coherent-packet warm-start REJECTED (probe found no surface near prediction)
     int packetLayer = 0;
-    if (uniforms.coherentPacketEnabled != 0 && reprojectionValid) {
+    const bool coherentPacketOn = is_function_constant_defined(FC_COHERENT_PACKET)
+        ? FC_COHERENT_PACKET : (uniforms.coherentPacketEnabled != 0);
+    if (coherentPacketOn && reprojectionValid) {
         float t_pred = reprojectedDepth;
         bool packetIsMandelbulb = (fractalType == FractalTypeMandelbulb || fractalType == FractalTypeMandelbulbJulia);
         // Hit threshold mirrors the fine-march acceptance gate so a probe-hit is
@@ -4009,7 +4018,7 @@ kernel void adaptiveHierarchical8x8(
             // they fall back to a per-pixel Shadow() call. Coherent regions still
             // get the full sharing speedup; silhouettes pay the per-pixel cost they
             // would have paid anyway under !shareShadows.
-            if (uniforms.coherentPacketEnabled != 0 && localIndex != 0 && tg_anchorHasHit != 0) {
+            if (coherentPacketOn && localIndex != 0 && tg_anchorHasHit != 0) {
                 float normalDot = dot(nor, tg_anchorNormal);
                 float dpDist = length(p - tg_anchorPos);
                 // Tile diagonal at unit depth ≈ 8 * 1.41 / min(res). Use adjustedDist
@@ -4098,7 +4107,7 @@ kernel void adaptiveHierarchical8x8(
     //   3 = red     : warm-start probe REJECTED -> fell back to coarse pass
     //   4 = cyan    : shadow-share fallback (per-pixel Shadow paid)
     //   0 = unset   : pixel followed legacy coarse-tile path (no tint)
-    if (uniforms.coherentPacketEnabled != 0) {
+    if (coherentPacketOn) {
         half3 layerTint = half3(0.0h);
         half tintMix = 0.0h;
         if (packetLayer == 1)      { layerTint = half3(1.0h, 0.0h, 1.0h); tintMix = 0.65h; }

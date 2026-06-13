@@ -87,6 +87,7 @@ extension Renderer {
         var colorIterations: Int32?        // FC index 9 - enables loop unrolling in color
         var shadowsEnabled: Bool?          // FC index 11 - GMT-fractals: compile-out shadows entirely
         var mandelbulbPower: Int32?        // FC index 12 - bakes integer power for fastPowR optimization
+        var coherentPacketEnabled: Bool?   // FC index 14 - compute kernel only; compiles out packet experiment
 
             static func specializedMandelbulbPower(fractalType: FractalModelType,
                                    formulaParams: FormulaParams) -> Int32? {
@@ -136,6 +137,9 @@ extension Renderer {
             }
             if var power = mandelbulbPower {
                 constants.setConstantValue(&power, type: .int, index: FunctionConstantIndex.mandelbulbPower.rawValue)
+            }
+            if var packet = coherentPacketEnabled {
+                constants.setConstantValue(&packet, type: .bool, index: FunctionConstantIndex.coherentPacketEnabled.rawValue)
             }
 
             return constants

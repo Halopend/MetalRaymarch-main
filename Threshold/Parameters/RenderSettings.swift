@@ -2374,11 +2374,19 @@ final class RenderSettings: @unchecked Sendable {
     private var _stPosition = SIMD3<Float>(repeating: 0)
     private var _stWorldRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
     private var _stDetailScale: Float = 1
+    private var _sceneLoadGeneration: UInt64 = 0
 
     /// Configured "Same Scene Transition Time" in seconds. Clamped to 0...10.
     var sceneTransitionDuration: Float {
         get { withLock { _sceneTransitionDuration } }
         set { withLock { _sceneTransitionDuration = max(0, min(10, newValue)) } }
+    }
+
+    /// Monotonic counter bumped each time a scene/preset load is committed.
+    /// Lets per-renderer systems (e.g. the music-reactive engine) detect a
+    /// preset load and reset accumulated state like drift offsets.
+    var sceneLoadGeneration: UInt64 {
+        withLock { _sceneLoadGeneration }
     }
 
     /// Snapshot the currently displayed transform/shape parameters before a new
@@ -2403,6 +2411,8 @@ final class RenderSettings: @unchecked Sendable {
         withLock {
             guard _sceneTransitionArmed else { return }
             _sceneTransitionArmed = false
+            // A preset/scene load completed, whether or not the visual ease runs.
+            _sceneLoadGeneration &+= 1
 
             // Skip when disabled or while the keyframe animation system owns the
             // displayed values (it drives them directly, bypassing this path).

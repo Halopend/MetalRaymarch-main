@@ -24,8 +24,12 @@ private struct RenderPipelineKeyContext {
          qualityMode: Int,
          colorIterations: Int32,
          powerKey: String,
-         useQuadShared: Bool) {
-        exactStem = prefix + "FT\(fractalTypeRawValue)_FI\(iterations)_RS\(raySteps)_N"
+         useQuadShared: Bool,
+         sceneKey: String = "") {
+        // sceneKey carries scene-stable feature bakes (e.g. "_B0" safety bubble).
+        // Exact-only: shared/startup pipelines leave those FCs undefined so the
+        // shader falls back to runtime uniforms, keeping fallbacks correct.
+        exactStem = prefix + "FT\(fractalTypeRawValue)_FI\(iterations)_RS\(raySteps)\(sceneKey)_N"
         sharedStem = prefix + "FI\(iterations)_RS\(raySteps)_N"
         suffix = "_Q\(qualityMode)_CI\(colorIterations)\(powerKey)" + (useQuadShared ? "_QS" : "")
     }
@@ -49,8 +53,11 @@ private struct ComputePipelineKeyContext {
          fractalTypeRawValue: Int,
          fractalIterations: Int,
          maxRaySteps: Int,
-         powerKey: String) {
-        exactKey = prefix + "FT\(fractalTypeRawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
+         powerKey: String,
+         sceneKey: String = "") {
+        // sceneKey carries scene-stable feature bakes (e.g. "_B0_CP0"); exact-only
+        // so shared/startup pipelines keep runtime-uniform fallback behavior.
+        exactKey = prefix + "FT\(fractalTypeRawValue)_FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)\(sceneKey)"
         sharedKey = prefix + "FI\(fractalIterations)_RS\(maxRaySteps)\(powerKey)"
     }
 }
@@ -67,6 +74,23 @@ struct ComputePipelineRequest {
 }
 
 extension Renderer {
+    /// Effective safety-bubble state for exact-pipeline specialization. Mirrors
+    /// the uniform derivation in Renderer (mandelbulb force-disables the bubble),
+    /// so the baked FC always matches what the uniform would have said.
+    @inline(__always)
+    fileprivate func effectiveSafetyBubbleEnabled(for fractalType: FractalModelType) -> Bool {
+        fractalType != .mandelbulb && appModel.renderSettings.safetyBubbleEnabled
+    }
+
+    /// Scene-stable feature bakes for exact compute-pipeline keys
+    /// (safety bubble + coherent-packet experiment), read from live settings.
+    @inline(__always)
+    fileprivate func computeSceneKey(for fractalType: FractalModelType) -> String {
+        let bubble = effectiveSafetyBubbleEnabled(for: fractalType)
+        let packet = appModel.renderSettings.coherentPacketEnabled
+        return "_B\(bubble ? 1 : 0)_CP\(packet ? 1 : 0)"
+    }
+
     @inline(__always)
     fileprivate func recordPipelineTelemetry(renderHit: Bool? = nil,
                                              computeHit: Bool? = nil,
@@ -148,8 +172,10 @@ extension Renderer {
         fractalTypeRawValue: Int32,
         mandelbulbPower: Int32?,
         activeCustomHash: String?,
+        bubbleEnabled: Bool,
         isSpecialized: Bool
     ) -> MTLRenderPipelineState {
+        lastSelectBubble = bubbleEnabled
         lastSelectIter = iterations
         lastSelectRS = raySteps
         lastSelectQS = useQuadShared
@@ -171,8 +197,12 @@ extension Renderer {
         fractalIterations: Int,
         maxRaySteps: Int,
         mandelbulbPower: Int32?,
-        activeCustomHash: String?
+        activeCustomHash: String?,
+        bubbleEnabled: Bool,
+        packetEnabled: Bool
     ) -> MTLComputePipelineState? {
+        lastComputeBubble = bubbleEnabled
+        lastComputePacket = packetEnabled
         lastComputeFT = fractalTypeRawValue
         lastComputeFI = fractalIterations
         lastComputeRS = maxRaySteps
@@ -247,6 +277,7 @@ extension Renderer {
         let neon = (appModel.renderSettings.gradientPreset?.isNeonMode ?? false) ? 1 : 0
         let qualityMode: Int32 = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
+        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(for: fractalType),
             fractalTypeRawValue: Int(fractalType.rawValue),
@@ -255,7 +286,8 @@ extension Renderer {
             qualityMode: Int(qualityMode),
             colorIterations: colorIterations,
             powerKey: powerKey,
-            useQuadShared: useQuadShared
+            useQuadShared: useQuadShared,
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neon == 1)
 
@@ -268,7 +300,7 @@ extension Renderer {
         let config = FunctionConstantConfig(
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
-            safetyBubbleEnabled: nil,  // Runtime: respects user toggle
+            safetyBubbleEnabled: bubbleEnabled,  // Baked; toggle changes the cache key and rebuilds async
             qualityMode: qualityMode,
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
@@ -353,7 +385,8 @@ extension Renderer {
                 fractalTypeRawValue: Int(preset.fractalType.rawValue),
                 fractalIterations: Int(functionConstants.fractalIterations),
                 maxRaySteps: Int(functionConstants.maxRaySteps),
-                powerKey: powerKey
+                powerKey: powerKey,
+                sceneKey: computeSceneKey(for: preset.fractalType)
             ).exactKey
             if prewarmedComputeKeys.insert(computeKey).inserted {
                 await prewarmComputePipelineDuringStartup(forPreset: preset)
@@ -408,6 +441,7 @@ extension Renderer {
             print("🔀 [Pipeline] Mandelbulb power changed: \(previousPower) → \(nextPower)")
         }
                 let colorIterations = Int32(request?.colorIterations ?? appModel.renderSettings.colorIterations)
+        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
 
         // Fast-path: parameters unchanged since last call — skip string alloc + dict lookup
         if iterations == lastSelectIter && raySteps == lastSelectRS &&
@@ -416,6 +450,7 @@ extension Renderer {
               colorIterations == lastSelectColorIterations &&
            fractalType.rawValue == lastSelectFT &&
            activeCustomHash == lastSelectCustomHash &&
+           bubbleEnabled == lastSelectBubble &&
            mandelbulbPower == lastSelectPower, let cached = lastSelectedPipeline {
             recordPipelineTelemetry(renderHit: true, renderSource: "fast-path")
             if fractalType == .custom, !lastSelectedIsSpecialized {
@@ -436,7 +471,8 @@ extension Renderer {
             qualityMode: qualityMode,
             colorIterations: colorIterations,
             powerKey: powerKey,
-            useQuadShared: useQuadShared
+            useQuadShared: useQuadShared,
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
         if RENDERER_DEBUG,
@@ -474,7 +510,7 @@ extension Renderer {
             let exactConfig = FunctionConstantConfig(
                 fractalIterations: Int32(iterations),
                 shadowIterations: Int32(max(iterations - 2, 2)),
-                safetyBubbleEnabled: nil,
+                safetyBubbleEnabled: bubbleEnabled,
                 qualityMode: Int32(qualityMode),
                 debugHierarchical: false,
                 maxRaySteps: Int32(raySteps),
@@ -506,6 +542,7 @@ extension Renderer {
                         fractalTypeRawValue: fractalType.rawValue,
                         mandelbulbPower: mandelbulbPower,
                         activeCustomHash: activeCustomHash,
+                        bubbleEnabled: bubbleEnabled,
                         isSpecialized: false
                     )
                 }
@@ -534,6 +571,7 @@ extension Renderer {
                         fractalTypeRawValue: fractalType.rawValue,
                         mandelbulbPower: mandelbulbPower,
                         activeCustomHash: activeCustomHash,
+                        bubbleEnabled: bubbleEnabled,
                         isSpecialized: true
                     )
                 } catch {
@@ -617,6 +655,7 @@ extension Renderer {
             fractalTypeRawValue: fractalType.rawValue,
             mandelbulbPower: mandelbulbPower,
             activeCustomHash: activeCustomHash,
+            bubbleEnabled: bubbleEnabled,
             isSpecialized: isSpecialized
         )
     }
@@ -637,6 +676,7 @@ extension Renderer {
         )
         let qualityMode: Int = iterations <= 7 ? 2 : (iterations <= 9 ? 1 : 0)
         let powerKey = mandelbulbPower.map { "_P\($0)" } ?? ""
+        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
         let keyContext = RenderPipelineKeyContext(
             prefix: customCacheKeyPrefix(for: fractalType),
             fractalTypeRawValue: Int(fractalType.rawValue),
@@ -645,7 +685,8 @@ extension Renderer {
             qualityMode: qualityMode,
             colorIterations: colorIterations,
             powerKey: powerKey,
-            useQuadShared: useQuadShared
+            useQuadShared: useQuadShared,
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)"
         )
         let cacheKey = keyContext.exactKey(neonEnabled: neonMode)
 
@@ -658,7 +699,7 @@ extension Renderer {
         let config = FunctionConstantConfig(
             fractalIterations: Int32(iterations),
             shadowIterations: Int32(max(iterations - 2, 2)),
-            safetyBubbleEnabled: nil,  // Runtime: respects user toggle
+            safetyBubbleEnabled: bubbleEnabled,  // Baked; toggle changes the cache key and rebuilds async
             qualityMode: Int32(qualityMode),
             debugHierarchical: false,
             maxRaySteps: Int32(raySteps),
@@ -703,12 +744,15 @@ extension Renderer {
 
         let functionConstants = preset.deriveFunctionConstants()
         let powerKey = functionConstants.mandelbulbPower.map { "P\($0)" } ?? ""
+        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: preset.fractalType)
+        let packetEnabled = appModel.renderSettings.coherentPacketEnabled
         let keyContext = ComputePipelineKeyContext(
             prefix: customCacheKeyPrefix(for: preset.fractalType),
             fractalTypeRawValue: Int(preset.fractalType.rawValue),
             fractalIterations: Int(functionConstants.fractalIterations),
             maxRaySteps: Int(functionConstants.maxRaySteps),
-            powerKey: powerKey
+            powerKey: powerKey,
+            sceneKey: computeSceneKey(for: preset.fractalType)
         )
         let exactKey = keyContext.exactKey
 
@@ -720,7 +764,9 @@ extension Renderer {
             fractalIterations: functionConstants.fractalIterations,
             shadowIterations: functionConstants.shadowIterations,
             maxRaySteps: functionConstants.maxRaySteps,
-            mandelbulbPower: functionConstants.mandelbulbPower
+            mandelbulbPower: functionConstants.mandelbulbPower,
+            safetyBubbleEnabled: bubbleEnabled,
+            coherentPacketEnabled: packetEnabled
         )
     }
 
@@ -738,7 +784,9 @@ extension Renderer {
     static func buildComputePipeline(device: MTLDevice, library: MTLLibrary, kernelName: String,
                                      fractalType: Int32? = nil,
                                      fractalIterations: Int32, shadowIterations: Int32, maxRaySteps: Int32,
-                                     mandelbulbPower: Int32? = nil) -> MTLComputePipelineState? {
+                                     mandelbulbPower: Int32? = nil,
+                                     safetyBubbleEnabled: Bool? = nil,
+                                     coherentPacketEnabled: Bool? = nil) -> MTLComputePipelineState? {
         let constants = MTLFunctionConstantValues()
         var fi = fractalIterations
         var si = shadowIterations
@@ -751,6 +799,12 @@ extension Renderer {
         }
         if var power = mandelbulbPower {
             constants.setConstantValue(&power, type: .int, index: FunctionConstantIndex.mandelbulbPower.rawValue)
+        }
+        if var bubble = safetyBubbleEnabled {
+            constants.setConstantValue(&bubble, type: .bool, index: FunctionConstantIndex.safetyBubbleEnabled.rawValue)
+        }
+        if var packet = coherentPacketEnabled {
+            constants.setConstantValue(&packet, type: .bool, index: FunctionConstantIndex.coherentPacketEnabled.rawValue)
         }
         constants.setConstantValue(&fi, type: .int, index: FunctionConstantIndex.fractalIterations.rawValue)
         constants.setConstantValue(&si, type: .int, index: FunctionConstantIndex.shadowIterations.rawValue)
@@ -807,16 +861,20 @@ extension Renderer {
             return nil
         }()
         let powerKey = mbPowerInt.map { "P\($0)" } ?? ""
+        let bubbleEnabled = effectiveSafetyBubbleEnabled(for: fractalType)
+        let packetEnabled = appModel.renderSettings.coherentPacketEnabled
         let keyContext = ComputePipelineKeyContext(
             prefix: customCacheKeyPrefix(for: fractalType),
             fractalTypeRawValue: Int(fractalType.rawValue),
             fractalIterations: fractalIterations,
             maxRaySteps: maxRaySteps,
-            powerKey: powerKey
+            powerKey: powerKey,
+            sceneKey: "_B\(bubbleEnabled ? 1 : 0)_CP\(packetEnabled ? 1 : 0)"
         )
 
         // Fast-path: parameters unchanged since last call
         if fractalIterations == lastComputeFI && maxRaySteps == lastComputeRS && fractalType.rawValue == lastComputeFT && activeCustomHash == lastComputeCustomHash && mbPowerInt == lastComputePower,
+           bubbleEnabled == lastComputeBubble, packetEnabled == lastComputePacket,
            let cached = lastSelectedComputePipeline {
             recordPipelineTelemetry(computeHit: true, computeSource: "fast-path")
             return cached
@@ -837,7 +895,9 @@ extension Renderer {
                 fractalIterations: fractalIterations,
                 maxRaySteps: maxRaySteps,
                 mandelbulbPower: mbPowerInt,
-                activeCustomHash: activeCustomHash
+                activeCustomHash: activeCustomHash,
+                bubbleEnabled: bubbleEnabled,
+                packetEnabled: packetEnabled
             )
         }
 
@@ -854,7 +914,9 @@ extension Renderer {
                 fractalIterations: fractalIterations,
                 maxRaySteps: maxRaySteps,
                 mandelbulbPower: mbPowerInt,
-                activeCustomHash: activeCustomHash
+                activeCustomHash: activeCustomHash,
+                bubbleEnabled: bubbleEnabled,
+                packetEnabled: packetEnabled
             )
         }
 
@@ -872,7 +934,9 @@ extension Renderer {
                     fractalIterations: Int32(fractalIterations),
                     shadowIterations: Int32(max(fractalIterations - 2, 2)),
                     maxRaySteps: Int32(maxRaySteps),
-                    mandelbulbPower: mbPowerInt
+                    mandelbulbPower: mbPowerInt,
+                    safetyBubbleEnabled: bubbleEnabled,
+                    coherentPacketEnabled: packetEnabled
                 )
                 recordPipelineTelemetry(computeHit: false, computeMissKey: exactKey, computeSource: "custom-background-build")
                 customSceneDiagnostic("🔬 [CSDiag] selectComputePipeline FT=custom → enqueued background build, returning NIL (compute prepass declined this frame)")
@@ -886,7 +950,9 @@ extension Renderer {
                 fractalIterations: fractalIterations,
                 maxRaySteps: maxRaySteps,
                 mandelbulbPower: mbPowerInt,
-                activeCustomHash: activeCustomHash
+                activeCustomHash: activeCustomHash,
+                bubbleEnabled: bubbleEnabled,
+                packetEnabled: packetEnabled
             )
         }
 
@@ -896,7 +962,9 @@ extension Renderer {
             fractalIterations: Int32(fractalIterations),
             shadowIterations: Int32(max(fractalIterations - 2, 2)),
             maxRaySteps: Int32(maxRaySteps),
-            mandelbulbPower: mbPowerInt
+            mandelbulbPower: mbPowerInt,
+            safetyBubbleEnabled: bubbleEnabled,
+            coherentPacketEnabled: packetEnabled
         )
 
         // 4. Ultimate fallback — generic pipeline with NO function constants.
@@ -913,7 +981,9 @@ extension Renderer {
             fractalIterations: fractalIterations,
             maxRaySteps: maxRaySteps,
             mandelbulbPower: mbPowerInt,
-            activeCustomHash: activeCustomHash
+            activeCustomHash: activeCustomHash,
+            bubbleEnabled: bubbleEnabled,
+            packetEnabled: packetEnabled
         )
     }
 
@@ -1054,7 +1124,9 @@ extension Renderer {
         fractalIterations: Int32,
         shadowIterations: Int32,
         maxRaySteps: Int32,
-        mandelbulbPower: Int32?
+        mandelbulbPower: Int32?,
+        safetyBubbleEnabled: Bool? = nil,
+        coherentPacketEnabled: Bool? = nil
     ) {
         if pendingComputePipelineBuildKeys.contains(cacheKey) { return }
         if shouldDelayComputePipelineBuild(forKey: cacheKey) { return }
@@ -1085,7 +1157,9 @@ extension Renderer {
                 fractalIterations: fractalIterations,
                 shadowIterations: shadowIterations,
                 maxRaySteps: maxRaySteps,
-                mandelbulbPower: mandelbulbPower
+                mandelbulbPower: mandelbulbPower,
+                safetyBubbleEnabled: safetyBubbleEnabled,
+                coherentPacketEnabled: coherentPacketEnabled
             ) {
                 await self.insertBuiltComputePipeline(pipeline, forKey: cacheKey)
             } else {

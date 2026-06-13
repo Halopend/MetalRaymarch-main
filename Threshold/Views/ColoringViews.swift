@@ -184,6 +184,7 @@ struct ColorMappingView: View {
                     enabled: .constant(true),
                     onChanged: { cache.push(\.colorMix, value: cache.color.colorMix) },
                     showToggle: false)
+                MusicDriftIndicatorRow(cache: cache, target: .colorMix)
                 Divider().padding(.leading, 159)
                 EffectSliderRow(icon: "number", label: "Iterations",
                     value: Binding(get: { cache.color.colorIterations }, set: { cache.color.colorIterations = $0 }),

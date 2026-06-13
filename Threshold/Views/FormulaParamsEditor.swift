@@ -240,6 +240,20 @@ private struct ParameterNodeRow: View {
 
     @ViewBuilder
     private func frontFace(floatNode: FloatParameterNode) -> some View {
+        VStack(spacing: 2) {
+            frontFaceControls(floatNode: floatNode)
+
+            // Live drift diagnostic: where the music offset puts the final
+            // value inside the gesture/slider min...max range.
+            if let target = musicReactiveTarget, hasMusicMapping(target) {
+                MusicDriftIndicatorBar(node: floatNode)
+                    .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func frontFaceControls(floatNode: FloatParameterNode) -> some View {
         HStack(spacing: 4) {
             EffectSliderRow(
                 icon: floatNode.icon,
