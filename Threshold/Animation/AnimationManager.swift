@@ -427,6 +427,90 @@ final class AnimationManager {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documentsPath.appendingPathComponent(scenesFileName)
     }
+
+    /// Timestamped backups of user scenes, mirroring PresetManager's safety net.
+    private var scenesBackupsDirectory: URL {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = documentsPath.appendingPathComponent("AnimationSceneBackups", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private var lastSceneBackupAt: Date?
+    private let sceneBackupInterval: TimeInterval = 60
+    private let maxSceneBackupCount = 20
+
+    private static let sceneBackupTimestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// Write a timestamped backup of the given scene data (throttled).
+    private func writeSceneBackup(data: Data) {
+        let now = Date()
+        if let lastSceneBackupAt, now.timeIntervalSince(lastSceneBackupAt) < sceneBackupInterval {
+            return
+        }
+        lastSceneBackupAt = now
+        let stamp = Self.sceneBackupTimestampFormatter.string(from: now)
+        let url = scenesBackupsDirectory.appendingPathComponent("scenes-\(stamp).json")
+        do {
+            try data.write(to: url, options: .atomic)
+            pruneSceneBackups(keeping: maxSceneBackupCount)
+        } catch {
+            print("❌ Failed to write scenes backup: \(error)")
+        }
+    }
+
+    /// Force an immediate backup of the CURRENT user scenes, bypassing the
+    /// throttle. Call before any destructive replace (e.g. iCloud restore).
+    func backupCurrentScenesNow() {
+        guard !userScenes.isEmpty else { return }
+        do {
+            let data = try prettySceneEncoder.encode(userScenes)
+            lastSceneBackupAt = nil // defeat the throttle for this safety snapshot
+            writeSceneBackup(data: data)
+        } catch {
+            print("❌ Failed to write pre-restore scenes backup: \(error)")
+        }
+    }
+
+    private func pruneSceneBackups(keeping count: Int) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: scenesBackupsDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else { return }
+        let sorted = files.sorted { a, b in
+            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return da > db
+        }
+        for url in sorted.dropFirst(count) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Most-recent backup scenes, used when the main file is missing or corrupt.
+    private func loadLatestBackupScenes() -> [AnimationScene] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: scenesBackupsDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else { return [] }
+        let latest = files.max { a, b in
+            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return da < db
+        }
+        guard let url = latest,
+              let data = try? Data(contentsOf: url),
+              let scenes = try? sceneDecoder.decode([AnimationScene].self, from: data) else { return [] }
+        print("✅ Recovered \(scenes.count) user scenes from backup: \(url.lastPathComponent)")
+        return scenes
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // INITIALIZATION
@@ -1324,10 +1408,21 @@ final class AnimationManager {
                     userScenes = try sceneDecoder.decode([AnimationScene].self, from: data)
                     print("📂 Loaded \(userScenes.count) user scenes")
                 } catch {
-                    print("❌ Failed to load scenes: \(error)")
+                    // Main file is corrupt — recover from the newest backup
+                    // rather than starting empty (which a later save would
+                    // persist over the only good copy).
+                    print("❌ Failed to load scenes: \(error) — attempting backup recovery")
+                    userScenes = loadLatestBackupScenes()
                 }
             } else {
-                print("📂 No saved user scenes found")
+                // No main file: a backup may still exist (e.g. file lost but
+                // backups survived). Recover if so.
+                let recovered = loadLatestBackupScenes()
+                if !recovered.isEmpty {
+                    userScenes = recovered
+                } else {
+                    print("📂 No saved user scenes found")
+                }
             }
 
             // Load hidden default IDs
@@ -1359,7 +1454,8 @@ final class AnimationManager {
     private func saveScenes() {
         do {
             let data = try prettySceneEncoder.encode(userScenes)
-            try data.write(to: scenesFileURL)
+            try data.write(to: scenesFileURL, options: .atomic)
+            writeSceneBackup(data: data)
             print("💾 Saved \(userScenes.count) user scenes")
         } catch {
             print("❌ Failed to save scenes: \(error)")

@@ -273,16 +273,22 @@ FORCE_INLINE void applySphericalInversionRay(thread float3 &origin, thread float
 // lightIntensity (pre-scaled) / specPower.
 
 // === BOUNDING SPHERE EARLY EXIT ===
-// Returns -1 if ray misses sphere, otherwise returns entry distance
+// Returns -1 if ray misses sphere, otherwise the distance to start marching.
+// This is a "skip empty space before the volume" optimization, so:
+//   - Origin outside, ray hits sphere → near-entry distance.
+//   - Origin INSIDE the sphere (zoomed in) → 0: there is no empty space to
+//     skip, so we must start at the camera. Returning the far intersection
+//     here would skip all geometry between the camera and the back wall,
+//     punching a growing hole in the center as you zoom in.
 inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, float radius) {
     float3 oc = ro - center;
-    float b = dot(oc, rd);
     float c = dot(oc, oc) - radius * radius;
+    if (c < 0.0) return 0.0;  // Origin inside sphere — start marching immediately
+    float b = dot(oc, rd);
     float discriminant = b * b - c;
     if (discriminant < 0.0) return -1.0;  // Miss
-    float sqrtD = sqrt(discriminant);
-    float t = -b - sqrtD;  // Near intersection
-    return (t > 0.0) ? t : max(-b + sqrtD, 0.0);  // Far intersection if inside
+    float t = -b - sqrt(discriminant);  // Near intersection
+    return (t > 0.0) ? t : -1.0;  // Behind the camera → treat as miss
 }
 
 // === ADAPTIVE LEVEL SELECTION ===

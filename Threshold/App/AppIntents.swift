@@ -3,9 +3,9 @@ import SwiftUI
 
 // MARK: - Play Animation
 struct PlayAnimationIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play animation"
-    static var description: LocalizedStringResource = "Start playing the current animation scene"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Play animation"
+    static let description: LocalizedStringResource = "Start playing the current animation scene"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -20,9 +20,9 @@ struct PlayAnimationIntent: AppIntent {
 
 // MARK: - Pause Animation
 struct PauseAnimationIntent: AppIntent {
-    static var title: LocalizedStringResource = "Pause animation"
-    static var description: LocalizedStringResource = "Pause the current animation scene"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Pause animation"
+    static let description: LocalizedStringResource = "Pause the current animation scene"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -37,9 +37,9 @@ struct PauseAnimationIntent: AppIntent {
 
 // MARK: - Stop Animation
 struct StopAnimationIntent: AppIntent {
-    static var title: LocalizedStringResource = "Stop animation"
-    static var description: LocalizedStringResource = "Stop the current animation scene"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Stop animation"
+    static let description: LocalizedStringResource = "Stop the current animation scene"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -54,9 +54,9 @@ struct StopAnimationIntent: AppIntent {
 
 // MARK: - Toggle Audio Reactivity
 struct ToggleAudioReactivityIntent: AppIntent {
-    static var title: LocalizedStringResource = "Toggle audio reactivity"
-    static var description: LocalizedStringResource = "Enable or disable audio-reactive visualization"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Toggle audio reactivity"
+    static let description: LocalizedStringResource = "Enable or disable audio-reactive visualization"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -73,9 +73,9 @@ struct ToggleAudioReactivityIntent: AppIntent {
 
 // MARK: - Enable Audio Reactivity
 struct EnableAudioReactivityIntent: AppIntent {
-    static var title: LocalizedStringResource = "Enable audio reactivity"
-    static var description: LocalizedStringResource = "Enable audio-reactive visualization"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Enable audio reactivity"
+    static let description: LocalizedStringResource = "Enable audio-reactive visualization"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -90,9 +90,9 @@ struct EnableAudioReactivityIntent: AppIntent {
 
 // MARK: - Disable Audio Reactivity
 struct DisableAudioReactivityIntent: AppIntent {
-    static var title: LocalizedStringResource = "Disable audio reactivity"
-    static var description: LocalizedStringResource = "Disable audio-reactive visualization"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Disable audio reactivity"
+    static let description: LocalizedStringResource = "Disable audio-reactive visualization"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -107,9 +107,9 @@ struct DisableAudioReactivityIntent: AppIntent {
 
 // MARK: - Increase Audio Amount
 struct IncreaseAudioAmountIntent: AppIntent {
-    static var title: LocalizedStringResource = "Increase audio sensitivity"
-    static var description: LocalizedStringResource = "Increase the audio reactivity amount"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Increase audio sensitivity"
+    static let description: LocalizedStringResource = "Increase the audio reactivity amount"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -120,15 +120,15 @@ struct IncreaseAudioAmountIntent: AppIntent {
         let currentValue = appModel.renderSettings.fractalAudioAmount
         let newValue = min(1.0, currentValue + 0.1)
         appModel.renderSettings.fractalAudioAmount = newValue
-        return .result(dialog: String(format: "Audio sensitivity set to %.0f%%", newValue * 100))
+        return .result(dialog: "Audio sensitivity set to \(Int((newValue * 100).rounded()))%")
     }
 }
 
 // MARK: - Decrease Audio Amount
 struct DecreaseAudioAmountIntent: AppIntent {
-    static var title: LocalizedStringResource = "Decrease audio sensitivity"
-    static var description: LocalizedStringResource = "Decrease the audio reactivity amount"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Decrease audio sensitivity"
+    static let description: LocalizedStringResource = "Decrease the audio reactivity amount"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -139,15 +139,15 @@ struct DecreaseAudioAmountIntent: AppIntent {
         let currentValue = appModel.renderSettings.fractalAudioAmount
         let newValue = max(0.0, currentValue - 0.1)
         appModel.renderSettings.fractalAudioAmount = newValue
-        return .result(dialog: String(format: "Audio sensitivity set to %.0f%%", newValue * 100))
+        return .result(dialog: "Audio sensitivity set to \(Int((newValue * 100).rounded()))%")
     }
 }
 
 // MARK: - Increase Beat Punch
 struct IncreaseBeatPunchIntent: AppIntent {
-    static var title: LocalizedStringResource = "Increase beat punch"
-    static var description: LocalizedStringResource = "Increase the beat detection intensity"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Increase beat punch"
+    static let description: LocalizedStringResource = "Increase the beat detection intensity"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -158,15 +158,15 @@ struct IncreaseBeatPunchIntent: AppIntent {
         let currentValue = appModel.renderSettings.fractalBeatPunch
         let newValue = min(1.0, currentValue + 0.1)
         appModel.renderSettings.fractalBeatPunch = newValue
-        return .result(dialog: String(format: "Beat punch set to %.0f%%", newValue * 100))
+        return .result(dialog: "Beat punch set to \(Int((newValue * 100).rounded()))%")
     }
 }
 
 // MARK: - Decrease Beat Punch
 struct DecreaseBeatPunchIntent: AppIntent {
-    static var title: LocalizedStringResource = "Decrease beat punch"
-    static var description: LocalizedStringResource = "Decrease the beat detection intensity"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Decrease beat punch"
+    static let description: LocalizedStringResource = "Decrease the beat detection intensity"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -177,7 +177,7 @@ struct DecreaseBeatPunchIntent: AppIntent {
         let currentValue = appModel.renderSettings.fractalBeatPunch
         let newValue = max(0.0, currentValue - 0.1)
         appModel.renderSettings.fractalBeatPunch = newValue
-        return .result(dialog: String(format: "Beat punch set to %.0f%%", newValue * 100))
+        return .result(dialog: "Beat punch set to \(Int((newValue * 100).rounded()))%")
     }
 }
 
@@ -187,9 +187,9 @@ struct DecreaseBeatPunchIntent: AppIntent {
 
 // MARK: - Toggle Play/Pause Music
 struct ToggleMusicPlaybackIntent: AppIntent {
-    static var title: LocalizedStringResource = "Play or pause music"
-    static var description: LocalizedStringResource = "Toggle playback of the music feeding the visualizer"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Play or pause music"
+    static let description: LocalizedStringResource = "Toggle playback of the music feeding the visualizer"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -205,9 +205,9 @@ struct ToggleMusicPlaybackIntent: AppIntent {
 
 // MARK: - Next Track
 struct NextTrackIntent: AppIntent {
-    static var title: LocalizedStringResource = "Next track"
-    static var description: LocalizedStringResource = "Skip to the next track"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Next track"
+    static let description: LocalizedStringResource = "Skip to the next track"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -225,9 +225,9 @@ struct NextTrackIntent: AppIntent {
 
 // MARK: - Previous Track
 struct PreviousTrackIntent: AppIntent {
-    static var title: LocalizedStringResource = "Previous track"
-    static var description: LocalizedStringResource = "Go back to the previous track"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Previous track"
+    static let description: LocalizedStringResource = "Go back to the previous track"
+    static let openAppWhenRun = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
@@ -245,9 +245,9 @@ struct PreviousTrackIntent: AppIntent {
 
 // MARK: - Now Playing (query)
 struct NowPlayingIntent: AppIntent {
-    static var title: LocalizedStringResource = "What's playing"
-    static var description: LocalizedStringResource = "Report the track currently feeding the visualizer"
-    static var openAppWhenRun = false
+    static let title: LocalizedStringResource = "What's playing"
+    static let description: LocalizedStringResource = "Report the track currently feeding the visualizer"
+    static let openAppWhenRun = false
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -278,9 +278,9 @@ enum FractalTypeAppEnum: String, AppEnum {
     case mengerSphere
     case kleinian
 
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Fractal Type"
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Fractal Type"
 
-    static var caseDisplayRepresentations: [FractalTypeAppEnum: DisplayRepresentation] = [
+    static let caseDisplayRepresentations: [FractalTypeAppEnum: DisplayRepresentation] = [
         .mandelbox: "Mandelbox",
         .mandelbulb: "Mandelbulb",
         .menger: "Menger Sponge",
@@ -307,9 +307,9 @@ enum FractalTypeAppEnum: String, AppEnum {
 
 // MARK: - Switch Fractal Type
 struct SwitchFractalTypeIntent: AppIntent {
-    static var title: LocalizedStringResource = "Switch fractal"
-    static var description: LocalizedStringResource = "Change the active fractal type"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Switch fractal"
+    static let description: LocalizedStringResource = "Change the active fractal type"
+    static let openAppWhenRun = true
 
     @Parameter(title: "Fractal")
     var fractal: FractalTypeAppEnum
@@ -331,9 +331,9 @@ struct SwitchFractalTypeIntent: AppIntent {
 
 // MARK: - Set Audio Sensitivity
 struct SetAudioSensitivityIntent: AppIntent {
-    static var title: LocalizedStringResource = "Set audio sensitivity"
-    static var description: LocalizedStringResource = "Set the audio reactivity amount to a specific level"
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Set audio sensitivity"
+    static let description: LocalizedStringResource = "Set the audio reactivity amount to a specific level"
+    static let openAppWhenRun = true
 
     @Parameter(title: "Percent", default: 60,
                controlStyle: .field,
@@ -358,6 +358,11 @@ struct SetAudioSensitivityIntent: AppIntent {
 
 // MARK: - AppShortcutsProvider
 struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
+    // NOTE: AppShortcutsProvider registers a MAXIMUM of 10 App Shortcuts —
+    // anything past the 10th is silently dropped. The full set of intents below
+    // is still available in the Shortcuts app and Spotlight; this list is just
+    // the curated zero-config voice phrases. Keep it at 10 and lead with the
+    // highest-value voice commands (parameterized ones especially).
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: PlayAnimationIntent(),
@@ -376,50 +381,19 @@ struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
         )
 
         AppShortcut(
-            intent: StopAnimationIntent(),
-            phrases: ["Stop the animation in \(.applicationName)",
-                      "Stop \(.applicationName)"],
-            shortTitle: "Stop",
-            systemImageName: "stop.fill"
-        )
-
-        AppShortcut(
-            intent: EnableAudioReactivityIntent(),
-            phrases: ["Enable audio reactivity in \(.applicationName)",
-                      "Turn on \(.applicationName) audio"],
-            shortTitle: "Enable Audio",
-            systemImageName: "waveform.circle.fill"
-        )
-
-        AppShortcut(
-            intent: DisableAudioReactivityIntent(),
-            phrases: ["Disable audio reactivity in \(.applicationName)",
-                      "Turn off \(.applicationName) audio"],
-            shortTitle: "Disable Audio",
-            systemImageName: "waveform.circle"
-        )
-
-        AppShortcut(
             intent: ToggleAudioReactivityIntent(),
-            phrases: ["Toggle audio reactivity in \(.applicationName)"],
+            phrases: ["Toggle audio reactivity in \(.applicationName)",
+                      "Turn on \(.applicationName) audio",
+                      "Turn off \(.applicationName) audio"],
             shortTitle: "Toggle Audio",
             systemImageName: "waveform.circle.fill"
         )
 
         AppShortcut(
-            intent: IncreaseAudioAmountIntent(),
-            phrases: ["Increase audio sensitivity in \(.applicationName)",
-                      "Turn up \(.applicationName) audio"],
-            shortTitle: "Boost Audio",
-            systemImageName: "speaker.wave.2.fill"
-        )
-
-        AppShortcut(
-            intent: DecreaseAudioAmountIntent(),
-            phrases: ["Decrease audio sensitivity in \(.applicationName)",
-                      "Turn down \(.applicationName) audio"],
-            shortTitle: "Lower Audio",
-            systemImageName: "speaker.wave.1.fill"
+            intent: SetAudioSensitivityIntent(),
+            phrases: ["Set audio sensitivity in \(.applicationName)"],
+            shortTitle: "Set Sensitivity",
+            systemImageName: "dial.medium"
         )
 
         AppShortcut(
@@ -431,11 +405,11 @@ struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
         )
 
         AppShortcut(
-            intent: DecreaseBeatPunchIntent(),
-            phrases: ["Decrease beat punch in \(.applicationName)",
-                      "Less \(.applicationName) beat punch"],
-            shortTitle: "Lower Beat",
-            systemImageName: "bolt"
+            intent: SwitchFractalTypeIntent(),
+            phrases: ["Switch fractal in \(.applicationName)",
+                      "Change \(.applicationName) fractal"],
+            shortTitle: "Switch Fractal",
+            systemImageName: "cube.transparent"
         )
 
         AppShortcut(
@@ -468,21 +442,6 @@ struct ThresholdAppShortcutsProvider: AppShortcutsProvider {
                       "What song is \(.applicationName) playing"],
             shortTitle: "Now Playing",
             systemImageName: "music.note"
-        )
-
-        AppShortcut(
-            intent: SwitchFractalTypeIntent(),
-            phrases: ["Switch fractal in \(.applicationName)",
-                      "Change \(.applicationName) fractal"],
-            shortTitle: "Switch Fractal",
-            systemImageName: "cube.transparent"
-        )
-
-        AppShortcut(
-            intent: SetAudioSensitivityIntent(),
-            phrases: ["Set audio sensitivity in \(.applicationName)"],
-            shortTitle: "Set Sensitivity",
-            systemImageName: "dial.medium"
         )
     }
 }

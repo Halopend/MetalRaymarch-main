@@ -210,6 +210,20 @@ class PresetManager {
         }
     }
 
+    /// Force an immediate timestamped backup of the CURRENT presets, bypassing
+    /// the throttle. Call this before any destructive replace (e.g. iCloud
+    /// restore) so local-only scenes can always be recovered from Backups/.
+    func backupCurrentPresetsNow() {
+        guard !presets.isEmpty else { return }
+        do {
+            let data = try presetEncoder.encode(presets)
+            lastBackupAt = nil // defeat the throttle for this safety snapshot
+            writeBackup(data: data)
+        } catch {
+            print("Failed to write pre-restore safety backup: \(error)")
+        }
+    }
+
     /// Replace all presets with the given array and persist.
     func replaceAll(with newPresets: [FractalPreset]) {
         presets = newPresets

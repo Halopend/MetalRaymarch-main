@@ -394,18 +394,30 @@ extension ContentView {
                     .tint(.cyan)
                     .disabled(cloud.isBusy || !cloud.isSyncEnabled)
 
-                    Button {
-                        appModel.iCloudBackup.restoreFromCloud(
-                            into: appModel.renderSettings,
-                            presetManager: appModel.presetManager,
-                            animationManager: appModel.animationManager
-                        )
+                    Button(role: .destructive) {
+                        showICloudRestoreConfirm = true
                     } label: {
                         Label("Restore", systemImage: "arrow.down.to.line.compact")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .disabled(cloud.isBusy || !cloud.isSyncEnabled)
+                    .confirmationDialog(
+                        "Restore from iCloud?",
+                        isPresented: $showICloudRestoreConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Replace Local Scenes", role: .destructive) {
+                            appModel.iCloudBackup.restoreFromCloud(
+                                into: appModel.renderSettings,
+                                presetManager: appModel.presetManager,
+                                animationManager: appModel.animationManager
+                            )
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("This replaces your local scenes, animations, and settings with the copy in iCloud. Local-only scenes that aren't backed up will be overwritten. A safety backup of your current scenes is saved first.")
+                    }
                 }
 
                 Button {

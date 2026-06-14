@@ -53,6 +53,7 @@ struct ContentView: View {
     // the per-tab `extension ContentView` files).
     @State private var savedGradientToDelete: Int? = nil
     @State private var showDeleteConfirm = false
+    @State var showICloudRestoreConfirm = false
     @State var renamingGradientIndex: Int? = nil
     @State var renamingGradientName: String = ""
     @AppStorage("allowCustomScenes") var allowCustomScenes: Bool = false

@@ -251,6 +251,13 @@ final class ICloudBackupManager {
             let result = await Self.performRestore(from: folder)
             switch result {
             case .success(let restored):
+                // Safety: snapshot current local presets AND animation scenes
+                // before any destructive replace, so an accidental restore (or
+                // an empty/stale cloud) can never permanently lose local-only
+                // data. Recoverable from each manager's Backups directory.
+                presetManager.backupCurrentPresetsNow()
+                animationManager?.backupCurrentScenesNow()
+
                 if let payload = restored.settings {
                     payload.apply(to: settings)
                     SettingsPersistence.saveAll(from: settings)

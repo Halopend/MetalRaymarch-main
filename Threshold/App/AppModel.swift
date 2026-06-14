@@ -366,7 +366,6 @@ class AppModel {
     }
     
     init() {
-        AppModel.shared = self
         ParameterRoutingValidation.validateStartupRouting()
 
         // Initialize unified music service first since it's a non-optional constant
@@ -375,7 +374,11 @@ class AppModel {
         #if os(macOS)
         systemAudioCapture = SystemAudioTapCapture(analyzer: audioAnalyzer)
         #endif
-        
+
+        // Publish the shared reference only after all stored properties are
+        // initialized — `self` cannot escape an initializer before then.
+        AppModel.shared = self
+
         // Initialize gesture controller with render settings
         gestureController = GestureController(renderSettings: renderSettings, parameterPipeline: parameterPipeline)
         parameterPipeline.setDebugTraceEnabled(parameterOperationDebugTrace)
