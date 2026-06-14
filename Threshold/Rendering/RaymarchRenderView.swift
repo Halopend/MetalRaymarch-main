@@ -1069,7 +1069,15 @@ private final class ThresholdMacRenderer {
         let traceScale = max(effectiveScale, traceScaleFloor)
         let maxViewDistanceCap: Float = isKleinianFamily ? 420.0 : 80.0
         let baseViewDistance: Float = isKleinianFamily ? RenderSettings.maxViewDistance * 2.0 : RenderSettings.maxViewDistance
-        let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / traceScale)
+        // The march runs in MODEL space, where the fractal is a fixed size and
+        // detail-scale "zoom" only moves the camera toward the origin. Dividing the
+        // view distance by the zoomed scale is correct for zooming OUT (camera
+        // recedes, needs more range) but WRONG for zooming IN: it collapses the
+        // ray range below the fractal's own extent, clipping the long center rays
+        // and punching a growing hole in the view center. Cap the divisor at the
+        // base scale so zooming in never shrinks the range below the base.
+        let viewDistanceScale = max(min(effectiveScale, smoothedScale), traceScaleFloor)
+        let targetMaxViewDistance = min(maxViewDistanceCap, baseViewDistance / viewDistanceScale)
         let maxViewDistanceSpeed: Float = targetMaxViewDistance > smoothedMaxViewDistance ? 30.0 : 10.0
         let maxViewDistanceBlend = 1.0 - exp(-maxViewDistanceSpeed * deltaTime)
         smoothedMaxViewDistance += (targetMaxViewDistance - smoothedMaxViewDistance) * maxViewDistanceBlend

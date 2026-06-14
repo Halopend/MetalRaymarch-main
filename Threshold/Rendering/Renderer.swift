@@ -770,9 +770,17 @@ actor Renderer {
             drawable = legacyDrawable
         }
 
-        // Wait for a buffer to become available. With maxBuffersInFlight=2,
-        // this allows CPU/GPU pipelining while preventing frame accumulation.
-        // The 2-buffer setup prevents the 45fps vsync lock that occurred with 1 buffer.
+        // Wait for a buffer to become available. With maxBuffersInFlight=2, the
+        // cheap CPU encode of frame N+1 overlaps the GPU render of N, so encode
+        // time is hidden behind GPU work — a throughput win whenever we're
+        // GPU-bound (the steady state on Vision Pro, where we run below 45 FPS
+        // and never approach the compositor's vsync cadence). The cost is ~1
+        // frame of extra latency, which CompositorServices hides by reprojecting
+        // at present time from the device anchor. Going to 1 buffer would lower
+        // latency but serialize encode with GPU work, reducing throughput — net
+        // worse while GPU-bound. (Earlier comments framed this as "preventing a
+        // 45 FPS vsync lock"; that's a misnomer — there is no 45 FPS lock to hit
+        // when we're already below it.)
         // Timeout at 100ms (~10 FPS floor) to detect GPU stalls instead of hanging forever.
         let inFlightWaitStart = CACurrentMediaTime()
         let waitResult = inFlightSemaphore.wait(timeout: .now() + .milliseconds(100))

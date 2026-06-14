@@ -4,9 +4,11 @@ import Foundation
 // The 256 byte aligned size of our uniform structure
 let alignedUniformsSize = (MemoryLayout<UniformsArray>.size + 0xFF) & -0x100
 
-// Double buffering for CPU/GPU pipelining.
-// Allows CPU to prepare frame N+1 while GPU renders N.
-// This prevents the 45fps vsync lock while minimizing latency.
+// Double buffering for CPU/GPU pipelining (visionOS Renderer only; the Mac
+// RaymarchRenderView has its own count). Lets the CPU encode frame N+1 while the
+// GPU renders N, hiding encode time behind GPU work — a throughput win while
+// GPU-bound (the steady state on Vision Pro, where we run below 45 FPS). Trades
+// ~1 frame of latency, which CompositorServices reprojects away at present time.
 let maxBuffersInFlight = 2
 
 // Function constant indices - must match the indices in Shaders.metal
