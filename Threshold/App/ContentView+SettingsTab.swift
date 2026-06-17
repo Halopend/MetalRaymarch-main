@@ -667,14 +667,12 @@ extension ContentView {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
         }
         .sheet(item: $exportShareItem) { item in
-            VStack(spacing: 12) {
-                Text(item.url.lastPathComponent)
-                    .font(.subheadline.weight(.medium))
-                ShareLink(item: item.url) {
-                    Label("Share File", systemImage: "square.and.arrow.up")
-                }
-            }
-            .padding()
+            // Use the same native share UI as the Presets library so the two
+            // export paths behave identically. UIActivityViewController /
+            // NSSharingServicePicker dismiss themselves once the user picks a
+            // destination or cancels — the previous custom ShareLink sheet had
+            // no dismiss control and could get stuck on visionOS/macOS.
+            ShareSheet(activityItems: [item.url])
         }
     }
 

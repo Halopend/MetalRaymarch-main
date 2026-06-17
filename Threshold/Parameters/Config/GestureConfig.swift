@@ -17,6 +17,8 @@ struct GestureConfig: Codable, Equatable, Sendable {
 
     // Sensitivity & smoothing
     var gestureSensitivity: Float = GestureDefaults.gestureSensitivity
+    /// Time-smoothing for gesture-driven parameter changes (seconds).
+    var gestureSmoothing: Float = GestureDefaults.gestureSmoothing
     var menuAndMovementOnly: Bool = GestureDefaults.menuAndMovementOnly
     var useRelativeGestures: Bool = GestureDefaults.useRelativeGestures
     var extendedGestureRange: Bool = GestureDefaults.extendedGestureRange
@@ -62,6 +64,7 @@ struct GestureConfig: Codable, Equatable, Sendable {
 
     mutating func clamp() {
         gestureSensitivity = gestureSensitivity.clamped(to: GestureDefaults.gestureSensitivityRange)
+        gestureSmoothing = gestureSmoothing.clamped(to: GestureDefaults.gestureSmoothingRange)
         translationSensitivity = translationSensitivity.clamped(to: GestureDefaults.translationSensitivityRange)
         rotationSnapWindowDegrees = rotationSnapWindowDegrees.clamped(to: GestureDefaults.rotationSnapWindowDegreesRange)
         rotationBreakawayDegrees = rotationBreakawayDegrees.clamped(to: GestureDefaults.rotationBreakawayDegreesRange)

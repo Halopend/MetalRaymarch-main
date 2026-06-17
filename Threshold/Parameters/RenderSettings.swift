@@ -135,6 +135,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _rotationSnapWindowDegrees: Float = loadGestureFloat("rotationSnapWindowDegrees", default: GestureDefaults.rotationSnapWindowDegrees)
     private var _rotationBreakawayDegrees: Float = loadGestureFloat("rotationBreakawayDegrees", default: GestureDefaults.rotationBreakawayDegrees)
     private var _gestureSensitivity: Float = loadGestureFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
+    private var _gestureSmoothing: Float = loadGestureFloat("gestureSmoothing", default: GestureDefaults.gestureSmoothing)
     private var _menuAndMovementOnly: Bool = loadGestureBool("menuAndMovementOnly", default: GestureDefaults.menuAndMovementOnly)
     private var _menuToggleGestureEnabled: Bool = loadGestureBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
@@ -897,6 +898,19 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(1.0, min(10.0, newValue))
             withLock { _gestureSensitivity = clamped }
+            persistGesture()
+        }
+    }
+
+    /// Gesture smoothing time (seconds). Drives the critically-damped spring that
+    /// eases gesture-driven parameter changes toward their targets, so motions
+    /// "play out" over time instead of snapping. Higher = smoother/slower.
+    var gestureSmoothing: Float {
+        get { withLock { _gestureSmoothing } }
+        set {
+            let r = GestureDefaults.gestureSmoothingRange
+            let clamped = max(r.lowerBound, min(r.upperBound, newValue))
+            withLock { _gestureSmoothing = clamped }
             persistGesture()
         }
     }
@@ -2343,8 +2357,9 @@ final class RenderSettings: @unchecked Sendable {
     // Critically-damped spring with velocity/acceleration limits for buttery smooth motion
     
     /// Smooth time - how long (in seconds) to reach the target. Higher = smoother but more latency.
-    private let smoothTime: Float = 0.35
-    
+    /// User-adjustable via the "Gesture Smoothing" control (see `gestureSmoothing` / `_gestureSmoothing`).
+    private var smoothTime: Float { _gestureSmoothing }
+
     /// Maximum speed the parameter can travel (units per second). Prevents jarring fast motion.
     private let maxSpeed: Float = 8.0
     
@@ -2490,7 +2505,8 @@ final class RenderSettings: @unchecked Sendable {
             let effSmoothTime = stActive ? max(0.05, _sceneTransitionDuration * 0.5) : smoothTime
             let effMaxSpeed = stActive ? Float(1e9) : maxSpeed
             let effMaxPositionSpeed = stActive ? Float(1e9) : maxPositionSpeed
-            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : 12.0
+            // Rotation/scale (grab) smoothing tracks the same gesture-smoothing control.
+            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : (2.0 / max(effSmoothTime, 0.001))
             if stActive {
                 _sceneTransitionElapsed += clampedDT
                 // Safety timeout so the override always releases.
@@ -3220,6 +3236,7 @@ final class RenderSettings: @unchecked Sendable {
                 var c = GestureConfig()
                 c.gestureBindings = _gestureBindings
                 c.gestureSensitivity = _gestureSensitivity
+                c.gestureSmoothing = _gestureSmoothing
                 c.menuAndMovementOnly = _menuAndMovementOnly
                 c.useRelativeGestures = _useRelativeGestures
                 c.extendedGestureRange = _extendedGestureRange
@@ -3255,6 +3272,7 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 _gestureBindings = newValue.gestureBindings
                 _gestureSensitivity = newValue.gestureSensitivity
+                _gestureSmoothing = max(GestureDefaults.gestureSmoothingRange.lowerBound, min(GestureDefaults.gestureSmoothingRange.upperBound, newValue.gestureSmoothing))
                 _menuAndMovementOnly = newValue.menuAndMovementOnly
                 _useRelativeGestures = newValue.useRelativeGestures
                 _extendedGestureRange = newValue.extendedGestureRange

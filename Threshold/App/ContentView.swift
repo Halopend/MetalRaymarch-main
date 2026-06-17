@@ -93,6 +93,11 @@ struct ContentView: View {
         return cache.audioReactive.musicReactiveMappings.count
     }
 
+    /// True when spherical inversion is warping space — drives the Shape tab's active badge.
+    private var isSphericalInversionActive: Bool {
+        cache.display.sphericalInversionMode != .off
+    }
+
     private var isAnimationPlaying: Bool {
         appModel.animationManager?.isPlaying ?? appModel.renderSettings.isAnimationPlaying
     }
@@ -662,6 +667,8 @@ struct ContentView: View {
             countBadge(activeDynamicEffectCount, color: .pink)
         case .music where activeMusicPermutationCount > 0:
             countBadge(activeMusicPermutationCount, color: .green)
+        case .shape where isSphericalInversionActive:
+            dotBadge(color: .indigo)
         default:
             EmptyView()
         }
@@ -785,6 +792,16 @@ struct ContentView: View {
             .padding(.horizontal, 2)
             .background(Capsule().fill(color))
             .offset(x: 9, y: -7)
+            .accessibilityHidden(true)
+    }
+
+    /// Small filled dot for boolean "active" states (e.g. spherical inversion on the Shape tab).
+    private func dotBadge(color: Color) -> some View {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1))
+            .offset(x: 5, y: -5)
             .accessibilityHidden(true)
     }
 

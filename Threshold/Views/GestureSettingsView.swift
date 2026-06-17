@@ -147,6 +147,13 @@ struct GestureSettingsView: View {
                         onChanged: { cache.push(\.gestureSensitivity, value: cache.gesture.gestureSensitivity) },
                         showToggle: false)
 
+                    EffectSliderRow(icon: "wind", label: "Gesture Smoothing (s)",
+                        value: Binding(get: { cache.gesture.gestureSmoothing }, set: { cache.gesture.gestureSmoothing = $0 }),
+                        range: 0.05...1.5,
+                        enabled: .constant(true),
+                        onChanged: { cache.push(\.gestureSmoothing, value: cache.gesture.gestureSmoothing) },
+                        showToggle: false)
+
                     EffectSliderRow(icon: "move.3d", label: "Translation Sensitivity",
                         value: Binding(get: { cache.gesture.translationSensitivity }, set: { cache.gesture.translationSensitivity = $0 }),
                         range: 0.2...3.0,
