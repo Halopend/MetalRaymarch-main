@@ -2505,8 +2505,9 @@ final class RenderSettings: @unchecked Sendable {
             let effSmoothTime = stActive ? max(0.05, _sceneTransitionDuration * 0.5) : smoothTime
             let effMaxSpeed = stActive ? Float(1e9) : maxSpeed
             let effMaxPositionSpeed = stActive ? Float(1e9) : maxPositionSpeed
-            // Rotation/scale (grab) smoothing tracks the same gesture-smoothing control.
-            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : (2.0 / max(effSmoothTime, 0.001))
+            // Rotation/scale (grab) smoothing tracks gesture-smoothing but is clamped to
+            // a minimum rate so direct-manipulation grab never feels frozen at high smoothing.
+            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : max(2.0 / max(effSmoothTime, 0.001), 10.0)
             if stActive {
                 _sceneTransitionElapsed += clampedDT
                 // Safety timeout so the override always releases.
@@ -3017,6 +3018,7 @@ final class RenderSettings: @unchecked Sendable {
 
     /// Persist the gesture config (called after binding/threshold/sensitivity changes).
     private func persistGesture() {
+        guard SettingsPersistence.shouldSave(domain: .gesture) else { return }
         SettingsPersistence.save(gestureConfig, domain: .gesture)
     }
 

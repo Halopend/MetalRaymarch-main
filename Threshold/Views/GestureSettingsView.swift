@@ -149,7 +149,7 @@ struct GestureSettingsView: View {
 
                     EffectSliderRow(icon: "wind", label: "Gesture Smoothing (s)",
                         value: Binding(get: { cache.gesture.gestureSmoothing }, set: { cache.gesture.gestureSmoothing = $0 }),
-                        range: 0.05...1.5,
+                        range: GestureDefaults.gestureSmoothingRange,
                         enabled: .constant(true),
                         onChanged: { cache.push(\.gestureSmoothing, value: cache.gesture.gestureSmoothing) },
                         showToggle: false)

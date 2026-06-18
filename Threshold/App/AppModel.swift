@@ -607,7 +607,7 @@ class AppModel {
                         // Renderer never came up within the wait: queue the
                         // apply behind the activation handler instead of
                         // silently dropping the preview.
-                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self] in
+                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self = self] in
                             guard let self, self.activeExternalPreviewID == request.id else { return }
                             self.animationManager?.currentScene = scene
                         }
@@ -663,7 +663,7 @@ class AppModel {
                         self.clearExternalPreview(restorePreviewedState: false)
                         self.pendingExternalImport = nil
                         self.ensureWindowContentVisible()
-                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self] in
+                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self = self] in
                             self?.animationManager?.currentScene = importedScene
                         }
                         return

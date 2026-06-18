@@ -94,7 +94,7 @@ extension ContentView {
                             showToggle: false)
 
                         EffectSliderRow(icon: "wind", label: "Gesture Smoothing (s)",
-                            value: $cache.gesture.gestureSmoothing, range: 0.05...1.5,
+                            value: $cache.gesture.gestureSmoothing, range: GestureDefaults.gestureSmoothingRange,
                             enabled: .constant(true),
                             onChanged: { cache.push(\.gestureSmoothing, value: cache.gesture.gestureSmoothing) },
                             showToggle: false)
