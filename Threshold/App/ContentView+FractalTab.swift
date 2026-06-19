@@ -120,7 +120,8 @@ extension ContentView {
                     value: $cache.fractalScale, range: -3.0...5.0,
                     enabled: .constant(true),
                     onChanged: { cache.push(\.targetFractalScale, value: cache.fractalScale) },
-                    showToggle: false)
+                    showToggle: false,
+                    musicTargetID: ParameterTargetID.Core.fractalScale)
             }
         }
     }

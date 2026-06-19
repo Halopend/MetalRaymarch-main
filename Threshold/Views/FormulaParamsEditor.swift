@@ -260,7 +260,8 @@ private struct ParameterNodeRow: View {
                 range: floatNode.range,
                 enabled: .constant(true),
                 onChanged: {},
-                showToggle: false
+                showToggle: false,
+                musicTargetID: floatNode.id
             )
 
             if floatNode.isGestureMappable {

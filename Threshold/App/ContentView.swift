@@ -215,6 +215,10 @@ struct ContentView: View {
             begin: { appModel.beginMenuAdjustment() },
             end: { appModel.endMenuAdjustment() }
         ))
+        .environment(\.derivedValueProvider, DerivedValueProvider(
+            resolve: { [cache] id in cache.liveDerivedValue(for: id) },
+            musicActive: cache.isMusicReactiveActive
+        ))
         .animation(motionSensitiveAnimation(.easeInOut(duration: 0.3)), value: appModel.immersiveSpaceState)
         .background(menuSurfaceFill, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(

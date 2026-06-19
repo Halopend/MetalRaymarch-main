@@ -37,4 +37,9 @@ final class ParameterPipeline: @unchecked Sendable {
     func clearFormulaStacks() {
         dispatcher.clearFormulaStacks()
     }
+
+    /// Latest (base, resolved) snapshot for a target, for UI derived-value display.
+    func liveValue(for targetID: String) -> ParameterOperationDispatcher.LiveValue? {
+        dispatcher.liveValue(for: targetID)
+    }
 }
