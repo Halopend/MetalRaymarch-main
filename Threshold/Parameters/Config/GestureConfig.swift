@@ -94,43 +94,44 @@ struct GestureConfig: Codable, Equatable, Sendable {
 }
 
 // Custom Decodable init in extension so the memberwise initializer is preserved.
-// Uses decodeIfPresent for gestureSmoothing so existing saved data (which lacks
-// this key) continues to decode successfully with the default value.
+// Every field uses decodeIfPresent so any config written by an older (or newer,
+// field-removed) build still decodes, falling back to the default for missing
+// keys instead of throwing and discarding the user's entire gesture config.
 extension GestureConfig {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        gestureBindings = try c.decode([String: GestureActionBinding].self, forKey: .gestureBindings)
-        useSpringBlob = try c.decode(Bool.self, forKey: .useSpringBlob)
-        gestureSensitivity = try c.decode(Float.self, forKey: .gestureSensitivity)
+        gestureBindings = try c.decodeIfPresent([String: GestureActionBinding].self, forKey: .gestureBindings) ?? GestureDefaults.defaultBindings
+        useSpringBlob = try c.decodeIfPresent(Bool.self, forKey: .useSpringBlob) ?? GestureDefaults.useSpringBlob
+        gestureSensitivity = try c.decodeIfPresent(Float.self, forKey: .gestureSensitivity) ?? GestureDefaults.gestureSensitivity
         gestureSmoothing = try c.decodeIfPresent(Float.self, forKey: .gestureSmoothing) ?? GestureDefaults.gestureSmoothing
-        menuAndMovementOnly = try c.decode(Bool.self, forKey: .menuAndMovementOnly)
-        useRelativeGestures = try c.decode(Bool.self, forKey: .useRelativeGestures)
-        extendedGestureRange = try c.decode(Bool.self, forKey: .extendedGestureRange)
-        translationSensitivity = try c.decode(Float.self, forKey: .translationSensitivity)
-        rotationAutoSnap = try c.decode(Bool.self, forKey: .rotationAutoSnap)
-        rotationSnapWindowDegrees = try c.decode(Float.self, forKey: .rotationSnapWindowDegrees)
-        rotationBreakawayDegrees = try c.decode(Float.self, forKey: .rotationBreakawayDegrees)
-        menuToggleGestureEnabled = try c.decode(Bool.self, forKey: .menuToggleGestureEnabled)
-        menuToggleGestureMode = try c.decode(MenuToggleGestureMode.self, forKey: .menuToggleGestureMode)
-        menuToggleHoldDuration = try c.decode(Float.self, forKey: .menuToggleHoldDuration)
-        menuToggleCooldown = try c.decode(Float.self, forKey: .menuToggleCooldown)
-        menuToggleActivateThreshold = try c.decode(Float.self, forKey: .menuToggleActivateThreshold)
-        menuToggleReleaseThreshold = try c.decode(Float.self, forKey: .menuToggleReleaseThreshold)
-        perFingerTapGestureEnabled = try c.decode(Bool.self, forKey: .perFingerTapGestureEnabled)
-        perFingerTapLeftActions = try c.decode([PerFingerTapAction].self, forKey: .perFingerTapLeftActions)
-        perFingerTapRightActions = try c.decode([PerFingerTapAction].self, forKey: .perFingerTapRightActions)
-        perFingerTapActivateThreshold = try c.decode(Float.self, forKey: .perFingerTapActivateThreshold)
-        perFingerTapReleaseThreshold = try c.decode(Float.self, forKey: .perFingerTapReleaseThreshold)
-        perFingerTapHoldDuration = try c.decode(Float.self, forKey: .perFingerTapHoldDuration)
-        perFingerTapCooldown = try c.decode(Float.self, forKey: .perFingerTapCooldown)
-        twoHandPinchActivateThreshold = try c.decode(Float.self, forKey: .twoHandPinchActivateThreshold)
-        twoHandPinchReleaseThreshold = try c.decode(Float.self, forKey: .twoHandPinchReleaseThreshold)
-        ringPinchActivateThreshold = try c.decode(Float.self, forKey: .ringPinchActivateThreshold)
-        ringPinchReleaseThreshold = try c.decode(Float.self, forKey: .ringPinchReleaseThreshold)
-        gestureMinHandDistance = try c.decode(Float.self, forKey: .gestureMinHandDistance)
-        gestureMaxHandDistance = try c.decode(Float.self, forKey: .gestureMaxHandDistance)
-        gestureMaxStartHandDistance = try c.decode(Float.self, forKey: .gestureMaxStartHandDistance)
-        gestureMaxActiveHandDistance = try c.decode(Float.self, forKey: .gestureMaxActiveHandDistance)
+        menuAndMovementOnly = try c.decodeIfPresent(Bool.self, forKey: .menuAndMovementOnly) ?? GestureDefaults.menuAndMovementOnly
+        useRelativeGestures = try c.decodeIfPresent(Bool.self, forKey: .useRelativeGestures) ?? GestureDefaults.useRelativeGestures
+        extendedGestureRange = try c.decodeIfPresent(Bool.self, forKey: .extendedGestureRange) ?? GestureDefaults.extendedGestureRange
+        translationSensitivity = try c.decodeIfPresent(Float.self, forKey: .translationSensitivity) ?? GestureDefaults.translationSensitivity
+        rotationAutoSnap = try c.decodeIfPresent(Bool.self, forKey: .rotationAutoSnap) ?? GestureDefaults.rotationAutoSnap
+        rotationSnapWindowDegrees = try c.decodeIfPresent(Float.self, forKey: .rotationSnapWindowDegrees) ?? GestureDefaults.rotationSnapWindowDegrees
+        rotationBreakawayDegrees = try c.decodeIfPresent(Float.self, forKey: .rotationBreakawayDegrees) ?? GestureDefaults.rotationBreakawayDegrees
+        menuToggleGestureEnabled = try c.decodeIfPresent(Bool.self, forKey: .menuToggleGestureEnabled) ?? GestureDefaults.menuToggleGestureEnabled
+        menuToggleGestureMode = try c.decodeIfPresent(MenuToggleGestureMode.self, forKey: .menuToggleGestureMode) ?? GestureDefaults.menuToggleGestureMode
+        menuToggleHoldDuration = try c.decodeIfPresent(Float.self, forKey: .menuToggleHoldDuration) ?? GestureDefaults.menuToggleHoldDuration
+        menuToggleCooldown = try c.decodeIfPresent(Float.self, forKey: .menuToggleCooldown) ?? GestureDefaults.menuToggleCooldown
+        menuToggleActivateThreshold = try c.decodeIfPresent(Float.self, forKey: .menuToggleActivateThreshold) ?? GestureDefaults.menuToggleActivateThreshold
+        menuToggleReleaseThreshold = try c.decodeIfPresent(Float.self, forKey: .menuToggleReleaseThreshold) ?? GestureDefaults.menuToggleReleaseThreshold
+        perFingerTapGestureEnabled = try c.decodeIfPresent(Bool.self, forKey: .perFingerTapGestureEnabled) ?? GestureDefaults.perFingerTapGestureEnabled
+        perFingerTapLeftActions = try c.decodeIfPresent([PerFingerTapAction].self, forKey: .perFingerTapLeftActions) ?? GestureDefaults.perFingerTapLeftActions
+        perFingerTapRightActions = try c.decodeIfPresent([PerFingerTapAction].self, forKey: .perFingerTapRightActions) ?? GestureDefaults.perFingerTapRightActions
+        perFingerTapActivateThreshold = try c.decodeIfPresent(Float.self, forKey: .perFingerTapActivateThreshold) ?? GestureDefaults.perFingerTapActivateThreshold
+        perFingerTapReleaseThreshold = try c.decodeIfPresent(Float.self, forKey: .perFingerTapReleaseThreshold) ?? GestureDefaults.perFingerTapReleaseThreshold
+        perFingerTapHoldDuration = try c.decodeIfPresent(Float.self, forKey: .perFingerTapHoldDuration) ?? GestureDefaults.perFingerTapHoldDuration
+        perFingerTapCooldown = try c.decodeIfPresent(Float.self, forKey: .perFingerTapCooldown) ?? GestureDefaults.perFingerTapCooldown
+        twoHandPinchActivateThreshold = try c.decodeIfPresent(Float.self, forKey: .twoHandPinchActivateThreshold) ?? GestureDefaults.twoHandPinchActivateThreshold
+        twoHandPinchReleaseThreshold = try c.decodeIfPresent(Float.self, forKey: .twoHandPinchReleaseThreshold) ?? GestureDefaults.twoHandPinchReleaseThreshold
+        ringPinchActivateThreshold = try c.decodeIfPresent(Float.self, forKey: .ringPinchActivateThreshold) ?? GestureDefaults.ringPinchActivateThreshold
+        ringPinchReleaseThreshold = try c.decodeIfPresent(Float.self, forKey: .ringPinchReleaseThreshold) ?? GestureDefaults.ringPinchReleaseThreshold
+        gestureMinHandDistance = try c.decodeIfPresent(Float.self, forKey: .gestureMinHandDistance) ?? GestureDefaults.gestureMinHandDistance
+        gestureMaxHandDistance = try c.decodeIfPresent(Float.self, forKey: .gestureMaxHandDistance) ?? GestureDefaults.gestureMaxHandDistance
+        gestureMaxStartHandDistance = try c.decodeIfPresent(Float.self, forKey: .gestureMaxStartHandDistance) ?? GestureDefaults.gestureMaxStartHandDistance
+        gestureMaxActiveHandDistance = try c.decodeIfPresent(Float.self, forKey: .gestureMaxActiveHandDistance) ?? GestureDefaults.gestureMaxActiveHandDistance
     }
 }
 
