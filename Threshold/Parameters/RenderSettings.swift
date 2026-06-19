@@ -123,6 +123,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
+    private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -815,6 +816,18 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock { _coherentPacketEnabled = newValue }
             UserDefaults.standard.set(newValue, forKey: "coherentPacketEnabled")
+        }
+    }
+
+    /// Foveated raymarching strength (0...1). 0 = uniform full-quality march
+    /// everywhere; higher values march progressively fewer ray steps in the
+    /// peripheral 8x8 tiles. Only affects the 8x8 adaptive compute path.
+    var foveationStrength: Float {
+        get { withLock { _foveationStrength } }
+        set {
+            let clamped = max(0.0, min(1.0, newValue))
+            withLock { _foveationStrength = clamped }
+            UserDefaults.standard.set(clamped, forKey: "foveationStrength")
         }
     }
 
@@ -1972,6 +1985,7 @@ final class RenderSettings: @unchecked Sendable {
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
+                foveationStrength: _foveationStrength,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -3097,6 +3111,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
                 c.coherentPacketEnabled = _coherentPacketEnabled
+                c.foveationStrength = _foveationStrength
                 return c
             }
         }
@@ -3110,6 +3125,7 @@ final class RenderSettings: @unchecked Sendable {
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
+                _foveationStrength = newValue.foveationStrength
             }
         }
     }

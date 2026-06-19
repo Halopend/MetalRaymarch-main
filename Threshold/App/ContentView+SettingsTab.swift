@@ -763,6 +763,30 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Foveated raymarch")
+                        .font(.headline)
+                    Spacer()
+                    Text("EXPERIMENTAL")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                }
+                Slider(
+                    value: Binding(
+                        get: { appModel.renderSettings.foveationStrength },
+                        set: { appModel.renderSettings.foveationStrength = $0 }
+                    ),
+                    in: 0...1
+                ).tint(themeColor)
+                Text("Peripheral 8x8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8x8 compute path only.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+
 #if DEBUG
             VStack(alignment: .leading, spacing: 8) {
                 HStack { Image(systemName: "timer").foregroundStyle(themeColor); Text("Benchmarking").font(.headline) }

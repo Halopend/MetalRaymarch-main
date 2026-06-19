@@ -1321,7 +1321,7 @@ actor Renderer {
             jitterOffset: .zero,
             temporalReprojectionEnabled: temporalFrameCount > 0 ? 1 : 0,
             coherentPacketEnabled: settingsSnapshot.coherentPacketEnabled ? 1 : 0,
-            _pad_tile: 0,
+            foveationStrength: settingsSnapshot.foveationStrength,
             floorPlane: framePreparation.perEye[viewIndex].floorPlane,
             floorCenterRadius: framePreparation.perEye[viewIndex].floorCenterRadius,
             formulaParams: settingsSnapshot.formulaParams,

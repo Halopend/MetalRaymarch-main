@@ -32,6 +32,7 @@ struct RenderSettingsSnapshot {
     let tileSize: Int
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool
+    let foveationStrength: Float
     let limitFlash: Float
     let activeGestureIndex: Int
     let safetyBubbleEnabled: Bool
