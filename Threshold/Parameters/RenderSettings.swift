@@ -2507,7 +2507,8 @@ final class RenderSettings: @unchecked Sendable {
             let effMaxPositionSpeed = stActive ? Float(1e9) : maxPositionSpeed
             // Rotation/scale (grab) smoothing tracks gesture-smoothing but is clamped to
             // a minimum rate so direct-manipulation grab never feels frozen at high smoothing.
-            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : max(2.0 / max(effSmoothTime, 0.001), 10.0)
+            let minGrabRate: Float = 10.0  // floor on the exponential rate (≈0.1s settle)
+            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : max(2.0 / max(effSmoothTime, 0.001), minGrabRate)
             if stActive {
                 _sceneTransitionElapsed += clampedDT
                 // Safety timeout so the override always releases.
