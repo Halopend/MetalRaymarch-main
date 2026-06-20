@@ -282,6 +282,12 @@ class AppModel {
                         pendingPresetForActivation = nil
                         await applyLoadedScene(queued, options: [])
                     }
+                    // Same late-binding drain for a queued animation scene.
+                    if let queuedScene = pendingSceneApplyAfterActivation,
+                       queuedScene.formulaHash == formula?.shortHash {
+                        pendingSceneApplyAfterActivation = nil
+                        queuedScene.apply()
+                    }
                 } catch {
                     self.errorReporter.report(.preset(.importFailed(
                         "Failed to compile custom shader: \(error.localizedDescription)"
@@ -310,6 +316,26 @@ class AppModel {
     /// renderer has compiled the formula. Cleared on success, on failure,
     /// and on every successful direct (non-deferred) load.
     @ObservationIgnored var pendingPresetForActivation: FractalPreset?
+
+    /// Animation-scene counterpart of `pendingPresetForActivation`: an external
+    /// `.threshanim`/`.threshanimv` whose embedded formula couldn't activate in
+    /// time (renderer not up). The apply closure runs from the activation
+    /// handler's didSet once the formula is compiled, so the scene loads when
+    /// the user eventually enters the immersive space instead of being
+    /// silently dropped after the activation wait times out.
+    @ObservationIgnored var pendingSceneApplyAfterActivation: (formulaHash: String, apply: @MainActor () -> Void)?
+
+    /// Queue an animation-scene apply behind formula activation and nudge the
+    /// immersive space open (same UX as the queued-preset path).
+    func queueSceneApplyAfterFormulaActivation(formulaHash: String, apply: @escaping @MainActor () -> Void) {
+        pendingSceneApplyAfterActivation = (formulaHash, apply)
+        if immersiveSpaceState != .open {
+            NotificationCenter.default.post(
+                name: AppModel.requestOpenImmersiveSpaceNotification,
+                object: nil
+            )
+        }
+    }
     
     /// Prepare the shader pipeline for specific iteration and ray step values
     /// Call this when slider values change to avoid compilation hitches
@@ -577,6 +603,16 @@ class AppModel {
                     ready = true
                 case .deferred:
                     ready = await waitForRendererAndActivate(formula)
+                    if !ready {
+                        // Renderer never came up within the wait: queue the
+                        // apply behind the activation handler instead of
+                        // silently dropping the preview.
+                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self] in
+                            guard let self, self.activeExternalPreviewID == request.id else { return }
+                            self.animationManager?.currentScene = scene
+                        }
+                        return
+                    }
                 case .failed:
                     ready = false
                 }
@@ -617,6 +653,21 @@ class AppModel {
                     ready = true
                 case .deferred:
                     ready = await waitForRendererAndActivate(formula)
+                    if !ready {
+                        // Renderer never came up within the wait. Persist the
+                        // import + close the sheet now (the user's intent is
+                        // committed), and queue the scene apply behind the
+                        // activation handler so it loads when they enter the
+                        // immersive space instead of being silently dropped.
+                        let importedScene = self.animationManager?.importScene(scene)
+                        self.clearExternalPreview(restorePreviewedState: false)
+                        self.pendingExternalImport = nil
+                        self.ensureWindowContentVisible()
+                        queueSceneApplyAfterFormulaActivation(formulaHash: formula.shortHash) { [weak self] in
+                            self?.animationManager?.currentScene = importedScene
+                        }
+                        return
+                    }
                 case .failed:
                     ready = false
                 }
@@ -883,10 +934,11 @@ class AppModel {
             } else {
                 uninstallEmbeddedFormula()
             }
-            // Direct (non-deferred) load: clear any leftover queued preset
-            // from a previous deferred import, so a stale queued preset
+            // Direct (non-deferred) load: clear any leftover queued preset /
+            // scene from a previous deferred import, so a stale queued apply
             // can't fire on the next handler binding.
             pendingPresetForActivation = nil
+            pendingSceneApplyAfterActivation = nil
             await applyLoadedScene(preset, options: options)
         }
     }
@@ -1146,9 +1198,14 @@ class AppModel {
         isMenuWindowVisible = false
         isMenuHovering = false
         menuAdjustmentDepth = 0
-        dismissMenuWindowHandler?()
+        // Hide via opacity + hit-testing (driven by isMenuWindowVisible in ContentView)
+        // instead of tearing down the window. Calling dismissWindow here destroys the
+        // entire (heavy) ContentView, and the next open rebuilds it on the main thread —
+        // that rebuild stalls the @MainActor hand-gesture task, which reads as the menu /
+        // app briefly freezing on each toggle. Keeping the window instance alive makes the
+        // reopen a cheap no-op and removes the hitch.
         refreshMenuInteractionState()
-        print("📋 Menu window dismissed (\(reason))")
+        print("📋 Menu window hidden (\(reason))")
     }
 
     private func toggleFractalMenuFromGesture(

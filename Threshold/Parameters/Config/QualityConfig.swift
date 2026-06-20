@@ -24,11 +24,15 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Experimental: coherent packet predict-validate raymarch path (Stages 0-3)
     var coherentPacketEnabled: Bool = false
 
+    // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.
+    var foveationStrength: Float = 0.0
+
     // MARK: - Validation
 
     mutating func clamp() {
         baseFractalIterations = max(2, min(24, baseFractalIterations))
         baseMaxRaySteps = max(16, min(200, baseMaxRaySteps))
         resolutionScale = max(0.33, min(1.0, resolutionScale))
+        foveationStrength = max(0.0, min(1.0, foveationStrength))
     }
 }

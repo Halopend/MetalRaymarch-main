@@ -307,10 +307,11 @@ extension EmbeddedFormulaContainer {
         return try encoder.encode(self)
     }
 
-    /// Writes this container to a shareable `.threshfx` file in the temp directory.
-    @MainActor
+    /// Writes this container to a shareable `.threshfx` file in the temp
+    /// directory. Call off the main actor (see `exportOffMain`) — validate +
+    /// encode + write blocks for the file's size.
     func exportToFile() -> URL? {
-        let fileName = "\(PresetManager.sanitizedExportFileNameStem(formula.name)).threshfx"
+        let fileName = "\(PresetManager.sanitizedExportFileNameStem(formula.name)).\(ThresholdExportFormat.customFormula.ext)"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         do {
             try encode().write(to: url)

@@ -8,6 +8,50 @@
 import SwiftUI
 import Foundation
 
+/// Single source of truth for Threshold's shareable file formats. The export
+/// writers (PresetManager, AnimationManager, EmbeddedFormulaContainer) and the
+/// export-tab format reference both read from here; the UTType declarations in
+/// the platform Info.plists must mirror these extensions.
+enum ThresholdExportFormat: CaseIterable, Sendable {
+    case scenePreset
+    case musicPreset
+    case animationScene
+    case musicVideoScene
+    case customFormula
+
+    /// Filename extension without the leading dot.
+    var ext: String {
+        switch self {
+        case .scenePreset: return "threshscene"
+        case .musicPreset: return "threshmp"
+        case .animationScene: return "threshanim"
+        case .musicVideoScene: return "threshanimv"
+        case .customFormula: return "threshfx"
+        }
+    }
+
+    /// One-line description shown in the export tab's format reference.
+    var summary: String {
+        switch self {
+        case .scenePreset: return "Fractal preset (settings snapshot)"
+        case .musicPreset: return "Music-reactive preset (audio mappings)"
+        case .animationScene: return "Animation scene (keyframe sequence)"
+        case .musicVideoScene: return "Animation + music (music video)"
+        case .customFormula: return "Custom formula (standalone shader)"
+        }
+    }
+}
+
+/// Runs an export (JSON encode + temp-file write, tens of ms for large
+/// presets) off the main actor and delivers the URL back on it for sheet
+/// presentation — keeps the tap animation from hitching.
+func exportOffMain(_ produce: @escaping @Sendable () -> URL?,
+                   onReady: @escaping @MainActor (URL) -> Void) {
+    Task.detached(priority: .userInitiated) {
+        guard let url = produce() else { return }
+        await onReady(url)
+    }
+}
 
 /// Manages saving and loading of presets
 @MainActor
@@ -37,7 +81,7 @@ class PresetManager {
         return formatter
     }()
 
-    static func sanitizedExportFileNameStem(_ name: String) -> String {
+    nonisolated static func sanitizedExportFileNameStem(_ name: String) -> String {
         let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:\n\r")
         let cleaned = name.components(separatedBy: invalid).joined()
             .replacingOccurrences(of: " ", with: "_")
@@ -276,14 +320,16 @@ class PresetManager {
         UsageAnalytics.shared.trackPresetLoaded(name: preset.name)
     }
     
-    /// Export a preset to a file URL
+    /// Export a preset to a file URL.
     /// Uses `.threshmp` for presets with music-reactive mappings, `.threshscene` otherwise.
-    func exportPreset(_ preset: FractalPreset) -> URL? {
+    /// Nonisolated: encoding + the temp-file write can take tens of ms for
+    /// large presets — call it off the main actor (see `exportOffMain`).
+    nonisolated static func exportPresetFile(_ preset: FractalPreset) -> URL? {
         let hasMusicMappings = preset.musicReactiveMappings != nil && !(preset.musicReactiveMappings?.isEmpty ?? true)
-        let ext = hasMusicMappings ? "threshmp" : "threshscene"
-        let fileName = "\(Self.sanitizedExportFileNameStem(preset.name)).\(ext)"
+        let format: ThresholdExportFormat = hasMusicMappings ? .musicPreset : .scenePreset
+        let fileName = "\(Self.sanitizedExportFileNameStem(preset.name)).\(format.ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
-        
+
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601

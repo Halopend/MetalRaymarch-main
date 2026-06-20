@@ -490,6 +490,10 @@ extension Renderer {
                     recordPipelineTelemetry(renderSource: "custom-missing-library")
                     print("⚠️ [CustomScene] Missing active custom shader library for render pipeline build")
                     customSceneDiagnostic("🔬 [CSDiag] ⚠️ selectPipeline FT=custom → returning DEFAULT pipelineState (library == nil) — this WILL render as fog/sky only because FractalDE_Dispatch lacks FractalTypeCustom arm in default library")
+                    // Self-heal: re-activate the registered formula so this
+                    // sky-only state lasts frames, not forever (any ordering
+                    // race between preset apply and activation lands here).
+                    scheduleCustomLibrarySelfHeal()
                     isSpecialized = false
                     result = useQuadShared ? (quadSharedPipelineState ?? pipelineState) : pipelineState
                     return cacheSelectedRenderPipeline(

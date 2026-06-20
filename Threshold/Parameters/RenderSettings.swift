@@ -123,6 +123,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
+    private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -135,6 +136,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _rotationSnapWindowDegrees: Float = loadGestureFloat("rotationSnapWindowDegrees", default: GestureDefaults.rotationSnapWindowDegrees)
     private var _rotationBreakawayDegrees: Float = loadGestureFloat("rotationBreakawayDegrees", default: GestureDefaults.rotationBreakawayDegrees)
     private var _gestureSensitivity: Float = loadGestureFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
+    private var _gestureSmoothing: Float = loadGestureFloat("gestureSmoothing", default: GestureDefaults.gestureSmoothing)
     private var _menuAndMovementOnly: Bool = loadGestureBool("menuAndMovementOnly", default: GestureDefaults.menuAndMovementOnly)
     private var _menuToggleGestureEnabled: Bool = loadGestureBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
@@ -817,6 +819,18 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Foveated raymarching strength (0...1). 0 = uniform full-quality march
+    /// everywhere; higher values march progressively fewer ray steps in the
+    /// peripheral 8x8 tiles. Only affects the 8x8 adaptive compute path.
+    var foveationStrength: Float {
+        get { withLock { _foveationStrength } }
+        set {
+            let clamped = max(0.0, min(1.0, newValue))
+            withLock { _foveationStrength = clamped }
+            UserDefaults.standard.set(clamped, forKey: "foveationStrength")
+        }
+    }
+
     /// Flash intensity for limit feedback (0-1). Set to 1.0 to trigger flash, decays automatically.
     var limitFlash: Float {
         get { withLock { _limitFlash } }
@@ -897,6 +911,19 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(1.0, min(10.0, newValue))
             withLock { _gestureSensitivity = clamped }
+            persistGesture()
+        }
+    }
+
+    /// Gesture smoothing time (seconds). Drives the critically-damped spring that
+    /// eases gesture-driven parameter changes toward their targets, so motions
+    /// "play out" over time instead of snapping. Higher = smoother/slower.
+    var gestureSmoothing: Float {
+        get { withLock { _gestureSmoothing } }
+        set {
+            let r = GestureDefaults.gestureSmoothingRange
+            let clamped = max(r.lowerBound, min(r.upperBound, newValue))
+            withLock { _gestureSmoothing = clamped }
             persistGesture()
         }
     }
@@ -1958,6 +1985,7 @@ final class RenderSettings: @unchecked Sendable {
                 tileSize: _tileSize,
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
+                foveationStrength: _foveationStrength,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -2343,8 +2371,9 @@ final class RenderSettings: @unchecked Sendable {
     // Critically-damped spring with velocity/acceleration limits for buttery smooth motion
     
     /// Smooth time - how long (in seconds) to reach the target. Higher = smoother but more latency.
-    private let smoothTime: Float = 0.35
-    
+    /// User-adjustable via the "Gesture Smoothing" control (see `gestureSmoothing` / `_gestureSmoothing`).
+    private var smoothTime: Float { _gestureSmoothing }
+
     /// Maximum speed the parameter can travel (units per second). Prevents jarring fast motion.
     private let maxSpeed: Float = 8.0
     
@@ -2490,7 +2519,10 @@ final class RenderSettings: @unchecked Sendable {
             let effSmoothTime = stActive ? max(0.05, _sceneTransitionDuration * 0.5) : smoothTime
             let effMaxSpeed = stActive ? Float(1e9) : maxSpeed
             let effMaxPositionSpeed = stActive ? Float(1e9) : maxPositionSpeed
-            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : 12.0
+            // Rotation/scale (grab) smoothing tracks gesture-smoothing but is clamped to
+            // a minimum rate so direct-manipulation grab never feels frozen at high smoothing.
+            let minGrabRate: Float = 10.0  // floor on the exponential rate (≈0.1s settle)
+            let rotRate: Float = stActive ? (2.0 / effSmoothTime) : max(2.0 / max(effSmoothTime, 0.001), minGrabRate)
             if stActive {
                 _sceneTransitionElapsed += clampedDT
                 // Safety timeout so the override always releases.
@@ -3001,6 +3033,7 @@ final class RenderSettings: @unchecked Sendable {
 
     /// Persist the gesture config (called after binding/threshold/sensitivity changes).
     private func persistGesture() {
+        guard SettingsPersistence.shouldSave(domain: .gesture) else { return }
         SettingsPersistence.save(gestureConfig, domain: .gesture)
     }
 
@@ -3078,6 +3111,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
                 c.coherentPacketEnabled = _coherentPacketEnabled
+                c.foveationStrength = _foveationStrength
                 return c
             }
         }
@@ -3091,6 +3125,7 @@ final class RenderSettings: @unchecked Sendable {
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
+                _foveationStrength = newValue.foveationStrength
             }
         }
     }
@@ -3220,6 +3255,7 @@ final class RenderSettings: @unchecked Sendable {
                 var c = GestureConfig()
                 c.gestureBindings = _gestureBindings
                 c.gestureSensitivity = _gestureSensitivity
+                c.gestureSmoothing = _gestureSmoothing
                 c.menuAndMovementOnly = _menuAndMovementOnly
                 c.useRelativeGestures = _useRelativeGestures
                 c.extendedGestureRange = _extendedGestureRange
@@ -3255,6 +3291,7 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 _gestureBindings = newValue.gestureBindings
                 _gestureSensitivity = newValue.gestureSensitivity
+                _gestureSmoothing = max(GestureDefaults.gestureSmoothingRange.lowerBound, min(GestureDefaults.gestureSmoothingRange.upperBound, newValue.gestureSmoothing))
                 _menuAndMovementOnly = newValue.menuAndMovementOnly
                 _useRelativeGestures = newValue.useRelativeGestures
                 _extendedGestureRange = newValue.extendedGestureRange

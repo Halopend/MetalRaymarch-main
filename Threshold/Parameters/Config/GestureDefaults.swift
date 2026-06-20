@@ -17,6 +17,10 @@ enum GestureDefaults {
     static let useRelativeGestures = true
     static let extendedGestureRange = false
     static let translationSensitivity: Float = 1.0
+    /// Smoothing time (seconds) for the critically-damped spring that eases
+    /// gesture-driven parameter changes toward their targets. Higher = gestures
+    /// "play out" more slowly and feel smoother; lower = snappier/more direct.
+    static let gestureSmoothing: Float = 0.35
 
     // MARK: - Rotation auto-snap
     static let rotationAutoSnap = false
@@ -54,6 +58,7 @@ enum GestureDefaults {
 
     // MARK: - Ranges
     static let gestureSensitivityRange: ClosedRange<Float> = 1.0...10.0
+    static let gestureSmoothingRange: ClosedRange<Float> = 0.05...1.5
     static let translationSensitivityRange: ClosedRange<Float> = 0.2...3.0
     static let rotationSnapWindowDegreesRange: ClosedRange<Float> = 1.0...30.0
     static let rotationBreakawayDegreesRange: ClosedRange<Float> = 0.0...45.0

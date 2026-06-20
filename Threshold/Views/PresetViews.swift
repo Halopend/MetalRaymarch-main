@@ -379,7 +379,7 @@ struct PresetsListView: View {
                         }
                         Spacer()
                         Button {
-                            if let url = animationManager.exportSceneToFile(scene) {
+                            exportOffMain({ AnimationManager.exportSceneFile(scene) }) { url in
                                 shareItem = ShareItem(url: url)
                             }
                         } label: {
@@ -453,7 +453,7 @@ struct PresetsListView: View {
                         refreshPresets()
                     },
                     onExport: {
-                        if let url = presetManager.exportPreset(preset) {
+                        exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                             shareItem = ShareItem(url: url)
                         }
                     }
@@ -474,7 +474,7 @@ struct PresetsListView: View {
                     }
 
                     Button {
-                        if let url = presetManager.exportPreset(preset) {
+                        exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                             shareItem = ShareItem(url: url)
                         }
                     } label: {
@@ -568,10 +568,14 @@ struct ShareSheet: UIViewControllerRepresentable {
 #elseif os(macOS)
 struct ShareSheet: NSViewControllerRepresentable {
     let activityItems: [Any]
+    @Environment(\.dismiss) private var dismiss
+
+    func makeCoordinator() -> Coordinator { Coordinator(dismiss: dismiss) }
 
     func makeNSViewController(context: Context) -> NSViewController {
         let controller = NSViewController()
         let picker = NSSharingServicePicker(items: activityItems)
+        picker.delegate = context.coordinator
         // Delay presentation to next run loop iteration so the view is laid out.
         // Already on MainActor via NSViewControllerRepresentable.
         Task { @MainActor in
@@ -581,6 +585,15 @@ struct ShareSheet: NSViewControllerRepresentable {
     }
 
     func updateNSViewController(_ nsViewController: NSViewController, context: Context) {}
+
+    final class Coordinator: NSObject, NSSharingServicePickerDelegate {
+        let dismiss: DismissAction
+        init(dismiss: DismissAction) { self.dismiss = dismiss }
+
+        @MainActor func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+            dismiss()
+        }
+    }
 }
 #endif
 

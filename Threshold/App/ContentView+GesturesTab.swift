@@ -93,6 +93,15 @@ extension ContentView {
                             onChanged: { cache.push(\.gestureSensitivity, value: cache.gesture.gestureSensitivity) },
                             showToggle: false)
 
+                        EffectSliderRow(icon: "wind", label: "Gesture Smoothing (s)",
+                            value: $cache.gesture.gestureSmoothing, range: GestureDefaults.gestureSmoothingRange,
+                            enabled: .constant(true),
+                            onChanged: { cache.push(\.gestureSmoothing, value: cache.gesture.gestureSmoothing) },
+                            showToggle: false)
+                        Text("How long gesture changes take to play out. Higher = smoother and more gradual; lower = snappier and more direct.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+
                         #if os(macOS)
                         Toggle("Tilt to Orbit (Motion Sensor)", isOn: Binding(
                             get: { appModel.renderSettings.macTiltControlEnabled },

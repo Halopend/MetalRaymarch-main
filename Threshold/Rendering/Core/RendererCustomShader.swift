@@ -15,8 +15,47 @@
 
 import Foundation
 import Metal
+import QuartzCore
 
 extension Renderer {
+
+    // MARK: - Self-heal
+
+    /// Last-resort recovery for frames that arrive with `fractalType == .custom`
+    /// but no compiled custom library. That state means a preset referencing a
+    /// `.threshfx` formula was applied before (or its activation was lost
+    /// across) the renderer's activation — cold-start file opens, immersive
+    /// space re-entry rebinding handlers, or preview/import interleavings can
+    /// all order that way, and without recovery the scene renders fog/sky
+    /// forever. The formula stays registered on AppModel, so the renderer can
+    /// simply re-activate it itself: any ordering bug degrades to a brief sky
+    /// flash instead of a dead scene. Debounced to one attempt per second so a
+    /// formula that genuinely fails to compile cannot hot-loop the compiler.
+    func scheduleCustomLibrarySelfHeal() {
+        let now = CACurrentMediaTime()
+        guard !customLibrarySelfHealInFlight,
+              now - lastCustomLibrarySelfHealAttempt > 1.0 else { return }
+        customLibrarySelfHealInFlight = true
+        lastCustomLibrarySelfHealAttempt = now
+
+        Task { [weak self] in
+            guard let self else { return }
+            let formula = await MainActor.run { self.appModel.activeEmbeddedFormula }
+            if let formula {
+                do {
+                    try await self.activateEmbeddedFormula(formula)
+                    print("🔧 [CustomScene] Self-heal: recompiled '\(formula.name)' after a frame requested it with no library installed")
+                } catch {
+                    print("❌ [CustomScene] Self-heal activation failed for '\(formula.name)': \(error)")
+                }
+            }
+            await self.finishCustomLibrarySelfHeal()
+        }
+    }
+
+    private func finishCustomLibrarySelfHeal() {
+        customLibrarySelfHealInFlight = false
+    }
 
     // MARK: - State
 
@@ -60,30 +99,39 @@ extension Renderer {
     func activateEmbeddedFormula(_ formula: EmbeddedFormula?) async throws {
         customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula ENTRY formula=\(formula?.name ?? "nil") newHash=\(formula?.shortHash ?? "nil") currentHash=\(customShaderHash ?? "nil") libraryPresent=\(customShaderLibrary != nil)")
         guard let formula else {
-            // Deactivate.
+            // Deactivate. Pipelines stay cached (keys are hash-namespaced and
+            // inert while inactive) — preview/restore flows often bring the
+            // same formula straight back.
             if customShaderLibrary != nil {
-                customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — evicting")
-                evictCustomShaderPipelines()
+                customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula DEACTIVATE — library detached, pipelines retained")
+                warmStartGate.invalidate()
+                resetPipelineFastPaths()
                 customShaderLibrary = nil
                 customShaderHash = nil
             }
             return
         }
 
-        // Already active and unchanged — no work.
+        // Already active and unchanged — no work (and no warm-start cut:
+        // self-heal retries and startup re-activations land here).
         if customShaderHash == formula.shortHash, customShaderLibrary != nil {
             customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula NO-OP (hash unchanged + library present)")
             return
         }
+
+        // All custom formulas share FractalTypeCustom, so the warm-start gate's
+        // geometry key cannot tell two .threshfx DEs apart — depth rendered by
+        // the outgoing formula must never seed the incoming one's marches.
+        warmStartGate.invalidate()
 
         // Compile (cached internally by sourceHash).
         customSceneDiagnostic("🔬 [CSDiag] activateEmbeddedFormula compiling library…")
         let compiler = ensureCompiler()
         let library = try await compiler.library(for: formula)
 
-        evictCustomShaderPipelines()
         customShaderLibrary = library
         customShaderHash = formula.shortHash
+        retainCustomShaderPipelines(mostRecentHash: formula.shortHash)
 
         customSceneDiagnostic("🔬 [CSDiag] ✅ activateEmbeddedFormula INSTALLED '\(formula.name)' hash=\(formula.shortHash) — library now present")
         if RENDERER_DEBUG {
@@ -93,35 +141,58 @@ extension Renderer {
 
     // MARK: - Eviction
 
-    /// Drop every cached pipeline whose key starts with the `CX` prefix. Called
-    /// when the active custom shader changes or is removed.
-    func evictCustomShaderPipelines() {
+    /// How many recent custom formulas keep their specialized pipelines cached.
+    /// Keys are namespaced per formula hash (`CX{hash}_`) and frame-time
+    /// selection filters to the ACTIVE hash, so retained pipelines are inert
+    /// until their formula re-activates — switching back becomes a cache hit
+    /// instead of a recompile storm. Pipelines are small (~100-500 KB each),
+    /// so four formulas' worth is a few MB at most.
+    static let customPipelineRetentionLimit = 4
+
+    /// Record `hash` as the most recently used custom formula and evict
+    /// pipelines only for formulas that fall off the MRU list. Replaces the
+    /// previous blanket "evict every CX* entry on each switch", which forced
+    /// a full recompile every time the user A/B'd two formulas.
+    func retainCustomShaderPipelines(mostRecentHash hash: String) {
+        recentCustomFormulaHashes.removeAll { $0 == hash }
+        recentCustomFormulaHashes.insert(hash, at: 0)
+        while recentCustomFormulaHashes.count > Self.customPipelineRetentionLimit {
+            let evicted = recentCustomFormulaHashes.removeLast()
+            evictCustomShaderPipelines(forHash: evicted)
+        }
+        resetPipelineFastPaths()
+    }
+
+    /// Drop cached pipelines belonging to one specific custom formula.
+    func evictCustomShaderPipelines(forHash hash: String) {
+        let prefix = "CX\(hash)_"
         var renderEvicted = 0
         var computeEvicted = 0
 
-        let renderKeys = pipelineCache.keys.filter { $0.hasPrefix("CX") }
-        for key in renderKeys {
+        for key in pipelineCache.keys.filter({ $0.hasPrefix(prefix) }) {
             pipelineCache.removeValue(forKey: key)
             renderEvicted += 1
         }
-        let computeKeys = computePipelineCache.keys.filter { $0.hasPrefix("CX") }
-        for key in computeKeys {
+        for key in computePipelineCache.keys.filter({ $0.hasPrefix(prefix) }) {
             computePipelineCache.removeValue(forKey: key)
             computeEvicted += 1
         }
 
-        // Reset fast-path so a stale cached pointer doesn't get returned.
+        if RENDERER_DEBUG && (renderEvicted + computeEvicted) > 0 {
+            print("🧹 [CustomShader] Evicted \(renderEvicted) render + \(computeEvicted) compute pipelines for \(hash)")
+        }
+        customSceneDiagnostic("🔬 [CSDiag] evictCustomShaderPipelines(forHash: \(hash)) render=\(renderEvicted) compute=\(computeEvicted)")
+    }
+
+    /// Reset the one-entry pipeline fast paths so a stale cached pointer from
+    /// the previous formula can't be returned after a switch/deactivation.
+    func resetPipelineFastPaths() {
         lastSelectedPipeline = nil
         lastSelectIter = -1
         lastSelectCustomHash = nil
         lastSelectedComputePipeline = nil
         lastComputeFI = -1
         lastComputeCustomHash = nil
-
-        if RENDERER_DEBUG && (renderEvicted + computeEvicted) > 0 {
-            print("🧹 [CustomShader] Evicted \(renderEvicted) render + \(computeEvicted) compute pipelines")
-        }
-        customSceneDiagnostic("🔬 [CSDiag] evictCustomShaderPipelines render=\(renderEvicted) compute=\(computeEvicted) (fast-paths reset)")
     }
 
     // MARK: - Helpers

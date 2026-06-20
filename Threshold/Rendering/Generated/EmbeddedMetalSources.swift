@@ -200,12 +200,17 @@ typedef struct
 } PrecomputedFractalParams;
 
 // === PRECOMPUTED LIGHTING ===
-// Spotlight position and intensity depend only on time and lighting mode.
-// Computing these per-pixel wastes GPU cycles on identical results.
+// Spotlight position/intensity depend only on time + lighting mode, and the
+// vibrance/softness sun blend depends only on frame-uniform settings.
+// Computing any of these per-pixel wastes GPU cycles on identical results.
 typedef struct
 {
     vector_float3 spotLightPosition;  // Precomputed spotlight world position
-    float lightIntensity;             // Precomputed light intensity multiplier
+    float lightIntensity;             // BLENDED intensity (mode base × vibrance/softness scale)
+    vector_float3 sunDir;             // Blended sun direction (soft ↔ sharp by vibrance/softness)
+    float sunDiffuseScale;            // Blended sun diffuse scale
+    float specPower;                  // mix(20, 110, saturate(1 - lightingSoftness))
+    vector_float2 _padLighting;       // Pad struct to a 16-byte multiple
 } PrecomputedLighting;
 
 // === PRECOMPUTED AUDIO ===
@@ -344,7 +349,12 @@ typedef struct
     // shared shadows). 1 = predict-validate-fallback: single-DE-eval safety probe per
     // pixel, normal-coherence-gated shadow share, layer-of-acceptance debug overlay.
     int coherentPacketEnabled;
-    float _pad_tile;             // Align to 16 bytes
+    // === FOVEATED RAYMARCH ===
+    // 0 = uniform full-quality march everywhere (default). >0 = peripheral 8x8
+    // tiles march proportionally fewer ray steps, smoothly ramping from the
+    // viewport center toward the edges. Occupies the former 16-byte alignment
+    // pad, so struct layout is unchanged.
+    float foveationStrength;
     vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     
@@ -2064,34 +2074,11 @@ FORCE_INLINE void applySphericalInversionRay(thread float3 &origin, thread float
 }
 
 // === LIGHTING BLEND: Classic (soft) ↔ Current (vibrance-driven sharp) ===
-// lightingSoftness: 0 = current vibrance-driven system, 1 = classic fixed lighting
-// This allows smooth blending between the old lighting look and the new one.
-struct LightingParams {
-    float3 sunDir;
-    float sunDiffuseScale;
-    float lightIntensity;
-};
-
-FORCE_INLINE LightingParams computeBlendedLighting(float vibrance, float lightingSoftness, float baseLightIntensity) {
-    LightingParams params;
-    
-    // Current system: vibrance drives sun direction and intensity
-    float3 sunDirNew = mix(sunDirSoft, sunDirSharp, vibrance);
-    float sunDiffuseNew = 0.15f;        // Slightly lower than classic for sharper look when vibrant
-    float intensityScaleNew = mix(0.7f, 1.2f, vibrance);
-    
-    // Classic system: fixed sun direction, fixed diffuse, no intensity scaling
-    float3 sunDirClassic = sunDirSoft;  // Original un-normalized direction
-    float sunDiffuseClassic = 0.2f;     // Original fixed value
-    float intensityScaleClassic = 1.0f; // No scaling in classic mode
-    
-    // Blend between current and classic based on softness for smooth transitions
-    params.sunDir = mix(sunDirNew, sunDirClassic, lightingSoftness);
-    params.sunDiffuseScale = mix(sunDiffuseNew, sunDiffuseClassic, lightingSoftness);
-    params.lightIntensity = baseLightIntensity * mix(intensityScaleNew, intensityScaleClassic, lightingSoftness);
-    
-    return params;
-}
+// The vibrance/softness sun blend is frame-uniform, so it is evaluated once
+// per frame on the CPU (RenderPrecompute.makePrecomputedLighting — its
+// sunDirSoft/sunDirSharp constants MUST mirror the ones above) and arrives
+// in uniforms.precomputedLighting as sunDir / sunDiffuseScale /
+// lightIntensity (pre-scaled) / specPower.
 
 // === BOUNDING SPHERE EARLY EXIT ===
 // Returns -1 if ray misses sphere, otherwise returns entry distance
@@ -3022,6 +3009,54 @@ struct SceneResult {
     OrbitCache cache;   // Cached orbit state from final hit position
 };
 
+// One step of relaxed sphere tracing (Keinert et al.). Returns true when the
+// previous over-relaxed step overshot (consecutive unbounding spheres no
+// longer overlap): stepLen turns negative to retreat inside the last safe
+// sphere and omega drops to 1 for the rest of the ray. On a normal step,
+// advances stepLen to h·omega. The caller must skip hit registration on a
+// failed step — the sample sits past a possibly-skipped gap.
+FORCE_INLINE bool relaxedStepUpdate(float h,
+                                    thread float& omega,
+                                    thread float& prevH,
+                                    thread float& stepLen)
+{
+    bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
+    if (UNLIKELY(sorFail)) {
+        stepLen -= omega * stepLen;
+        omega = 1.0f;
+    } else {
+        stepLen = h * omega;
+    }
+    prevH = h;
+    return sorFail;
+}
+
+// Per-type over-relaxation ceiling. Over-stepping is only provably safe when
+// the DE is a true lower bound: box/sphere-fold estimators qualify, but the
+// log-DE types (Mandelbulb / Julia variants) and the fudge-factored Kleinian
+// family can locally OVERESTIMATE, where the overstep-failure test cannot
+// fire and rays tunnel through thin features. Custom .threshfx DEs are
+// arbitrary user code, so they keep the pre-detection 1.2 ceiling that
+// existing shared scenes were authored against. With FC_FRACTAL_TYPE set the
+// switch folds to a constant at pipeline-compile time.
+FORCE_INLINE float relaxedOmegaCap(int type) {
+    switch (type) {
+    case FractalTypeMandelbox:
+    case FractalTypeMenger:
+    case FractalTypeOctahedron:
+    case FractalTypeMengerSphere:
+    case FractalTypeBoxSphereFolder:
+    case FractalTypeMandelboxSphereProjection:
+        return 1.4f;
+    case FractalTypeMandelbulb:
+    case FractalTypeMandelbulbJulia:
+    case FractalTypeQuaternionJulia:
+        return 1.1f;
+    default: // Kleinian family, custom formulas, future types
+        return 1.2f;
+    }
+}
+
 // Raymarch that caches orbit state on hit for reuse in normals/colors
 FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault)
 {
@@ -3058,12 +3093,11 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     int maxSteps = max(int(float(baseMaxSteps) * quality), 4);
 
     // === RELAXED SPHERE TRACING (Keinert et al., "Enhanced Sphere Tracing") ===
-    // Take omega× over-relaxed steps. If consecutive unbounding spheres stop
-    // overlapping, the skipped gap may contain surface: retreat back inside the
-    // last safe sphere and continue conservatively (omega = 1 for this ray).
-    // The failure check makes hits identical to omega = 1 marching, so the full
-    // stepMultiplier is safe for every fractal type, including Mandelbulb.
-    float omega = max(stepMultiplier, 1.0f);
+    // Take omega× over-relaxed steps; relaxedStepUpdate() retreats inside the
+    // last safe sphere when consecutive unbounding spheres stop overlapping.
+    // The ceiling is per fractal type — see relaxedOmegaCap() for why log-DE
+    // and Kleinian/custom estimators must stay closer to 1.
+    float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
     float prevH = 0.0;
     float stepLen = 0.0;
 
@@ -3078,15 +3112,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
 
-        bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
-        if (UNLIKELY(sorFail)) {
-            // Retreat inside the previous unbounding sphere; conservative from here.
-            stepLen -= omega * stepLen;
-            omega = 1.0f;
-        } else {
-            stepLen = h * omega;
-        }
-        prevH = h;
+        bool sorFail = relaxedStepUpdate(h, omega, prevH, stepLen);
 
         if(UNLIKELY(h < threshold) && !sorFail)
         {
@@ -3133,8 +3159,9 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     int maxSteps = max(int(float(baseMaxSteps) * quality * stepScale), 8);
     float endT = startT + 2.0;
 
-    // Relaxed sphere tracing with overstep-failure detection (see SceneWithCache).
-    float omega = max(stepMultiplier, 1.0f);
+    // Relaxed sphere tracing with overstep-failure detection; per-type ceiling
+    // (see relaxedOmegaCap for why log-DE/Kleinian/custom stay closer to 1).
+    float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
     float prevH = 0.0;
     float stepLen = 0.0;
 
@@ -3147,14 +3174,7 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
 
-        bool sorFail = omega > 1.0f && (h + prevH) < stepLen;
-        if (UNLIKELY(sorFail)) {
-            stepLen -= omega * stepLen;
-            omega = 1.0f;
-        } else {
-            stepLen = h * omega;
-        }
-        prevH = h;
+        bool sorFail = relaxedStepUpdate(h, omega, prevH, stepLen);
 
         if(UNLIKELY(h < threshold) && !sorFail)
         {
@@ -3538,6 +3558,23 @@ kernel void adaptiveHierarchical8x8(
     int lodIterations = max(uniforms.fractalIterations, 2);
     int maxSteps = uniforms.maxRaySteps;
     int fractalType = uniforms.fractalType;
+
+    // === FOVEATED RAYMARCH ===
+    // Peripheral tiles get fewer ray steps. The factor is derived from the tile
+    // CENTER, so all 64 threads in this threadgroup compute the same value with
+    // no intra-tile divergence. Foveal region (r < kFovInner) stays full-quality;
+    // beyond it the step budget ramps down to kFovMinFraction at the corners,
+    // scaled by foveationStrength. Disabled (factor == 1) when strength == 0.
+    if (uniforms.foveationStrength > 0.0f) {
+        const float kFovInner = 0.35f;        // normalized radius that stays sharp
+        const float kFovMinFraction = 0.5f;   // step budget at the far periphery
+        float2 tileCenter = float2(tileId * ADAPTIVE_TILE_SIZE + ADAPTIVE_TILE_SIZE / 2);
+        float2 halfRes = max(float2(viewportSize) * 0.5f, float2(1.0f));
+        float r = min(length((tileCenter - halfRes) / halfRes), 1.0f);
+        float ramp = smoothstep(kFovInner, 1.0f, r) * uniforms.foveationStrength;
+        float factor = mix(1.0f, kFovMinFraction, ramp);
+        maxSteps = max(int(float(maxSteps) * factor), 8);
+    }
 
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;
@@ -3952,13 +3989,10 @@ kernel void adaptiveHierarchical8x8(
         float3 spot = spotData.xyz;
         float atten = spotData.w;
         
-        // Blended lighting: classic soft ↔ vibrance-driven sharp
-        LightingParams lp = computeBlendedLighting(
-            uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
-            uniforms.precomputedLighting.lightIntensity);
-        float3 sunDir = lp.sunDir;
-        float sunDiffuseScale = lp.sunDiffuseScale;
-        float lightIntensity = lp.lightIntensity;
+        // Blended lighting (precomputed on CPU — frame-uniform)
+        float3 sunDir = uniforms.precomputedLighting.sunDir;
+        float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
+        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
         
         const bool shareShadows = is_function_constant_defined(FC_SHARE_SHADOWS)
             ? FC_SHARE_SHADOWS
@@ -4040,7 +4074,7 @@ kernel void adaptiveHierarchical8x8(
         float3 V = -marchDir;
         float NoV = saturate(dot(nor, V));
         float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
-        float specPower = mix(20.0f, 110.0f, saturate(1.0f - uniforms.lightingSoftness));
+        float specPower = uniforms.precomputedLighting.specPower;
         float3 Hspot = normalize(spot + V);
         float3 Hsun = normalize(sunDir + V);
         float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
@@ -4199,7 +4233,20 @@ kernel void taaResolve(
     // instead of a fixed plane makes reprojection correct under head
     // *translation* as well as rotation, so history survives natural head
     // motion instead of being variance-clamped away.
+    //
+    // Closest-depth dilation (5-tap cross, one low-res texel apart): at fractal
+    // silhouettes a full-res pixel can straddle the low-res depth edge, and the
+    // per-frame jitter wobbles which side a raw point-sample lands on. Taking
+    // the NEAREST surface in the neighbourhood (max in reverse-Z) keeps edge
+    // pixels reprojecting with the foreground's motion, so their history
+    // survives instead of being variance-clamped into shimmer.
+    float2 depthTexel = 1.0 / float2(max(sceneDepthTex.get_width(), 1u),
+                                     max(sceneDepthTex.get_height(), 1u));
     float depthZ = sceneDepthTex.sample(pointSampler, uv, eye);
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2( depthTexel.x, 0.0), eye));
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2(-depthTexel.x, 0.0), eye));
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2(0.0,  depthTexel.y), eye));
+    depthZ = max(depthZ, sceneDepthTex.sample(pointSampler, uv + float2(0.0, -depthTexel.y), eye));
     float4 viewPoint4 = uniforms.invProjMatrix * float4(ndc, depthZ, 1.0);
     float vw = abs(viewPoint4.w) > 1e-6 ? viewPoint4.w : 1e-6;
     float3 viewPt = viewPoint4.xyz / vw;
@@ -4370,12 +4417,12 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     // fall back to the full march, so the warm start can never change WHAT is
     // hit — only how fast we find it.
     SceneResult sceneResult;
+    bool needFullMarch = true;
     if (FC_WARM_START_ON && warmStartT > 0.0f) {
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
-        if (sceneResult.distGlow.x >= kRayMissThreshold) {
-            sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
-        }
-    } else {
+        needFullMarch = sceneResult.distGlow.x >= kRayMissThreshold;
+    }
+    if (needFullMarch) {
         sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
     }
     ret = sceneResult.distGlow;
@@ -4397,13 +4444,10 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             float3 spot = spotData.xyz;
             float atten = spotData.w;
             
-            // Blended lighting: classic soft ↔ vibrance-driven sharp
-            LightingParams lp = computeBlendedLighting(
-                uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
-                uniforms.precomputedLighting.lightIntensity);
-            float3 sunDir = lp.sunDir;
-            float sunDiffuseScale = lp.sunDiffuseScale;
-            float lightIntensity = lp.lightIntensity;
+            // Blended lighting (precomputed on CPU — frame-uniform)
+            float3 sunDir = uniforms.precomputedLighting.sunDir;
+            float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
+            float lightIntensity = uniforms.precomputedLighting.lightIntensity;
 
             int shadowIterations = ReducedSecondaryIterations(lodIterations, fractalType, true);
             // Shadow params still need per-pixel bubble center, but use precomputed fractal values
@@ -4430,7 +4474,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                 float3 V = -marchDir;
                 float NoV = saturate(dot(nor, V));
                 float fresnel = fma(1.0f - 0.04f, powr(max(1.0f - NoV, 0.0f), 5.0f), 0.04f);
-                float specPower = mix(20.0f, 110.0f, saturate(1.0f - uniforms.lightingSoftness));
+                float specPower = uniforms.precomputedLighting.specPower;
                 float3 Hspot = normalize(spot + V);
                 float3 Hsun = normalize(sunDir + V);
                 float specSpot = powr(max(dot(nor, Hspot), kPowEpsilon), specPower) * kSpecularIntensity * fresnel;
@@ -4654,14 +4698,11 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         float3 spot = spotData.xyz;
         float atten = spotData.w;
         
-        // Blended lighting: classic soft ↔ vibrance-driven sharp
-        LightingParams lp = computeBlendedLighting(
-            uniforms.colorScheme.vibrance, uniforms.lightingSoftness,
-            uniforms.precomputedLighting.lightIntensity);
-        float3 sunDir = lp.sunDir;
-        float sunDiffuseScale = lp.sunDiffuseScale;
-        float lightIntensity = lp.lightIntensity;
-        
+        // Blended lighting (precomputed on CPU — frame-uniform)
+        float3 sunDir = uniforms.precomputedLighting.sunDir;
+        float sunDiffuseScale = uniforms.precomputedLighting.sunDiffuseScale;
+        float lightIntensity = uniforms.precomputedLighting.lightIntensity;
+
         if (shareShadows) {
             if (quadLaneId == 0) {
                 shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));

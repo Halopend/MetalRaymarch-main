@@ -48,6 +48,68 @@ extension EnvironmentValues {
     }
 }
 
+// MARK: - Derived Value (music-reactive) Environment
+
+/// Carries a resolver for a parameter's live (base, resolved) value plus whether
+/// music-reactive modulation is currently active. Injected once at the ContentView
+/// root so any EffectSliderRow can draw a derived-value ghost indicator just by
+/// passing its `musicTargetID`.
+struct DerivedValueProvider: Sendable {
+    var resolve: @Sendable @MainActor (String) -> ParameterOperationDispatcher.LiveValue? = { _ in nil }
+    var musicActive: Bool = false
+}
+
+extension DerivedValueProvider: Equatable {
+    // Identity hinges on the active flag; the resolver closure is stable per session.
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.musicActive == rhs.musicActive }
+}
+
+private struct DerivedValueProviderKey: EnvironmentKey {
+    static let defaultValue = DerivedValueProvider()
+}
+
+extension EnvironmentValues {
+    var derivedValueProvider: DerivedValueProvider {
+        get { self[DerivedValueProviderKey.self] }
+        set { self[DerivedValueProviderKey.self] = newValue }
+    }
+}
+
+/// Non-interactive ghost marker overlaid on a slider track showing the live
+/// music-modulated ("derived") value. Repaints via TimelineView only while music
+/// is active, so idle UI pays nothing.
+struct DerivedValueGhost: View {
+    let targetID: String
+    let range: ClosedRange<Float>
+    @Environment(\.derivedValueProvider) private var provider
+
+    /// Approximate half-thumb inset so the marker lines up with the slider track.
+    private let thumbInset: CGFloat = 11
+
+    var body: some View {
+        if provider.musicActive {
+            GeometryReader { geo in
+                TimelineView(.animation) { _ in
+                    let live = provider.resolve(targetID)
+                    if let live, live.isModulated {
+                        let span = max(0.0001, range.upperBound - range.lowerBound)
+                        let frac = CGFloat(min(1, max(0, (live.resolved - range.lowerBound) / span)))
+                        let trackWidth = max(0, geo.size.width - thumbInset * 2)
+                        let x = thumbInset + frac * trackWidth
+                        Capsule()
+                            .fill(Color.accentColor)
+                            .frame(width: 2.5, height: geo.size.height * 0.62)
+                            .position(x: x, y: geo.size.height / 2)
+                            .shadow(color: Color.accentColor.opacity(0.7), radius: 3)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Condensed Effect Slider Row
 
 /// Single-line effect row: icon + label | slider | on/off toggle
@@ -60,7 +122,10 @@ struct EffectSliderRow: View {
     @Binding var enabled: Bool
     let onChanged: () -> Void
     var showToggle: Bool = true
-    
+    /// When set, the slider shows a live "derived value" ghost marker while
+    /// music-reactive modulation is driving this parameter.
+    var musicTargetID: String? = nil
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
@@ -80,6 +145,11 @@ struct EffectSliderRow: View {
                 }
             })
             .disabled(!enabled)
+            .overlay {
+                if let musicTargetID {
+                    DerivedValueGhost(targetID: musicTargetID, range: range)
+                }
+            }
             .onChange(of: value) { _, _ in onChanged() }
             if showToggle {
                 Toggle("", isOn: $enabled)

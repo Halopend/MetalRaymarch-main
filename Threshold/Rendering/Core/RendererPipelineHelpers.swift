@@ -53,7 +53,7 @@ extension Renderer {
             // engagement is still gated per frame via uniforms.warmStartEnabled.
             // Screenshot and Mac pipelines bypass this helper and compile it out.
             var warmStart = true
-            constants.setConstantValue(&warmStart, type: .bool, index: 13) // FCIndexWarmStart
+            constants.setConstantValue(&warmStart, type: .bool, index: FunctionConstantIndex.warmStart.rawValue)
         }
         fragmentFunction = try library?.makeFunction(name: fragmentFunctionName, constantValues: constants)
 

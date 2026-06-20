@@ -136,7 +136,7 @@ extension Renderer {
         guard let bundle = fragmentPassPlan.metalFXBundle else {
             // Direct render: no MetalFX depth was written this frame, so the
             // next fragment frame must not warm-start from stale history.
-            fragmentWarmStartValid = false
+            warmStartGate.invalidate()
             return
         }
 
@@ -198,41 +198,18 @@ extension Renderer {
 
             // This frame's depth becomes next frame's warm-start history.
             bundle.manager.advanceDepthHistory()
-            fragmentWarmStartValid = true
-            lastWarmStartGeometrySignature = Self.warmStartGeometrySignature(settingsSnapshot)
+            warmStartGate.recordDepthWritten(settingsSnapshot)
         } catch {
             if RENDERER_DEBUG && !hasLoggedMetalFXFallback {
                 print("⚠️ MetalFX spatial upscale failed: \(error). Falling back to direct rendering next frame.")
                 hasLoggedMetalFXFallback = true
             }
             metalFXManager = nil
-            fragmentWarmStartValid = false
+            warmStartGate.invalidate()
         }
 #else
         _ = (commandBuffer, drawable, fragmentPassPlan, framePreparation, settingsSnapshot)
 #endif
-    }
-
-    /// Hash of every setting that shapes the distance field. Warm-starting from
-    /// a depth buffer rendered with a different signature would let rays march
-    /// past newly exposed closer surfaces, so the gate compares this against
-    /// the signature recorded when the depth history was written.
-    static func warmStartGeometrySignature(_ s: RenderSettingsSnapshot) -> Int {
-        var hasher = Hasher()
-        hasher.combine(s.fractalType.rawValue)
-        hasher.combine(s.fractalIterations)
-        hasher.combine(s.scale)
-        hasher.combine(s.fractalScale)
-        hasher.combine(s.minDistance)
-        hasher.combine(s.detailScale)
-        hasher.combine(s.foldingLimit)
-        hasher.combine(s.sphereRadius)
-        hasher.combine(s.sphericalInversionMode.rawValue)
-        hasher.combine(s.sphericalInversionRadius)
-        // FormulaParams is a C struct (fixed-size float array + rotation
-        // matrices + flags); hashing its raw bytes covers all of them.
-        withUnsafeBytes(of: s.formulaParams) { hasher.combine(bytes: $0) }
-        return hasher.finalize()
     }
 
     func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {

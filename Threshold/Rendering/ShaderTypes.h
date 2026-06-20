@@ -184,12 +184,17 @@ typedef struct
 } PrecomputedFractalParams;
 
 // === PRECOMPUTED LIGHTING ===
-// Spotlight position and intensity depend only on time and lighting mode.
-// Computing these per-pixel wastes GPU cycles on identical results.
+// Spotlight position/intensity depend only on time + lighting mode, and the
+// vibrance/softness sun blend depends only on frame-uniform settings.
+// Computing any of these per-pixel wastes GPU cycles on identical results.
 typedef struct
 {
     vector_float3 spotLightPosition;  // Precomputed spotlight world position
-    float lightIntensity;             // Precomputed light intensity multiplier
+    float lightIntensity;             // BLENDED intensity (mode base × vibrance/softness scale)
+    vector_float3 sunDir;             // Blended sun direction (soft ↔ sharp by vibrance/softness)
+    float sunDiffuseScale;            // Blended sun diffuse scale
+    float specPower;                  // mix(20, 110, saturate(1 - lightingSoftness))
+    vector_float2 _padLighting;       // Pad struct to a 16-byte multiple
 } PrecomputedLighting;
 
 // === PRECOMPUTED AUDIO ===
@@ -328,7 +333,12 @@ typedef struct
     // shared shadows). 1 = predict-validate-fallback: single-DE-eval safety probe per
     // pixel, normal-coherence-gated shadow share, layer-of-acceptance debug overlay.
     int coherentPacketEnabled;
-    float _pad_tile;             // Align to 16 bytes
+    // === FOVEATED RAYMARCH ===
+    // 0 = uniform full-quality march everywhere (default). >0 = peripheral 8x8
+    // tiles march proportionally fewer ray steps, smoothly ramping from the
+    // viewport center toward the edges. Occupies the former 16-byte alignment
+    // pad, so struct layout is unchanged.
+    float foveationStrength;
     vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     

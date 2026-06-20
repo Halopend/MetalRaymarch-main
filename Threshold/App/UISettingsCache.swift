@@ -191,6 +191,16 @@ final class UISettingsCache {
         settings?[keyPath: keyPath] = value
     }
 
+    /// True while music-reactive modulation is enabled and driving parameters.
+    var isMusicReactiveActive: Bool { audioReactive.fractalAudioReactiveEnabled }
+
+    /// Latest (base, resolved) snapshot for a modulated parameter, used by sliders
+    /// to draw a live "derived value" ghost indicator. nil if the parameter has
+    /// never been driven through the pipeline.
+    func liveDerivedValue(for targetID: String) -> ParameterOperationDispatcher.LiveValue? {
+        parameterPipeline?.liveValue(for: targetID)
+    }
+
     func dispatchParameterOperation(_ operation: ParameterOperation) {
         parameterPipeline?.dispatchUI([operation], cache: self)
     }

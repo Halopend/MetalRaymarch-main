@@ -469,7 +469,7 @@ extension ContentView {
                             name: "Export",
                             embeddedFormula: appModel.activeEmbeddedFormula
                         )
-                        if let url = appModel.presetManager.exportPreset(preset) {
+                        exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                             exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
@@ -489,7 +489,8 @@ extension ContentView {
                             embeddedFormula: appModel.activeEmbeddedFormula
                         )
                         preset.musicReactiveMappings = appModel.renderSettings.musicReactiveMappings
-                        if let url = appModel.presetManager.exportPreset(preset) {
+                        let musicPreset = preset
+                        exportOffMain({ PresetManager.exportPresetFile(musicPreset) }) { url in
                             exportShareItem = ExportShareItem(url: url)
                         }
                     } label: {
@@ -540,7 +541,7 @@ extension ContentView {
                             }
                             Spacer()
                             Button {
-                                if let url = appModel.presetManager.exportPreset(preset) {
+                                exportOffMain({ PresetManager.exportPresetFile(preset) }) { url in
                                     exportShareItem = ExportShareItem(url: url)
                                 }
                             } label: {
@@ -579,7 +580,8 @@ extension ContentView {
                         }
                         Spacer()
                         Button {
-                            if let url = EmbeddedFormulaContainer(formula: formula).exportToFile() {
+                            let container = EmbeddedFormulaContainer(formula: formula)
+                            exportOffMain({ container.exportToFile() }) { url in
                                 exportShareItem = ExportShareItem(url: url)
                             }
                         } label: {
@@ -627,7 +629,7 @@ extension ContentView {
                                 }
                                 Spacer()
                                 Button {
-                                    if let url = mgr.exportSceneToFile(scene) {
+                                    exportOffMain({ AnimationManager.exportSceneFile(scene) }) { url in
                                         exportShareItem = ExportShareItem(url: url)
                                     }
                                 } label: {
@@ -655,25 +657,22 @@ extension ContentView {
                     Spacer()
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    formatRow(ext: ".threshscene", desc: "Fractal preset (settings snapshot)")
-                    formatRow(ext: ".threshanim", desc: "Animation scene (keyframe sequence)")
-                    formatRow(ext: ".threshanimv", desc: "Animation + music (music video)")
-                    formatRow(ext: ".threshmp", desc: "Music-reactive preset (audio mappings)")
-                    formatRow(ext: ".threshfx", desc: "Custom formula (standalone shader)")
+                    // Single source of truth shared with the export writers.
+                    ForEach(ThresholdExportFormat.allCases, id: \.ext) { format in
+                        formatRow(ext: ".\(format.ext)", desc: format.summary)
+                    }
                 }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
         }
         .sheet(item: $exportShareItem) { item in
-            VStack(spacing: 12) {
-                Text(item.url.lastPathComponent)
-                    .font(.subheadline.weight(.medium))
-                ShareLink(item: item.url) {
-                    Label("Share File", systemImage: "square.and.arrow.up")
-                }
-            }
-            .padding()
+            // Use the same native share UI as the Presets library so the two
+            // export paths behave identically. UIActivityViewController /
+            // NSSharingServicePicker dismiss themselves once the user picks a
+            // destination or cancels — the previous custom ShareLink sheet had
+            // no dismiss control and could get stuck on visionOS/macOS.
+            ShareSheet(activityItems: [item.url])
         }
     }
 
@@ -760,6 +759,30 @@ extension ContentView {
                     }
                 }.tint(themeColor)
                 Text("Layer-of-acceptance overlay shows immediately when this toggle is on (no other debug flag needed): magenta = warm-start hit, green = warm-start tight, red = warm-start rejected, cyan = shadow fallback. Untinted = legacy coarse path. 8x8 compute path only.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Foveated raymarch")
+                        .font(.headline)
+                    Spacer()
+                    Text("EXPERIMENTAL")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                }
+                Slider(
+                    value: Binding(
+                        get: { appModel.renderSettings.foveationStrength },
+                        set: { appModel.renderSettings.foveationStrength = $0 }
+                    ),
+                    in: 0...1
+                ).tint(themeColor)
+                Text("Peripheral 8x8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8x8 compute path only.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))

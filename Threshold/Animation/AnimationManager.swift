@@ -27,12 +27,15 @@ final class AnimationManager {
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }()
-    @ObservationIgnored private let prettySceneEncoder: JSONEncoder = {
+    @ObservationIgnored private let prettySceneEncoder: JSONEncoder = AnimationManager.makePrettySceneEncoder()
+
+    /// Shared encoder config for scene persistence and (off-main) export.
+    nonisolated static func makePrettySceneEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
-    }()
+    }
     
     // ═══════════════════════════════════════════════════════════════════════════
     // SCENE STORAGE
@@ -1401,16 +1404,18 @@ final class AnimationManager {
         }
     }
     
-    /// Export a scene to a shareable file URL
-    func exportSceneToFile(_ scene: AnimationScene) -> URL? {
-            let sanitizedName = PresetManager.sanitizedExportFileNameStem(scene.name)
-        // Use .threshanimv for scenes with attached music, .threshanim otherwise
-        let ext = scene.attachedSong != nil ? "threshanimv" : "threshanim"
-        let fileName = "\(sanitizedName).\(ext)"
+    /// Export a scene to a shareable file URL.
+    /// Nonisolated: encode + write can take tens of ms — call it off the main
+    /// actor (see `exportOffMain`).
+    nonisolated static func exportSceneFile(_ scene: AnimationScene) -> URL? {
+        let sanitizedName = PresetManager.sanitizedExportFileNameStem(scene.name)
+        // Scenes with attached music export as music videos.
+        let format: ThresholdExportFormat = scene.attachedSong != nil ? .musicVideoScene : .animationScene
+        let fileName = "\(sanitizedName).\(format.ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
 
         do {
-            let data = try prettySceneEncoder.encode(scene)
+            let data = try makePrettySceneEncoder().encode(scene)
             try data.write(to: tempURL)
             return tempURL
         } catch {
