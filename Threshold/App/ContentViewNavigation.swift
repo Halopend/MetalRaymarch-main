@@ -283,10 +283,12 @@ enum SettingsSubTab: String, CaseIterable, Identifiable {
 }
 
 // Used by SaveDestinationSheet (ContentViewComponents.swift); kept internal.
-enum SaveChoice: String, CaseIterable {
-    case resetLocation = "Reset Location"
-    case presetCustomName = "Preset - Custom Name"
-    case presetWithPreview = "Preset + Preview"
+// Plain enum: cases are referenced directly and compared for equality; the
+// rawValues/allCases were never read (UI labels are hardcoded at the call site).
+enum SaveChoice {
+    case resetLocation
+    case presetCustomName
+    case presetWithPreview
 }
 
 enum RendererModeOption: String, CaseIterable {

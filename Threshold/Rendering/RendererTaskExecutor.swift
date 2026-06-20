@@ -13,7 +13,7 @@ import Synchronization
 ///
 /// @unchecked Sendable justification: mutable job queue is protected by Mutex;
 /// DispatchSemaphore is used for blocking thread wake-up (not in async context);
-/// isRunning is only written during init and never changes.
+/// the run loop continues while the executor remains alive (weak reference).
 final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
     private struct JobQueue {
         var jobs: [UnownedJob] = []
@@ -44,7 +44,6 @@ final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
     // DispatchSemaphore is intentionally used here for blocking thread wake-up.
     // This is a raw Thread (not async context), so semaphore is the correct primitive.
     private let semaphore = DispatchSemaphore(value: 0)
-    private let isRunning = true
     private var renderThread: Thread?
     
     init() {
@@ -54,7 +53,7 @@ final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
             Thread.current.threadPriority = 1.0
             Thread.current.name = "RenderThread"
             
-            while executor?.isRunning ?? false {
+            while executor != nil {
                 executor?.semaphore.wait()
                 
                 while let job = executor?._queue.withLock({ $0.dequeue() }) {

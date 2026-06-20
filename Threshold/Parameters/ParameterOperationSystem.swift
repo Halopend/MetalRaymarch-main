@@ -5,22 +5,15 @@ import simd
 enum ParameterOperationSource: String, Codable, Sendable {
     case gesture
     case slider
-    case windowSlider
-    case animation
-    case precompute
     case audio
-    case preset
-    case system
 }
 
 enum ParameterOperationValue: Codable, Sendable {
     case absolute(Float)
-    case delta(Float)
 
     func resolved(from current: Float) -> Float {
         switch self {
         case .absolute(let value): return value
-        case .delta(let delta): return current + delta
         }
     }
 }
@@ -88,13 +81,8 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
         static let `default` = SourcePolicy(priority: [
             .gesture: 10,
-            .windowSlider: 20,
             .slider: 25,
-            .precompute: 28,
-            .animation: 30,
-            .audio: 35,
-            .preset: 40,
-            .system: 50
+            .audio: 35
         ])
 
         func rank(for source: ParameterOperationSource) -> Int {
@@ -308,7 +296,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             recordLiveValue(operation.targetID, base: outcome.base, resolved: resolved)
             let usesPlaybackRelativeManualOverride: Bool = settings.isAnimationPlaying && {
                 switch operation.source {
-                case .gesture, .slider, .windowSlider:
+                case .gesture, .slider:
                     return true
                 default:
                     return false
@@ -361,16 +349,14 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     private func layer(for source: ParameterOperationSource) -> ParameterLayer {
         switch source {
         case .gesture: return .gesture
-        case .slider, .windowSlider, .preset: return .ui
-        case .precompute: return .precompute
+        case .slider: return .ui
         case .audio: return .music
-        case .animation, .system: return .system
         }
     }
 
     private func smoothingTime(for strategy: ParameterMotionStrategy, requested: Float?) -> Float? {
         switch strategy {
-        case .none, .smoothDamp, .slerp:
+        case .none, .smoothDamp:
             return 0
         case .layerLerp:
             return requested

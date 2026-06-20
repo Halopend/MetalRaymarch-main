@@ -15,7 +15,6 @@ enum ParameterMotionStrategy: String, Codable, Sendable {
     case none
     case layerLerp
     case smoothDamp
-    case slerp
 }
 
 struct ParameterGroup: Hashable, Codable, Sendable {

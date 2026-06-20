@@ -5,8 +5,8 @@
 //  Manages the 3D Buddhabrot volume rendering pipeline for Vision Pro.
 //
 //  Architecture:
-//    Phase 1: Async compute pass accumulates Mandelbulb orbit density into a 3D uint32 buffer
-//             using atomics. Runs on a background command queue at low priority.
+//    Phase 1: Compute pass accumulates Mandelbulb orbit density into a 3D uint32 buffer
+//             using atomics. Encoded in-order onto the per-frame command buffer.
 //    Phase 2: Per-frame normalize density → 3D float texture, then stereo volume ray march
 //             via the existing CompositorLayer render pass.
 //
@@ -79,18 +79,6 @@ final class BuddhabrotSettings: @unchecked Sendable {
         set { withLock { _useRGBMode = newValue } }
     }
 
-    private var _shortEscapeMax: Int = 20
-    var shortEscapeMax: Int {
-        get { withLock { _shortEscapeMax } }
-        set { withLock { _shortEscapeMax = newValue } }
-    }
-
-    private var _mediumEscapeMax: Int = 100
-    var mediumEscapeMax: Int {
-        get { withLock { _mediumEscapeMax } }
-        set { withLock { _mediumEscapeMax = newValue } }
-    }
-    
     // Accumulation control
     private var _batchSize: Int = 65536         // Seeds per compute dispatch
     var batchSize: Int {
@@ -279,7 +267,6 @@ final class BuddhabrotSettings: @unchecked Sendable {
             BuddhabrotSettingsSnapshot(
                 resolution: _resolution, power: _power, maxIterations: _maxIterations,
                 bailoutRadius: _bailoutRadius, useRGBMode: _useRGBMode,
-                shortEscapeMax: _shortEscapeMax, mediumEscapeMax: _mediumEscapeMax,
                 batchSize: _batchSize, batchesPerFrame: _batchesPerFrame,
                 normalizationInterval: _normalizationInterval,
                 densityScale: _densityScale, gamma: _gamma, alphaScale: _alphaScale,
@@ -310,8 +297,6 @@ struct BuddhabrotSettingsSnapshot {
     let maxIterations: Int
     let bailoutRadius: Float
     let useRGBMode: Bool
-    let shortEscapeMax: Int
-    let mediumEscapeMax: Int
     let batchSize: Int
     let batchesPerFrame: Int
     let normalizationInterval: Int
@@ -349,7 +334,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     // MARK: - GPU Resources
     
     private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue          // Low-priority queue for accumulation
     private let settings: BuddhabrotSettings
     private let usesLayeredLayout: Bool
     
@@ -421,14 +405,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         self.device = device
         self.settings = settings
         self.usesLayeredLayout = layerRenderer.configuration.layout == .layered
-        
-        // Create a dedicated command queue for accumulation (could be low priority)
-        guard let queue = device.makeCommandQueue() else {
-            print("❌ BuddhabrotRenderer: Failed to create command queue")
-            return nil
-        }
-        self.commandQueue = queue
-        
+
         // Build compute pipelines
         guard let library = device.makeDefaultLibrary() else {
             print("❌ BuddhabrotRenderer: Failed to load default library")
@@ -690,79 +667,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     
     // MARK: - Phase 1: Orbit Accumulation
     
-    /// Dispatches orbit accumulation compute passes.
-    /// Call from the render loop; uses a separate command buffer to not block rendering.
-    /// Returns the command buffer so the caller can track completion.
-    @discardableResult
-    func dispatchAccumulation() -> MTLCommandBuffer? {
-        let buddhabrotSnapshot = settings.snapshot()
-        let needsResourceReset = buddhabrotSnapshot.resolution != currentResolution || buddhabrotSnapshot.useRGBMode != currentUseRGBMode || buddhabrotSnapshot.needsClear
-
-        // Check if resolution changed
-        if needsResourceReset {
-            reallocateResources(resolution: buddhabrotSnapshot.resolution, useRGBMode: buddhabrotSnapshot.useRGBMode)
-        }
-        
-        guard let pipeline = buddhabrotSnapshot.useRGBMode ? accumulateRGBPipeline : accumulatePipeline,
-              let uniformBuffer = accumulationUniformBuffer else {
-            return nil
-        }
-        
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
-        commandBuffer.label = "Buddhabrot Accumulation"
-
-        if needsResourceReset {
-            guard encodeDensityClear(commandBuffer: commandBuffer) else { return nil }
-            settings.clearNeedsClear(ifGeneration: buddhabrotSnapshot.clearGeneration)
-        }
-
-        let batchSize = max(1, buddhabrotSnapshot.batchSize)
-        let batchesPerFrame = max(1, buddhabrotSnapshot.batchesPerFrame)
-        
-        // Fill uniforms
-        let uniforms = uniformBuffer.contents().bindMemory(to: BuddhabrotAccumulationUniforms.self, capacity: 1)
-        uniforms.pointee.resolution = UInt32(currentResolution)
-        uniforms.pointee.maxIterations = UInt32(buddhabrotSnapshot.maxIterations)
-        uniforms.pointee.minIterations = 0 // Accept all escapes for single-channel
-        uniforms.pointee.batchSize = UInt32(batchSize)
-        uniforms.pointee.seedOffset = seedOffset
-        uniforms.pointee.escapeRadius = buddhabrotSnapshot.bailoutRadius * buddhabrotSnapshot.bailoutRadius
-        uniforms.pointee.worldExtent = buddhabrotSnapshot.worldExtent
-        uniforms.pointee.power = buddhabrotSnapshot.power
-        uniforms.pointee.bailoutRadius = buddhabrotSnapshot.bailoutRadius
-        
-        for _ in 0..<batchesPerFrame {
-            guard let encoder = commandBuffer.makeComputeCommandEncoder() else { continue }
-            encoder.label = "Buddhabrot Orbit Batch"
-            encoder.setComputePipelineState(pipeline)
-            
-            encoder.setBuffer(uniformBuffer, offset: 0, index: 0) // BuddhabrotBufferIndexUniforms
-            
-            if buddhabrotSnapshot.useRGBMode {
-                encoder.setBuffer(densityBufferR, offset: 0, index: 1)
-                encoder.setBuffer(densityBufferG, offset: 0, index: 2)
-                encoder.setBuffer(densityBufferB, offset: 0, index: 3)
-            } else {
-                encoder.setBuffer(densityBuffer, offset: 0, index: 1)
-            }
-            
-            let threadsPerGrid = MTLSize(width: batchSize, height: 1, depth: 1)
-            let threadgroupSize = MTLSize(width: min(256, pipeline.maxTotalThreadsPerThreadgroup), height: 1, depth: 1)
-            encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadgroupSize)
-            
-            encoder.endEncoding()
-            
-            // Advance seed for next batch
-            seedOffset &+= 1
-            uniforms.pointee.seedOffset = seedOffset
-        }
-        
-        settings.addSamplesAccumulated(UInt64(batchSize * batchesPerFrame))
-        
-        commandBuffer.commit()
-        return commandBuffer
-    }
-
     /// In-order accumulation encoded onto the frame command buffer.
     /// This guarantees normalization sees fresh density data in the same frame.
     func encodeAccumulation(commandBuffer: MTLCommandBuffer, buddhabrotSnapshot: BuddhabrotSettingsSnapshot) {

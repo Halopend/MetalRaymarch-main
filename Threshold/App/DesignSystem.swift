@@ -59,77 +59,11 @@ enum DS {
         /// 20 pt — prominent containers / sheets.
         static let prominent: CGFloat = 20
     }
-
-    // MARK: - Semantic Color Tints
-
-    /// Opacity scale for translucent fills/strokes over the current background.
-    enum Tint {
-        /// 0.06 — accent section background (e.g. `.blue.opacity(0.06)`).
-        static let sectionFill: Double = 0.06
-        /// 0.08 — neutral surface fill (e.g. `Color.secondary.opacity(0.08)`).
-        static let surfaceFill: Double = 0.08
-        /// 0.12 — hover / selected fill.
-        static let hoverFill: Double = 0.12
-        /// 0.14 — emphasized selected fill.
-        static let selectedFill: Double = 0.14
-        /// 0.12 — subtle separator/border stroke.
-        static let border: Double = 0.12
-        /// 0.4 — prominent (selected) border stroke.
-        static let strongBorder: Double = 0.4
-    }
-
-    /// Semantic colors that resolve consistently across light/dark and platforms.
-    enum Colors {
-        /// Subtle neutral surface fill used for inset rows and cards.
-        static let surface = Color.secondary.opacity(Tint.surfaceFill)
-        /// Neutral hairline border.
-        static let border = Color.secondary.opacity(Tint.border)
-        /// Selected-state accent (matches existing `.blue` selection emphasis).
-        static let accent = Color.blue
-    }
 }
 
 // MARK: - Convenience View Modifiers
 
 extension View {
-    /// Wraps the view in a standard card surface: padding + tinted rounded
-    /// background. Defaults match the dominant pattern (`.padding(10)` +
-    /// `RoundedRectangle(cornerRadius: 12)`).
-    func dsCardSurface(
-        padding: CGFloat = DS.Spacing.md,
-        radius: CGFloat = DS.Radius.card,
-        fill: Color = DS.Colors.surface
-    ) -> some View {
-        self
-            .padding(padding)
-            .background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-    }
-
-    /// Tinted accent section background commonly used for grouped controls
-    /// (e.g. the `.blue/.green/.orange.opacity(0.06)` section blocks).
-    func dsSectionBackground(
-        _ accent: Color,
-        radius: CGFloat = DS.Radius.card,
-        opacity: Double = DS.Tint.sectionFill
-    ) -> some View {
-        self.background(
-            accent.opacity(opacity),
-            in: RoundedRectangle(cornerRadius: radius, style: .continuous)
-        )
-    }
-
-    /// Adds a hairline rounded border using the neutral border tint.
-    func dsBorder(
-        radius: CGFloat = DS.Radius.card,
-        color: Color = DS.Colors.border,
-        lineWidth: CGFloat = 1
-    ) -> some View {
-        self.overlay(
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(color, lineWidth: lineWidth)
-        )
-    }
-
     /// Applies Liquid Glass as the view's primary background on OS versions that
     /// support it (iOS/iPadOS 26, macOS 26, visionOS 26), falling back to
     /// `.ultraThinMaterial` on earlier releases. Use this for floating chrome

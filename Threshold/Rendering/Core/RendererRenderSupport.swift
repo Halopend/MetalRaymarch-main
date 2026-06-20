@@ -33,7 +33,6 @@ struct FramePhaseBreakdown {
     var snapshotMs: Double = 0
     var updateGameStateMs: Double = 0
     var renderPathEncodeMs: Double = 0
-    var mainActorDispatchCount: Int = 0
 
     static let zero = FramePhaseBreakdown()
 }
@@ -392,7 +391,7 @@ extension Renderer {
 
         let pathText = useAdaptiveCompute ? "compute" : "fragment"
         let fps = frameTimeSeconds > 0 ? (1.0 / frameTimeSeconds) : 0
-        print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms wait=\(clockWaitText)ms inflight=\(inFlightWaitText)ms hand=\(handTrackingText)ms settings=\(settingsUpdateText)ms snap=\(snapshotText)ms game=\(gameStateText)ms encode=\(renderEncodeText)ms tasks=\(frameBreakdown.mainActorDispatchCount) path=\(pathText) rt=\(drawableWidth)x\(drawableHeight) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)")
+        print("⚠️ Slow frame: ft=\(String(format: "%.2f", frameMs))ms fps=\(String(format: "%.1f", fps)) gpu=\(gpuText)ms cpu=\(String(format: "%.2f", cpuEncodeMs))ms wait=\(clockWaitText)ms inflight=\(inFlightWaitText)ms hand=\(handTrackingText)ms settings=\(settingsUpdateText)ms snap=\(snapshotText)ms game=\(gameStateText)ms encode=\(renderEncodeText)ms path=\(pathText) rt=\(drawableWidth)x\(drawableHeight) tile=\(settingsSnapshot.tileSize) iters=\(settingsSnapshot.fractalIterations) steps=\(settingsSnapshot.maxRaySteps) views=\(viewCount)")
     }
 
     /// Returns true when the fragment render path should render at low-res into

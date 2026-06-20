@@ -195,9 +195,6 @@ class AppModel {
     /// Updated at ~2 Hz by UIUpdateCoordinator. Zero means no world-tracking fix yet.
     var headHeightMeters: Float = 0
 
-    /// Inferred user posture. `.unknown` until world tracking provides a valid height reading.
-    var detectedPosture: UserPosture { UserPosture.detect(headHeightMeters: headHeightMeters) }
-
     @ObservationIgnored private var isMenuHovering: Bool = false
     @ObservationIgnored private var menuAdjustmentDepth: Int = 0
     

@@ -74,8 +74,6 @@ extension Renderer {
 
     /// Function constant configuration for shader specialization
     struct FunctionConstantConfig {
-        static let disableHighQualityPipeline = true
-
         var fractalIterations: Int32?      // FC index 0
         var shadowIterations: Int32?       // FC index 1
         var safetyBubbleEnabled: Bool?     // FC index 2
@@ -160,25 +158,6 @@ extension Renderer {
             )
         }
 
-        /// Creates a config for high quality rendering (Ultra quality preset: FI=12, RS=100)
-        /// All optional features available.
-        static var highQuality: FunctionConstantConfig {
-            if disableHighQualityPipeline {
-                return .highPerformance
-            }
-
-            return FunctionConstantConfig(
-                fractalIterations: 12,
-                shadowIterations: 10,
-                safetyBubbleEnabled: nil,  // Runtime: respects user toggle
-                qualityMode: 0,  // High quality
-                debugHierarchical: false,
-                maxRaySteps: 100,
-                neonModeEnabled: nil,    // Runtime (not specialized)
-                colorIterations: 12      // Match fractal iterations
-            )
-        }
-
         /// Creates a config for each quality preset.
         /// These pipelines compile out neon code for maximum performance.
         /// Low quality also compiles out shadows entirely (Shadow() returns ambient constant).
@@ -239,7 +218,6 @@ extension Renderer {
                                          rasterSampleCount: Int,
                                          mtlVertexDescriptor: MTLVertexDescriptor,
                                          config: FunctionConstantConfig,
-                                         colorFormat: MTLPixelFormat? = nil,
                                          fragmentFunctionName: String = "fragmentShader",
                                          library: MTLLibrary? = nil) throws -> MTLRenderPipelineState {
         return try buildRenderPipelineWithDevice(
@@ -247,7 +225,6 @@ extension Renderer {
             layerRenderer: layerRenderer,
             rasterSampleCount: rasterSampleCount,
             mtlVertexDescriptor: mtlVertexDescriptor,
-            colorFormat: colorFormat,
             fragmentFunctionName: fragmentFunctionName,
             functionConstants: config.toMTLConstants(),
             library: library
