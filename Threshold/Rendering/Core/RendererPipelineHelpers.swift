@@ -216,9 +216,12 @@ extension Renderer {
         static func fromPreset(_ preset: FractalPreset) -> FunctionConstantConfig {
             let fc = preset.deriveFunctionConstants()
             return FunctionConstantConfig(
+                // Bake the same effective bubble state encoded in the preset's
+                // pipelineCacheKey so the prewarmed pipeline matches what
+                // selectPipeline looks up (and bakes) once the preset is applied.
                 fractalIterations: fc.fractalIterations,
                 shadowIterations: fc.shadowIterations,
-                safetyBubbleEnabled: nil,  // Runtime: respects live safety bubble toggle/radius changes
+                safetyBubbleEnabled: preset.effectiveSafetyBubbleEnabled,
                 qualityMode: fc.qualityMode,
                 debugHierarchical: false,
                 maxRaySteps: fc.maxRaySteps,

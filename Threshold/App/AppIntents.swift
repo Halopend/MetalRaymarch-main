@@ -198,8 +198,10 @@ struct ToggleMusicPlaybackIntent: AppIntent {
         }
 
         appModel.musicService.togglePlayPause()
-        let state = appModel.musicService.isPlaying ? "Playing" : "Paused"
-        return .result(dialog: "\(state) music")
+        // Transport is fire-and-forget (the provider runs async), so isPlaying
+        // still reflects the pre-toggle state here. Report the action rather
+        // than a state that may be wrong by the time Siri speaks it.
+        return .result(dialog: "Toggling music playback")
     }
 }
 
@@ -216,10 +218,9 @@ struct NextTrackIntent: AppIntent {
         }
 
         appModel.musicService.next()
-        if let track = appModel.musicService.nowPlaying {
-            return .result(dialog: "Now playing \(track.title) by \(track.artist)")
-        }
-        return .result(dialog: "Skipped to next track")
+        // nowPlaying still reflects the previous track until the provider's
+        // async transport completes, so report the action, not a stale track.
+        return .result(dialog: "Skipping to the next track")
     }
 }
 
@@ -236,10 +237,8 @@ struct PreviousTrackIntent: AppIntent {
         }
 
         appModel.musicService.previous()
-        if let track = appModel.musicService.nowPlaying {
-            return .result(dialog: "Now playing \(track.title) by \(track.artist)")
-        }
-        return .result(dialog: "Went to previous track")
+        // Same async caveat as next track: avoid announcing a stale track.
+        return .result(dialog: "Going to the previous track")
     }
 }
 

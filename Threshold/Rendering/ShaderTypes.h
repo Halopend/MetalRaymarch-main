@@ -333,7 +333,12 @@ typedef struct
     // shared shadows). 1 = predict-validate-fallback: single-DE-eval safety probe per
     // pixel, normal-coherence-gated shadow share, layer-of-acceptance debug overlay.
     int coherentPacketEnabled;
-    float _pad_tile;             // Align to 16 bytes
+    // === FOVEATED RAYMARCH ===
+    // 0 = uniform full-quality march everywhere (default). >0 = peripheral 8x8
+    // tiles march proportionally fewer ray steps, smoothly ramping from the
+    // viewport center toward the edges. Occupies the former 16-byte alignment
+    // pad, so struct layout is unchanged.
+    float foveationStrength;
     vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     

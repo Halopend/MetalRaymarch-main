@@ -349,7 +349,12 @@ typedef struct
     // shared shadows). 1 = predict-validate-fallback: single-DE-eval safety probe per
     // pixel, normal-coherence-gated shadow share, layer-of-acceptance debug overlay.
     int coherentPacketEnabled;
-    float _pad_tile;             // Align to 16 bytes
+    // === FOVEATED RAYMARCH ===
+    // 0 = uniform full-quality march everywhere (default). >0 = peripheral 8x8
+    // tiles march proportionally fewer ray steps, smoothly ramping from the
+    // viewport center toward the edges. Occupies the former 16-byte alignment
+    // pad, so struct layout is unchanged.
+    float foveationStrength;
     vector_float4 floorPlane; // xyz = model-space normal, w = plane constant
     vector_float4 floorCenterRadius; // xyz = model-space center, w = radius in model units
     
@@ -3566,6 +3571,23 @@ kernel void adaptiveHierarchical8x8(
     int lodIterations = max(uniforms.fractalIterations, 2);
     int maxSteps = uniforms.maxRaySteps;
     int fractalType = uniforms.fractalType;
+
+    // === FOVEATED RAYMARCH ===
+    // Peripheral tiles get fewer ray steps. The factor is derived from the tile
+    // CENTER, so all 64 threads in this threadgroup compute the same value with
+    // no intra-tile divergence. Foveal region (r < kFovInner) stays full-quality;
+    // beyond it the step budget ramps down to kFovMinFraction at the corners,
+    // scaled by foveationStrength. Disabled (factor == 1) when strength == 0.
+    if (uniforms.foveationStrength > 0.0f) {
+        const float kFovInner = 0.35f;        // normalized radius that stays sharp
+        const float kFovMinFraction = 0.5f;   // step budget at the far periphery
+        float2 tileCenter = float2(tileId * ADAPTIVE_TILE_SIZE + ADAPTIVE_TILE_SIZE / 2);
+        float2 halfRes = max(float2(viewportSize) * 0.5f, float2(1.0f));
+        float r = min(length((tileCenter - halfRes) / halfRes), 1.0f);
+        float ramp = smoothstep(kFovInner, 1.0f, r) * uniforms.foveationStrength;
+        float factor = mix(1.0f, kFovMinFraction, ramp);
+        maxSteps = max(int(float(maxSteps) * factor), 8);
+    }
 
     float3 marchOrigin = cameraPos;
     float3 marchDir = rd;

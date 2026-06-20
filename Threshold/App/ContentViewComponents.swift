@@ -525,6 +525,9 @@ struct ExternalFileImportSheet: View {
                 } label: {
                     Label("Cancel", systemImage: "xmark")
                 }
+                // The sheet uses .interactiveDismissDisabled(), so wire Esc
+                // explicitly to the Cancel action as the keyboard escape hatch.
+                .keyboardShortcut(.cancelAction)
 
                 Spacer()
 

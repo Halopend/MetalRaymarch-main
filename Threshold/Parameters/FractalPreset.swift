@@ -358,12 +358,25 @@ struct FractalPreset: Codable, Identifiable {
         )
     }
     
+    /// Effective safety-bubble bake for this preset. Mirrors the renderer's
+    /// `effectiveSafetyBubbleEnabled` (mandelbulb force-disables the bubble) so the
+    /// preset-built pipeline and `selectPipeline` agree on the baked FC and key.
+    var effectiveSafetyBubbleEnabled: Bool {
+        fractalType != .mandelbulb && (safetyBubbleEnabled ?? true)
+    }
+
     /// Returns a unique key for pipeline caching based on function constants.
     /// Presets with identical function constant values can share pipelines.
+    ///
+    /// The `_B...` scene segment must match `RenderPipelineKeyContext`'s exact key
+    /// (inserted between RS and _N). Without it, `getPipeline(forPreset:)` stores
+    /// the prewarmed pipeline under a key `selectPipeline` never looks up once the
+    /// preset is applied, so preset loads miss the prewarm and rebuild/fall back.
     var pipelineCacheKey: String {
         let fc = deriveFunctionConstants()
         let powerKey = fc.mandelbulbPower.map { "_P\($0)" } ?? ""
-        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)_CI\(fc.colorIterations)\(powerKey)"
+        let sceneKey = "_B\(effectiveSafetyBubbleEnabled ? 1 : 0)"
+        return "FT\(fractalType.rawValue)_FI\(fc.fractalIterations)_RS\(fc.maxRaySteps)\(sceneKey)_N\(fc.neonModeEnabled ? 1 : 0)_Q\(fc.qualityMode)_CI\(fc.colorIterations)\(powerKey)"
     }
     
     /// Create a preset from current render settings

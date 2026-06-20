@@ -707,14 +707,12 @@ extension ContentView {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.06)))
         }
         .sheet(item: $exportShareItem) { item in
-            VStack(spacing: 12) {
-                Text(item.url.lastPathComponent)
-                    .font(.subheadline.weight(.medium))
-                ShareLink(item: item.url) {
-                    Label("Share File", systemImage: "square.and.arrow.up")
-                }
-            }
-            .padding()
+            // Use the same native share UI as the Presets library so the two
+            // export paths behave identically. UIActivityViewController /
+            // NSSharingServicePicker dismiss themselves once the user picks a
+            // destination or cancels — the previous custom ShareLink sheet had
+            // no dismiss control and could get stuck on visionOS/macOS.
+            ShareSheet(activityItems: [item.url])
         }
     }
 
@@ -801,6 +799,30 @@ extension ContentView {
                     }
                 }.tint(themeColor)
                 Text("Layer-of-acceptance overlay shows immediately when this toggle is on (no other debug flag needed): magenta = warm-start hit, green = warm-start tight, red = warm-start rejected, cyan = shadow fallback. Untinted = legacy coarse path. 8x8 compute path only.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Foveated raymarch")
+                        .font(.headline)
+                    Spacer()
+                    Text("EXPERIMENTAL")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                }
+                Slider(
+                    value: Binding(
+                        get: { appModel.renderSettings.foveationStrength },
+                        set: { appModel.renderSettings.foveationStrength = $0 }
+                    ),
+                    in: 0...1
+                ).tint(themeColor)
+                Text("Peripheral 8x8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8x8 compute path only.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))

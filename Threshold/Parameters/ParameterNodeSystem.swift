@@ -206,6 +206,11 @@ struct ParameterLayerStack: Sendable {
     private(set) var defaultValue: Float
     private(set) var range: ClosedRange<Float>
 
+    /// The anchor (user/base) value the additive layers modulate around — i.e. the
+    /// `.ui` layer's raw value. Non-mutating so the UI can peek without disturbing
+    /// the smoothing state owned by the render side.
+    var baseRawValue: Float? { ui?.rawValue }
+
     init(defaultValue: Float, range: ClosedRange<Float>, timestamp: TimeInterval = CFAbsoluteTimeGetCurrent()) {
         self.defaultValue = defaultValue
         self.range = range

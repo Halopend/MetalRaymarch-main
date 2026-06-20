@@ -111,6 +111,29 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
     private let _state = Mutex(State())
 
+    /// Live (base, resolved) snapshot per target, refreshed every time an operation
+    /// is applied through the settings path (gesture/animation/audio). The UI reads
+    /// this to render a "derived value" ghost indicator without touching — and racing
+    /// on — the authoritative, mutating layer stacks.
+    struct LiveValue: Sendable {
+        let base: Float
+        let resolved: Float
+        /// True when an additive layer is currently displacing the parameter enough
+        /// to be worth showing as a distinct derived value.
+        var isModulated: Bool { abs(resolved - base) > 1e-4 }
+    }
+    private let _liveValues = Mutex<[String: LiveValue]>([:])
+
+    /// Latest (base, resolved) snapshot for a target, or nil if it has never been
+    /// driven through the settings path.
+    func liveValue(for targetID: String) -> LiveValue? {
+        _liveValues.withLock { $0[targetID] }
+    }
+
+    private func recordLiveValue(_ targetID: String, base: Float, resolved: Float) {
+        _liveValues.withLock { $0[targetID] = LiveValue(base: base, resolved: resolved) }
+    }
+
     private struct CoreParameterDescriptor {
         let range: ClosedRange<Float>
         let bundle: ParameterBundle
@@ -284,7 +307,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             let current = FormulaCatalog.getParam(params, index: formulaIndex)
             let nodeRange: ClosedRange<Float> = ParameterNodeRegistry.shared
                 .node(for: fractalType, formulaIndex: formulaIndex)?.range ?? -Float.greatestFiniteMagnitude...Float.greatestFiniteMagnitude
-            let resolved = _state.withLock { state -> Float in
+            let outcome = _state.withLock { state -> (resolved: Float, base: Float) in
                 var stack = state.formulaStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: current, range: nodeRange, timestamp: timestamp)
                 stack.setBaseIfNeeded(current, timestamp: timestamp)
                 let incoming = operation.value.resolved(from: stack.resolvedValue(at: timestamp))
@@ -293,9 +316,12 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
                     .motionStrategy ?? .layerLerp
                 let effectiveSmoothTime = smoothingTime(for: strategy, requested: operation.smoothing.smoothingTime)
                 let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: timestamp)
+                let anchor = stack.baseRawValue ?? current
                 state.formulaStacks[operation.targetID] = stack
-                return resolved
+                return (resolved, anchor)
             }
+            let resolved = outcome.resolved
+            recordLiveValue(operation.targetID, base: outcome.base, resolved: resolved)
             let usesPlaybackRelativeManualOverride: Bool = settings.isAnimationPlaying && {
                 switch operation.source {
                 case .gesture, .slider, .windowSlider:
@@ -325,7 +351,7 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         guard let descriptor = coreDescriptors[operation.targetID] else { return }
 
         let base = descriptor.read(settings)
-        let resolved = _state.withLock { state -> Float in
+        let outcome = _state.withLock { state -> (resolved: Float, base: Float) in
             var stack = state.coreStacks[operation.targetID] ?? ParameterLayerStack(defaultValue: base, range: descriptor.range, timestamp: operation.timestamp)
             stack.setBaseIfNeeded(base, timestamp: operation.timestamp)
 
@@ -333,11 +359,14 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             let incoming = operation.value.resolved(from: current)
             let effectiveSmoothTime = smoothingTime(for: descriptor.motionStrategy, requested: operation.smoothing.smoothingTime)
             let resolved = stack.apply(layer: layer, value: incoming, smoothingTime: effectiveSmoothTime, timestamp: operation.timestamp)
+            let anchor = stack.baseRawValue ?? base
 
             state.coreStacks[operation.targetID] = stack
-            return min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved))
+            return (min(descriptor.range.upperBound, max(descriptor.range.lowerBound, resolved)), anchor)
         }
+        let resolved = outcome.resolved
 
+        recordLiveValue(operation.targetID, base: outcome.base, resolved: resolved)
         descriptor.write(settings, resolved)
 
         if debugTraceEnabled {
@@ -402,6 +431,17 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             FormulaCatalog.setParam(&params, index: formulaIndex, value: resolved)
         }
         settings.formulaParams = params
+
+        // Music is gone: collapse the derived snapshot to base so the UI ghost
+        // indicators fade out and stop displaying a stale offset.
+        for (id, resolved) in cleared.core {
+            recordLiveValue(id, base: resolved, resolved: resolved)
+        }
+        _liveValues.withLock { live in
+            for id in live.keys where ParameterTargetID.parseFormulaID(id) != nil {
+                if let v = live[id] { live[id] = LiveValue(base: v.resolved, resolved: v.resolved) }
+            }
+        }
     }
 
     /// Discard all formula parameter layer stacks. Call when the fractal type
@@ -410,6 +450,11 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     func clearFormulaStacks() {
         _state.withLock { state in
             state.formulaStacks.removeAll()
+        }
+        _liveValues.withLock { live in
+            for id in live.keys where ParameterTargetID.parseFormulaID(id) != nil {
+                live.removeValue(forKey: id)
+            }
         }
     }
 }
