@@ -2152,10 +2152,6 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _animationActivityFactor } }
     }
 
-    var isAnimationKillSwitchActive: Bool {
-        get { withLock { _animationKillSwitchActive || _animationActivityFactor < 0.999 } }
-    }
-
     func beginAnimationKillSwitch(duration: TimeInterval) {
         let clampedDuration = max(Float(duration), 0.01)
         withLock {

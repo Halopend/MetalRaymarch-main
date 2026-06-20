@@ -259,20 +259,6 @@ final class UISettingsCache {
         color.colorSchemeGamma = pp.gamma
     }
     
-    /// Update a single formula param slot and push the entire struct to RenderSettings.
-    /// Routes through the parameter operation dispatcher so layer precedence is respected.
-    func pushFormulaParam(index: Int, value: Float) {
-        guard let settings else { return }
-        guard let targetID = ParameterNodeRegistry.shared.node(for: settings.fractalType, formulaIndex: index)?.id else { return }
-        let op = ParameterOperation(
-            targetID: targetID,
-            source: .slider,
-            value: .absolute(value),
-            frameIndex: 0
-        )
-        parameterPipeline?.dispatchUI([op], cache: self)
-    }
-    
     /// Reset formula params to defaults for the current type and push.
     func resetFormulaParams() {
         parameterPipeline?.clearFormulaStacks()

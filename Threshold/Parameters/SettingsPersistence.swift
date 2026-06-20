@@ -190,18 +190,6 @@ enum SettingsPersistence {
         save(config, domain: .music)
     }
 
-    static func loadMusicPreferences(defaultServicePriority: [String] = []) -> MusicPreferences {
-        Music.loadPreferences(defaultServicePriority: defaultServicePriority)
-    }
-
-    static func saveMusicPreferences(_ preferences: MusicPreferences, defaultServicePriority: [String] = []) {
-        Music.savePreferences(preferences, defaultServicePriority: defaultServicePriority)
-    }
-
-    static func loadMusicPresets() -> [MusicReactivePreset] {
-        Music.loadPresets()
-    }
-
     static func saveMusicPresets(_ presets: [MusicReactivePreset]) {
         Music.savePresets(presets)
     }

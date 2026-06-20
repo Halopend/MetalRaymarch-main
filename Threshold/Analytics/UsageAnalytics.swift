@@ -149,7 +149,6 @@ final class UsageAnalytics {
     @ObservationIgnored private var cachedDatabase: CKDatabase?
     
     // Local tracking state
-    private var sessionStartTime: Date = Date()
     private var lastSampleTime: Date = Date()
     private var totalSessionTime: TimeInterval = 0
     

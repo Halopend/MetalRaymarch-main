@@ -482,16 +482,3 @@ private struct SendablePCMBuffer: @unchecked Sendable {
     let buffer: AVAudioPCMBuffer
 }
 
-// MARK: - Extension for RenderSettings integration
-
-extension RenderSettings {
-    /// Updates audio level from the analyzer (call each frame when in audio-reactive mode)
-    @MainActor
-    func updateFromAudioAnalyzer(_ analyzer: AudioAnalyzer) {
-        if lightingMode == .audioReactive && analyzer.isCapturing {
-            // Use weighted combination: bass for punch, mids for body, treble for sparkle
-            let combinedLevel = analyzer.bassLevel * 0.5 + analyzer.midLevel * 0.3 + analyzer.level * 0.2
-            audioLevel = combinedLevel
-        }
-    }
-}

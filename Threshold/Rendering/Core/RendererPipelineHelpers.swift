@@ -143,21 +143,6 @@ extension Renderer {
             return constants
         }
 
-        /// Creates a config optimized for high performance (Low quality preset: FI=6, RI=32)
-        /// All optional features compiled out for maximum speed.
-        static var highPerformance: FunctionConstantConfig {
-            return FunctionConstantConfig(
-                fractalIterations: 6,
-                shadowIterations: 4,
-                safetyBubbleEnabled: false,
-                qualityMode: 2,  // Low quality
-                debugHierarchical: false,
-                maxRaySteps: 32,
-                neonModeEnabled: false,  // Compile out neon
-                colorIterations: 6       // Match fractal iterations
-            )
-        }
-
         /// Creates a config for each quality preset.
         /// These pipelines compile out neon code for maximum performance.
         /// Low quality also compiles out shadows entirely (Shadow() returns ambient constant).

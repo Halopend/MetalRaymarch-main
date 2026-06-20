@@ -625,27 +625,6 @@ final class AnimationManager {
         }
     }
     
-    /// Add current settings as a new keyframe to the specified scene
-    func addKeyframeToScene(_ sceneID: UUID, duration: TimeInterval = 2.0) {
-        guard let settings = renderSettings else { return }
-        
-        if DefaultScenes.isDefault(sceneID) {
-            // Edit the overlay (create one from the original if needed)
-            var overlay = editedDefaultOverrides[sceneID]
-                ?? DefaultScenes.all().first { $0.id == sceneID }
-                ?? AnimationScene(name: "Unknown")
-            overlay.addKeyframe(from: settings, duration: duration)
-            editedDefaultOverrides[sceneID] = overlay
-            if currentScene?.id == sceneID { currentScene = overlay }
-        } else if let index = userScenes.firstIndex(where: { $0.id == sceneID }) {
-            userScenes[index].addKeyframe(from: settings, duration: duration)
-            if currentScene?.id == sceneID { currentScene = userScenes[index] }
-            saveScenes()
-        }
-        
-        print("➕ Added keyframe to scene")
-    }
-    
     /// Remove a keyframe from scene
     func removeKeyframe(at keyframeIndex: Int, from sceneID: UUID) {
         if DefaultScenes.isDefault(sceneID) {
@@ -679,27 +658,6 @@ final class AnimationManager {
         kf.id = s.keyframes[index].id
         s.keyframes[index] = kf
         updateScene(s)
-    }
-    
-    /// Update a specific keyframe in a scene
-    func updateKeyframe(_ keyframe: AnimationKeyframe, in sceneID: UUID) {
-        if DefaultScenes.isDefault(sceneID) {
-            var overlay = editedDefaultOverrides[sceneID]
-                ?? DefaultScenes.all().first { $0.id == sceneID }
-                ?? AnimationScene(name: "Unknown")
-            if let kfIdx = overlay.keyframes.firstIndex(where: { $0.id == keyframe.id }) {
-                overlay.keyframes[kfIdx] = keyframe
-                overlay.modifiedAt = Date()
-                editedDefaultOverrides[sceneID] = overlay
-                if currentScene?.id == sceneID { currentScene = overlay }
-            }
-        } else if let sceneIndex = userScenes.firstIndex(where: { $0.id == sceneID }),
-                  let kfIdx = userScenes[sceneIndex].keyframes.firstIndex(where: { $0.id == keyframe.id }) {
-            userScenes[sceneIndex].keyframes[kfIdx] = keyframe
-            userScenes[sceneIndex].modifiedAt = Date()
-            if currentScene?.id == sceneID { currentScene = userScenes[sceneIndex] }
-            saveScenes()
-        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -859,20 +817,6 @@ final class AnimationManager {
         }
     }
 
-    /// Disable user/gesture overrides during playback and re-apply scene-driven
-    /// values at the current playhead position.
-    func disablePlaybackOverrides() {
-        guard let settings = renderSettings,
-              let scene = currentScene,
-              scene.keyframes.count >= 1 else { return }
-
-        settings.clearAnimationManualOffsets()
-
-        if let keyframe = interpolatedKeyframeAtCurrentPlayhead(in: scene) {
-            applyKeyframe(keyframe)
-        }
-    }
-    
     /// Pause playback
     func pause() {
         playhead.state = .paused
@@ -974,46 +918,6 @@ final class AnimationManager {
         
         // Apply the keyframe immediately
         applyKeyframe(scene.keyframes[index])
-    }
-    
-    /// Jump to a specific time across the entire scene's duration
-    func jumpToTime(_ time: TimeInterval) {
-        guard let scene = currentScene, !scene.keyframes.isEmpty else { return }
-        let keyframes = scene.keyframes
-        
-        if keyframes.count == 1 {
-            jumpToKeyframe(0)
-            return
-        }
-        
-        let total = scene.totalDuration
-        let targetTime = max(0, min(time, total)) // clamp
-        
-        var accumulated: TimeInterval = 0
-        var foundIndex = 0
-        var segmentElapsed: TimeInterval = 0
-        
-        for i in 0..<(keyframes.count - 1) {
-            let segDuration = segmentDuration(for: keyframes, toIndex: i + 1)
-            let remaining = targetTime - accumulated
-            if remaining <= segDuration { // found the segment
-                foundIndex = i
-                segmentElapsed = remaining
-                break
-            }
-            accumulated += segDuration
-            if i == keyframes.count - 2 { // edge case: last segment
-                foundIndex = i
-                segmentElapsed = segDuration // max out the last segment
-            }
-        }
-        
-        playhead.currentKeyframeIndex = foundIndex
-        playhead.elapsedInSegment = segmentElapsed
-        uiPlayhead = playhead
-        
-        // Disable scene overrides and re-apply directly at current location
-        disablePlaybackOverrides()
     }
     
     /// Calculate current total time of the playhead

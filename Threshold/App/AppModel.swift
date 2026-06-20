@@ -757,15 +757,6 @@ class AppModel {
         }
     }
 
-    /// Show the menu window via gesture. Does not reposition the restored window.
-    func openMenuWindowFromGesture() {
-        guard !isMenuWindowVisible else {
-            refreshMenuInteractionState()
-            return
-        }
-        showMenuWindow(reason: "gesture")
-    }
-
     func pullMenuWindowTowardUser() {
         guard !isMenuWindowVisible else {
             refreshMenuInteractionState()
@@ -880,10 +871,6 @@ class AppModel {
         )
         snapshot.thumbnailData = nil
         activeResetPreset = snapshot
-    }
-
-    func clearActiveResetPreset() {
-        activeResetPreset = nil
     }
 
     /// Optional side-effects to run around a scene load. Defaults match the

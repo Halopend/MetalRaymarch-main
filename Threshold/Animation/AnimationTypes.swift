@@ -815,20 +815,6 @@ struct AnimationScene: Codable, Identifiable, Equatable {
         }
     }
     
-    /// Add a keyframe from current settings
-    mutating func addKeyframe(from settings: RenderSettings, duration: TimeInterval = 2.0) {
-        let index = keyframes.count + 1
-        var keyframe = AnimationKeyframe(from: settings, name: "Keyframe \(index)", duration: duration)
-        
-        // First keyframe should have 0 duration (starting point)
-        if keyframes.isEmpty {
-            keyframe.duration = 0
-        }
-        
-        keyframes.append(keyframe)
-        modifiedAt = Date()
-    }
-    
     /// Remove keyframe at index
     mutating func removeKeyframe(at index: Int) {
         guard keyframes.indices.contains(index) else { return }

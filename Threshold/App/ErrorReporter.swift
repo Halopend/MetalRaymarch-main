@@ -26,9 +26,6 @@ final class ErrorReporter {
     /// Capped at `maxHistoryCount` entries.
     private(set) var errorHistory: [ErrorEntry] = []
 
-    /// Whether an error banner is currently visible.
-    var hasActiveError: Bool { currentError != nil }
-
     // MARK: - Configuration
 
     /// Maximum number of errors retained in history.
@@ -86,11 +83,6 @@ final class ErrorReporter {
         dismissTask?.cancel()
         dismissTask = nil
         currentError = nil
-    }
-
-    /// Clear all error history.
-    func clearHistory() {
-        errorHistory.removeAll()
     }
 
     // MARK: - Private

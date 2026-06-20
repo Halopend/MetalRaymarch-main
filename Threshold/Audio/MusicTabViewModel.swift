@@ -74,13 +74,6 @@ final class MusicTabViewModel {
         }
     }
 
-    func ensureLibraryLoaded() {
-        guard let activeID = activeProvider?.serviceID else { return }
-        guard musicService.librarySongs(for: activeID).isEmpty,
-              !musicService.isLibraryLoading(for: activeID) else { return }
-        refreshLibrary()
-    }
-
     func playSong(_ track: UnifiedTrack) {
         runLibraryCommand { self.musicService.playSong(track) }
     }
@@ -114,10 +107,6 @@ final class MusicTabViewModel {
     }
 
     // MARK: - Song Attachment Helpers
-
-    func captureNowPlayingAttachment() async -> SongAttachment? {
-        await musicService.captureAttachmentWithFallbacks()
-    }
 
     func makeAttachment(from track: UnifiedTrack, crossMatch: Bool = true) async -> SongAttachment {
         await musicService.makeAttachment(from: track, crossMatch: crossMatch)

@@ -154,12 +154,6 @@ actor CustomShaderCompiler {
         libraryCache.removeValue(forKey: sourceHash)
     }
 
-    /// Drop every cached library. Called when the active formula changes and the
-    /// renderer wants to bound memory growth.
-    func evictAll() {
-        libraryCache.removeAll(keepingCapacity: false)
-    }
-
     // MARK: - Source synthesis
 
     /// Stitch the user's DE source into the bundled Metal sources to produce a

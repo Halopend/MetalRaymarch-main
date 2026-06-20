@@ -59,7 +59,6 @@ func exportOffMain(_ produce: @escaping @Sendable () -> URL?,
 class PresetManager {
     private(set) var presets: [FractalPreset] = []
     private static var bundledPresetsCache: [FractalPreset]?
-    private let presetsKey = "FractalPresets"
     private let maxBackupCount: Int? = nil  // nil = unlimited retention
     private var pendingSaveTask: Task<Void, Never>?
     private let saveDebounceNanoseconds: UInt64 = 250_000_000
@@ -291,21 +290,6 @@ class PresetManager {
 
     }
     
-    /// Update rating for a preset (0-5)
-    func updateRating(_ preset: FractalPreset, rating: Int) {
-        guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
-        let clamped = max(0, min(5, rating))
-        presets[index].rating = clamped
-        scheduleSavePresets()
-    }
-    
-    /// Rename a preset
-    func renamePreset(_ preset: FractalPreset, to newName: String) {
-        guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
-        presets[index].name = newName
-        scheduleSavePresets()
-    }
-    
     /// Delete a preset
     func deletePreset(_ preset: FractalPreset) {
         presets.removeAll { $0.id == preset.id }
@@ -531,10 +515,5 @@ extension PresetManager {
             print("Failed to restore last state: \(error)")
             return nil
         }
-    }
-    
-    /// Check if a last state exists
-    var hasLastState: Bool {
-        FileManager.default.fileExists(atPath: lastStateFileURL.path)
     }
 }
