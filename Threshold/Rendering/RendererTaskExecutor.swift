@@ -13,7 +13,8 @@ import Synchronization
 ///
 /// @unchecked Sendable justification: mutable job queue is protected by Mutex;
 /// DispatchSemaphore is used for blocking thread wake-up (not in async context);
-/// the run loop continues while the executor remains alive (weak reference).
+/// the run loop is gated on the weak `executor` capture — the only instance is the
+/// process-lifetime `shared` singleton, so in practice it runs until the process exits.
 final class RendererTaskExecutor: TaskExecutor, @unchecked Sendable {
     private struct JobQueue {
         var jobs: [UnownedJob] = []
