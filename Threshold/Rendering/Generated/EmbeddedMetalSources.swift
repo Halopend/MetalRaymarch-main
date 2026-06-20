@@ -149,7 +149,7 @@ typedef struct
     // Replaces fixed 3-color palettes with up to 8 user-defined gradient stops.
     // Each stop packs color (xyz) + position (w) into a float4.
     vector_float4 gradientStops[MAX_GRADIENT_STOPS]; // float4(r, g, b, position)
-    int gradientStopCount;            // Number of active stops (0 = use legacy palette)
+    int gradientStopCount;            // Number of active stops (0 = fall back to white)
     int colorMappingMode;             // 0=orbitTrap, 1=iterations, 2=zDepth, 3=angle, 4=normal, 5=blended
     float gradientRepeat;             // How many times gradient repeats (default 1.0)
     float gradientOffset;             // Shifts gradient start (0-1)
@@ -322,7 +322,7 @@ typedef struct
     int maxRaySteps;
     float maxViewDistance;
     uint32_t eyeIndex;
-    uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
+    uint32_t debugHierarchical;  // 1 = overlay a yellow tile-boundary grid
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
     int fractalType;             // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
@@ -1990,13 +1990,6 @@ vertex ColorInOut screenshotVertexShader(Vertex in [[stage_in]],
 // --- Fractal Code Port ---
 // Spatial Rendering optimizations for visionOS
 
-// Soft lighting: original un-normalized sunDir (length ~0.44)
-// The shorter vector naturally softens shadows (shorter march range), diffuse
-// (smaller dot product range), and specular (0.44^10 ≈ 0 vs 1.0^10 = 1).
-constant float3 sunDirSoft  = float3(0.3235, 0.0924, 0.2773);
-// Sharp lighting: normalized sunDir — crisper shadows, stronger specular
-constant float3 sunDirSharp = float3(0.7420, 0.2119, 0.6360);
-
 constant float kPowEpsilon = 1e-6f;
 constant half kPowEpsilonHalf = 1e-4h;
 
@@ -2105,10 +2098,6 @@ inline float rayIntersectBoundingSphere(float3 ro, float3 rd, float3 center, flo
     float t = -b - sqrt(discriminant);  // Near intersection
     return (t > 0.0) ? t : -1.0;  // Behind the camera → treat as miss
 }
-
-// === ADAPTIVE LEVEL SELECTION ===
-// (Removed: `selectAdaptiveLevel` — leftover from an abandoned 4-level cascade.
-//  Current renderer uses a flat 8x8 tile dispatch only.)
 
 // visionOS projection outputs z/w in [0, 1] range directly.
 // No transformation needed - just pass through for async timewarp/reprojection.
@@ -2366,8 +2355,8 @@ FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLi
 // per call, but the coarse pass can now use 0.6× iterations instead of 0.5×
 // with better accuracy, meaning fewer total ray steps to converge.
 //
-// Uses half precision for the inner loop (same as MapHalf) since this is
-// only used in coarse passes where thresholds are large.
+// Runs the fold iteration in half precision since this is only used in
+// coarse passes where distance thresholds are large.
 
 FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float foldingLimit, float fractionalIterations)
 {
@@ -3209,15 +3198,6 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
     return result;
 }
 
-// =============================================================================
-// (Removed: SIMD group cooperative raymarcher experiment.
-//  `SceneWithCacheSIMDGroup`, `SceneWithCacheFromStartSIMDGroup`,
-//  `isSIMDGroupAnchorLane`, `SIMDGroupConservativeStep` were defined but never
-//  called. Superseded by the per-pixel `coherentPacketEnabled` warm-start probe
-//  in `adaptiveHierarchical8x8`. Restore from git history if SIMD anchor-lane
-//  cooperative marching is revived.)
-// =============================================================================
-
 // Post effects with color scheme support and dynamic animation
 // Consumes precomputed audio aggregates for lightweight audio-reactive modulation.
 half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, PrecomputedAudio audio, half limitFlash = 0.0h, half rayGlow = 0.0h)
@@ -3417,8 +3397,8 @@ FORCE_INLINE half3 compositeFloorCircle(half3 color, FloorCircleHit hit) {
 // GMT-FRACTALS TECHNIQUE: FC_SHADOWS_ENABLED allows compile-time elimination of
 // entire shadow computation. When disabled, returns a flat ambient shadow value
 // (0.35) — zero Map() evaluations, zero ALU cost.
-// Also uses MapDistOnly instead of MapHalf — removes all fold/trap tracking
-// from shadow rays, saving ~6 ops per iteration per shadow step.
+// Also uses MapDistOnly instead of the full distance estimator — removes all
+// fold/trap tracking from shadow rays, saving ~6 ops per iteration per step.
 FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimit, FractalParams params, int iterations, int fractalType = 0, FormulaParams fp = {})
 {
     // === COMPILE-TIME SHADOW ELIMINATION (GMT-fractals technique) ===
@@ -3454,7 +3434,7 @@ FORCE_INLINE float Shadow(float3 ro, float3 rd, float quality, float foldingLimi
         // GEOMETRY-ONLY DE (GMT-fractals technique): MapDistOnly strips all
         // fold tracking, orbit traps, and Jacobian from shadow rays.
         // Shadow rays only need distance — the ~6 extra ops per iteration
-        // in Map/MapHalf for tracking are pure waste here.
+        // the full distance estimator spends on tracking are pure waste here.
         float h = MapDistOnlyUnified(p, params, foldingLimit, iterations, fractalType, fp);
         
         // Use rcp for division by t (faster on many GPUs)

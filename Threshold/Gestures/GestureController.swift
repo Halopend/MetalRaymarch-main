@@ -7,10 +7,9 @@
 //  Usage:
 //  - TWO-HAND PINCH: Pinch with both hands simultaneously
 //    Finger-to-action mapping is configurable (see FingerGestureAction).
-//    Default: index=grab, middle=minDistance, ring=fractalScale, pinky=sphereRadius.
+//    Default: index=grab, middle=minDistance, ring=fractalScale.
 //  - SINGLE-HAND PINCH+DRAG: Move one hand while pinching
 //    * Right hand index = translate position
-//  - LEFT HAND FIST: Start/stop parameter recording
 //  - RIGHT HAND MENU GESTURE (configurable): Toggle menu visibility
 //
 
@@ -909,7 +908,7 @@ final class GestureController {
     /// Process a two-hand gesture for a specific finger
     /// Directly sets TARGET values - Renderer handles smoothing
     /// - Parameters:
-    ///   - digit: 1=index, 2=middle, 3=ring, 4=pinky
+    ///   - digit: 1=index, 2=middle, 3=ring
     ///   - state: The gesture state to track
     ///   - currentTarget: The current target value (read from RenderSettings)
     ///   - range: The valid range for the parameter
@@ -930,8 +929,8 @@ final class GestureController {
         let rightPinch = rightHand.pinchStrength(digit: digit)
         
         // Use lower thresholds for ring finger (harder to pinch)
-        let activateThresh = (digit == 3 || digit == 4) ? settings.ringPinchActivateThreshold : settings.twoHandPinchActivateThreshold
-        let releaseThresh = (digit == 3 || digit == 4) ? settings.ringPinchReleaseThreshold : settings.twoHandPinchReleaseThreshold
+        let activateThresh = (digit == 3) ? settings.ringPinchActivateThreshold : settings.twoHandPinchActivateThreshold
+        let releaseThresh = (digit == 3) ? settings.ringPinchReleaseThreshold : settings.twoHandPinchReleaseThreshold
         
         // Measure hand separation (only meaningful if both tracked)
         let leftPos = leftHand.pinchPosition(digit: digit)

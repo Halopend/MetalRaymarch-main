@@ -47,10 +47,12 @@ enum RenderPrecompute {
         )
     }
 
-    /// Sun direction constants for the vibrance/softness lighting blend.
-    /// MUST match `sunDirSoft` / `sunDirSharp` in Shaders.metal (the GPU keeps
-    /// its own copies for the compute paths' documentation; the blend itself
-    /// is evaluated only here now).
+    /// Sun direction endpoints for the vibrance/softness lighting blend.
+    /// `sunDirSoft` is the original un-normalized direction (length ~0.44), which
+    /// naturally softens shadows, diffuse, and specular; `sunDirSharp` is its
+    /// normalized counterpart for crisper shadows and stronger specular. The
+    /// blend between them is precomputed here (frame-uniform) and passed to the
+    /// GPU, so the shaders no longer need their own copies.
     static let sunDirSoft = SIMD3<Float>(0.3235, 0.0924, 0.2773)
     static let sunDirSharp = SIMD3<Float>(0.7420, 0.2119, 0.6360)
 

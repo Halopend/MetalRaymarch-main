@@ -337,17 +337,13 @@ struct FractalGridView: View {
         }
     }
 
-    private func isJumpingOffPreset(_ preset: FractalPreset) -> Bool {
-        preset.isJumpingOffPreset
-    }
-
     private func jumpingOffPresets() -> [FractalPreset] {
-        filteredStaticPresets().filter { isJumpingOffPreset($0) }
+        filteredStaticPresets().filter { $0.isJumpingOffPreset }
     }
 
     private func musicReactivePresets() -> [FractalPreset] {
         filteredStaticPresets().filter { preset in
-            !preset.isCustomScenePreset && !isJumpingOffPreset(preset)
+            !preset.isCustomScenePreset && !preset.isJumpingOffPreset
         }
     }
 

@@ -8,9 +8,9 @@ import MetalFX
 ///
 /// The Mac renderer draws the raymarch into a reduced-resolution offscreen
 /// color+depth target, then this upscaler resolves it to the full drawable
-/// resolution. Stage B will add a temporal sibling (`MacTemporalUpscaler`) that
-/// also consumes depth + motion vectors; the texture-management shape here is
-/// intentionally close so that code can mirror it.
+/// resolution. Its temporal sibling (`MacTemporalUpscaler`) also consumes
+/// depth + motion vectors; the texture-management shape here is intentionally
+/// close so the two mirror each other.
 ///
 /// Color textures stay in the drawable's `bgra8Unorm_srgb` format so the
 /// raymarch pipeline state needs no changes; MetalFX runs in `.perceptual`

@@ -4,7 +4,6 @@ import simd
 struct GestureFeatureFlags: Sendable {
     var useMenuToggleEngine: Bool = true
     var useArbitrationEngine: Bool = true
-    var useModeEngines: Bool = false
 }
 
 struct GestureContext {
@@ -25,9 +24,4 @@ enum GestureOperation {
     case setActiveGestureIndex(Int)
     case setGeometryGestureActive(Bool)
     case trackGestureUsage
-}
-
-protocol GestureEngine {
-    associatedtype State
-    func update(context: GestureContext) -> [GestureOperation]
 }

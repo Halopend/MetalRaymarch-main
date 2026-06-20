@@ -100,18 +100,8 @@ final class FormulaCatalog: @unchecked Sendable {
         byType[type.rawValue]
     }
     
-    /// Descriptor by string id.
-    func descriptor(id: String) -> FormulaDescriptor? {
-        byId[id]
-    }
-    
-    /// All formulas in a given category (O(1) lookup).
-    func formulas(inCategory category: String) -> [FormulaDescriptor] {
-        byCategory[category] ?? []
-    }
-    
     /// Unique category names in declaration order (prebuilt at load time).
-    
+
     // MARK: - FormulaParams Builder
     
     /// Build a `FormulaParams` from an array of `(paramIndex, value)` overrides.
@@ -140,19 +130,7 @@ final class FormulaCatalog: @unchecked Sendable {
         
         return fp
     }
-    
-    /// Build a `FormulaParams` from a dictionary of param name → value.
-    func buildParams(for type: FractalModelType, namedOverrides: [String: Float]) -> FormulaParams {
-        guard let desc = byType[type.rawValue] else {
-            return type.defaultFormulaParams()
-        }
-        let indexed = namedOverrides.compactMap { (name, value) -> (Int, Float)? in
-            guard let p = desc.params.first(where: { $0.name == name }) else { return nil }
-            return (p.index, value)
-        }
-        return buildParams(for: type, overrides: indexed)
-    }
-    
+
     // MARK: - Param Accessors
 
     /// Precompute matrix identity flags once on CPU so shader hot loops can avoid

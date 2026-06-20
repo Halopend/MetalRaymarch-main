@@ -65,21 +65,6 @@ final class GestureSensitivityStore: Sendable {
         save()
     }
 
-    /// Reset all parameters back to default sensitivity.
-    func resetAll() {
-        _sensitivities.withLock { sensitivities in
-            sensitivities.removeAll()
-        }
-        save()
-    }
-
-    /// Returns all parameter IDs that have non-default sensitivity.
-    func customizedParameterIDs() -> [String] {
-        _sensitivities.withLock { sensitivities in
-            Array(sensitivities.keys)
-        }
-    }
-
     // MARK: - Persistence
 
     private func save() {

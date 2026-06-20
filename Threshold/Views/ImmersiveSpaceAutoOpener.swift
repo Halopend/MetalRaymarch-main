@@ -36,12 +36,9 @@ struct ImmersiveSpaceAutoOpener: View {
                 )
                 for await _ in notifications {
                     // The notification fires from `AppModel` whenever a
-                    // queued preset is waiting for the renderer. We may
-                    // already be in the immersive space (in which case
-                    // appModel.immersiveSpaceState == .open and the
-                    // notification wasn't posted), or we may be in the
-                    // middle of opening it. Either way, only act when
-                    // we're fully closed and not already transitioning.
+                    // queued preset is waiting for the renderer. Only act
+                    // when the immersive space is fully closed — if it's
+                    // already open or mid-transition, ignore this signal.
                     guard appModel.immersiveSpaceState == .closed else { continue }
                     appModel.immersiveSpaceState = .inTransition
                     let result = await openImmersiveSpace(id: appModel.immersiveSpaceID)

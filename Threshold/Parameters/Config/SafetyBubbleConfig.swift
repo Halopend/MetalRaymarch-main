@@ -113,10 +113,4 @@ struct SafetyBubbleConfig: Codable, Equatable, Sendable {
         fadeWidth = max(0.0, min(1.0, fadeWidth))
         strength = max(0.0, min(1.0, strength))
     }
-
-    /// Compatibility alias matching the legacy `safetyBubbleBlend` name.
-    var blend: Float {
-        get { strength }
-        set { strength = max(0.0, min(1.0, newValue)) }
-    }
 }

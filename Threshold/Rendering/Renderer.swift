@@ -83,8 +83,7 @@ actor Renderer {
     
     // Dedicated compute output texture (has .shaderWrite flag that drawable textures lack)
     var computeOutputTexture: MTLTexture?
-    var computeOutputSize: SIMD2<Int> = .zero
-    
+
     // ═══════════════════════════════════════════════════════════════════════════
     // TEMPORAL REPROJECTION STATE
     // Double-buffered depth textures store ray-t per pixel for reuse next frame.
@@ -95,7 +94,6 @@ actor Renderer {
     private var temporalDepthIndex: Int = 0                         // which is "current write"
     var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
     private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
-    private var temporalDepthSize: SIMD2<Int> = .zero
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CUSTOM TAA (Temporal Anti-Aliasing)
@@ -201,7 +199,6 @@ actor Renderer {
     // One-shot log guard for visionOS 26+ queryDrawables() candidate sizes.
     var hasLoggedDrawableQualityOptions: Bool = false
 
-    private var lastFPSUpdateTime: TimeInterval = 0
     var lastHandTrackingUpdateTime: TimeInterval = 0  // Throttle hand UI updates
     // Hand-tracking dispatch coordination between the render loop (Renderer actor)
     // and the per-frame @MainActor Task that processes gestures. A single Mutex
@@ -1412,8 +1409,7 @@ actor Renderer {
         texture.label = "Adaptive Compute Output"
         
         computeOutputTexture = texture
-        computeOutputSize = SIMD2(width, height)
-        
+
         // Residency update deferred to renderWithAdaptiveCompute() for batching
         
         if RENDERER_DEBUG { print("📐 Created compute output texture: \(width)×\(height) × \(viewCount) layers") }
@@ -1458,7 +1454,6 @@ actor Renderer {
         
         temporalDepthTextures = [tex0, tex1]
         temporalDepthIndex = 0
-        temporalDepthSize = SIMD2(width, height)
         temporalFrameCount = 0  // Reset — first frame has no valid previous data
         
         // Residency update deferred to renderWithAdaptiveCompute() for batching

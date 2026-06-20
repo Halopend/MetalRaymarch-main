@@ -241,7 +241,8 @@ class PresetManager {
         }
     }
 
-    /// Write a timestamped backup and keep only the newest few
+    /// Write a timestamped backup. Retention is currently unlimited:
+    /// `maxBackupCount` is nil, so `pruneBackups` never removes old backups.
     private func writeBackup(data: Data) {
         let now = Date()
         if let lastBackupAt, now.timeIntervalSince(lastBackupAt) < backupInterval {
@@ -339,7 +340,7 @@ class PresetManager {
     /// Nonisolated: encoding + the temp-file write can take tens of ms for
     /// large presets — call it off the main actor (see `exportOffMain`).
     nonisolated static func exportPresetFile(_ preset: FractalPreset) -> URL? {
-        let hasMusicMappings = preset.musicReactiveMappings != nil && !(preset.musicReactiveMappings?.isEmpty ?? true)
+        let hasMusicMappings = preset.hasMusicReactiveMappings
         let format: ThresholdExportFormat = hasMusicMappings ? .musicPreset : .scenePreset
         let fileName = "\(Self.sanitizedExportFileNameStem(preset.name)).\(format.ext)"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
@@ -464,23 +465,6 @@ extension PresetManager {
         return presets
     }
     
-    /// The fallback preset for when no saved state exists.
-    /// Loaded from Bright_Preset.threshscene; falls back to a minimal inline
-    /// preset if the bundle file is somehow missing.
-    static func brightPreset() -> FractalPreset {
-        if let preset = bundledPresets().first(where: { $0.name == "Bright Preset" || $0.name == "Bright_Preset" }) {
-            return preset
-        }
-        // Minimal inline fallback (should never be reached)
-        var preset = FractalPreset(name: "Bright Preset")
-        preset.fractalType = .mandelbox
-        preset.fractalScale = 2.8
-        preset.foldingLimit = 1.1646773
-        preset.minDistance = 0.8117829
-        preset.position = SIMD3<Float>(0.10157842, 1.3497616, -3.3686383)
-        return preset
-    }
-
     /// Clean Mandelbox at the default/reset position, used as the first-launch
     /// default when no `__lastState__` has been saved yet.
     static func mandelboxDefaultPreset() -> FractalPreset {
@@ -525,7 +509,7 @@ extension PresetManager {
     /// Restore last state to settings if available.
     /// Returns the applied preset so callers can restore auxiliary state
     /// (for example embedded custom formulas) alongside render settings.
-    /// When no saved state exists, loads and returns the default bright preset.
+    /// When no saved state exists, loads and returns the default Mandelbox preset.
     @discardableResult
     func restoreLastState(to settings: RenderSettings) -> FractalPreset? {
         guard FileManager.default.fileExists(atPath: lastStateFileURL.path) else {

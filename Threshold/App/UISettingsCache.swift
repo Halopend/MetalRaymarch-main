@@ -61,17 +61,7 @@ final class UISettingsCache {
 
     // === SAVED CUSTOM GRADIENTS (isolated in GradientLibrary to avoid observation cross-talk) ===
     let gradientLibrary = GradientLibrary()
-    
-    func saveCurrentGradientAsCustom() {
-        var copy = color.gradientState.gradient
-        let existingCount = gradientLibrary.savedCustomGradients.count
-        copy = GradientColorMap(name: "Custom \(existingCount + 1)", stops: copy.stops,
-                                 mappingMode: copy.mappingMode, repeatCount: copy.repeatCount,
-                                 offset: copy.offset, smoothing: copy.smoothing)
-        gradientLibrary.savedCustomGradients.append(copy)
-        gradientLibrary.persist()
-    }
-    
+
     func deleteSavedGradient(at index: Int) {
         guard index >= 0 && index < gradientLibrary.savedCustomGradients.count else { return }
         gradientLibrary.savedCustomGradients.remove(at: index)
@@ -244,11 +234,6 @@ final class UISettingsCache {
             gestureController?.applyFractalDefaults()
             loadFromSettings()
         }
-    }
-    
-    func pushColorScheme(_ scheme: ColorScheme) {
-        settings?.transitionToColorScheme(scheme)
-        color.colorScheme = scheme
     }
     
     func pushGradientMap(_ map: GradientColorMap) {

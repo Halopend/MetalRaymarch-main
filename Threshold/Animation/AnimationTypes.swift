@@ -606,9 +606,6 @@ struct SongAttachment: Codable, Equatable {
     /// Convenience: the primary (first) track ID.
     var trackID: UnifiedTrackID { trackIDs[0] }
 
-    /// All service IDs that have an identifier for this song.
-    var availableServiceIDs: [String] { trackIDs.map(\.serviceID) }
-
     // ── Legacy field (backward compat decoding only) ─────────────────────
     var appleMusicID: String?
 
@@ -887,13 +884,7 @@ struct AnimationPlayhead {
     /// Ping-pong direction: true = moving toward higher indices, false = moving toward lower.
     /// Also used for .reverse init (starts false) and .forward (always true, ignored).
     var isGoingForward: Bool = true
-    
-    /// Progress through current segment (0...1)
-    func segmentProgress(segmentDuration: TimeInterval) -> Float {
-        guard segmentDuration > 0 else { return 1.0 }
-        return Float(min(elapsedInSegment / segmentDuration, 1.0))
-    }
-    
+
     /// Reset to beginning
     mutating func reset() {
         currentKeyframeIndex = 0
@@ -963,16 +954,6 @@ enum EasingFunction: String, Codable, CaseIterable {
         case .bezier:
             // Bezier needs a handle; fallback to easeInOut when called without one
             return CubicBezier.evaluate(t, handle: .easeInOut)
-        }
-    }
-    
-    /// Apply easing with a Bezier handle (used for per-keyframe curves)
-    func apply(_ t: Float, bezierHandle: BezierHandle) -> Float {
-        switch self {
-        case .bezier:
-            return CubicBezier.evaluate(t, handle: bezierHandle)
-        default:
-            return apply(t)
         }
     }
 }

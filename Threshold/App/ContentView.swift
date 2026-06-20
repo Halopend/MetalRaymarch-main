@@ -195,7 +195,6 @@ struct ContentView: View {
 
     // Developer state
     @State var isProfilerRunning = false
-    @State var lastProfileTime: Date?
     @State var isTestAnimationPlaying = false
 #if DEBUG
     @State var isBenchmarking = false
@@ -214,6 +213,13 @@ struct ContentView: View {
             } else {
                 preImmersiveLayout
             }
+        }
+        .overlay(alignment: .top) {
+            // Surfaces ErrorReporter failures (preset/animation import, etc.) that
+            // were previously reported but never shown. Transient: self-dismisses
+            // and only renders while currentError is set.
+            ErrorBannerView(errorReporter: appModel.errorReporter)
+                .padding(.top, 8)
         }
         .environment(\.menuAdjustmentActions, MenuAdjustmentActions(
             begin: { appModel.beginMenuAdjustment() },

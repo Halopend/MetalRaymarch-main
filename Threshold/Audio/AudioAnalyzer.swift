@@ -38,7 +38,8 @@ class AudioAnalyzer {
     /// Whether the microphone capture path is active.
     @ObservationIgnored nonisolated(unsafe) private(set) var isMicrophoneCapturing: Bool = false
 
-    /// Whether an external PCM source (for example Music.app via SCK) is active.
+    /// Whether an external PCM source (whole-system output minus this process,
+    /// captured via ScreenCaptureKit) is active.
     @ObservationIgnored nonisolated(unsafe) private(set) var isExternalCapturing: Bool = false
     
     // Pending MainActor dispatch batching — avoids creating ~86 Tasks/sec

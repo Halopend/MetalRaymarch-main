@@ -11,60 +11,6 @@ import SwiftUI
 import MediaPlayer
 #endif
 
-#if os(macOS)
-@MainActor
-final class AppleMusicServiceAdapter: MusicServiceProvider {
-    let manager: AppleMusicManager
-
-    init(manager: AppleMusicManager) {
-        self.manager = manager
-    }
-
-    let serviceID = "appleMusic"
-    let displayName = "Apple Music"
-    let iconName = "apple.logo"
-    var accentColor: Color { .pink }
-
-    var connectionStatus: MusicServiceConnectionStatus { .disconnected }
-    func connect() { manager.requestAuthorization() }
-    func disconnect() { manager.stopMonitoring() }
-
-    var nowPlaying: UnifiedTrack? { nil }
-    var isPlaying: Bool { false }
-    var progressFraction: Float { 0 }
-    var currentTimeString: String { "0:00" }
-    var totalTimeString: String { "0:00" }
-
-    func togglePlayPause() async {}
-    func next() async {}
-    func previous() async {}
-    func seek(fraction: Float) async {}
-
-    var librarySongs: [UnifiedTrack] { [] }
-    var libraryPlaylists: [UnifiedPlaylist] { [] }
-    var libraryAlbums: [UnifiedAlbum] { [] }
-    var isLibraryLoading: Bool { false }
-    var libraryError: String? { manager.libraryErrorMessage }
-
-    func refreshLibrary() async { await manager.refreshLibrary() }
-    func playSong(_ track: UnifiedTrack) async { await manager.playSong(id: track.id) }
-    func playPlaylist(_ playlist: UnifiedPlaylist, shuffle: Bool) async { await manager.playPlaylist(id: playlist.id, shuffle: shuffle) }
-    func playAlbum(_ album: UnifiedAlbum, shuffle: Bool) async { await manager.playAlbum(id: album.id, shuffle: shuffle) }
-    func fetchPlaylistTracks(_ playlist: UnifiedPlaylist) async -> [UnifiedTrack] { [] }
-    func playSongByNativeID(_ nativeID: String) async -> Bool { false }
-    func searchTrack(title: String, artist: String) async -> UnifiedTrack? { nil }
-    func createPlaylist(name: String, trackNativeIDs: [String]) async -> String? { nil }
-
-    var bassLevel: Float { manager.bassLevel }
-    var midLevel: Float { manager.midLevel }
-    var trebleLevel: Float { manager.trebleLevel }
-    var beatIntensity: Float { manager.beatIntensity }
-    var overallLevel: Float { manager.overallLevel }
-
-    func updateFrame() { manager.updateFrame() }
-}
-#else
-
 @MainActor
 final class AppleMusicServiceAdapter: MusicServiceProvider {
 
@@ -262,4 +208,3 @@ final class AppleMusicServiceAdapter: MusicServiceProvider {
 
     func updateFrame() { manager.updateFrame() }
 }
-#endif

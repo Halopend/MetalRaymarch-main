@@ -80,20 +80,6 @@ final class MusicService {
         return providers.first(where: { $0.isConnected })
     }
 
-    /// Cycle through available connected services.
-    func cycleActiveService() {
-        let connected = providers.filter { $0.isConnected }
-        guard connected.count > 1 else { return }
-
-        if let current = preferredServiceID,
-           let idx = connected.firstIndex(where: { $0.serviceID == current }) {
-            let nextIdx = (idx + 1) % connected.count
-            preferredServiceID = connected[nextIdx].serviceID
-        } else if let first = connected.first {
-            preferredServiceID = first.serviceID
-        }
-    }
-
     /// Set the preferred service by ID.
     func setPreferredService(_ serviceID: String?) {
         preferredServiceID = serviceID
@@ -284,11 +270,6 @@ final class MusicService {
         var order = servicePriority
         guard let idx = order.firstIndex(of: serviceID), idx < order.count - 1 else { return }
         order.swapAt(idx, idx + 1)
-        servicePriority = order
-    }
-
-    /// Reorder the priority list (e.g. from drag-and-drop).
-    func setServicePriority(_ order: [String]) {
         servicePriority = order
     }
 

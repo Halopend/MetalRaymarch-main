@@ -987,11 +987,6 @@ extension Renderer {
         )
     }
 
-    /// Returns the number of pipelines currently in the unified cache.
-    var pipelineCacheCount: Int {
-        return pipelineCache.count
-    }
-
     private func acceptsCompletedCustomPipelineBuild(forKey key: String) -> Bool {
         guard key.hasPrefix("CX") else { return true }
         guard let activeHash = customShaderHash else { return false }

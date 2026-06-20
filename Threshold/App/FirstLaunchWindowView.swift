@@ -292,8 +292,8 @@ struct FirstLaunchWindowView: View {
             }
 
             // The five left-hand fingers, in tap-to-palm order. Names
-            // and icons mirror `GestureSettingsView.perFingerNames` /
-            // `perFingerIcons` for visual consistency with the editor.
+            // and icons mirror those used by the per-finger gesture editor
+            // in Settings > Gestures for visual consistency.
             VStack(spacing: 6) {
                 ForEach(0..<5, id: \.self) { finger in
                     fingerAssignmentRow(finger: finger)
@@ -511,14 +511,11 @@ private struct IntroTipRow: View {
 
 private enum OnboardingTutorialClip {
     case movementAndScale
-    case menuSystem
 
     var resourceName: String {
         switch self {
         case .movementAndScale:
             return "movement_and_scale"
-        case .menuSystem:
-            return "menu_system"
         }
     }
 }

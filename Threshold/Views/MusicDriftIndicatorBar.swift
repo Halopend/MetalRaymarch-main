@@ -14,31 +14,6 @@ import SwiftUI
 /// and the bar edge glows red — the state where the finger control or a
 /// freshly loaded preset appears to "stop working" because further base
 /// movement is swallowed by the clamp.
-/// Convenience wrapper for core/effect sliders: resolves the parameter node
-/// for a `MusicReactiveTarget` and shows the drift bar only while that target
-/// has an enabled music mapping. Renders nothing otherwise.
-struct MusicDriftIndicatorRow: View {
-    var cache: UISettingsCache
-    let target: MusicReactiveTarget
-
-    private var hasEnabledMapping: Bool {
-        cache.audioReactive.musicReactiveMappings.contains { $0.target == target && $0.isEnabled }
-    }
-
-    private var resolvedNode: FloatParameterNode? {
-        guard let id = target.parameterTargetID(for: cache.fractalType) else { return nil }
-        let registry = ParameterNodeRegistry.shared
-        return registry.coreNodes[id] ?? registry.effectNodes[id]
-    }
-
-    var body: some View {
-        if hasEnabledMapping, let node = resolvedNode {
-            MusicDriftIndicatorBar(node: node)
-                .padding(.horizontal, 20)
-        }
-    }
-}
-
 struct MusicDriftIndicatorBar: View {
     let node: FloatParameterNode
 

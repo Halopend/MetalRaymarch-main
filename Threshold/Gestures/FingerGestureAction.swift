@@ -21,14 +21,6 @@ enum GestureDirection: String, CaseIterable, Codable, Hashable, Sendable {
         case .depth:      return "arrow.up.and.down.and.arrow.left.and.right"
         }
     }
-
-    var suffix: String {
-        switch self {
-        case .vertical:   return "V"
-        case .horizontal: return "H"
-        case .depth:      return "Z"
-        }
-    }
 }
 
 enum FingerGestureAction: Int32, CaseIterable, Codable, Hashable {
@@ -39,8 +31,6 @@ enum FingerGestureAction: Int32, CaseIterable, Codable, Hashable {
     case sphereRadius = 4
     case fractalScale = 5
     case translate    = 6
-
-    static let coreCases: [FingerGestureAction] = [.none, .grab, .minDistance, .foldingLimit, .sphereRadius, .fractalScale, .translate]
 
     var displayName: String {
         switch self {
@@ -184,17 +174,6 @@ struct GestureSlot: Hashable, Codable, Sendable {
         }
         return slots
     }()
-
-    static func slots(for hand: GestureHandMode) -> [GestureSlot] {
-        if hand == .both {
-            return FingerDigit.allCases.map { GestureSlot(hand: hand, finger: $0) }
-        }
-        return FingerDigit.allCases.flatMap { finger in
-            [GestureSlot(hand: hand, finger: finger, direction: .vertical),
-             GestureSlot(hand: hand, finger: finger, direction: .horizontal),
-             GestureSlot(hand: hand, finger: finger, direction: .depth)]
-        }
-    }
 }
 
 struct GestureDisplayMetadata: Codable, Hashable, Sendable {

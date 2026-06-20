@@ -30,16 +30,6 @@ extension Renderer {
         }
     }
 
-    /// Update residency set when compute output texture changes
-    func updateResidencySetForComputeTexture(_ texture: MTLTexture) {
-        if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
-            guard let set = residencySet else { return }
-            set.addAllocation(texture)
-            set.commit()
-            set.requestResidency()
-        }
-    }
-
     /// Batch-add multiple textures to the residency set with a single commit + requestResidency.
     func updateResidencySetForComputeTextures(_ textures: [MTLTexture]) {
         if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {

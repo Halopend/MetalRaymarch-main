@@ -22,10 +22,6 @@ final class ParameterPipeline: @unchecked Sendable {
         dispatcher.dispatch(operations, settings: settings)
     }
 
-    func dispatchAnimation(_ operations: [ParameterOperation], settings: RenderSettings) {
-        dispatcher.dispatch(operations, settings: settings)
-    }
-
     func dispatchAudio(_ operations: [ParameterOperation], settings: RenderSettings) {
         dispatcher.dispatch(operations, settings: settings)
     }

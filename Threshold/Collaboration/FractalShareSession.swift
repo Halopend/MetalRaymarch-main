@@ -261,14 +261,3 @@ class FractalShareSession {
         }
     }
 }
-
-// MARK: - SharePlay Eligibility Check
-
-extension FractalShareSession {
-    
-    /// Check if SharePlay is available on this device
-    static var isSharePlayAvailable: Bool {
-        // SharePlay requires iOS 15+ / visionOS 1+
-        return true
-    }
-}

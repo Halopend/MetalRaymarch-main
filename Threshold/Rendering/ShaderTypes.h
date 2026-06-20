@@ -133,7 +133,7 @@ typedef struct
     // Replaces fixed 3-color palettes with up to 8 user-defined gradient stops.
     // Each stop packs color (xyz) + position (w) into a float4.
     vector_float4 gradientStops[MAX_GRADIENT_STOPS]; // float4(r, g, b, position)
-    int gradientStopCount;            // Number of active stops (0 = use legacy palette)
+    int gradientStopCount;            // Number of active stops (0 = fall back to white)
     int colorMappingMode;             // 0=orbitTrap, 1=iterations, 2=zDepth, 3=angle, 4=normal, 5=blended
     float gradientRepeat;             // How many times gradient repeats (default 1.0)
     float gradientOffset;             // Shifts gradient start (0-1)
@@ -306,7 +306,7 @@ typedef struct
     int maxRaySteps;
     float maxViewDistance;
     uint32_t eyeIndex;
-    uint32_t debugHierarchical;  // 1 = show debug tint (green=hit, red=miss)
+    uint32_t debugHierarchical;  // 1 = overlay a yellow tile-boundary grid
     float limitFlash;            // Edge flash when gesture hits limit (0-1)
     int fractalType;             // 0=Mandelbox, 1-14=formula types (see FractalType enum)
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting

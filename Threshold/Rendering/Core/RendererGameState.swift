@@ -291,7 +291,5 @@ extension Renderer {
             animatedGlow: animatedGlow,
             perEye: preparedEyeStates
         )
-
-//        rotation += 0.01
     }
 }

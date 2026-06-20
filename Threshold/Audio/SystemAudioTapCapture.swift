@@ -47,8 +47,6 @@ struct SystemAudioSource: Identifiable, Hashable {
 
     /// Sentinel id used for the "Entire system output" entry.
     static let systemID = "__threshold_system_output__"
-
-    var isWholeSystem: Bool { id == Self.systemID }
 }
 
 @MainActor
@@ -98,22 +96,6 @@ final class SystemAudioTapCapture {
 
     init(analyzer: AudioAnalyzer) {
         self.analyzer = analyzer
-    }
-
-    // MARK: - Selection
-
-    func select(_ source: SystemAudioSource) {
-        selectedSourceID = source.id
-    }
-
-    func select(id: String) {
-        selectedSourceID = id
-    }
-
-    /// The currently selected source, falling back to whole-system.
-    var selectedSource: SystemAudioSource {
-        availableSources.first { $0.id == selectedSourceID }
-            ?? SystemAudioSource(id: SystemAudioSource.systemID, name: "Entire system output")
     }
 
     // MARK: - Permission
@@ -205,13 +187,6 @@ final class SystemAudioTapCapture {
             errorMessage = captureErrorMessage(error)
             logger.error("System audio capture failed to start: \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    /// Restart capture against the currently selected source (used when the user
-    /// changes the target while already capturing).
-    func restart() async {
-        await stop()
-        await start()
     }
 
     /// Stop capturing and let analyzer levels decay to zero.

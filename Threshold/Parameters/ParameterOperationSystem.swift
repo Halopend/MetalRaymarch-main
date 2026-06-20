@@ -2,13 +2,6 @@ import Foundation
 import Synchronization
 import simd
 
-enum ParameterBundle: String, Codable, Sendable {
-    case scale
-    case color
-    case fractalCore
-    case lighting
-}
-
 enum ParameterOperationSource: String, Codable, Sendable {
     case gesture
     case slider
@@ -136,7 +129,6 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
 
     private struct CoreParameterDescriptor {
         let range: ClosedRange<Float>
-        let bundle: ParameterBundle
         let motionStrategy: ParameterMotionStrategy
         let read: (RenderSettings) -> Float
         let write: (RenderSettings, Float) -> Void
@@ -147,56 +139,48 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     private let coreDescriptors: [String: CoreParameterDescriptor] = [
         ParameterTargetID.Core.fractalScale: CoreParameterDescriptor(
             range: -5.0...8.0,
-            bundle: .scale,
             motionStrategy: .smoothDamp,
             read: { $0.targetFractalScale },
             write: { settings, value in settings.targetFractalScale = value }
         ),
         ParameterTargetID.Core.colorMix: CoreParameterDescriptor(
             range: 0.0...1.0,
-            bundle: .color,
             motionStrategy: .layerLerp,
             read: { $0.colorMix },
             write: { settings, value in settings.colorMix = value }
         ),
         ParameterTargetID.Core.iterations: CoreParameterDescriptor(
             range: 2.0...24.0,
-            bundle: .fractalCore,
             motionStrategy: .layerLerp,
             read: { Float($0.fractalIterations) },
             write: { settings, value in settings.fractalIterations = max(2, min(24, Int(round(value)))) }
         ),
         ParameterTargetID.Effect.glow: CoreParameterDescriptor(
             range: 0.0...2.0,
-            bundle: .lighting,
             motionStrategy: .layerLerp,
             read: { $0.glowEffect.intensity },
             write: { settings, value in settings.audioModulateGlowIntensity(value) }
         ),
         ParameterTargetID.Effect.fog: CoreParameterDescriptor(
             range: 0.0...1.0,
-            bundle: .lighting,
             motionStrategy: .layerLerp,
             read: { $0.fogEffect.intensity },
             write: { settings, value in settings.audioModulateFogIntensity(value) }
         ),
         ParameterTargetID.Effect.bloom: CoreParameterDescriptor(
             range: 0.0...2.0,
-            bundle: .lighting,
             motionStrategy: .layerLerp,
             read: { $0.bloomEffect.strength },
             write: { settings, value in settings.audioModulateBloomStrength(value) }
         ),
         ParameterTargetID.Effect.hueSpeed: CoreParameterDescriptor(
             range: 0.0...0.5,
-            bundle: .color,
             motionStrategy: .layerLerp,
             read: { $0.hueRotationEffect.speed },
             write: { settings, value in settings.audioModulateHueSpeed(value) }
         ),
         ParameterTargetID.Effect.saturation: CoreParameterDescriptor(
             range: 0.0...3.0,
-            bundle: .color,
             motionStrategy: .layerLerp,
             read: { $0.colorSchemeSaturation },
             write: { settings, value in settings.audioModulateSaturation(value) }

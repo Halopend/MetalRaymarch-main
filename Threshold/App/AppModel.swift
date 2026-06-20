@@ -816,11 +816,6 @@ class AppModel {
         manager.play()
     }
 
-    /// Legacy gesture hook retained so existing finger-tap mappings keep working.
-    func toggleAnimationPlayerWindow() {
-        toggleAnimationPlayback()
-    }
-    
     /// Ensure menu window content is visible — call when exiting immersive mode or on app launch.
     func ensureWindowContentVisible() {
         if !isMenuWindowVisible {

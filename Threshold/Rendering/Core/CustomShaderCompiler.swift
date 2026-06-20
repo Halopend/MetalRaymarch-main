@@ -149,8 +149,7 @@ actor CustomShaderCompiler {
         }
     }
 
-    /// Drop a previously-compiled library (for example when its source hash is
-    /// no longer referenced). Currently used for cache eviction on formula switch.
+    /// Drop the cached library for a single source hash, if one is present.
     func evict(sourceHash: String) {
         libraryCache.removeValue(forKey: sourceHash)
     }

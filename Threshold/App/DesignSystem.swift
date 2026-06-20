@@ -2,18 +2,17 @@
 //  DesignSystem.swift
 //  MetalProject
 //
-//  Centralized spacing, corner-radius, and semantic color tokens for the
-//  Threshold UI. Introduced during the Phase 4 UI/UX cleanup to replace the
-//  scattered numeric literals (`.padding(10)`, `cornerRadius: 12`,
-//  `.opacity(0.06)`) found across the Views layer.
-//
-//  These tokens were chosen to match the existing dominant literals (so
-//  adoption is mechanical, not a visual redesign):
+//  Spacing, corner-radius, and glass-background tokens for the Threshold UI.
+//  These mirror the dominant numeric literals already used in the UI so they
+//  can be swapped in without a visual redesign:
 //    padding      → 6 / 8 / 10 / 12 / 16 / 20
 //    cornerRadius → 6 / 8 / 10 / 12 / 16 / 20
 //
-//  Adoption is incremental: views can keep raw literals until touched, then
-//  swap to `DS.Spacing.*` / `DS.Radius.*` / the convenience modifiers below.
+//  Adoption is partial: only a few tokens (`DS.Spacing.*`, `DS.Radius.*`,
+//  the `dsGlass` modifier) are currently used, at a handful of call sites in
+//  the App layer (ContentViewComponents, ContentViewHelpers,
+//  ContentView+SettingsTab). Most views still use raw literals; these tokens
+//  are available for incremental adoption as views are touched.
 //
 
 import SwiftUI

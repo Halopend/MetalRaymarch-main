@@ -23,7 +23,6 @@ final class MetalFXManager {
         case scalerCreationFailed(inputWidth: Int, inputHeight: Int, outputWidth: Int, outputHeight: Int)
         case missingTextures
         case textureViewFailed
-        case inputTooSmall(width: Int, height: Int, minimum: Int)
 
         var description: String {
             switch self {
@@ -35,8 +34,6 @@ final class MetalFXManager {
                 return "MetalFX textures not ready"
             case .textureViewFailed:
                 return "Failed to create eye texture view"
-            case .inputTooSmall(let w, let h, let minimum):
-                return "MetalFX input too small (\(w)x\(h)); shortest edge must be >= \(minimum)"
             }
         }
     }

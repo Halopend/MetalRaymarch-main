@@ -53,7 +53,6 @@ class AnyParameterNodeBase: @unchecked Sendable, Identifiable {
 /// read/write closures are MainActor-isolated and only invoked from the UI path.
 class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
     let range: ClosedRange<Float>
-    let step: Float
     let readValue: @MainActor (UISettingsCache) -> Float
     let writeValue: @MainActor (UISettingsCache, Float) -> Void
     private let _layerStack: Mutex<ParameterLayerStack>
@@ -64,13 +63,11 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
          icon: String,
          defaultValue: Float,
          range: ClosedRange<Float>,
-         step: Float,
          isGestureMappable: Bool,
          motionStrategy: ParameterMotionStrategy = .layerLerp,
          readValue: @MainActor @escaping (UISettingsCache) -> Float,
          writeValue: @MainActor @escaping (UISettingsCache, Float) -> Void) {
         self.range = range
-        self.step = step
         self.readValue = readValue
         self.writeValue = writeValue
         self._layerStack = Mutex(ParameterLayerStack(defaultValue: defaultValue, range: range))
@@ -419,7 +416,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "arrow.up.left.and.arrow.down.right",
             defaultValue: 2.0,
             range: -5.0...8.0,
-            step: 0.01,
             isGestureMappable: true,
             motionStrategy: .smoothDamp,
             readValue: { $0.fractalScale },
@@ -433,7 +429,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "paintpalette",
             defaultValue: 0.5,
             range: 0.0...1.0,
-            step: 0.01,
             isGestureMappable: true,
             readValue: { $0.color.colorMix },
             writeValue: { cache, v in cache.color.colorMix = v; cache.push(\.colorMix, value: v) }
@@ -446,7 +441,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "number",
             defaultValue: 12.0,
             range: 2.0...24.0,
-            step: 1.0,
             isGestureMappable: false,
             readValue: { Float($0.liveFractalIterations) },
             writeValue: { cache, v in
@@ -464,7 +458,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "sun.max",
             defaultValue: 0.0,
             range: 0.0...2.0,
-            step: 0.01,
             isGestureMappable: false,
             readValue: { $0.lighting.glowEffect.intensity },
             writeValue: { cache, v in cache.lighting.glowEffect.intensity = v; cache.commitGlowEffect() }
@@ -477,7 +470,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "cloud.fog",
             defaultValue: 0.32,
             range: 0.0...1.0,
-            step: 0.01,
             isGestureMappable: false,
             readValue: { $0.lighting.fogEffect.intensity },
             writeValue: { cache, v in cache.lighting.fogEffect.intensity = v; cache.commitFogEffect() }
@@ -490,7 +482,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "sparkle",
             defaultValue: 0.0,
             range: 0.0...2.0,
-            step: 0.01,
             isGestureMappable: false,
             readValue: { $0.lighting.bloomEffect.strength },
             writeValue: { cache, v in cache.lighting.bloomEffect.strength = v; cache.commitBloomEffect() }
@@ -503,7 +494,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "arrow.trianglehead.2.clockwise.rotate.90",
             defaultValue: 0.0,
             range: 0.0...0.5,
-            step: 0.001,
             isGestureMappable: false,
             readValue: { $0.lighting.hueRotationEffect.speed },
             writeValue: { cache, v in cache.lighting.hueRotationEffect.speed = v; cache.commitHueRotationEffect() }
@@ -516,7 +506,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             icon: "drop.halffull",
             defaultValue: 2.0,
             range: 0.0...3.0,
-            step: 0.01,
             isGestureMappable: false,
             readValue: { $0.color.colorSchemeSaturation },
             writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.commitColorSchemeSaturation() }
@@ -664,7 +653,6 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 icon: icon,
                 defaultValue: param.default,
                 range: param.min...param.max,
-                step: param.step,
                 isGestureMappable: true,
                 motionStrategy: Self.formulaMotionStrategy(for: type, index: param.index),
                 readValue: { cache in FormulaCatalog.getParam(cache.formulaParams, index: param.index) },

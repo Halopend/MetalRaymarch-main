@@ -65,24 +65,4 @@ struct LightingConfig: Codable, Equatable, Sendable {
         juliaDriftEffect = try container.decodeIfPresent(JuliaDriftEffect.self, forKey: .juliaDriftEffect) ?? JuliaDriftEffect()
     }
 
-    // MARK: - Preset Application
-
-    /// Apply a lighting preset, replacing all individual effects.
-    mutating func applyPreset(_ preset: LightingPreset) {
-        lightingPreset = preset
-        guard preset != .custom else { return }
-        let effects = preset.effects()
-        hueRotationEffect = effects.hue
-        pulseEffect = effects.pulse
-        glowEffect = effects.glow
-        bloomEffect = effects.bloom
-        fogEffect = effects.fog
-        gradientCycleEffect = effects.gradientCycle
-        linearRailEffect = effects.linearRail
-    }
-
-    /// Mark as custom (called when any individual effect is manually changed).
-    mutating func markCustom() {
-        lightingPreset = .custom
-    }
 }

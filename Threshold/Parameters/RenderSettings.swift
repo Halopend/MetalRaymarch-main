@@ -33,14 +33,6 @@ final class RenderSettings: @unchecked Sendable {
         return UserDefaults.standard.float(forKey: key)
     }
 
-    private static func loadGestureBool(_ key: String, default fallback: Bool) -> Bool {
-        loadBool(key, default: fallback)
-    }
-
-    private static func loadGestureFloat(_ key: String, default fallback: Float) -> Float {
-        loadFloat(key, default: fallback)
-    }
-
     private static func loadGestureBinding(_ key: String,
                                            default fallback: GestureActionBinding) -> GestureActionBinding {
         let defaults = UserDefaults.standard
@@ -80,7 +72,16 @@ final class RenderSettings: @unchecked Sendable {
         return cleaned
     }
 
-    init() {}
+    init() {
+        // One-time migration: existing installs persisted coherentPacketEnabled /
+        // foveationStrength under bare UserDefaults keys (still read at declaration
+        // above). The QualityConfig domain was never written, so seed it once from
+        // the already-initialized quality fields. New installs (domain present) and
+        // subsequent launches skip this.
+        if SettingsPersistence.load(QualityConfig.self, domain: .quality) == nil {
+            SettingsPersistence.save(qualityConfig, domain: .quality)
+        }
+    }
 
     private var _minDistance: Float = 0.8           // 80% of max (1.0) for quality
     private var _scale: Float = 1.0
@@ -130,15 +131,15 @@ final class RenderSettings: @unchecked Sendable {
     private var _showMusicShortcuts: Bool = loadBool("showMusicShortcuts", default: false)
     private var _isMenuInteractionActive: Bool = false // True while interacting with menu UI (hover/drag)
     private var _activeGestureIndex: Int = 0         // Currently active gesture (0=none, 1=index, 2=middle, 3=ring)
-    private var _useRelativeGestures: Bool = loadGestureBool("useRelativeGestures", default: GestureDefaults.useRelativeGestures)
-    private var _extendedGestureRange: Bool = loadGestureBool("extendedGestureRange", default: GestureDefaults.extendedGestureRange)
-    private var _rotationAutoSnap: Bool = loadGestureBool("rotationAutoSnap", default: GestureDefaults.rotationAutoSnap)
-    private var _rotationSnapWindowDegrees: Float = loadGestureFloat("rotationSnapWindowDegrees", default: GestureDefaults.rotationSnapWindowDegrees)
-    private var _rotationBreakawayDegrees: Float = loadGestureFloat("rotationBreakawayDegrees", default: GestureDefaults.rotationBreakawayDegrees)
-    private var _gestureSensitivity: Float = loadGestureFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
-    private var _gestureSmoothing: Float = loadGestureFloat("gestureSmoothing", default: GestureDefaults.gestureSmoothing)
-    private var _menuAndMovementOnly: Bool = loadGestureBool("menuAndMovementOnly", default: GestureDefaults.menuAndMovementOnly)
-    private var _menuToggleGestureEnabled: Bool = loadGestureBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
+    private var _useRelativeGestures: Bool = loadBool("useRelativeGestures", default: GestureDefaults.useRelativeGestures)
+    private var _extendedGestureRange: Bool = loadBool("extendedGestureRange", default: GestureDefaults.extendedGestureRange)
+    private var _rotationAutoSnap: Bool = loadBool("rotationAutoSnap", default: GestureDefaults.rotationAutoSnap)
+    private var _rotationSnapWindowDegrees: Float = loadFloat("rotationSnapWindowDegrees", default: GestureDefaults.rotationSnapWindowDegrees)
+    private var _rotationBreakawayDegrees: Float = loadFloat("rotationBreakawayDegrees", default: GestureDefaults.rotationBreakawayDegrees)
+    private var _gestureSensitivity: Float = loadFloat("gestureSensitivity", default: GestureDefaults.gestureSensitivity)
+    private var _gestureSmoothing: Float = loadFloat("gestureSmoothing", default: GestureDefaults.gestureSmoothing)
+    private var _menuAndMovementOnly: Bool = loadBool("menuAndMovementOnly", default: GestureDefaults.menuAndMovementOnly)
+    private var _menuToggleGestureEnabled: Bool = loadBool("menuToggleGestureEnabled", default: GestureDefaults.menuToggleGestureEnabled)
     private var _menuToggleGestureMode: MenuToggleGestureMode = {
         let key = "menuToggleGestureMode"
         guard UserDefaults.standard.object(forKey: key) != nil else { return GestureDefaults.menuToggleGestureMode }
@@ -164,28 +165,28 @@ final class RenderSettings: @unchecked Sendable {
 
         return bindings
     }()
-    private var _menuToggleHoldDuration: Float = loadGestureFloat("menuToggleHoldDuration", default: GestureDefaults.menuToggleHoldDuration)
-    private var _menuToggleCooldown: Float = loadGestureFloat("menuToggleCooldown", default: GestureDefaults.menuToggleCooldown)
-    private var _menuToggleActivateThreshold: Float = loadGestureFloat("menuToggleActivateThreshold", default: GestureDefaults.menuToggleActivateThreshold)
-    private var _menuToggleReleaseThreshold: Float = loadGestureFloat("menuToggleReleaseThreshold", default: GestureDefaults.menuToggleReleaseThreshold)
-    private var _twoHandPinchActivateThreshold: Float = loadGestureFloat("twoHandPinchActivateThreshold", default: GestureDefaults.twoHandPinchActivateThreshold)
-    private var _twoHandPinchReleaseThreshold: Float = loadGestureFloat("twoHandPinchReleaseThreshold", default: GestureDefaults.twoHandPinchReleaseThreshold)
-    private var _ringPinchActivateThreshold: Float = loadGestureFloat("ringPinchActivateThreshold", default: GestureDefaults.ringPinchActivateThreshold)
-    private var _ringPinchReleaseThreshold: Float = loadGestureFloat("ringPinchReleaseThreshold", default: GestureDefaults.ringPinchReleaseThreshold)
-    private var _gestureMinHandDistance: Float = loadGestureFloat("gestureMinHandDistance", default: GestureDefaults.gestureMinHandDistance)
-    private var _gestureMaxHandDistance: Float = loadGestureFloat("gestureMaxHandDistance", default: GestureDefaults.gestureMaxHandDistance)
-    private var _gestureMaxStartHandDistance: Float = loadGestureFloat("gestureMaxStartHandDistance", default: GestureDefaults.gestureMaxStartHandDistance)
-    private var _gestureMaxActiveHandDistance: Float = loadGestureFloat("gestureMaxActiveHandDistance", default: GestureDefaults.gestureMaxActiveHandDistance)
-    private var _translationSensitivity: Float = loadGestureFloat("translationSensitivity", default: GestureDefaults.translationSensitivity)
+    private var _menuToggleHoldDuration: Float = loadFloat("menuToggleHoldDuration", default: GestureDefaults.menuToggleHoldDuration)
+    private var _menuToggleCooldown: Float = loadFloat("menuToggleCooldown", default: GestureDefaults.menuToggleCooldown)
+    private var _menuToggleActivateThreshold: Float = loadFloat("menuToggleActivateThreshold", default: GestureDefaults.menuToggleActivateThreshold)
+    private var _menuToggleReleaseThreshold: Float = loadFloat("menuToggleReleaseThreshold", default: GestureDefaults.menuToggleReleaseThreshold)
+    private var _twoHandPinchActivateThreshold: Float = loadFloat("twoHandPinchActivateThreshold", default: GestureDefaults.twoHandPinchActivateThreshold)
+    private var _twoHandPinchReleaseThreshold: Float = loadFloat("twoHandPinchReleaseThreshold", default: GestureDefaults.twoHandPinchReleaseThreshold)
+    private var _ringPinchActivateThreshold: Float = loadFloat("ringPinchActivateThreshold", default: GestureDefaults.ringPinchActivateThreshold)
+    private var _ringPinchReleaseThreshold: Float = loadFloat("ringPinchReleaseThreshold", default: GestureDefaults.ringPinchReleaseThreshold)
+    private var _gestureMinHandDistance: Float = loadFloat("gestureMinHandDistance", default: GestureDefaults.gestureMinHandDistance)
+    private var _gestureMaxHandDistance: Float = loadFloat("gestureMaxHandDistance", default: GestureDefaults.gestureMaxHandDistance)
+    private var _gestureMaxStartHandDistance: Float = loadFloat("gestureMaxStartHandDistance", default: GestureDefaults.gestureMaxStartHandDistance)
+    private var _gestureMaxActiveHandDistance: Float = loadFloat("gestureMaxActiveHandDistance", default: GestureDefaults.gestureMaxActiveHandDistance)
+    private var _translationSensitivity: Float = loadFloat("translationSensitivity", default: GestureDefaults.translationSensitivity)
 
     // Per-finger tap-to-palm gesture layer
-    private var _perFingerTapGestureEnabled: Bool = loadGestureBool("perFingerTapGestureEnabled", default: GestureDefaults.perFingerTapGestureEnabled)
+    private var _perFingerTapGestureEnabled: Bool = loadBool("perFingerTapGestureEnabled", default: GestureDefaults.perFingerTapGestureEnabled)
     private var _perFingerTapLeftActions: [PerFingerTapAction] = GestureDefaults.loadPerFingerTapActions(keyPrefix: "perFingerTapLeft")
     private var _perFingerTapRightActions: [PerFingerTapAction] = GestureDefaults.loadPerFingerTapActions(keyPrefix: "perFingerTapRight")
-    private var _perFingerTapActivateThreshold: Float = loadGestureFloat("perFingerTapActivateThreshold", default: GestureDefaults.perFingerTapActivateThreshold)
-    private var _perFingerTapReleaseThreshold: Float = loadGestureFloat("perFingerTapReleaseThreshold", default: GestureDefaults.perFingerTapReleaseThreshold)
-    private var _perFingerTapHoldDuration: Float = loadGestureFloat("perFingerTapHoldDuration", default: GestureDefaults.perFingerTapHoldDuration)
-    private var _perFingerTapCooldown: Float = loadGestureFloat("perFingerTapCooldown", default: GestureDefaults.perFingerTapCooldown)
+    private var _perFingerTapActivateThreshold: Float = loadFloat("perFingerTapActivateThreshold", default: GestureDefaults.perFingerTapActivateThreshold)
+    private var _perFingerTapReleaseThreshold: Float = loadFloat("perFingerTapReleaseThreshold", default: GestureDefaults.perFingerTapReleaseThreshold)
+    private var _perFingerTapHoldDuration: Float = loadFloat("perFingerTapHoldDuration", default: GestureDefaults.perFingerTapHoldDuration)
+    private var _perFingerTapCooldown: Float = loadFloat("perFingerTapCooldown", default: GestureDefaults.perFingerTapCooldown)
 
     private var _leftHandedMode: Bool = UserDefaults.standard.bool(forKey: "leftHandedMode")
 
@@ -193,7 +194,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _macTiltControlEnabled: Bool = UserDefaults.standard.bool(forKey: "macTiltControlEnabled")
 
     // === SPRING BLOB NAVIGATION ===
-    private var _useSpringBlob: Bool = loadGestureBool("useSpringBlob", default: GestureDefaults.useSpringBlob)
+    private var _useSpringBlob: Bool = loadBool("useSpringBlob", default: GestureDefaults.useSpringBlob)
     // Spring physics state — driven by translate gesture, ticked in Renderer
     private var _springDisplacement: SIMD3<Float> = .zero  // Current displacement from rest
     private var _springVelocity: SIMD3<Float> = .zero      // Current velocity
@@ -202,7 +203,7 @@ final class RenderSettings: @unchecked Sendable {
     // Safety bubble controls
     private var _safetyBubbleEnabled: Bool = false  // Cut out a small safe sphere (default off)
     private var _safetyBubbleRadius: Float = 1.8    // Radius of the safe bubble (meters)
-    private var _safetyBubbleShape: Float = 0.0     // 0 = sphere, 1 = cube, intermediate = morph (no rotation)
+    private var _safetyBubbleShape: Float = 0.0     // 0...1 = sphere/cube morph (no rotation); 2...6 select discrete platonic solids
     private var _safetyBubbleFadeEnabled: Bool = true
     private var _safetyBubbleFadeWidth: Float = 0.1
     private var _safetyBubbleStrength: Float = 0.5
@@ -474,22 +475,34 @@ final class RenderSettings: @unchecked Sendable {
     
     var bassSensitivity: Float {
         get { withLock { _bassSensitivity } }
-        set { withLock { _bassSensitivity = max(0.0, min(2.0, newValue)) } }
+        set {
+            withLock { _bassSensitivity = max(0.0, min(2.0, newValue)) }
+            persistAudioReactive()
+        }
     }
-    
+
     var midSensitivity: Float {
         get { withLock { _midSensitivity } }
-        set { withLock { _midSensitivity = max(0.0, min(2.0, newValue)) } }
+        set {
+            withLock { _midSensitivity = max(0.0, min(2.0, newValue)) }
+            persistAudioReactive()
+        }
     }
-    
+
     var trebleSensitivity: Float {
         get { withLock { _trebleSensitivity } }
-        set { withLock { _trebleSensitivity = max(0.0, min(2.0, newValue)) } }
+        set {
+            withLock { _trebleSensitivity = max(0.0, min(2.0, newValue)) }
+            persistAudioReactive()
+        }
     }
-    
+
     var beatSensitivity: Float {
         get { withLock { _beatSensitivity } }
-        set { withLock { _beatSensitivity = max(0.0, min(2.0, newValue)) } }
+        set {
+            withLock { _beatSensitivity = max(0.0, min(2.0, newValue)) }
+            persistAudioReactive()
+        }
     }
 
     var fractalAudioReactiveEnabled: Bool {
@@ -815,7 +828,7 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _coherentPacketEnabled } }
         set {
             withLock { _coherentPacketEnabled = newValue }
-            UserDefaults.standard.set(newValue, forKey: "coherentPacketEnabled")
+            persistQuality()
         }
     }
 
@@ -827,7 +840,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(1.0, newValue))
             withLock { _foveationStrength = clamped }
-            UserDefaults.standard.set(clamped, forKey: "foveationStrength")
+            persistQuality()
         }
     }
 
@@ -1224,6 +1237,10 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
+    /// Device-local: hand-dominance is intentionally stored as a bare UserDefaults
+    /// key and deliberately omitted from the domain save/restore + iCloud sync, since
+    /// it pairs with the device-local gesture bindings and shouldn't follow a preset
+    /// or sync across devices.
     var leftHandedMode: Bool {
         get { withLock { _leftHandedMode } }
         set {
@@ -1235,6 +1252,10 @@ final class RenderSettings: @unchecked Sendable {
     /// macOS-only: when enabled, tilting the laptop orbits the fractal via the
     /// built-in Sudden Motion Sensor (Intel MacBooks only; a no-op where the
     /// sensor is unavailable).
+    ///
+    /// Device-local: stored as a bare UserDefaults key and deliberately omitted from
+    /// the domain save/restore + iCloud sync, since the tilt sensor only exists on
+    /// Intel MacBooks and the setting is meaningless to sync to other devices.
     var macTiltControlEnabled: Bool {
         get { withLock { _macTiltControlEnabled } }
         set {
@@ -1375,11 +1396,6 @@ final class RenderSettings: @unchecked Sendable {
                 syncGradientPresetForColorSchemeLocked(newValue)
             } 
         }
-    }
-    
-    /// Previous color scheme (for transitions)
-    var previousColorScheme: ColorScheme {
-        get { withLock { _colorScheme } }
     }
     
     /// Transition progress (0 = start, 1 = complete)
@@ -3036,8 +3052,9 @@ final class RenderSettings: @unchecked Sendable {
     // one persist call per domain. Each saves the entire config struct as JSON.
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// Persist the audio-reactive config (called after any audio toggle/amount change).
+    /// Persist the audio-reactive config (throttled — continuous sliders may fire rapidly).
     private func persistAudioReactive() {
+        guard SettingsPersistence.shouldSave(domain: .audioReactive) else { return }
         SettingsPersistence.save(audioReactiveConfig, domain: .audioReactive)
     }
 
@@ -3056,6 +3073,12 @@ final class RenderSettings: @unchecked Sendable {
     private func persistColor() {
         guard SettingsPersistence.shouldSave(domain: .color) else { return }
         SettingsPersistence.save(colorConfig, domain: .color)
+    }
+
+    /// Persist the quality config (throttled — foveation slider may fire rapidly).
+    private func persistQuality() {
+        guard SettingsPersistence.shouldSave(domain: .quality) else { return }
+        SettingsPersistence.save(qualityConfig, domain: .quality)
     }
 
     /// Persist the lighting config (throttled — effect intensity sliders may fire rapidly).

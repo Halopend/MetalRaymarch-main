@@ -34,7 +34,6 @@ final class IOSTiltMotionSensor: TiltMotionSensor {
 
         if active {
             guard !isStarted else { return }
-            manager.deviceMotionUpdateInterval = 1.0 / 60.0
             manager.startDeviceMotionUpdates()
             isStarted = true
             baseline = nil

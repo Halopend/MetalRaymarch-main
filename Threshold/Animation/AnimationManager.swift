@@ -236,8 +236,6 @@ final class AnimationManager {
     /// Sample rate for live recording (samples per second).
     private static let recordingSampleRate: Double = 10.0
 
-    var recordingSampleCount: Int { recordingSamples.count }
-    
     // ═══════════════════════════════════════════════════════════════════════════
     // RENDER SETTINGS REFERENCE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -522,12 +520,7 @@ final class AnimationManager {
         loadScenes()
         rebuildScenes()
     }
-    
-    func setRenderSettings(_ settings: RenderSettings) {
-        self.renderSettings = settings
-        settings.sceneTransitionDuration = Float(sceneTransitionDuration)
-    }
-    
+
     // ═══════════════════════════════════════════════════════════════════════════
     // SCENE MANAGEMENT
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1181,7 +1174,9 @@ final class AnimationManager {
         // Interpolate using the appropriate method
         let interpolated: AnimationKeyframe
 
-        // Determine effective easing: per-keyframe overrides global
+        // Easing is always the per-keyframe easingType; the global easingFunction
+        // only feeds the spline-gate OR condition below (it can promote a .bezier
+        // keyframe to spline interpolation), never replacing effectiveEasing.
         let effectiveEasing = toKeyframe.easingType
 
         if effectiveEasing.usesSplineInterpolation || (easingFunction.usesSplineInterpolation && effectiveEasing == .bezier) {
@@ -1375,6 +1370,9 @@ final class AnimationManager {
         let fromKeyframe = keyframes[fromIndex]
         let toKeyframe = keyframes[toIndex]
 
+        // Easing is always the per-keyframe easingType; the global easingFunction
+        // only feeds the spline-gate OR condition below (it can promote a .bezier
+        // keyframe to spline interpolation), never replacing effectiveEasing.
         let effectiveEasing = toKeyframe.easingType
         if effectiveEasing.usesSplineInterpolation || (easingFunction.usesSplineInterpolation && effectiveEasing == .bezier) {
             return CatmullRomSpline.interpolateKeyframes(

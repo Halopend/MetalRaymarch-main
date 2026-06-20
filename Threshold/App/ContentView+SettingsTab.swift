@@ -737,7 +737,7 @@ extension ContentView {
                 HStack {
                     Button {
                         isProfilerRunning = true; appModel.runProfiler()
-                        Task { try? await Task.sleep(for: .seconds(3)); await MainActor.run { isProfilerRunning = false; lastProfileTime = Date() } }
+                        Task { try? await Task.sleep(for: .seconds(3)); await MainActor.run { isProfilerRunning = false } }
                     } label: {
                         HStack {
                             if isProfilerRunning { ProgressView().scaleEffect(0.7).frame(width: 16, height: 16) } else { Image(systemName: "play.fill") }

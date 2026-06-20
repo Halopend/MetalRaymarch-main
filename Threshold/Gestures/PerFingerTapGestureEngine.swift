@@ -240,9 +240,4 @@ private struct PerHandTapState {
         holdTimer = Array(repeating: 0, count: 5)
         consecutiveFrames = Array(repeating: 0, count: 5)
     }
-
-    mutating func reset() {
-        resetTrackingState()
-        cooldown = 0
-    }
 }

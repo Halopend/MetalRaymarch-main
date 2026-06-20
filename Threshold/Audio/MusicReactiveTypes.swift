@@ -583,7 +583,7 @@ struct MusicReactivePreset: Codable, Identifiable, Hashable, Sendable {
 }
 
 /// Genre-optimized reactivity presets.
-/// Each preset tunes sensitivity curves and which parameters respond to audio.
+/// Each preset tunes sensitivity scalars and which parameters respond to audio.
 enum ReactivityPreset: String, CaseIterable {
     case electronic = "EDM"
     case ambient    = "Ambient"

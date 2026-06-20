@@ -164,8 +164,7 @@ final class UsageAnalytics {
     private var glowIntensityAccum: Float = 0
     private var safetyBubbleRadiusAccum: Float = 0
     private var fpsAccum: Float = 0
-    private var sampleCount: Int = 0
-    
+
     // Feature flags
     private var usedAudioReactive = false
     private var usedHandGestures = false
@@ -378,8 +377,7 @@ final class UsageAnalytics {
         bloomStrengthAccum += lit.bloomEffect.strength * dtf
         fogIntensityAccum += lit.fogEffect.intensity * dtf
         fpsAccum += Float(fps) * dtf
-        sampleCount += 1
-        
+
         // Accumulate fractal type distribution
         fractalTypeTimeAccum[geo.fractalType.displayName, default: 0] += dt
         
@@ -436,12 +434,6 @@ final class UsageAnalytics {
         presetLoadCounts[name, default: 0] += 1
     }
     
-    /// Track preset save
-    func trackPresetSaved() {
-        guard analyticsEnabled else { return }
-        presetsSaved += 1
-    }
-    
     /// Track preset save with full preset data for analysis
     /// This uploads the complete preset to CloudKit so you can see what users are creating
     func trackPresetSaved(preset: FractalPreset) {
@@ -474,14 +466,7 @@ final class UsageAnalytics {
         }
         
         // Device info
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        let deviceModel = withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(cString: $0)
-            }
-        }
-        record["deviceModel"] = deviceModel
+        record["deviceModel"] = currentDeviceModel()
         record["appVersion"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         
         // === Key fields for easy CloudKit querying/filtering ===
@@ -524,12 +509,6 @@ final class UsageAnalytics {
         }
     }
     
-    // MARK: - Snapshot Creation
-    
-    private func createSnapshot(settings: RenderSettings) -> UsageSnapshot {
-        buildSnapshot()
-    }
-    
     // MARK: - CloudKit Upload
     
     /// Upload current snapshot to CloudKit
@@ -537,18 +516,12 @@ final class UsageAnalytics {
         guard analyticsEnabled else { return }
         guard totalSessionTime > 10 else { return }  // Don't upload very short sessions
         
-        // Get current settings from app model (need to pass in or use shared reference)
-        // For now, create a minimal snapshot
-        let snapshot = createMinimalSnapshot()
-        
+        // Build a snapshot from the current accumulated data.
+        let snapshot = buildSnapshot()
+
         await uploadToCloudKit(snapshot)
     }
-    
-    /// Create snapshot with current accumulated data
-    private func createMinimalSnapshot() -> UsageSnapshot {
-        buildSnapshot()
-    }
-    
+
     private func uploadToCloudKit(_ snapshot: UsageSnapshot) async {
         guard analyticsEnabled else { return }
         let record = CKRecord(recordType: "UsageSnapshot")
