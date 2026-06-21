@@ -389,7 +389,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     private var seedOffset: UInt32 = 0
     private var maxDensityValue: UInt32 = 0
     private var frameCounter: Int = 0
-    private var accumulationTime: Float = 0
     private var warnedAboutMissingPipelines = false
     private var currentUseRGBMode: Bool = false
     private var completedSplatCountLock = os_unfair_lock()
@@ -806,9 +805,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             }
             return false
         }
-        
-        accumulationTime = time
-        
+
         // Build per-eye uniforms
         let uniformsPtr = uniformBuffer.contents().bindMemory(to: BuddhabrotRayMarchUniformsArray.self, capacity: 1)
         
@@ -1148,9 +1145,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
               let uniformBuf = splatRenderUniformBuffer else {
             return false
         }
-        
-        accumulationTime = time
-        
+
         let liveDeviceTransform = drawable.deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4
         
         // Fill per-eye uniforms

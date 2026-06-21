@@ -106,16 +106,6 @@ final class MusicTabViewModel {
         return albums.filter { $0.title.lowercased().contains(query) || $0.artist.lowercased().contains(query) }
     }
 
-    // MARK: - Song Attachment Helpers
-
-    func makeAttachment(from track: UnifiedTrack, crossMatch: Bool = true) async -> SongAttachment {
-        await musicService.makeAttachment(from: track, crossMatch: crossMatch)
-    }
-
-    func play(attachment: SongAttachment) {
-        musicService.play(attachment: attachment)
-    }
-
     // MARK: - Preset Persistence
 
     func saveMusicPreset(using cache: UISettingsCache) {

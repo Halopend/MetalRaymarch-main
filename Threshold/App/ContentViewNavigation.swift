@@ -271,15 +271,6 @@ enum SettingsSubTab: String, CaseIterable, Identifiable {
         }
     }
 
-    var help: String {
-        switch self {
-        case .display:   return "Platform, lighting, and visual toggles"
-        case .gestures:  return "Hand and finger gesture controls"
-        case .sharing:   return "Community sharing and iCloud Drive"
-        case .export:    return "Export and share scenes"
-        case .advanced:  return "Profiler, stats, and experimental features"
-        }
-    }
 }
 
 // Used by SaveDestinationSheet (ContentViewComponents.swift); kept internal.

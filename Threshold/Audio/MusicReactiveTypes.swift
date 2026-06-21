@@ -466,11 +466,6 @@ struct MusicReactiveMapping: Codable, Identifiable, Hashable, Sendable {
         lfo.sanitizeInPlace()
     }
 
-    /// Default mappings — starts empty. Users add what they want via the + button.
-    static func defaultMappings() -> [MusicReactiveMapping] {
-        []
-    }
-
     var hasFlashingRisk: Bool {
         isEnabled && target.migrated.hasFlashingRisk && abs(amount) > 0.01
     }

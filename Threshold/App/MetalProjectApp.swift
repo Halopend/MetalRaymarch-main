@@ -20,13 +20,7 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
         let supportedLayouts = capabilities.supportedLayouts(options: [])
 
         configuration.layout = supportedLayouts.contains(.layered) ? .layered : .dedicated
-        
-        // Ensure we have renderTarget usage for direct rendering
-        configuration.colorFormat = .bgra8Unorm_srgb
-        // Add shaderWrite just in case blit needs it, though usually not required for copy
-        // But definitely need renderTarget
-        // configuration.textureUsage = [.renderTarget, .shaderRead]
-        
+
         // === RENDER QUALITY RANGE (visionOS 26+) ===
         // Setting maxRenderQuality allows CompositorServices to provide multiple drawable
         // candidates at different texture sizes. This app intentionally does NOT do

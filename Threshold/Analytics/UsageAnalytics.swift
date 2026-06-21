@@ -246,12 +246,7 @@ final class UsageAnalytics {
 
     private func distributionPercentages(_ source: [String: TimeInterval], duration: TimeInterval) -> [String: Float] {
         let safeDuration = max(duration, 1.0)
-        var distribution: [String: Float] = [:]
-        distribution.reserveCapacity(source.count)
-        for (key, time) in source {
-            distribution[key] = Float(time / safeDuration)
-        }
-        return distribution
+        return source.mapValues { Float($0 / safeDuration) }
     }
 
     private func topFavoritePresets(limit: Int = 3) -> [String] {
@@ -500,7 +495,7 @@ final class UsageAnalytics {
         record["positionZ"] = preset.position.z as NSNumber
         
         do {
-            let _ = try await database().save(record)
+            _ = try await database().save(record)
             print("📊 Preset snapshot uploaded: \"\(preset.name)\"")
         } catch {
             print("📊 Preset snapshot upload failed: \(error.localizedDescription)")
@@ -584,7 +579,7 @@ final class UsageAnalytics {
         record["appVersion"] = snapshot.appVersion
         
         do {
-            let _ = try await database().save(record)
+            _ = try await database().save(record)
             print("📊 Analytics uploaded successfully")
         } catch {
             print("📊 Analytics upload failed: \(error.localizedDescription)")

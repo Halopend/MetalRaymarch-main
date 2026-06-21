@@ -1038,18 +1038,6 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
 
-    /// Find the slot currently assigned to a given binding, or nil.
-    func slot(for binding: GestureActionBinding) -> GestureSlot? {
-        withLock {
-            for slot in GestureSlot.allSlots {
-                if _gestureBindings[slot.persistenceKey] == binding {
-                    return slot
-                }
-            }
-            return nil
-        }
-    }
-
     /// Returns the binding for a given hand mode and digit (1=index, 2=middle, 3=ring).
     func binding(forHand hand: GestureHandMode, digit: Int) -> GestureActionBinding {
         guard let finger = FingerDigit(rawValue: digit) else { return .core(.none) }

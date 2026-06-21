@@ -21,8 +21,8 @@ func customSceneDiagnostic(_ message: @autoclosure () -> String) {
 
 /// Result of `installEmbeddedFormulaIfNeededAndWait`. Callers that need to
 /// know whether the renderer has *actually* compiled the formula (vs. just
-/// having it registered in the catalogs for later activation) check
-/// `.isReady` before applying presets that depend on it.
+/// having it registered in the catalogs for later activation) check for
+/// `.ready` before applying presets that depend on it.
 enum EmbeddedFormulaInstallResult: Equatable {
     /// Formula is activated and compiled in the renderer, OR no formula was
     /// requested. Safe to apply presets that reference this formula.
@@ -37,7 +37,6 @@ enum EmbeddedFormulaInstallResult: Equatable {
     /// Validation, registration, or compilation failed. The caller should
     /// surface the error and not apply the preset.
     case failed
-    var isReady: Bool { self == .ready }
 }
 
 @MainActor

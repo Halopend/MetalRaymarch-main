@@ -190,10 +190,6 @@ enum SettingsPersistence {
         save(config, domain: .music)
     }
 
-    static func saveMusicPresets(_ presets: [MusicReactivePreset]) {
-        Music.savePresets(presets)
-    }
-
     @discardableResult
     private static func migrateLegacyMusicKeys(into config: inout MusicConfig, defaultServicePriority: [String]) -> Bool {
         MusicLegacyMigrationAdapter.migrate(

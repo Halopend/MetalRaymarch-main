@@ -92,9 +92,6 @@ final class MusicService {
     /// Direct access to backing manager.
     let appleMusic: AppleMusicManager
 
-    /// Typed adapter access when needed.
-    private(set) var appleMusicAdapter: AppleMusicServiceAdapter?
-
     init(appleMusic: AppleMusicManager) {
         self.appleMusic = appleMusic
         appleMusic.onStateDidChange = { [weak self] in
@@ -105,9 +102,7 @@ final class MusicService {
         // macOS/iOS use the shared MediaPlayer-backed adapter file, while
         // visionOS builds the non-mac adapter file. Register it unconditionally
         // so `activeProvider` and transport/library actions work on every target.
-        let amAdapter = AppleMusicServiceAdapter(manager: appleMusic)
-        self.appleMusicAdapter = amAdapter
-        register(amAdapter)
+        register(AppleMusicServiceAdapter(manager: appleMusic))
     }
 
 

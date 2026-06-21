@@ -21,7 +21,6 @@ struct FractalShareActivity: GroupActivity {
         meta.title = "Explore Fractals Together"
         meta.subtitle = "Share your fractal journey"
         meta.type = .generic
-        meta.previewImage = nil  // Could add app icon here
         return meta
     }
 }

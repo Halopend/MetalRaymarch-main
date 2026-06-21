@@ -137,11 +137,6 @@ struct GestureSlot: Hashable, Codable, Sendable {
         }
     }
 
-    /// Legacy key (no direction suffix) for backward-compatible loading.
-    var legacyPersistenceKey: String {
-        "\(hand.rawValue)\(finger.displayName)Binding"
-    }
-
     init(hand: GestureHandMode, finger: FingerDigit, direction: GestureDirection? = nil) {
         self.hand = hand
         self.finger = finger
@@ -159,17 +154,6 @@ struct GestureSlot: Hashable, Codable, Sendable {
                     slots.append(GestureSlot(hand: hand, finger: finger, direction: .horizontal))
                     slots.append(GestureSlot(hand: hand, finger: finger, direction: .depth))
                 }
-            }
-        }
-        return slots
-    }()
-
-    /// Slots for the old 9-slot layout (backward compatible — no direction, or vertical only).
-    static let legacySlots: [GestureSlot] = {
-        var slots: [GestureSlot] = []
-        for hand in GestureHandMode.allCases {
-            for finger in FingerDigit.allCases {
-                slots.append(GestureSlot(hand: hand, finger: finger))
             }
         }
         return slots
