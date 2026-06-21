@@ -31,7 +31,6 @@ import simd
 final class GestureController {
     let parameterPipeline: ParameterPipeline
     private var operationFrameCounter: UInt64 = 0
-    private let featureFlags = GestureFeatureFlags()
     private let menuToggleEngine = MenuToggleGestureEngine()
     private let perFingerTapEngine = PerFingerTapGestureEngine()
     private let arbitrationEngine = GestureArbitrationEngine()
@@ -237,14 +236,12 @@ final class GestureController {
             }
         }
 
-        // Legacy menu-toggle engine (fallback when per-finger tap is disabled or as supplement)
-        if !didToggleMenu, featureFlags.useMenuToggleEngine, let settings = renderSettings {
+        // Menu-toggle engine (supplements per-finger tap)
+        if !didToggleMenu, let settings = renderSettings {
             let ops = menuToggleEngine.process(context: context, settings: settings)
             if ops.contains(where: { if case .toggleMenu = $0 { return true } else { return false } }) {
                 onMenuToggle?()
             }
-        } else if !didToggleMenu {
-            processMenuToggleGesture(deltaTime: deltaTime)
         }
 
         processWindowPullGesture(deltaTime: deltaTime)
@@ -333,107 +330,6 @@ final class GestureController {
     
     // MARK: - Special Gesture Processing
     
-    private func menuToggleStrength(for mode: MenuToggleGestureMode) -> Float {
-        switch mode {
-        case .middleToPalm:
-            let middle = rightHand.middleFingerTouchingPalm()
-            let ring = rightHand.ringFingerTouchingPalm()
-            return max(0, middle - max(0, ring - 0.4))
-        case .middleAndRingToPalm:
-            return min(rightHand.middleFingerTouchingPalm(), rightHand.ringFingerTouchingPalm())
-        case .fist:
-            return rightHand.fistStrength()
-        case .wristTap:
-            let leftTapsRight = rightHand.wristTapStrength(otherHand: leftHand)
-            let rightTapsLeft = leftHand.wristTapStrength(otherHand: rightHand)
-            return max(leftTapsRight, rightTapsLeft)
-        case .thumbToIndexPalmUp:
-            return rightHand.thumbToIndexPalmUpStrength()
-        case .ringToPalm:
-            let ring = rightHand.ringFingerTouchingPalm()
-            let middle = rightHand.middleFingerTouchingPalm()
-            return max(0, ring - max(0, middle - 0.4))
-        case .middleOrRingToPalm:
-            let middle = rightHand.middleFingerTouchingPalm()
-            let ring = rightHand.ringFingerTouchingPalm()
-            let selectiveMiddle = max(0, middle - max(0, ring - 0.4))
-            let selectiveRing = max(0, ring - max(0, middle - 0.4))
-            return max(selectiveMiddle, selectiveRing)
-        }
-    }
-
-    private func menuToggleThresholds(for mode: MenuToggleGestureMode, settings: RenderSettings) -> (activate: Float, release: Float) {
-        let baseActivate = settings.menuToggleActivateThreshold
-        let baseRelease = min(settings.menuToggleReleaseThreshold, baseActivate - 0.05)
-
-        switch mode {
-        case .middleToPalm:
-            return (activate: baseActivate, release: baseRelease - 0.05)
-        case .middleAndRingToPalm:
-            return (activate: baseActivate, release: baseRelease)
-        case .fist:
-            return (activate: min(0.90, baseActivate + 0.08), release: min(0.85, baseRelease + 0.05))
-        case .wristTap:
-            return (activate: min(0.90, baseActivate + 0.10), release: min(0.85, baseRelease + 0.10))
-        case .thumbToIndexPalmUp:
-            return (activate: baseActivate + 0.05, release: baseRelease + 0.05)
-        case .ringToPalm:
-            return (activate: baseActivate, release: baseRelease - 0.05)
-        case .middleOrRingToPalm:
-            return (activate: baseActivate, release: baseRelease - 0.05)
-        }
-    }
-
-    /// Process right-hand menu toggle gesture with configurable mode and hold duration.
-    private func processMenuToggleGesture(deltaTime: Float) {
-        guard let settings = renderSettings else { return }
-
-        guard settings.menuToggleGestureEnabled else {
-            menuToggleEngine.state.isActive = false
-            menuToggleEngine.state.holdTimer = 0
-            return
-        }
-
-        let mode = settings.menuToggleGestureMode
-
-        // Wrist tap requires both hands; other modes require right hand only
-        if mode.requiresBothHands {
-            guard leftHand.isTracked, rightHand.isTracked else {
-                menuToggleEngine.state.isActive = false
-                menuToggleEngine.state.holdTimer = 0
-                return
-            }
-        } else {
-            guard rightHand.isTracked else {
-                menuToggleEngine.state.isActive = false
-                menuToggleEngine.state.holdTimer = 0
-                return
-            }
-        }
-
-        let strength = menuToggleStrength(for: mode)
-        let thresholds = menuToggleThresholds(for: mode, settings: settings)
-
-        let shouldBeActive: Bool = menuToggleEngine.state.isActive
-            ? (strength >= thresholds.release)
-            : (strength >= thresholds.activate)
-
-        if shouldBeActive {
-            if !menuToggleEngine.state.isActive {
-                menuToggleEngine.state.holdTimer += deltaTime
-                if menuToggleEngine.state.cooldown <= 0, menuToggleEngine.state.holdTimer >= settings.menuToggleHoldDuration {
-                    menuToggleEngine.state.isActive = true
-                    menuToggleEngine.state.holdTimer = 0
-                    menuToggleEngine.state.cooldown = settings.menuToggleCooldown
-                    onMenuToggle?()
-                }
-            }
-        } else {
-            menuToggleEngine.state.isActive = false
-            menuToggleEngine.state.holdTimer = 0
-        }
-    }
-
     private func processWindowPullGesture(deltaTime: Float) {
         guard let settings = renderSettings else { return }
 
@@ -532,25 +428,18 @@ final class GestureController {
             let rightActive = GestureDirection.allCases.contains {
                 singleHandState.perSlot[GestureSlot(hand: .right, finger: finger, direction: $0).persistenceKey]?.isActive == true
             }
-            if featureFlags.useArbitrationEngine {
-                let decision = arbitrationEngine.decide(
-                    GestureArbitrationInput(
-                        digit: digit,
-                        twoHandCandidate: true,
-                        twoHandCurrentlyActive: twoHandStateByDigit[digit]?.isActive == true,
-                        leftSingleActive: leftActive,
-                        rightSingleActive: rightActive,
-                        grabActive: grabState.isActive,
-                        grabEndCooldown: grabState.endCooldown
-                    )
+            let decision = arbitrationEngine.decide(
+                GestureArbitrationInput(
+                    digit: digit,
+                    twoHandCandidate: true,
+                    twoHandCurrentlyActive: twoHandStateByDigit[digit]?.isActive == true,
+                    leftSingleActive: leftActive,
+                    rightSingleActive: rightActive,
+                    grabActive: grabState.isActive,
+                    grabEndCooldown: grabState.endCooldown
                 )
-                if !decision.allowTwoHand {
-                    if twoHandStateByDigit[digit]?.isActive == true {
-                        twoHandStateByDigit[digit]?.isActive = false
-                    }
-                    continue
-                }
-            } else if leftActive || rightActive {
+            )
+            if !decision.allowTwoHand {
                 if twoHandStateByDigit[digit]?.isActive == true {
                     twoHandStateByDigit[digit]?.isActive = false
                 }

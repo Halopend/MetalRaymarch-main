@@ -304,7 +304,6 @@ struct FractalParams {
     float absScalem1;
     float absScalePow;
     float sphereRadiusSq;   // Squared sphere radius for sphere fold
-    float minDistanceVal;
     float3 bubbleCenter;
     float bubbleRadius;
     int bubbleEnabled;
@@ -455,7 +454,6 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.absScalem1 = precomputed.absScalem1;
     params.absScalePow = precomputed.absScalePow;
     params.sphereRadiusSq = precomputed.sphereRadiusSq;
-    params.minDistanceVal = minRad2Val;
     params.bubbleCenter = bubbleCenter;
     params.bubbleRadius = bubbleRadius;
     params.bubbleEnabled = bubbleEnabled;
@@ -831,7 +829,6 @@ FORCE_INLINE half3 applyNeonColorScheme(half trapMin, half trapIter, half trapAn
 struct OrbitCache {
     // === BASIC ORBIT STATE ===
     float4 p;           // Final iterated position (xyz) and derivative scale (w)
-    float3 p0;          // Original starting point (for re-seeding if needed)
     float trap;         // Minimum r² encountered (orbit trap for coloring)
     float distance;     // Computed distance estimate
     int iterationsUsed; // How many iterations were actually performed
@@ -863,7 +860,7 @@ FORCE_INLINE OrbitCache makeEmptyOrbitCache() {
 
 // Unified colour function - uses cached orbit data when available, otherwise iterates
 // Supports all color modes including neon
-half3 ColourWithScheme(float3 pos, float sphereR, float gTime, float quality, float minRad2Val, float fractalScale, float colorMix, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme, OrbitCache cache = {}) 
+half3 ColourWithScheme(float3 pos, float quality, float minRad2Val, float fractalScale, float foldingLimit, float sphereRadius, int colorIters, ColorSchemeParams scheme, OrbitCache cache = {})
 {
     float4 p;
     float trap;
@@ -1006,7 +1003,6 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     d = applySafetyBubble(d, pos, params);
     
     cache.p = p;
-    cache.p0 = pos;
     cache.trap = trap;
     cache.distance = d;
     cache.iterationsUsed = loopCount;
@@ -1038,7 +1034,6 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
     
     // Populate OrbitCache from OrbitData for compatibility with coloring/normals
     cache.p = float4(orbit.finalP, 1.0f);
-    cache.p0 = pos;
     cache.trap = orbit.trap;
     cache.distance = d;
     cache.iterationsUsed = orbit.iterationsUsed;
@@ -1764,8 +1759,6 @@ kernel void adaptiveHierarchical8x8(
         uniforms.minDistance,
         marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
 
-    float gTime = uniforms.time * 0.01 + 15.00;
-    
     // === TEMPORAL REPROJECTION: PER-PIXEL ===
     // Reproject this pixel to previous frame, sample previous depth,
     // and use it as startT to skip most of the fine raymarch.
@@ -2142,25 +2135,6 @@ kernel void adaptiveHierarchical8x8(
     if (sceneResult.distGlow.x < kRayMissThreshold) {
         float3 p = marchOrigin + adjustedDist * marchDir;
 
-        // Motion-vector proxy from hit-point reprojection:
-        // project current hit point into previous frame and measure displacement in pixels.
-        float4 prevHitClip = uniforms.previousViewProjMatrix * float4(p, 1.0);
-        if (abs(prevHitClip.w) > 1e-5) {
-            float2 prevHitNDC = prevHitClip.xy / prevHitClip.w;
-            float2 prevHitUV = prevHitNDC * 0.5 + 0.5;
-            prevHitUV.y = 1.0 - prevHitUV.y;
-            if (prevHitUV.x >= 0.0 && prevHitUV.x <= 1.0 && prevHitUV.y >= 0.0 && prevHitUV.y <= 1.0) {
-                uint2 prevHitPixel = uint2(prevHitUV * uniforms.resolution);
-                prevHitPixel = clamp(prevHitPixel, uint2(0), viewportSize - 1);
-                prevHitPixel += viewportOrigin;
-
-                float prevHitDepth = prevDepthTexture.read(prevHitPixel, uniforms.eyeIndex).x;
-                if (prevHitDepth > 0.0 && prevHitDepth < kRayMissThreshold) {
-                    reprojectedDepth = prevHitDepth;
-                }
-            }
-        }
-        
         // GetNormal now uses analytic Jacobian from cache — zero extra Map() calls!
         float3 nor = GetNormal(p, adjustedDist, fractalParams, uniforms.foldingLimit, lodIterations, fractalType, uniforms.formulaParams, hitCache);
         
@@ -2242,8 +2216,8 @@ kernel void adaptiveHierarchical8x8(
         half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
         half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
         
-        col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, 
-                    uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
+        col = ColourWithScheme(p, 1.0, uniforms.minDistance, uniforms.fractalScale,
+                    uniforms.foldingLimit, uniforms.sphereRadius, int(uniforms.colorIterations), uniforms.colorScheme, hitCache);
         
         // Add ambient term (0.15) to prevent pure black in shadows + hemisphere ambient
         half hemisphereAO = half(nor.y * 0.5 + 0.5); // Simple sky/ground ambient
@@ -2565,8 +2539,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
                                    float warmStartT = -1.0f)
 {
     FragmentOutput output;
-    
-    float gTime = time * 0.01 + 15.00;
+
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
@@ -2643,7 +2616,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
             half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
 
-            col = ColourWithScheme(p, ret.x, gTime, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
+            col = ColourWithScheme(p, quality, uniforms.minDistance, uniforms.fractalScale, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations * quality), 2), uniforms.colorScheme, hitCache);
             
             // Add ambient term to prevent harsh shadows
             half hemisphereAO = half(nor.y * 0.5 + 0.5);
@@ -2806,8 +2779,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     fragCoord += uniforms.jitterOffset;
     
     float time = uniforms.time;
-    
-    float gTime = time * 0.01 + 15.00;
+
     float3 cameraPos = (uniforms.inverseModelViewMatrix * float4(0,0,0,1)).xyz;
     float3 rd = normalize(in.modelPos - cameraPos);
     
@@ -2900,7 +2872,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         half bri = quantizeCelLight(half(max(dot(spot, nor), 0.0) / attenPow * 0.25 * lightIntensity), uniforms.colorScheme);
         half briSun = quantizeCelLight(half(max(dot(sunDir, nor), 0.0) * sunDiffuseScale), uniforms.colorScheme);
         
-        col = ColourWithScheme(p, adjustedDist, gTime, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.colorMix, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
+        col = ColourWithScheme(p, 1.0, uniforms.minDistance, uniforms.fractalScale, uniforms.foldingLimit, uniforms.sphereRadius, max(int(uniforms.colorIterations), 2), uniforms.colorScheme, hitCache);
         
         // Add ambient term to prevent harsh shadows
         half hemisphereAO = half(nor.y * 0.5 + 0.5);

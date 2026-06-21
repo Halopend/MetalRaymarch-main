@@ -65,8 +65,6 @@ extension AppModel {
             return .failed
         }
 
-        print("🧪 [CustomScene] Activating formula '\(formula.name)' (hash=\(formula.shortHash))")
-
         do {
             try formula.validate()
         } catch {
@@ -95,17 +93,14 @@ extension AppModel {
             // renderer's startup task will read `activeEmbeddedFormula` and
             // activate it once the handler binds. Callers MUST wait for
             // `rendererStartupWarmupComplete` before applying the preset.
-            print("⚠️ [CustomScene] Renderer activation handler is not ready yet — will activate once the scene loads")
             customSceneDiagnostic("🔬 [CSDiag] ⚠️ installEmbeddedFormula DEFERRED (handler nil) — pipeline cache will NOT have FractalTypeCustom arm until renderer starts")
             return .deferred
         }
         do {
             try await handler?(formula)
-            print("✅ [CustomScene] Formula active: '\(formula.name)'")
             customSceneDiagnostic("🔬 [CSDiag] installEmbeddedFormula handler completed")
             return .ready
         } catch {
-            print("❌ [CustomScene] Formula compile failed: \(error)")
             customSceneDiagnostic("🔬 [CSDiag] ❌ installEmbeddedFormula handler THREW: \(error)")
             errorReporter.report(.preset(.importFailed(
                 "Failed to compile custom shader: \(error.localizedDescription)"

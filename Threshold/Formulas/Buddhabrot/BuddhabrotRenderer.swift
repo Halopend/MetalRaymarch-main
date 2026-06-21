@@ -625,8 +625,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         seedOffset = 0
         maxDensityValue = 0
         settings.resetAccumulationState()
-        
-        print("✓ Buddhabrot: Allocated \(resolution)^3 volume (\(bufferSize / 1024) KB density buffer)")
     }
     
     /// Reallocates the splat ring buffer and sort workspace when capacity changes.
@@ -660,8 +658,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             completedSplatCount = 0
         }
         
-        let totalKB = (bufferSize + sortEntrySize * 2 + histSize) / 1024
-        print("✓ Buddhabrot: Allocated splat buffer for \(maxSplatCount) splats (\(totalKB) KB total)")
     }
     
     // MARK: - Phase 1: Orbit Accumulation
@@ -745,12 +741,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         
         // Scan for max density on CPU (fast enough for 128^3 at normalization interval)
         updateMaxDensity(useRGBMode: buddhabrotSnapshot.useRGBMode)
-        
-        // Diagnostic: log max density periodically so we can verify accumulation is working
-        if frameCounter <= 5 || frameCounter % 60 == 0 {
-            print("📊 Buddhabrot normalize: frame=\(frameCounter) maxDensity=\(maxDensityValue) totalSamples=\(buddhabrotSnapshot.totalSamplesAccumulated)")
-        }
-        
         // Fill normalization uniforms
         let uniforms = uniformBuffer.contents().bindMemory(to: BuddhabrotNormalizationUniforms.self, capacity: 1)
         uniforms.pointee.resolution = UInt32(currentResolution)
@@ -1005,7 +995,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         withCompletedSplatCountLock {
             completedSplatCount = 0
         }
-        print("✓ Buddhabrot: Splat counter cleared")
     }
     
     // MARK: - 3DGS: Depth Key Computation
@@ -1386,7 +1375,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         seedOffset = 0
         maxDensityValue = 0
         settings.resetAccumulationState()
-        print("✓ Buddhabrot: Density buffers cleared")
 
         return true
     }

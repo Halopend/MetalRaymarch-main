@@ -259,12 +259,10 @@ class AudioAnalyzer {
             self.isMicrophoneCapturing = true
             self.refreshCaptureState()
             self.errorMessage = nil
-            print("🎤 Audio capture started (sample rate: \(format.sampleRate), FFT size: \(fftSize))")
         } catch {
             self.isMicrophoneCapturing = false
             self.refreshCaptureState(resetLevelsWhenIdle: true)
             self.errorMessage = "Failed to start audio: \(error.localizedDescription)"
-            print("❌ Audio capture error: \(error)")
         }
     }
 

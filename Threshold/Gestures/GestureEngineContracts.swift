@@ -1,11 +1,6 @@
 import Foundation
 import simd
 
-struct GestureFeatureFlags: Sendable {
-    var useMenuToggleEngine: Bool = true
-    var useArbitrationEngine: Bool = true
-}
-
 struct GestureContext {
     var leftHand: HandData
     var rightHand: HandData

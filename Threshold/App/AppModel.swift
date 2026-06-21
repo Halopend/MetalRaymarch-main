@@ -426,18 +426,15 @@ class AppModel {
         
         // Setup gesture callbacks
         gestureController?.onMenuToggle = { [weak self] in
-            print("📋 onMenuToggle callback fired!")
             self?.toggleMenuWindow()
         }
         gestureController?.onAnimationPlayerToggle = { [weak self] in
             self?.toggleAnimationPlayback()
         }
         gestureController?.onOpenShapeMenu = { [weak self] in
-            print("🧭 onOpenShapeMenu callback fired!")
             self?.openShapeMenuFromGesture()
         }
         gestureController?.onOpenRenderMenu = { [weak self] in
-            print("🎛️ onOpenRenderMenu callback fired!")
             self?.openRenderMenuFromGesture()
         }
         gestureController?.onMenuWindowPullTowardUser = { [weak self] in
@@ -748,7 +745,6 @@ class AppModel {
         if isMenuWindowVisible {
             guard canCloseMenuWindowNow() else {
                 refreshMenuInteractionState()
-                print("📋 Ignored immediate menu close after open")
                 return
             }
             closeMenuWindow(reason: "toggle")
@@ -840,7 +836,6 @@ class AppModel {
         if lastHoverEventTime > 0, now - lastHoverEventTime > 3.0 {
             isMenuHovering = false
             refreshMenuInteractionState()
-            print("🖐️ Auto-cleared stale hover state (no hover events for 3s)")
         }
     }
 
@@ -1166,7 +1161,6 @@ class AppModel {
         lastMenuWindowOpenedAt = CACurrentMediaTime()
         openMenuWindowHandler?()
         refreshMenuInteractionState()
-        print("📋 Menu window shown (\(reason))")
     }
 
     private func closeMenuWindow(reason: String, bypassGuard: Bool = false) {
@@ -1176,7 +1170,6 @@ class AppModel {
         }
         guard bypassGuard || canCloseMenuWindowNow() else {
             refreshMenuInteractionState()
-            print("📋 Ignored immediate menu close after open")
             return
         }
 
@@ -1190,7 +1183,6 @@ class AppModel {
         // app briefly freezing on each toggle. Keeping the window instance alive makes the
         // reopen a cheap no-op and removes the hitch.
         refreshMenuInteractionState()
-        print("📋 Menu window hidden (\(reason))")
     }
 
     private func toggleFractalMenuFromGesture(
@@ -1211,7 +1203,6 @@ class AppModel {
 
         openRequestedTab()
         refreshMenuInteractionState()
-        print("🧭 \(label) menu shown (gesture)")
     }
 
     /// Capture a screenshot for preset thumbnails

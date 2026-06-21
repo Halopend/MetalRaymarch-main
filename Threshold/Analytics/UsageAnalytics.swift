@@ -496,9 +496,7 @@ final class UsageAnalytics {
         
         do {
             _ = try await database().save(record)
-            print("📊 Preset snapshot uploaded: \"\(preset.name)\"")
         } catch {
-            print("📊 Preset snapshot upload failed: \(error.localizedDescription)")
             // Could save for retry, but presets are less critical than session data
         }
     }
@@ -580,9 +578,7 @@ final class UsageAnalytics {
         
         do {
             _ = try await database().save(record)
-            print("📊 Analytics uploaded successfully")
         } catch {
-            print("📊 Analytics upload failed: \(error.localizedDescription)")
             // Save for retry later
             savePendingSnapshot(snapshot)
         }
