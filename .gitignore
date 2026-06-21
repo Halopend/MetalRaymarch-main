@@ -1,10 +1,11 @@
 FractalBench/.build
 .DS_Store
 Traces
-MetalRaymarch.xcodeproj/project.xcworkspace/xcuserdata/*
-MetalRaymarch.xcodeproj/project.xcworkspace/xcuserdata
-MetalRaymarch.xcodeproj/project.xcworkspace/xcuserdata/halopend.xcuserdatad/UserInterfaceState.xcuserstate
-Threshold.xcodeproj/project.xcworkspace/xcuserdata/halopend.xcuserdatad/UserInterfaceState.xcuserstate
+
+# Xcode per-user state (never shared)
+**/xcuserdata/
+*.xcuserstate
+
 .venv
 .agents
 .agent
