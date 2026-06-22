@@ -26,11 +26,11 @@ Apple Music adapters and the duplicated animation-interpolation helpers.
 - [ ] **`ColorSchemeParams.cellEdgeStrength`** — `Rendering/ShaderTypes.h:121` — "reserved", no shader reads it. ⚠️ verify the Swift mirror's struct stride stays matched before removing (fold into `_cellPad`).
 
 ### Buddhabrot
-- [ ] **`accumulationTime` write-only property** — `Formulas/Buddhabrot/BuddhabrotRenderer.swift:392,810,1152` — assigned in 3 places, never read. Delete property + assignments.
+- [x] **`accumulationTime` write-only property** — `Formulas/Buddhabrot/BuddhabrotRenderer.swift:392,810,1152` — assigned in 3 places, never read. Delete property + assignments. *(already removed in a prior cleanup pass)*
 - [ ] **`colorLow/colorMid/colorHigh` setters never called** — `BuddhabrotRenderer.swift:120-137` — no UI writes them; only hardcoded defaults are read. Drop the settable wrappers/locks (make read-only).
-- [ ] **Dead iteration-band branch** — `BuddhabrotShaders.metal:137-146` — `minIterations` hardcoded 0, so `i >= 0` always true; collapse the if/else to `escaped = true; break;`.
+- [x] **Dead iteration-band branch** — `BuddhabrotShaders.metal:137-146` — `minIterations` hardcoded 0, so `i >= 0` always true; collapse the if/else to `escaped = true; break;`. *(done — branch collapsed; `minIterations` field kept to preserve struct layout)*
 - [ ] **`logBase` normalization uniform** — `BuddhabrotRenderer.swift:760` + `BuddhabrotTypes.h` — set to 1.0, no shader reads it. Remove field + assignment.
-- [ ] **Pointless `let _ = splatEmitUniformBuffer` guard** — `BuddhabrotRenderer.swift:941` — buffer unused in the function (uniforms go via `setBytes`). Drop the guard; check whether the whole buffer (alloc at 373,553-555) is dead.
+- [x] **Pointless `let _ = splatEmitUniformBuffer` guard** — `BuddhabrotRenderer.swift:941` — buffer unused in the function (uniforms go via `setBytes`). Drop the guard; check whether the whole buffer (alloc at 373,553-555) is dead. *(done — whole buffer was dead; removed property + alloc + guard. Also removed the adjacent write-only `completedSplatCount`/lock/handler apparatus, not previously listed.)*
 
 ### Gestures (recent feature-flag strip-down left dead paths)
 - [ ] **`GestureFeatureFlags` permanently-on** — `Gestures/GestureEngineContracts.swift:4-7` — both flags default true, never mutated; the `else` fallbacks (`GestureController:246-247,553-558`) are unreachable. Delete the flags, inline the true branches. *(Removes the dead menu-toggle path below.)*

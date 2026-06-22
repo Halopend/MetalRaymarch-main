@@ -136,12 +136,6 @@ kernel void buddhabrotAccumulate(
         float r2 = dot(z, z);
         if (r2 > bailoutSq) {
             escaped = true;
-            // Only count orbits that escaped within our iteration band
-            if (i >= params.minIterations) {
-                escaped = true;
-            } else {
-                escaped = false; // Escaped too quickly for this band
-            }
             break;
         }
     }

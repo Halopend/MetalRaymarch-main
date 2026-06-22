@@ -370,7 +370,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     private var splatBuffer: MTLBuffer?                // BuddhabrotSplat array (ring buffer)
     private var atomicCounterBuffer: MTLBuffer?        // Single uint32 atomic counter
     private var splatRenderUniformBuffer: MTLBuffer?   // Per-eye splat render uniforms
-    private var splatEmitUniformBuffer: MTLBuffer?     // Emit kernel uniforms
     private var currentMaxSplatCount: Int = 0
     
     // 3DGS sort resources
@@ -391,8 +390,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
     private var frameCounter: Int = 0
     private var warnedAboutMissingPipelines = false
     private var currentUseRGBMode: Bool = false
-    private var completedSplatCountLock = os_unfair_lock()
-    private var completedSplatCount: Int = 0
     private var volumePlacementAnchorTransform: matrix_float4x4?
     private var volumePlacementAnchorUserPosition: SIMD3<Float>?
     private var volumePlacementAnchorWorldRotation: simd_quatf?
@@ -549,10 +546,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         rayMarchUniformBuffer?.label = "Buddhabrot Ray March Uniforms"
         
         // Splat uniform buffers
-        let emitUniSize = MemoryLayout<BuddhabrotEmitUniforms>.stride
-        splatEmitUniformBuffer = device.makeBuffer(length: emitUniSize, options: .storageModeShared)
-        splatEmitUniformBuffer?.label = "Buddhabrot Splat Emit Uniforms"
-        
         let splatRenderUniSize = MemoryLayout<BuddhabrotSplatRenderUniformsArray>.stride
         splatRenderUniformBuffer = device.makeBuffer(length: splatRenderUniSize, options: .storageModeShared)
         splatRenderUniformBuffer?.label = "Buddhabrot Splat Render Uniforms"
@@ -654,9 +647,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         atomicCounterBuffer?.contents().bindMemory(to: UInt32.self, capacity: 1).pointee = 0
         seedOffset = 0
         settings.resetAccumulationState()
-        withCompletedSplatCountLock {
-            completedSplatCount = 0
-        }
         
     }
     
@@ -924,8 +914,7 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         
         guard let pipeline = splatEmitPipeline,
               let splatBuf = splatBuffer,
-              let counterBuf = atomicCounterBuffer,
-              let _ = splatEmitUniformBuffer else { return }
+              let counterBuf = atomicCounterBuffer else { return }
         
         let batchSize = max(1, buddhabrotSnapshot.batchSize)
         let batchesPerFrame = max(1, buddhabrotSnapshot.batchesPerFrame)
@@ -961,16 +950,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         }
         
         settings.addSamplesAccumulated(UInt64(batchSize * batchesPerFrame))
-
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            guard let self else { return }
-            guard let counterBuf = self.atomicCounterBuffer else { return }
-            let counterValue = counterBuf.contents().bindMemory(to: UInt32.self, capacity: 1).pointee
-            let clampedCount = min(Int(counterValue), self.currentMaxSplatCount)
-            self.withCompletedSplatCountLock {
-                self.completedSplatCount = clampedCount
-            }
-        }
     }
     
     /// Resets the splat counter (and effectively the ring buffer).
@@ -992,9 +971,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         
         seedOffset = 0
         settings.resetAccumulationState()
-        withCompletedSplatCountLock {
-            completedSplatCount = 0
-        }
     }
     
     // MARK: - 3DGS: Depth Key Computation
@@ -1218,13 +1194,6 @@ final class BuddhabrotRenderer: @unchecked Sendable {
         return true
     }
 
-    @inline(__always)
-    private func withCompletedSplatCountLock<T>(_ body: () -> T) -> T {
-        os_unfair_lock_lock(&completedSplatCountLock)
-        defer { os_unfair_lock_unlock(&completedSplatCountLock) }
-        return body()
-    }
-    
     // MARK: - Full Frame (Accumulation + Normalize + Ray March)
     
     /// Presents a transparent clear frame so the compositor shows passthrough
@@ -1274,9 +1243,8 @@ final class BuddhabrotRenderer: @unchecked Sendable {
             
             // Read the splat count directly from the shared atomic counter buffer.
             // The counter was written by *previous* frame GPU work (already completed)
-            // and is in a .storageModeShared buffer readable by the CPU.
-            // The completion handler updates completedSplatCount as a fallback,
-            // but direct read eliminates the 1-frame lag on startup.
+            // and is in a .storageModeShared buffer readable by the CPU,
+            // which eliminates the 1-frame lag on startup.
             let activeSplatCount: Int
             if let counterBuf = atomicCounterBuffer {
                 let gpuCount = Int(counterBuf.contents().load(as: UInt32.self))
