@@ -101,7 +101,7 @@ extension Renderer {
             return RendererFragmentPassPlan(
                 renderPassDescriptor: renderPassDescriptor,
                 viewports: viewports,
-                resolutionScale: settingsSnapshot.resolutionScale,
+                resolutionScale: effectiveResolutionScale(settingsSnapshot),
                 metalFXBundle: metalFXBundle
             )
         }
@@ -412,12 +412,30 @@ extension Renderer {
             break
         }
         // Treat anything within 0.1% of native as "disabled" to avoid pointless
-        // rebuilds at 0.999 due to float rounding.
-        return settingsSnapshot.resolutionScale < 0.999
+        // rebuilds at 0.999 due to float rounding. The effective scale is capped
+        // below native (see `effectiveResolutionScale`), so the fragment path on
+        // visionOS always upscales — keeping foveation + temporal warm-start on.
+        return effectiveResolutionScale(settingsSnapshot) < 0.999
         #else
         _ = (settingsSnapshot, framePath)
         return false
         #endif
+    }
+
+    /// visionOS quality ceiling. The user's `resolutionScale` is treated as a
+    /// ceiling, capped just below native so the MetalFX upscale + gaze foveation
+    /// + temporal depth warm-start stack is always engaged (that whole stack only
+    /// runs when the rendered scale is sub-native). Raise to 1.0 to permit a
+    /// true-native fragment path at the cost of those optimizations.
+    static let visionResolutionCeiling: Float = 0.9
+
+    /// Per-frame render scale for the fragment+MetalFX path: the adaptive
+    /// controller's current scale, bounded by the (capped) user ceiling. Pure
+    /// read within a frame — only the completion-handler `record(gpuTime:)`
+    /// advances the scale — so repeated calls in one frame are consistent.
+    func effectiveResolutionScale(_ settingsSnapshot: RenderSettingsSnapshot) -> Float {
+        let ceiling = min(settingsSnapshot.resolutionScale, Renderer.visionResolutionCeiling)
+        return adaptiveResolution.currentScale(ceiling: ceiling)
     }
 }
 
@@ -782,8 +800,9 @@ extension Renderer {
         // MTLFXSpatialScaler rejects (or crashes on) very small inputs and the
         // app currently exposes resolutionScale down to 0.33, so a small
         // drawable + low scale can land below the scaler's tolerated range.
-        let rawInputWidth = max(1, Int((Float(outputWidth) * settingsSnapshot.resolutionScale).rounded()))
-        let rawInputHeight = max(1, Int((Float(outputHeight) * settingsSnapshot.resolutionScale).rounded()))
+        let renderScale = effectiveResolutionScale(settingsSnapshot)
+        let rawInputWidth = max(1, Int((Float(outputWidth) * renderScale).rounded()))
+        let rawInputHeight = max(1, Int((Float(outputHeight) * renderScale).rounded()))
 
         let shortEdgeMin = MetalFXManager.minimumInputShortEdge
         let longEdgeMin = MetalFXManager.minimumInputLongEdge

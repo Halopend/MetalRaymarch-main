@@ -173,6 +173,15 @@ actor Renderer {
 #if canImport(MetalFX)
     var metalFXManager: MetalFXManager?
     var metalFXFence: MTLFence?
+
+    /// Closed-loop dynamic resolution for the visionOS fragment+MetalFX path.
+    /// Renders at the highest scale the GPU can sustain at the headset refresh,
+    /// shedding pixels under load and recovering with headroom. The user's
+    /// `resolutionScale` acts as the (capped) ceiling — see `effectiveResolutionScale`.
+    /// Target is the 90 Hz Vision Pro cadence; floor keeps a usable quality bound.
+    let adaptiveResolution = AdaptiveResolutionController(
+        config: AdaptiveResolutionController.Config(targetFrameTime: 1.0 / 90.0, floorScale: 0.5)
+    )
     var lastMetalFXInputSize: SIMD2<Int> = .zero
     var lastMetalFXOutputSize: SIMD2<Int> = .zero
     var hasLoggedMetalFXFallback = false
@@ -964,7 +973,7 @@ actor Renderer {
         // fragment-shader uniforms so each frame's render is offset by a different
         // fraction of a pixel. TAA accumulates these across frames for free SSAA.
         #if canImport(MetalFX)
-        if taaManager != nil, settingsSnapshot.resolutionScale < 0.999 {
+        if taaManager != nil, effectiveResolutionScale(settingsSnapshot) < 0.999 {
             taaHaltonIndex = taaHaltonIndex &+ 1
             let jx = Self.halton(taaHaltonIndex, base: 2) - 0.5
             let jy = Self.halton(taaHaltonIndex, base: 3) - 0.5
@@ -1214,6 +1223,12 @@ actor Renderer {
                 gpuMs = nil
             }
             guard let self else { return }
+            // Dynamic resolution: feed measured GPU time for fragment+MetalFX
+            // frames. The native compute path is excluded so its full-resolution
+            // cost can't bias the upscaled-path budget.
+            if let gpuMs, !useAdaptiveCompute {
+                self.adaptiveResolution.record(gpuTime: gpuMs / 1000.0)
+            }
             Task {
                 await self.recordFramePerf(
                     nowTime: logTime,

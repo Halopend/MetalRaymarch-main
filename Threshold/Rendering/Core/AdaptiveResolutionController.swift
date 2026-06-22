@@ -1,4 +1,4 @@
-#if os(macOS) || os(iOS)
+#if os(macOS) || os(iOS) || os(visionOS)
 import Foundation
 import QuartzCore
 import Synchronization
