@@ -11,24 +11,26 @@ import Foundation
 /// How audio energy shapes the parameter offset.
 /// Each curve produces a different delta shape from the same source level (0–1).
 enum ResponseCurve: String, CaseIterable, Codable, Sendable {
-    /// Smooth sinusoidal oscillation around the base value.
-    /// Audio energy modulates the amplitude of the oscillation.
+    /// "Wave" — smooth continuous oscillation around the base value; louder
+    /// audio swings wider and faster. The "alive / breathing" shape.
     case sinusoidal
-    /// Fast attack, exponential decay — ideal for beat-driven effects.
-    /// Produces a sharp spike on onset that decays until the next beat.
+    /// "Pulse" — fast attack, exponential decay: a sharp spike that fades. Pair
+    /// with the Drop source for a snap on each big hit.
     case pulse
-    /// Heavily smoothed, slow-moving modulation — ideal for color drift.
-    /// Audio energy causes a gentle, lagging offset from the base.
+    /// "Follow" — smoothly tracks the source with lag; a gentle wander that
+    /// never jumps. The "ambient / slow color drift" shape.
+    /// (rawValue stays `drift` for back-compat.)
     case drift
-    /// Blends beat pulse with slow drift for punch + movement at the same time.
+    /// "Living" — a Wave oscillation riding on a slow Follow; movement + drift
+    /// at once. (rawValue stays `hybrid` for back-compat.)
     case hybrid
 
     var displayName: String {
         switch self {
         case .sinusoidal: return "Wave"
         case .pulse:      return "Pulse"
-        case .drift:      return "Drift"
-        case .hybrid:     return "Hybrid"
+        case .drift:      return "Follow"
+        case .hybrid:     return "Living"
         }
     }
 
@@ -36,8 +38,8 @@ enum ResponseCurve: String, CaseIterable, Codable, Sendable {
         switch self {
         case .sinusoidal: return "waveform.path"
         case .pulse:      return "bolt.fill"
-        case .drift:      return "wind"
-        case .hybrid:     return "point.topleft.down.curvedto.point.bottomright.up"
+        case .drift:      return "water.waves"
+        case .hybrid:     return "sparkles"
         }
     }
 }
@@ -96,22 +98,33 @@ struct LFOSettings: Codable, Hashable, Sendable {
 }
 
 enum MusicReactiveSource: String, CaseIterable, Codable, Sendable {
+    /// Band-weighted overall intensity — the sensible default. (rawValue `composite`.)
     case composite
     case bass
     case mid
     case treble
+    /// The punctuation / "the beat dropped" — a real spectral-flux onset that
+    /// spikes on big hits. (rawValue stays `beat` for back-compat.)
     case beat
+    /// Deprecated wideband RMS; redundant with Energy. Hidden from the picker
+    /// (see `pickerCases`) but kept so older saved mappings still decode.
     case overall
 
     var displayName: String {
         switch self {
-        case .composite: return "Composite"
+        case .composite: return "Energy"
         case .bass: return "Bass"
         case .mid: return "Mid"
         case .treble: return "Treble"
-        case .beat: return "Beat"
-        case .overall: return "Overall"
+        case .beat: return "Drop"
+        case .overall: return "Energy"   // legacy alias; behaves like wideband but reads as Energy
         }
+    }
+
+    /// Sources offered in the UI picker. Excludes the deprecated `overall`
+    /// (redundant with Energy) so the control stays a clean, intuitive set.
+    static var pickerCases: [MusicReactiveSource] {
+        [.composite, .bass, .mid, .treble, .beat]
     }
 }
 
@@ -312,7 +325,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .fractalScale: return .composite
         case .colorMix: return .composite
         case .iterations: return .mid
-        case .glow: return .composite
+        case .glow: return .beat
         case .fog: return .composite
         case .bloom: return .beat
         case .hueSpeed: return .treble

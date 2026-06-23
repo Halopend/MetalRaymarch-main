@@ -132,17 +132,21 @@ final class MusicReactiveEngine {
         dampedMid = mid
         let treble = applyDamping(current: dampedTreble, target: bandLevels.treble, damping: damping, deltaTime: dt)
         dampedTreble = treble
-        let beat = applyDamping(current: dampedBeat, target: bandLevels.beat, damping: damping, deltaTime: dt)
-        dampedBeat = beat
         let overall = applyDamping(current: dampedOverall, target: bandLevels.overall, damping: damping, deltaTime: dt)
         dampedOverall = overall
 
         let globalAmount = settings.fractalAudioAmount * settings.animationActivityFactor
         let beatPunch = settings.fractalBeatPunch
 
-        // Composite drive (default source behavior)
+        // Drop (the punctuation source) is a TRANSIENT: bypass the amplitude
+        // follower so global damping can't smear the snap. The "Drop" slider
+        // (beatPunch) scales its intensity; default 0.3 ≈ unity gain.
+        let beat = min(1.0, bandLevels.beat * (0.5 + 1.5 * beatPunch))
+
+        // Energy = smooth band-weighted intensity. Deliberately does NOT mix in
+        // the transient Drop, so Energy-driven Wave/Follow targets stay smooth.
         let bandDrive = bass * 0.55 + mid * 0.30 + treble * 0.15
-        let driveTarget = min(1.0, bandDrive * 0.9 + beat * (0.1 + 0.6 * beatPunch))
+        let driveTarget = min(1.0, bandDrive * 0.9)
         let drive = applyDamping(current: dampedComposite, target: driveTarget, damping: damping, deltaTime: dt)
         dampedComposite = drive
 

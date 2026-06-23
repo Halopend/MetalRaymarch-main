@@ -29,9 +29,15 @@ class AudioAnalyzer {
     /// Mid level (250Hz-2kHz) - vocals and instruments
     @ObservationIgnored nonisolated(unsafe) private(set) var midLevel: Float = 0.0
     
-    /// Treble level (high frequencies 2k-20kHz) - good for sparkles
+    /// Treble level (high frequencies 2k-8kHz) - good for sparkles
     @ObservationIgnored nonisolated(unsafe) private(set) var trebleLevel: Float = 0.0
-    
+
+    /// Onset / "Drop" strength (0–1) from spectral flux. Near-zero most of the
+    /// time, spikes hard on a transient or a big musical punctuation (the drop).
+    /// This is the real signal behind the "Drop" reactive source — unlike the
+    /// old peak-envelope, it actually fires on hits, not on loudness.
+    @ObservationIgnored nonisolated(unsafe) private(set) var onsetLevel: Float = 0.0
+
     /// Whether any audio capture source is active.
     @ObservationIgnored nonisolated(unsafe) private(set) var isCapturing: Bool = false
 
@@ -48,7 +54,8 @@ class AudioAnalyzer {
     @ObservationIgnored nonisolated(unsafe) private var pendingBass: Float = 0
     @ObservationIgnored nonisolated(unsafe) private var pendingMid: Float = 0
     @ObservationIgnored nonisolated(unsafe) private var pendingTreble: Float = 0
-    
+    @ObservationIgnored nonisolated(unsafe) private var pendingOnset: Float = 0
+
     /// Error message if capture fails
     private(set) var errorMessage: String?
     
@@ -67,6 +74,11 @@ class AudioAnalyzer {
     private var imagBuffer: [Float] = []
     private var magnitudeBuffer: [Float] = []
     private var windowBuffer: [Float] = []
+
+    // Spectral-flux onset detection state (drives onsetLevel / the "Drop" source)
+    private var prevMagnitudeBuffer: [Float] = []   // last frame's spectrum
+    private var fluxBaseline: Float = 0             // EMA of recent flux = adaptive threshold
+    private var fluxFrameCount: Int = 0             // warm-up guard so startup doesn't false-trigger
     
     // Precomputed band boundary indices (set once in setupFFT, reused per frame)
     private var bassStartBin: Int = 0
@@ -82,6 +94,7 @@ class AudioAnalyzer {
     private let peakDecaySpeed: Float = 2.0    // Slow peak decay
     private let bandAttackSpeed: Float = 35.0  // Band-specific attack
     private let bandDecaySpeed: Float = 10.0   // Band-specific decay
+    private let onsetDecaySpeed: Float = 6.0   // Drop envelope fall (~0.17s) — instant attack, fast decay
     
     // Cached smoothing factors — avoids 4 exp() calls per frame when dt is stable
     private var cachedDT: Float = 0
@@ -197,6 +210,7 @@ class AudioAnalyzer {
         realBuffer = [Float](repeating: 0, count: fftSize)
         imagBuffer = [Float](repeating: 0, count: fftSize)
         magnitudeBuffer = [Float](repeating: 0, count: fftSize / 2)
+        prevMagnitudeBuffer = [Float](repeating: 0, count: fftSize / 2)
         
         // Create Hann window for better frequency resolution
         windowBuffer = [Float](repeating: 0, count: fftSize)
@@ -323,6 +337,7 @@ class AudioAnalyzer {
             pendingBass = 0
             pendingMid = 0
             pendingTreble = 0
+            pendingOnset = 0
             if !pendingLevelDispatch {
                 pendingLevelDispatch = true
                 Task { @MainActor in
@@ -339,6 +354,10 @@ class AudioAnalyzer {
         var bass: Float = 0
         var mid: Float = 0
         var treble: Float = 0
+
+        // Reset each buffer; only a real flux computation (below) raises it.
+        // Prevents a stale onset re-latching when a short buffer skips the FFT.
+        pendingOnset = 0
         
         if frameLength >= fftSize {
             // Copy and window the samples
@@ -396,8 +415,40 @@ class AudioAnalyzer {
             bass = min(1.0, compressLevel(bass * inputGain))
             mid = min(1.0, compressLevel(mid * inputGain))
             treble = min(1.0, compressLevel(treble * inputGain))
+
+            // ── Spectral-flux onset detection (the "Drop" signal) ──
+            // Sum of positive per-bin magnitude *increases* vs the previous
+            // frame: a transient/drop raises many bins at once → large flux,
+            // while sustained sound has near-zero flux. An EMA baseline acts as
+            // an adaptive threshold so only above-average jumps register, making
+            // the detector level-independent. Tuning knobs (threshold 1.5×,
+            // gain 0.6) are intentionally conservative — refine on-device.
+            if prevMagnitudeBuffer.count == halfSize {
+                var flux: Float = 0
+                let fluxEnd = max(2, min(halfSize, trebleEndBin))  // ignore very-high noise bins
+                for i in 1..<fluxEnd {
+                    let d = magnitudeBuffer[i] - prevMagnitudeBuffer[i]
+                    if d > 0 { flux += d }
+                }
+                fluxFrameCount += 1
+                if fluxFrameCount == 1 {
+                    fluxBaseline = flux                               // seed at the right magnitude (no startup over-trigger)
+                } else {
+                    fluxBaseline = fluxBaseline * 0.96 + flux * 0.04  // slow EMA: a spike barely moves the threshold it's measured against
+                }
+                if fluxFrameCount > 8 {  // warm-up so startup doesn't false-trigger
+                    let excess = max(0, flux - fluxBaseline * 1.5)
+                    pendingOnset = min(1.0, excess / max(fluxBaseline, 1e-3) * 0.6)
+                }
+                // Stash this frame's spectrum for next frame's comparison.
+                prevMagnitudeBuffer.withUnsafeMutableBufferPointer { dst in
+                    magnitudeBuffer.withUnsafeBufferPointer { src in
+                        dst.baseAddress!.update(from: src.baseAddress!, count: halfSize)
+                    }
+                }
+            }
         }
-        
+
         // Batch level updates: store latest values, dispatch to MainActor only if no dispatch is pending
         pendingOverall = normalizedLevel
         pendingBass = bass
@@ -420,10 +471,10 @@ class AudioAnalyzer {
     
     private func drainPendingLevels() {
         pendingLevelDispatch = false
-        updateLevels(overall: pendingOverall, bass: pendingBass, mid: pendingMid, treble: pendingTreble)
+        updateLevels(overall: pendingOverall, bass: pendingBass, mid: pendingMid, treble: pendingTreble, onset: pendingOnset)
     }
-    
-    private func updateLevels(overall: Float, bass: Float, mid: Float, treble: Float) {
+
+    private func updateLevels(overall: Float, bass: Float, mid: Float, treble: Float, onset: Float) {
         let currentTime = CACurrentMediaTime()
         let deltaTime = lastUpdateTime > 0 ? Float(currentTime - lastUpdateTime) : Float(1.0 / 60.0)
         lastUpdateTime = currentTime
@@ -449,6 +500,14 @@ class AudioAnalyzer {
         smoothBand(&bassLevel, target: bass, dt: clampedDT)
         smoothBand(&midLevel, target: mid, dt: clampedDT)
         smoothBand(&trebleLevel, target: treble, dt: clampedDT)
+
+        // Onset/"Drop": instant attack (snap to the spike), fast linear decay so
+        // it reads as a discrete hit rather than a sustained level.
+        if onset > onsetLevel {
+            onsetLevel = onset
+        } else {
+            onsetLevel = max(0, onsetLevel - onsetDecaySpeed * clampedDT)
+        }
     }
     
     private func smoothBand(_ current: inout Float, target: Float, dt: Float) {
@@ -472,6 +531,9 @@ class AudioAnalyzer {
         bassLevel = 0
         midLevel = 0
         trebleLevel = 0
+        onsetLevel = 0
+        fluxBaseline = 0
+        fluxFrameCount = 0
         lastUpdateTime = 0
     }
 }

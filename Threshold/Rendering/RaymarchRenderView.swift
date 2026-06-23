@@ -938,7 +938,7 @@ private final class ThresholdMacRenderer {
             totalBass += analyzer.bassLevel
             totalMid += analyzer.midLevel
             totalTreble += analyzer.trebleLevel
-            totalBeat = max(totalBeat, analyzer.peakLevel * 0.7)
+            totalBeat = max(totalBeat, analyzer.onsetLevel)  // real spectral-flux onset, not a loudness envelope
             totalLevel += analyzer.level
             sourceCount += 1
         }

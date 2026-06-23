@@ -410,7 +410,7 @@ private struct ParameterNodeRow: View {
                             get: { idx < cache.audioReactive.musicReactiveMappings.count ? cache.audioReactive.musicReactiveMappings[idx].source : .composite },
                             set: { src in updateMusicMapping(target) { $0.source = src } }
                         )) {
-                            ForEach(MusicReactiveSource.allCases, id: \.self) { s in
+                            ForEach(MusicReactiveSource.pickerCases, id: \.self) { s in
                                 Text(s.displayName).tag(s)
                             }
                         }

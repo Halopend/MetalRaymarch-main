@@ -1459,7 +1459,7 @@ struct KeyframeEditorView: View {
                                 if let musicConfig = keyframe.musicReactiveConfig {
                                     summaryRow("Enabled", text: musicConfig.fractalAudioReactiveEnabled ? "On" : "Off")
                                     summaryRow("Amount", value: musicConfig.fractalAudioAmount)
-                                    summaryRow("Beat Punch", value: musicConfig.fractalBeatPunch)
+                                    summaryRow("Drop", value: musicConfig.fractalBeatPunch)
                                     summaryRow("Mappings", text: "\(musicConfig.musicReactiveMappings.count)")
                                     summaryRow("Groups", text: "\(musicConfig.tripletMusicGains.count)")
                                 }

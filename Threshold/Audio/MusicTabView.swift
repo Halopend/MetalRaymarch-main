@@ -468,7 +468,7 @@ struct MusicTabContent: View {
             }
 
             if viewModel.musicPresets.isEmpty {
-                Text("Save the current amount, beat, damping, sensitivities, and parameter mappings as a reusable preset.")
+                Text("Save the current amount, drop, damping, sensitivities, and parameter mappings as a reusable preset.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -531,7 +531,7 @@ struct MusicTabContent: View {
                 set: { v in cache.audioReactive.fractalAudioAmount = v; cache.push(\.fractalAudioAmount, value: v) }
             ), range: 0...1, showsFlashingWarning: hasFlashingVisualMappings)
 
-            sliderRow(label: "Beat", value: Binding(
+            sliderRow(label: "Drop", value: Binding(
                 get: { cache.audioReactive.fractalBeatPunch },
                 set: { v in cache.audioReactive.fractalBeatPunch = v; cache.push(\.fractalBeatPunch, value: v) }
             ), range: 0...1)
@@ -1441,7 +1441,7 @@ struct MusicTabContent: View {
                                         get: { mappingAt(index)?.source ?? .composite },
                                         set: { newValue in updateMapping(index) { $0.source = newValue } }
                                     )) {
-                                        ForEach(MusicReactiveSource.allCases, id: \.self) { source in
+                                        ForEach(MusicReactiveSource.pickerCases, id: \.self) { source in
                                             Text(source.displayName).tag(source)
                                         }
                                     }
@@ -1458,7 +1458,7 @@ struct MusicTabContent: View {
                                     .pickerStyle(.segmented)
 
                                     if (mappingAt(index)?.responseCurve ?? .sinusoidal) == .hybrid {
-                                        sliderRow(label: "Hybrid", value: Binding(
+                                        sliderRow(label: "Living", value: Binding(
                                             get: { mappingAt(index)?.hybridCombo ?? 0.35 },
                                             set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
                                         ), range: 0...1)
@@ -1570,7 +1570,7 @@ struct MusicTabContent: View {
                     meterBar(label: "Bass",   level: rs.bassLevel,      color: .red)
                     meterBar(label: "Mid",    level: rs.midLevel,       color: .green)
                     meterBar(label: "Treble", level: rs.trebleLevel,    color: .blue)
-                    meterBar(label: "Beat",   level: rs.beatIntensity,  color: .purple)
+                    meterBar(label: "Drop",   level: rs.beatIntensity,  color: .purple)
                 }
             }
             .padding(12)

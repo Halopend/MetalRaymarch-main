@@ -910,7 +910,7 @@ actor Renderer {
                 totalBass += mic.bassLevel
                 totalMid += mic.midLevel
                 totalTreble += mic.trebleLevel
-                totalBeat = max(totalBeat, mic.peakLevel * 0.7)
+                totalBeat = max(totalBeat, mic.onsetLevel)  // real spectral-flux onset, not a loudness envelope
                 totalLevel += mic.level
                 sourceCount += 1
             }
