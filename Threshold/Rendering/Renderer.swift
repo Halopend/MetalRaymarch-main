@@ -178,9 +178,25 @@ actor Renderer {
     /// Renders at the highest scale the GPU can sustain at the headset refresh,
     /// shedding pixels under load and recovering with headroom. The user's
     /// `resolutionScale` acts as the (capped) ceiling — see `effectiveResolutionScale`.
-    /// Target is the 90 Hz Vision Pro cadence; floor keeps a usable quality bound.
+    ///
+    /// Tuning rationale (the "Vision Pro is blurry" fix):
+    /// - floorScale 0.67 (was 0.5→0.58): on a GPU-bound fractal scene the
+    ///   controller is effectively pinned at the floor (the scene can't hold the
+    ///   target at any scale ≥ floor), so the floor IS the operating resolution.
+    ///   0.67 caps the MetalFX magnification at ~1.5× — the practical quality knee
+    ///   for MTLFXSpatialScaler — instead of 1.72× (0.58) or 2.0× (0.5), which is
+    ///   the single biggest lever on perceived sharpness in the pinned state.
+    /// - targetFrameTime 1/72 (was 1/90): a 90 Hz target on a scene that runs
+    ///   below 45 fps means GPU/target is always > 1, so the controller only ever
+    ///   ratchets DOWN to the floor and never recovers. A looser, reachable budget
+    ///   lets the up-branch fire on lighter scenes so they climb back toward
+    ///   native (where MetalFX disengages entirely and the image is crisp).
+    /// NOTE: a deeper fix — feeding the controller raymarch-only GPU time instead
+    /// of the whole command buffer (which includes fixed MetalFX/TAA/resolve
+    /// overhead that never shrinks with scale) — is tracked as a follow-up; it
+    /// requires per-encoder GPU timing and on-device validation.
     let adaptiveResolution = AdaptiveResolutionController(
-        config: AdaptiveResolutionController.Config(targetFrameTime: 1.0 / 90.0, floorScale: 0.5)
+        config: AdaptiveResolutionController.Config(targetFrameTime: 1.0 / 72.0, floorScale: 0.67)
     )
     var lastMetalFXInputSize: SIMD2<Int> = .zero
     var lastMetalFXOutputSize: SIMD2<Int> = .zero
@@ -1226,9 +1242,11 @@ actor Renderer {
             // Dynamic resolution: feed measured GPU time for fragment+MetalFX
             // frames. The native compute path is excluded so its full-resolution
             // cost can't bias the upscaled-path budget.
+            #if canImport(MetalFX)
             if let gpuMs, !useAdaptiveCompute {
                 self.adaptiveResolution.record(gpuTime: gpuMs / 1000.0)
             }
+            #endif
             Task {
                 await self.recordFramePerf(
                     nowTime: logTime,

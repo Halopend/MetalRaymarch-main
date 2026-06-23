@@ -153,7 +153,12 @@ extension Renderer {
                 if taa.prepare(width: w, height: h, viewCount: viewCount) {
                     let blendFactor: Float = {
                         switch settingsSnapshot.geometryState {
-                        case .stable: return 0.1   // 10% current: maximum accumulation quality
+                        // 20% current (was 10%): at 0.1 a pixel needs ~100 frames to
+                        // converge and 90% of every frame is stale, already-upscaled
+                        // (soft) history — that smears fine fractal detail and ghosts
+                        // on the slightest reprojection error. 0.2 keeps strong
+                        // temporal AA while letting current-frame detail through.
+                        case .stable: return 0.2
                         case .settling: return 0.3 // Moderate blend while parameters converge
                         default: return 0.5        // Dynamic / gesture active
                         }
@@ -412,9 +417,11 @@ extension Renderer {
             break
         }
         // Treat anything within 0.1% of native as "disabled" to avoid pointless
-        // rebuilds at 0.999 due to float rounding. The effective scale is capped
-        // below native (see `effectiveResolutionScale`), so the fragment path on
-        // visionOS always upscales — keeping foveation + temporal warm-start on.
+        // rebuilds at 0.999 due to float rounding. When the adaptive controller
+        // has recovered to the user's ceiling (≤1.0), effective scale reaches 1.0
+        // and MetalFX is skipped — the image is rendered natively and is sharp.
+        // Under GPU load the controller sheds pixels, effective scale drops below
+        // native, and MetalFX re-engages to recover the drawable resolution.
         return effectiveResolutionScale(settingsSnapshot) < 0.999
         #else
         _ = (settingsSnapshot, framePath)
@@ -422,12 +429,14 @@ extension Renderer {
         #endif
     }
 
-    /// visionOS quality ceiling. The user's `resolutionScale` is treated as a
-    /// ceiling, capped just below native so the MetalFX upscale + gaze foveation
-    /// + temporal depth warm-start stack is always engaged (that whole stack only
-    /// runs when the rendered scale is sub-native). Raise to 1.0 to permit a
-    /// true-native fragment path at the cost of those optimizations.
-    static let visionResolutionCeiling: Float = 0.9
+    #if canImport(MetalFX)
+    /// visionOS quality ceiling for the adaptive resolution controller.
+    /// At 1.0 the controller can recover to native resolution when the GPU has
+    /// headroom — MetalFX switches off, depth warm-start is skipped, and the
+    /// image is crisp. Under load the controller sheds pixels and MetalFX
+    /// re-engages automatically. Set below 1.0 to force MetalFX always-on
+    /// (trades sharpness for foveation + warm-start on every frame).
+    static let visionResolutionCeiling: Float = 1.0
 
     /// Per-frame render scale for the fragment+MetalFX path: the adaptive
     /// controller's current scale, bounded by the (capped) user ceiling. Pure
@@ -437,6 +446,7 @@ extension Renderer {
         let ceiling = min(settingsSnapshot.resolutionScale, Renderer.visionResolutionCeiling)
         return adaptiveResolution.currentScale(ceiling: ceiling)
     }
+    #endif
 }
 
 #if canImport(MetalFX)

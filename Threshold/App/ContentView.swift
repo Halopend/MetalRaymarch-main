@@ -457,7 +457,7 @@ struct ContentView: View {
                     ("cube.transparent", "Fractals", Color.indigo),
                     ("hand.raised.fingers.spread", "Gestures", Color.green),
                     ("waveform", "Reactive", Color.blue),
-                    ("paintbrush.pointed.fill", "Color", Color.pink),
+                    ("paintbrush.pointed.fill", "Lights", Color.pink),
                 ] as [(String, String, Color)], id: \.0) { icon, label, color in
                     VStack(spacing: 5) {
                         ZStack {
