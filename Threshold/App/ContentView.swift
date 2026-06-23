@@ -454,18 +454,18 @@ struct ContentView: View {
             // Feature icon row
             HStack(spacing: 14) {
                 ForEach([
-                    ("cube.transparent", "Fractals"),
-                    ("hand.raised.fingers.spread", "Gestures"),
-                    ("waveform", "Reactive"),
-                    ("paintbrush.pointed.fill", "Color"),
-                ], id: \.0) { icon, label in
+                    ("cube.transparent", "Fractals", Color.indigo),
+                    ("hand.raised.fingers.spread", "Gestures", Color.green),
+                    ("waveform", "Reactive", Color.blue),
+                    ("paintbrush.pointed.fill", "Color", Color.pink),
+                ] as [(String, String, Color)], id: \.0) { icon, label, color in
                     VStack(spacing: 5) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.accentColor.opacity(0.14))
+                                .fill(color.opacity(0.16))
                             Image(systemName: icon)
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(color)
                         }
                         .frame(width: 44, height: 44)
                         Text(label)

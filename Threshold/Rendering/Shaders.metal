@@ -3038,12 +3038,21 @@ static inline float3 rcasSharpen(
 ) {
     constexpr sampler s(filter::nearest, address::clamp_to_edge);
 
-    // 5-tap cross neighbourhood
-    float3 b = tex.sample(s, uv + float2( 0.0,       -rcpSize.y), eye).rgb;
-    float3 d = tex.sample(s, uv + float2(-rcpSize.x,  0.0      ), eye).rgb;
-    float3 e = tex.sample(s, uv,                                   eye).rgb;
-    float3 f = tex.sample(s, uv + float2( rcpSize.x,  0.0      ), eye).rgb;
-    float3 h = tex.sample(s, uv + float2( 0.0,        rcpSize.y), eye).rgb;
+    // 5-tap cross neighbourhood.
+    // Pre-clamp the off-centre taps to the texel-centre interior so the sampler
+    // never has to hardware-clamp an out-of-range coordinate. This sidesteps a
+    // Metal driver bug (FB172520325 / 177318505, notably Apple-family-10 GPUs)
+    // where a clamp-to-edge read can return ZERO instead of the edge texel — here
+    // that would feed black into the anti-ring clamp and leave a dark fringe on
+    // the outermost pixel row/column. With nearest filtering, clamping to the
+    // texel-centre range is identical to working clamp-to-edge on healthy GPUs.
+    float2 lo = rcpSize * 0.5;
+    float2 hi = 1.0 - lo;
+    float3 b = tex.sample(s, clamp(uv + float2( 0.0,       -rcpSize.y), lo, hi), eye).rgb;
+    float3 d = tex.sample(s, clamp(uv + float2(-rcpSize.x,  0.0      ), lo, hi), eye).rgb;
+    float3 e = tex.sample(s, uv,                                                 eye).rgb;
+    float3 f = tex.sample(s, clamp(uv + float2( rcpSize.x,  0.0      ), lo, hi), eye).rgb;
+    float3 h = tex.sample(s, clamp(uv + float2( 0.0,        rcpSize.y), lo, hi), eye).rgb;
 
     // Luma weights — perceptual (2G + R + B unnormalised, consistent with FSR)
     const float3 kLuma = float3(0.5, 1.0, 0.5);
