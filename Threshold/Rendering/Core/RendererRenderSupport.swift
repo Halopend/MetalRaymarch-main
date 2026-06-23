@@ -142,62 +142,19 @@ extension Renderer {
         do {
             try bundle.manager.encodeSpatialUpscale(commandBuffer: commandBuffer, fence: metalFXFence)
 
-            // TAA: blend the MetalFX spatial output with the accumulated history
-            // to get sub-pixel detail from Halton-jittered frames at no extra render cost.
-            var taaOutputOverride: MTLTexture? = nil
-            if let taa = taaManager,
-               let metalFXOutput = bundle.manager.outputTexture,
-               let sceneDepth = bundle.manager.depthTexture {
-                let w = metalFXOutput.width, h = metalFXOutput.height
-                let viewCount = drawable.views.count
-                if taa.prepare(width: w, height: h, viewCount: viewCount) {
-                    let blendFactor: Float = {
-                        switch settingsSnapshot.geometryState {
-                        // 20% current (was 10%): at 0.1 a pixel needs ~100 frames to
-                        // converge and 90% of every frame is stale, already-upscaled
-                        // (soft) history — that smears fine fractal detail and ghosts
-                        // on the slightest reprojection error. 0.2 keeps strong
-                        // temporal AA while letting current-frame detail through.
-                        case .stable: return 0.2
-                        case .settling: return 0.3 // Moderate blend while parameters converge
-                        default: return 0.5        // Dynamic / gesture active
-                        }
-                    }()
-                    for viewIndex in 0..<viewCount {
-                        let eye = framePreparation.perEye[viewIndex]
-                        let prevVP = previousViewProjMatrices.count > viewIndex
-                            ? previousViewProjMatrices[viewIndex]
-                            : matrix_identity_float4x4
-                        taa.encode(
-                            commandBuffer: commandBuffer,
-                            currentTex: metalFXOutput,
-                            sceneDepthTex: sceneDepth,
-                            viewIndex: viewIndex,
-                            invProjMatrix: eye.projection.inverse,
-                            invViewMatrix: eye.inverseModelView,
-                            previousViewProjMatrix: prevVP,
-                            blendFactor: blendFactor
-                        )
-                    }
-                    taa.advanceHistory()
-                    taaOutputOverride = taa.outputTexture
-                }
-            }
-
-            // Rotate per-eye view-proj history unconditionally (TAA reprojection
-            // AND the fragment warm-start both consume it next frame, even on
-            // frames where the TAA manager is unavailable).
+            // Rotate per-eye view-proj history for the fragment depth warm-start
+            // (consumed next frame to start each ray near last frame's surface).
             for viewIndex in 0..<min(drawable.views.count, previousViewProjMatrices.count) {
                 let eye = framePreparation.perEye[viewIndex]
                 previousViewProjMatrices[viewIndex] = eye.projection * eye.modelView
             }
 
+            // Single spatial upscale → RCAS sharpen → drawable. No temporal blend.
             resolveMetalFXOutputToDrawable(
                 commandBuffer: commandBuffer,
                 metalFX: bundle.manager,
                 drawable: drawable,
-                resolutionScale: fragmentPassPlan.resolutionScale,
-                taaOutputOverride: taaOutputOverride
+                resolutionScale: fragmentPassPlan.resolutionScale
             )
 
             // This frame's depth becomes next frame's warm-start history.
@@ -217,17 +174,64 @@ extension Renderer {
     }
 
     func selectFramePath(settingsSnapshot: RenderSettingsSnapshot) -> RenderFramePath {
-        // Resolution scaling is currently implemented only on the fragment path via MetalFX.
-        // If scale < native, force fragment rendering so the user's resolution budget applies.
-        if settingsSnapshot.resolutionScale < 0.999 {
-            return .fragment(useQuadShared: settingsSnapshot.tileSize == 2)
-        }
-
+        // Resolution is now owned by the compositor's renderQuality (see
+        // applyRenderQualityIfNeeded), independent of the render path, so the
+        // path depends only on the tile mode. The compute path writes a
+        // drawable-sized texture and blits 1:1, so it honours renderQuality too.
         if settingsSnapshot.prefersAdaptiveComputePath,
            adaptiveHierarchicalPipeline8x8 != nil {
             return .adaptiveCompute
         }
         return .fragment(useQuadShared: settingsSnapshot.tileSize == 2)
+    }
+
+    /// visionOS 26+ runtime render-quality control. The compositor sizes the
+    /// drawable's color texture from `layerRenderer.renderQuality` (clamped to
+    /// the configuration's `maxRenderQuality`). If the app never sets it, it
+    /// stays at `capabilities.defaultRenderQuality` — well below native — so the
+    /// whole image is soft even at resolutionScale 1.0 with MetalFX bypassed.
+    /// Drive it from the user's resolution ("Detail Budget") slider: 1.0 =
+    /// native (sharpest), lower = the compositor renders a smaller drawable and
+    /// upscales it natively (foveation-aware, with a smoothed transition).
+    /// Render-quality only takes effect when foveation is enabled.
+    func applyRenderQualityIfNeeded(resolutionScale: Float) {
+        if #available(visionOS 26.0, *) {
+            guard layerRenderer.configuration.isFoveationEnabled else { return }
+            // maxRenderQuality is configured to 1.0; the system clamps to it.
+            let target = max(0.0, min(resolutionScale, 1.0))
+            guard abs(target - lastAppliedRenderQuality) > 0.001 else { return }
+            lastAppliedRenderQuality = target
+            layerRenderer.renderQuality = LayerRenderer.RenderQuality(target)
+            if RENDERER_DEBUG {
+                print("🎯 renderQuality → \(String(format: "%.2f", target)) (drawable resizes over a smoothed ramp)")
+            }
+        }
+    }
+
+    /// Publishes the live render diagnostics (drawable resolution, applied
+    /// render quality, path, foveation) to the control window. Only hops to the
+    /// MainActor when a user-visible value changes; captures Sendable primitives
+    /// only (never the non-Sendable drawable).
+    func publishRenderDiagnostics(drawable: LayerRenderer.Drawable) {
+        let w = drawable.colorTextures.first?.width ?? 0
+        let h = drawable.colorTextures.first?.height ?? 0
+        let foveation = layerRenderer.configuration.isFoveationEnabled
+        let quality = lastAppliedRenderQuality
+        let tile = appModel.renderSettings.tileSize
+        let path = (tile == 8 && adaptiveHierarchicalPipeline8x8 != nil) ? "compute 8×8" : "fragment"
+        let key = "\(w)x\(h)|\(String(format: "%.2f", quality))|\(foveation)|\(path)"
+        guard key != lastPublishedDiagnosticsKey else { return }
+        lastPublishedDiagnosticsKey = key
+
+        Task { @MainActor [weak appModel] in
+            guard let appModel else { return }
+            let metrics = appModel.renderMetrics
+            metrics.drawableWidth = w
+            metrics.drawableHeight = h
+            metrics.renderQuality = quality
+            metrics.foveationEnabled = foveation
+            metrics.renderPath = path
+        }
     }
 
     /// Actor-isolated throttle gate for slow-frame logging.
@@ -408,8 +412,15 @@ extension Renderer {
     /// be routed through MetalFX in a future phase once depth ownership and
     /// tile-shared history semantics are designed.
     /// Minimum scale is clamped to 0.33 by `RenderSettings.resolutionScale`.
+    /// MetalFX-spatial upscaling on visionOS is retired in favour of the
+    /// compositor's native `renderQuality` resolution control
+    /// (applyRenderQualityIfNeeded): foveation-aware, smoothed, and free of the
+    /// resolution double-dip. Flip this to re-enable the old MetalFX path.
+    static let visionMetalFXSpatialEnabled = false
+
     func isMetalFXActive(for settingsSnapshot: RenderSettingsSnapshot, framePath: RenderFramePath) -> Bool {
         #if canImport(MetalFX)
+        guard Renderer.visionMetalFXSpatialEnabled else { return false }
         switch framePath {
         case .adaptiveCompute:
             return false
@@ -417,11 +428,10 @@ extension Renderer {
             break
         }
         // Treat anything within 0.1% of native as "disabled" to avoid pointless
-        // rebuilds at 0.999 due to float rounding. When the adaptive controller
-        // has recovered to the user's ceiling (≤1.0), effective scale reaches 1.0
-        // and MetalFX is skipped — the image is rendered natively and is sharp.
-        // Under GPU load the controller sheds pixels, effective scale drops below
-        // native, and MetalFX re-engages to recover the drawable resolution.
+        // rebuilds at 0.999 due to float rounding. When the user's resolution
+        // slider is at native (1.0), effective scale is 1.0 and MetalFX is
+        // skipped — the image renders natively and is sharp. Below native, a
+        // single MetalFX spatial upscale reconstructs the drawable.
         return effectiveResolutionScale(settingsSnapshot) < 0.999
         #else
         _ = (settingsSnapshot, framePath)
@@ -430,21 +440,19 @@ extension Renderer {
     }
 
     #if canImport(MetalFX)
-    /// visionOS quality ceiling for the adaptive resolution controller.
-    /// At 1.0 the controller can recover to native resolution when the GPU has
-    /// headroom — MetalFX switches off, depth warm-start is skipped, and the
-    /// image is crisp. Under load the controller sheds pixels and MetalFX
-    /// re-engages automatically. Set below 1.0 to force MetalFX always-on
-    /// (trades sharpness for foveation + warm-start on every frame).
+    /// visionOS upscale ceiling. At 1.0 the user's resolution slider drives the
+    /// render scale directly: at 1.0 the fragment path renders natively and
+    /// MetalFX is bypassed entirely (sharpest); below 1.0 a single MetalFX
+    /// spatial upscale (+ RCAS sharpen) reconstructs the drawable. There is no
+    /// closed-loop dynamic-resolution controller and no temporal accumulation —
+    /// one predictable upscale the user controls.
     static let visionResolutionCeiling: Float = 1.0
 
-    /// Per-frame render scale for the fragment+MetalFX path: the adaptive
-    /// controller's current scale, bounded by the (capped) user ceiling. Pure
-    /// read within a frame — only the completion-handler `record(gpuTime:)`
-    /// advances the scale — so repeated calls in one frame are consistent.
+    /// Per-frame render scale for the fragment+MetalFX path. The user's
+    /// `resolutionScale` slider IS the scale (capped at the ceiling) — a single,
+    /// predictable upscale rather than a closed-loop dynamic resolution.
     func effectiveResolutionScale(_ settingsSnapshot: RenderSettingsSnapshot) -> Float {
-        let ceiling = min(settingsSnapshot.resolutionScale, Renderer.visionResolutionCeiling)
-        return adaptiveResolution.currentScale(ceiling: ceiling)
+        min(settingsSnapshot.resolutionScale, Renderer.visionResolutionCeiling)
     }
     #endif
 }
@@ -655,16 +663,14 @@ extension Renderer {
         commandBuffer: MTLCommandBuffer,
         metalFX: MetalFXManager,
         drawable: LayerRenderer.Drawable,
-        resolutionScale: Float,
-        taaOutputOverride: MTLTexture? = nil
+        resolutionScale: Float
     ) {
         guard layerRenderer.configuration.layout == .layered,
               drawable.colorTextures.count == 1,
               drawable.depthTextures.count == 1,
               let colorPipeline = metalFXColorResolvePipeline,
               let depthPipeline = metalFXDepthResolvePipeline,
-              // Use TAA result when available; fall back to MetalFX output for RCAS.
-              let outputTexture = taaOutputOverride ?? metalFX.outputTexture,
+              let outputTexture = metalFX.outputTexture,
               let depthTexture = metalFX.depthTexture else {
             blitMetalFXOutputToDrawable(commandBuffer: commandBuffer, metalFX: metalFX, drawable: drawable)
             return

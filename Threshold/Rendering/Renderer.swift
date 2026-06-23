@@ -95,18 +95,6 @@ actor Renderer {
     var previousViewProjMatrices: [matrix_float4x4] = [matrix_identity_float4x4, matrix_identity_float4x4]  // per eye
     private var temporalFrameCount: Int = 0                         // 0 = first frame, no reprojection
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CUSTOM TAA (Temporal Anti-Aliasing)
-    // MTLFXTemporalScaler is unavailable on visionOS; this provides equivalent
-    // quality by accumulating sub-pixel jittered samples across frames using a
-    // hand-rolled neighbourhood-variance-clamped exponential blend.
-    // Engages automatically whenever MetalFX spatial upscaling is active.
-    // ═══════════════════════════════════════════════════════════════════════════
-    var taaManager: VisionOSTAAManager?
-    // Halton sequence index for sub-pixel jitter (advanced each frame).
-    var taaHaltonIndex: UInt32 = 0
-    // Current frame's jitter in input-pixel units, baked into the fragment uniforms.
-    var taaCurrentJitter: SIMD2<Float> = .zero
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TEMPORAL DEPTH WARM-START (fragment path)
@@ -174,30 +162,6 @@ actor Renderer {
     var metalFXManager: MetalFXManager?
     var metalFXFence: MTLFence?
 
-    /// Closed-loop dynamic resolution for the visionOS fragment+MetalFX path.
-    /// Renders at the highest scale the GPU can sustain at the headset refresh,
-    /// shedding pixels under load and recovering with headroom. The user's
-    /// `resolutionScale` acts as the (capped) ceiling — see `effectiveResolutionScale`.
-    ///
-    /// Tuning rationale (the "Vision Pro is blurry" fix):
-    /// - floorScale 0.67 (was 0.5→0.58): on a GPU-bound fractal scene the
-    ///   controller is effectively pinned at the floor (the scene can't hold the
-    ///   target at any scale ≥ floor), so the floor IS the operating resolution.
-    ///   0.67 caps the MetalFX magnification at ~1.5× — the practical quality knee
-    ///   for MTLFXSpatialScaler — instead of 1.72× (0.58) or 2.0× (0.5), which is
-    ///   the single biggest lever on perceived sharpness in the pinned state.
-    /// - targetFrameTime 1/72 (was 1/90): a 90 Hz target on a scene that runs
-    ///   below 45 fps means GPU/target is always > 1, so the controller only ever
-    ///   ratchets DOWN to the floor and never recovers. A looser, reachable budget
-    ///   lets the up-branch fire on lighter scenes so they climb back toward
-    ///   native (where MetalFX disengages entirely and the image is crisp).
-    /// NOTE: a deeper fix — feeding the controller raymarch-only GPU time instead
-    /// of the whole command buffer (which includes fixed MetalFX/TAA/resolve
-    /// overhead that never shrinks with scale) — is tracked as a follow-up; it
-    /// requires per-encoder GPU timing and on-device validation.
-    let adaptiveResolution = AdaptiveResolutionController(
-        config: AdaptiveResolutionController.Config(targetFrameTime: 1.0 / 72.0, floorScale: 0.67)
-    )
     var lastMetalFXInputSize: SIMD2<Int> = .zero
     var lastMetalFXOutputSize: SIMD2<Int> = .zero
     var hasLoggedMetalFXFallback = false
@@ -220,6 +184,14 @@ actor Renderer {
     // FPS tracking
     var lastPresentationTime: LayerRenderer.Clock.Instant?
     var smoothedFPS: Double = 0
+
+    // Last render-quality target pushed to layerRenderer.renderQuality. The
+    // compositor smooths transitions, so we only re-set it when the target
+    // actually changes (re-setting every frame would restart the ramp).
+    var lastAppliedRenderQuality: Float = -1
+    // Change-detection for the in-headset render diagnostics readout so we only
+    // hop to MainActor when something the user can see has actually changed.
+    var lastPublishedDiagnosticsKey: String = ""
 
     // One-shot log guard for visionOS 26+ queryDrawables() candidate sizes.
     var hasLoggedDrawableQualityOptions: Bool = false
@@ -385,9 +357,6 @@ actor Renderer {
         metalFXFence = device.makeFence()
         metalFXFence?.label = "MetalFX Fragment→Scaler"
 
-        // Custom TAA — initialise best-effort; nil means TAA is skipped this session.
-        taaManager = try? VisionOSTAAManager(device: device)
-        if RENDERER_DEBUG { print(taaManager != nil ? "✓ TAA manager ready" : "⚠️ TAA unavailable (taaResolve kernel not found)") }
         #endif
 
         // 1×1 placeholder for the warm-start prev-depth argument on frames where
@@ -763,6 +732,12 @@ actor Renderer {
 
         frame.endUpdate()
 
+        // Drive the compositor's runtime render quality from the user's
+        // resolution slider before querying the drawable, so the drawable is
+        // sized for the requested quality. This is the visionOS-native (and
+        // foveation-aware) resolution control — see applyRenderQualityIfNeeded.
+        applyRenderQualityIfNeeded(resolutionScale: appModel.renderSettings.resolutionScale)
+
         guard let timing = frame.predictTiming() else { return }
         let clockWaitStart = CACurrentMediaTime()
         LayerRenderer.Clock().wait(until: timing.optimalInputTime)
@@ -791,6 +766,10 @@ actor Renderer {
             guard let legacyDrawable = frame.queryDrawable() else { return }
             drawable = legacyDrawable
         }
+
+        // Publish the actual drawable resolution + quality to the control window
+        // so the user can confirm native render resolution in-headset.
+        publishRenderDiagnostics(drawable: drawable)
 
         // Wait for a buffer to become available. With maxBuffersInFlight=2, the
         // cheap CPU encode of frame N+1 overlaps the GPU render of N, so encode
@@ -984,27 +963,6 @@ actor Renderer {
         let updateGameStateStart = CACurrentMediaTime()
         let framePreparation = self.updateGameState(drawable: drawable, settingsSnapshot: settingsSnapshot)
         frameBreakdown.updateGameStateMs = (CACurrentMediaTime() - updateGameStateStart) * 1000.0
-
-        // TAA: Advance the Halton sub-pixel jitter each frame and bake it into the
-        // fragment-shader uniforms so each frame's render is offset by a different
-        // fraction of a pixel. TAA accumulates these across frames for free SSAA.
-        #if canImport(MetalFX)
-        if taaManager != nil, effectiveResolutionScale(settingsSnapshot) < 0.999 {
-            taaHaltonIndex = taaHaltonIndex &+ 1
-            let jx = Self.halton(taaHaltonIndex, base: 2) - 0.5
-            let jy = Self.halton(taaHaltonIndex, base: 3) - 0.5
-            taaCurrentJitter = SIMD2<Float>(jx, jy)
-            // Patch jitterOffset in the already-written uniforms (UnsafeMutablePointer<UniformsArray>).
-            uniforms[uniformBufferIndex].uniforms.0.jitterOffset = taaCurrentJitter
-            uniforms[uniformBufferIndex].uniforms.1.jitterOffset = taaCurrentJitter
-            // Reset TAA history whenever geometry is unstable (parameter changes, gestures).
-            if settingsSnapshot.geometryState != .stable || settingsSnapshot.isGeometryGestureActive {
-                taaManager?.requestReset()
-            }
-        } else {
-            taaCurrentJitter = .zero
-        }
-        #endif
 
         // Begin submission only once CPU updates are complete.
         // Every path from here MUST call drawable.encodePresent() before endSubmission() fires.
@@ -1239,14 +1197,6 @@ actor Renderer {
                 gpuMs = nil
             }
             guard let self else { return }
-            // Dynamic resolution: feed measured GPU time for fragment+MetalFX
-            // frames. The native compute path is excluded so its full-resolution
-            // cost can't bias the upscaled-path budget.
-            #if canImport(MetalFX)
-            if let gpuMs, !useAdaptiveCompute {
-                self.adaptiveResolution.record(gpuTime: gpuMs / 1000.0)
-            }
-            #endif
             Task {
                 await self.recordFramePerf(
                     nowTime: logTime,
@@ -1747,17 +1697,4 @@ actor Renderer {
         }
     }
 
-    // Radical-inverse Halton low-discrepancy sequence for sub-pixel TAA jitter.
-    // Shared by both the compute path (RaymarchRenderView) and this renderer.
-    static func halton(_ index: UInt32, base: UInt32) -> Float {
-        var result: Float = 0
-        var fraction: Float = 1
-        var i = index
-        while i > 0 {
-            fraction /= Float(base)
-            result += fraction * Float(i % base)
-            i /= base
-        }
-        return result
-    }
 }

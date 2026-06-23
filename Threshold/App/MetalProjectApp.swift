@@ -27,11 +27,13 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
         // runtime render-quality scaling; we pick a fixed/default candidate.
         if #available(visionOS 26.0, *) {
             if configuration.isFoveationEnabled {
-                // Allow quality range from default (~0.6) up to 1.0
-                // Complex fractal scenes may render at lower quality for performance
-                // Simpler views or menus can use higher quality
+                // Raise the ceiling to native. The platform DEFAULT runtime
+                // render quality is below native, which is why the image looked
+                // uniformly soft even at resolutionScale 1.0 — the app now
+                // drives layerRenderer.renderQuality up to this ceiling at
+                // runtime (see Renderer.applyRenderQualityIfNeeded).
                 configuration.maxRenderQuality = LayerRenderer.RenderQuality(1.0)
-                print("✓ Render quality range enabled: maxRenderQuality = 1.0")
+                print("✓ maxRenderQuality = 1.0 (platform defaultRenderQuality: \(capabilities.defaultRenderQuality))")
             }
         }
     }

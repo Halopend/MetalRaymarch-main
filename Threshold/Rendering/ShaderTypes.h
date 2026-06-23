@@ -361,19 +361,6 @@ typedef struct
     ColorSchemeParams colorScheme;  // Color scheme parameters for palette control
 } TileUniforms;
 
-// === CUSTOM TAA (Temporal Anti-Aliasing) UNIFORMS ===
-// Used by the visionOS `taaResolve` compute kernel.
-// MTLFXTemporalScaler is unavailable on visionOS; this drives a hand-rolled
-// TAA pass that accumulates jittered sub-pixel samples across frames.
-typedef struct {
-    matrix_float4x4 invProjMatrix;           // Current frame inverse projection (per-eye)
-    matrix_float4x4 invViewMatrix;           // Current frame inverse model-view (per-eye)
-    matrix_float4x4 previousViewProjMatrix;  // Previous frame model-view-projection (per-eye)
-    vector_float2   resolution;              // Full output dimensions (pixels)
-    float           blendFactor;             // Current:history ratio — 0.1 steady, 1.0 on reset
-    uint32_t        eyeIndex;                // 0 = left, 1 = right
-} TAATileUniforms;
-
 // Include Buddhabrot types so they're visible through the bridging header
 #include "../Formulas/Buddhabrot/BuddhabrotTypes.h"
 
