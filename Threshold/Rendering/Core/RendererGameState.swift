@@ -252,6 +252,8 @@ extension Renderer {
                             lightingSoftness: settingsSnapshot.lightingSoftness,
                             sphericalInversionMode: settingsSnapshot.sphericalInversionMode.rawValue,
                             sphericalInversionRadius: settingsSnapshot.sphericalInversionRadius,
+                            sphereProjectionBlend: settingsSnapshot.sphereProjectionEnabled ? settingsSnapshot.sphereProjectionBlend : 0,
+                            sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,

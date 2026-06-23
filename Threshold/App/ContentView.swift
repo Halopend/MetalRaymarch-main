@@ -97,9 +97,13 @@ struct ContentView: View {
         return cache.audioReactive.musicReactiveMappings.count
     }
 
-    /// True when spherical inversion is warping space — drives the Shape tab's active badge.
+    /// True when spherical inversion is warping space, or the sphere-projection
+    /// option is actively layered on the Mandelbox — drives the Shape tab's
+    /// active badge. Sphere projection only affects the Mandelbox fast path, so
+    /// the badge ignores it on other fractal types (where it's a no-op).
     private var isSphericalInversionActive: Bool {
         cache.display.sphericalInversionMode != .off
+            || (cache.display.sphereProjectionEnabled && cache.fractalType == .mandelbox)
     }
 
     private var isAnimationPlaying: Bool {

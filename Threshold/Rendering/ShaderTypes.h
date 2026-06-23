@@ -246,6 +246,8 @@ typedef struct
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode; // 0=off, 1=outward-in ray inversion
     float sphericalInversionRadius; // Radius for spherical inversion mode
+    float sphereProjectionBlend;    // 0 = off; >0 blends a post-fold radial sphere projection (Mandelbox fast path)
+    float sphereProjectionRadius;   // Target radius for the post-fold sphere projection
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
@@ -312,6 +314,8 @@ typedef struct
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode;  // 0=off, 1=outward-in ray inversion
     float sphericalInversionRadius; // Radius for spherical inversion mode
+    float sphereProjectionBlend;    // 0 = off; >0 blends a post-fold radial sphere projection (Mandelbox fast path)
+    float sphereProjectionRadius;   // Target radius for the post-fold sphere projection
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)

@@ -292,6 +292,8 @@ extension ContentView {
 
             sphericalInversionSection
 
+            sphereProjectionSection
+
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {
                 HStack {
@@ -419,7 +421,61 @@ extension ContentView {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.06)))
     }
-    
+
+    private var sphereProjectionSection: some View {
+        let isMandelbox = cache.fractalType == .mandelbox
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Sphere Projection", systemImage: "globe.asia.australia")
+                    .font(.headline)
+                    .foregroundStyle(isMandelbox ? .primary : .secondary)
+                Spacer()
+                if isMandelbox {
+                    Toggle("", isOn: Binding(
+                        get: { cache.display.sphereProjectionEnabled },
+                        set: { newValue in
+                            cache.display.sphereProjectionEnabled = newValue
+                            cache.commitSphereProjection()
+                        }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                }
+            }
+
+            Text("Radially projects each fold onto a sphere right after the sphere-fold step — the \u{201C}accidental sphere\u{201D} look, blended onto the standard Mandelbox. Box detail melts into a glowing spherical shell.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isMandelbox {
+                if cache.display.sphereProjectionEnabled {
+                    EffectSliderRow(icon: "circle.lefthalf.filled", label: "Projection",
+                        value: Binding(get: { cache.display.sphereProjectionBlend }, set: { cache.display.sphereProjectionBlend = $0 }),
+                        range: 0.0...1.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitSphereProjection() },
+                        showToggle: false)
+
+                    EffectSliderRow(icon: "circle", label: "Projection Radius",
+                        value: Binding(get: { cache.display.sphereProjectionRadius }, set: { cache.display.sphereProjectionRadius = $0 }),
+                        range: 0.2...6.0,
+                        enabled: .constant(true),
+                        onChanged: { cache.commitSphereProjection() },
+                        showToggle: false)
+                }
+            } else {
+                Label("Only affects the Mandelbox fractal — switch to Mandelbox to use this.", systemImage: "info.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.teal.opacity(0.06)))
+    }
+
     private var fractalQualityContent: some View {
         VStack(spacing: 12) {
             HStack {

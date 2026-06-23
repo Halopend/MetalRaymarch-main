@@ -262,6 +262,8 @@ typedef struct
     float lightingSoftness;  // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode; // 0=off, 1=outward-in ray inversion
     float sphericalInversionRadius; // Radius for spherical inversion mode
+    float sphereProjectionBlend;    // 0 = off; >0 blends a post-fold radial sphere projection (Mandelbox fast path)
+    float sphereProjectionRadius;   // Target radius for the post-fold sphere projection
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
@@ -328,6 +330,8 @@ typedef struct
     float lightingSoftness;      // 0 = current vibrance-driven sharp lighting, 1 = classic soft lighting
     int sphericalInversionMode;  // 0=off, 1=outward-in ray inversion
     float sphericalInversionRadius; // Radius for spherical inversion mode
+    float sphereProjectionBlend;    // 0 = off; >0 blends a post-fold radial sphere projection (Mandelbox fast path)
+    float sphereProjectionRadius;   // Target radius for the post-fold sphere projection
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
@@ -1861,6 +1865,29 @@ FORCE_INLINE float DE_MandelboxSphereProjection_Dist(float3 pos, FormulaParams f
       p *= t; } \
     p = fma(p, scale, p0)
 
+// Sphere-projection variants: identical to the basic/half iterations, but after
+// the sphere fold each point is radially blended toward a fixed-radius sphere.
+// This reproduces the "Accidental Sphere Projection" look (see
+// Formulas/MandelboxSphereProjection) as an optional layer on the standard
+// Mandelbox fast path. The blend/radius come from FractalParams so the decision
+// is hoisted OUTSIDE the loop by the caller — the no-projection path is byte-for
+// -byte identical to before (zero cost when the option is off).
+#define MAP_ITERATION_PROJ(p, p0, foldingLimit, params, invSphereRadiusSq, projBlend, projRadius) \
+    p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz); \
+    { float r2 = dot(p.xyz, p.xyz); \
+      float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq); \
+      p *= t; } \
+    p.xyz = mix(p.xyz, mapProjectToSphere(p.xyz, projRadius), projBlend); \
+    p = fma(p, params.scale, p0)
+
+#define MAP_ITERATION_HALF_PROJ(p, p0, foldingLimit, scale, sphereRadiusSq, invSphereRadiusSq, projBlend, projRadius) \
+    p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), half3(2.0h), -p.xyz); \
+    { half r2 = dot(p.xyz, p.xyz); \
+      half t = clamp(1.0h / max(r2, sphereRadiusSq), 1.0h, invSphereRadiusSq); \
+      p *= t; } \
+    p.xyz = mix(p.xyz, half3(mapProjectToSphere(float3(p.xyz), projRadius)), half(projBlend)); \
+    p = fma(p, scale, p0)
+
 
 // File for Metal kernel and shader functions
 #include <metal_stdlib>
@@ -2060,6 +2087,16 @@ FORCE_INLINE float3 sphericalInvertPoint(float3 point, float radius) {
     return point * (radiusSq / distSq);
 }
 
+// Radially project a folded point onto a sphere of the given radius. Used by the
+// optional sphere-projection iteration macros (post-sphere-fold). Mirrors
+// projectToSphere() in Formulas/MandelboxSphereProjection.h (named distinctly to
+// avoid clashing with that header's definition).
+FORCE_INLINE float3 mapProjectToSphere(float3 p, float radius) {
+    float len = length(p);
+    if (len <= 1e-6f) { return float3(radius, 0.0f, 0.0f); }
+    return p * (radius / len);
+}
+
 FORCE_INLINE void applySphericalInversionRay(thread float3 &origin, thread float3 &direction, int mode, float radius) {
     if (mode == 0) { return; }
     float safeRadius = max(radius, 0.2f);
@@ -2126,6 +2163,8 @@ struct FractalParams {
     int bubbleFadeEnabled;  // Enable smooth fade transition
     float bubbleFadeWidth;  // Width of fade region beyond inner radius
     float bubbleStrength;   // Temporal fade (0=off, 1=fully active)
+    float sphereProjBlend;  // 0 = off; >0 blends post-fold radial sphere projection (Mandelbox path)
+    float sphereProjRadius; // Target radius for the post-fold sphere projection
 };
 
 FORCE_INLINE float safetyBubbleCubeDistance(float3 p, float bubbleRadius) {
@@ -2261,7 +2300,8 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     PrecomputedFractalParams precomputed,
     float minRad2Val,
     float3 bubbleCenter, float bubbleRadius, int bubbleEnabled, float bubbleShape,
-    int bubbleFadeEnabled, float bubbleFadeWidth, float bubbleStrength)
+    int bubbleFadeEnabled, float bubbleFadeWidth, float bubbleStrength,
+    float sphereProjBlend = 0.0f, float sphereProjRadius = 1.0f)
 {
     FractalParams params;
     // Use precomputed values (expensive powr() and divisions done on CPU)
@@ -2276,6 +2316,8 @@ FORCE_INLINE FractalParams makeFractalParamsFromPrecomputed(
     params.bubbleFadeEnabled = bubbleFadeEnabled;
     params.bubbleFadeWidth = bubbleFadeWidth;
     params.bubbleStrength = bubbleStrength;
+    params.sphereProjBlend = sphereProjBlend;
+    params.sphereProjRadius = sphereProjRadius;
     return params;
 }
 
@@ -2297,8 +2339,14 @@ FORCE_INLINE float Map(float3 pos, FractalParams params, float foldingLimit, int
     // and the compiler will automatically unroll the loop.
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
 
-    for (int i = 0; i < loopCount; i++) {
-        MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq);
+    if (params.sphereProjBlend > 0.0f) {
+        for (int i = 0; i < loopCount; i++) {
+            MAP_ITERATION_PROJ(p, p0, foldingLimit, params, invSphereRadiusSq, params.sphereProjBlend, params.sphereProjRadius);
+        }
+    } else {
+        for (int i = 0; i < loopCount; i++) {
+            MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq);
+        }
     }
     
     // Final distance estimate
@@ -2324,8 +2372,14 @@ FORCE_INLINE float MapDistOnly(float3 pos, FractalParams params, float foldingLi
     
     const int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
     
-    for (int i = 0; i < loopCount; i++) {
-        MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq);
+    if (params.sphereProjBlend > 0.0f) {
+        for (int i = 0; i < loopCount; i++) {
+            MAP_ITERATION_PROJ(p, p0, foldingLimit, params, invSphereRadiusSq, params.sphereProjBlend, params.sphereProjRadius);
+        }
+    } else {
+        for (int i = 0; i < loopCount; i++) {
+            MAP_ITERATION_BASIC(p, p0, foldingLimit, params, invSphereRadiusSq);
+        }
     }
     
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
@@ -2369,10 +2423,22 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     half4 hScale = half4(params.scale);
     half hSphRSq = half(params.sphereRadiusSq);
     half hInvSphRSq = 1.0h / hSphRSq;
-    
+    // Coarse pass must mirror the fine Map's sphere projection, else the
+    // over-relaxed marcher seeds startT from the un-projected (box) silhouette
+    // and tunnels through the projected surface.
+    bool useProj = params.sphereProjBlend > 0.0f;
+    half hProjBlend = half(params.sphereProjBlend);
+    half hProjRadius = half(params.sphereProjRadius);
+
     // Run floor(N) iterations
-    for (int i = 0; i < itersFloor; i++) {
-        MAP_ITERATION_HALF(p, p0, hFold, hScale, hSphRSq, hInvSphRSq);
+    if (useProj) {
+        for (int i = 0; i < itersFloor; i++) {
+            MAP_ITERATION_HALF_PROJ(p, p0, hFold, hScale, hSphRSq, hInvSphRSq, hProjBlend, hProjRadius);
+        }
+    } else {
+        for (int i = 0; i < itersFloor; i++) {
+            MAP_ITERATION_HALF(p, p0, hFold, hScale, hSphRSq, hInvSphRSq);
+        }
     }
     
     // Distance after floor(N) iterations
@@ -2385,7 +2451,11 @@ FORCE_INLINE float MapContinuous(float3 pos, FractalParams params, float folding
     }
     
     // Run one more iteration for ceil(N)
-    MAP_ITERATION_HALF(p, p0, hFold, hScale, hSphRSq, hInvSphRSq);
+    if (useProj) {
+        MAP_ITERATION_HALF_PROJ(p, p0, hFold, hScale, hSphRSq, hInvSphRSq, hProjBlend, hProjRadius);
+    } else {
+        MAP_ITERATION_HALF(p, p0, hFold, hScale, hSphRSq, hInvSphRSq);
+    }
     float dCeil = (length(float3(p.xyz)) - params.absScalem1) / float(p.w) - params.absScalePow;
     
     // Smooth interpolation between floor and ceil distance estimates
@@ -2783,40 +2853,61 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     float3x3 J = float3x3(1.0f);
     
     const int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-    
-    for (int i = 0; i < loopCount; i++) {
-        // --- Box fold with Jacobian ---
-        float3 pOld = p.xyz;
-        p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
-        
-        float3 boxDiag = select(float3(-1.0f), float3(1.0f),
-                               abs(pOld.xyz) < float3(foldingLimit));
-        J[0] *= boxDiag;
-        J[1] *= boxDiag;
-        J[2] *= boxDiag;
-        
-        // --- Sphere fold with Jacobian ---
-        float r2 = dot(p.xyz, p.xyz);
-        if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; }
-        
-        float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
-        
-        J *= t;
-        p *= t;
-        
-        // --- Scale + translate with Jacobian ---
-        float s = params.scale.x;
-        p = fma(p, params.scale, p0);
-        J = s * J;
-        J[0][0] += 1.0f;
-        J[1][1] += 1.0f;
-        J[2][2] += 1.0f;
+
+    // Sphere projection alters the fold result, so the analytic Jacobian below no
+    // longer matches the (projected) distance field. When it's active we run a
+    // projection-aware loop without Jacobian accumulation and flag the cache so
+    // GetNormal falls back to finite differences over THIS now-projected map —
+    // keeping normals/colors consistent with the rendered silhouette. The
+    // no-projection path is byte-for-byte unchanged (same Jacobian, zero cost).
+    bool useProj = params.sphereProjBlend > 0.0f;
+    if (useProj) {
+        float projBlend = params.sphereProjBlend;
+        float projRadius = params.sphereProjRadius;
+        for (int i = 0; i < loopCount; i++) {
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+            float r2 = dot(p.xyz, p.xyz);
+            if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; }
+            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
+            p *= t;
+            p.xyz = mix(p.xyz, mapProjectToSphere(p.xyz, projRadius), projBlend);
+            p = fma(p, params.scale, p0);
+        }
+    } else {
+        for (int i = 0; i < loopCount; i++) {
+            // --- Box fold with Jacobian ---
+            float3 pOld = p.xyz;
+            p.xyz = fma(clamp(p.xyz, -foldingLimit, foldingLimit), float3(2.0), -p.xyz);
+
+            float3 boxDiag = select(float3(-1.0f), float3(1.0f),
+                                   abs(pOld.xyz) < float3(foldingLimit));
+            J[0] *= boxDiag;
+            J[1] *= boxDiag;
+            J[2] *= boxDiag;
+
+            // --- Sphere fold with Jacobian ---
+            float r2 = dot(p.xyz, p.xyz);
+            if (r2 < trap) { trap = r2; trapIter = i; trapPos = p.xyz; }
+
+            float t = clamp(1.0f / max(r2, params.sphereRadiusSq), 1.0f, invSphereRadiusSq);
+
+            J *= t;
+            p *= t;
+
+            // --- Scale + translate with Jacobian ---
+            float s = params.scale.x;
+            p = fma(p, params.scale, p0);
+            J = s * J;
+            J[0][0] += 1.0f;
+            J[1][1] += 1.0f;
+            J[2][2] += 1.0f;
+        }
     }
-    
+
     float d = (length(p.xyz) - params.absScalem1) / p.w - params.absScalePow;
-    
+
     d = applySafetyBubble(d, pos, params);
-    
+
     cache.p = p;
     cache.trap = trap;
     cache.distance = d;
@@ -2825,7 +2916,7 @@ FORCE_INLINE float MapWithOrbitCache(float3 pos, FractalParams params, float fol
     cache.trapIteration = trapIter;
     cache.trapPosition = trapPos;
     cache.jacobian = J;
-    cache.hasJacobian = true;
+    cache.hasJacobian = !useProj;
     
     return d;
 }
@@ -3572,7 +3663,7 @@ kernel void adaptiveHierarchical8x8(
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
 
     // === TEMPORAL REPROJECTION: PER-PIXEL ===
     // Reproject this pixel to previous frame, sample previous depth,
@@ -3830,7 +3921,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams coarseParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
             coarseTCenter = SceneCoarse(marchOrigin, marchDir, uniforms.foldingLimit, coarseParams, lodIterations, fractalType, uniforms.formulaParams, uniforms.maxViewDistance);
             ranCoarseMarch = true;
 
@@ -3978,7 +4069,7 @@ kernel void adaptiveHierarchical8x8(
                 FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                     uniforms.precomputedFractal,
                     uniforms.minDistance,
-                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+                    marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
                 
                 tg_shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
                 tg_shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
@@ -4011,7 +4102,7 @@ kernel void adaptiveHierarchical8x8(
                     FractalParams shadowParamsLocal = makeFractalParamsFromPrecomputed(
                         uniforms.precomputedFractal,
                         uniforms.minDistance,
-                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+                        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
                     shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams));
                     shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParamsLocal, shadowIterations, fractalType, uniforms.formulaParams));
                     // Tag debug overlay layer for shadow fallback (only when not already tagged by warm-start).
@@ -4022,7 +4113,7 @@ kernel void adaptiveHierarchical8x8(
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
             shaSpot = half(Shadow(p, spot, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
             shaSun = half(Shadow(p, sunDir, 0.8, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
         }
@@ -4372,7 +4463,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
 
     half3 col = half3(0.0h);
     float2 ret;
@@ -4422,7 +4513,7 @@ inline FragmentOutput fragmentMain(ColorInOut in,
             FractalParams shadowParams = makeFractalParamsFromPrecomputed(
                 uniforms.precomputedFractal,
                 uniforms.minDistance,
-                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+                marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
 
             half shaSpot = half(Shadow(p, spot, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
             half shaSun = half(Shadow(p, sunDir, quality, uniforms.foldingLimit, shadowParams, shadowIterations, fractalType, uniforms.formulaParams));
@@ -4610,7 +4701,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     FractalParams fractalParams = makeFractalParamsFromPrecomputed(
         uniforms.precomputedFractal,
         uniforms.minDistance,
-        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+        marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
 
     // === QUAD-SHARED COARSE PASS: Leader finds approximate start distance ===
     // Lane 0 does a cheap coarse raymarch, then broadcasts the result.
@@ -4658,7 +4749,7 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
         FractalParams shadowParams = makeFractalParamsFromPrecomputed(
             uniforms.precomputedFractal,
             uniforms.minDistance,
-            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength);
+            marchOrigin, uniforms.safetyBubbleRadius, uniforms.safetyBubbleEnabled, uniforms.safetyBubbleShape, uniforms.safetyBubbleFadeEnabled, uniforms.safetyBubbleFadeWidth, uniforms.safetyBubbleStrength, uniforms.sphereProjectionBlend, uniforms.sphereProjectionRadius);
         
         // Use precomputed lighting from CPU with helper function
         float4 spotData = computeSpotlight(p, uniforms.precomputedLighting.spotLightPosition);

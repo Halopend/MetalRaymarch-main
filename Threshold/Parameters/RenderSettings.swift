@@ -96,6 +96,9 @@ final class RenderSettings: @unchecked Sendable {
     private var _lightingMode: LightingMode = .animated  // Static, animated, or audio-reactive
     private var _sphericalInversionMode: SphericalInversionMode = .off
     private var _sphericalInversionRadius: Float = 2.0
+    private var _sphereProjectionEnabled: Bool = false
+    private var _sphereProjectionBlend: Float = 1.0
+    private var _sphereProjectionRadius: Float = 1.0
     private var _platformRadius: Float = 3.0
     private var _platformEnabled: Bool = true
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
@@ -426,6 +429,30 @@ final class RenderSettings: @unchecked Sendable {
         get { withLock { _sphericalInversionRadius } }
         set {
             withLock { _sphericalInversionRadius = max(0.2, min(12.0, newValue)) }
+            persistDisplay()
+        }
+    }
+
+    var sphereProjectionEnabled: Bool {
+        get { withLock { _sphereProjectionEnabled } }
+        set {
+            withLock { _sphereProjectionEnabled = newValue }
+            persistDisplay()
+        }
+    }
+
+    var sphereProjectionBlend: Float {
+        get { withLock { _sphereProjectionBlend } }
+        set {
+            withLock { _sphereProjectionBlend = max(0.0, min(1.0, newValue)) }
+            persistDisplay()
+        }
+    }
+
+    var sphereProjectionRadius: Float {
+        get { withLock { _sphereProjectionRadius } }
+        set {
+            withLock { _sphereProjectionRadius = max(0.2, min(12.0, newValue)) }
             persistDisplay()
         }
     }
@@ -1973,6 +2000,9 @@ final class RenderSettings: @unchecked Sendable {
                 lightingMode: _lightingMode,
                 sphericalInversionMode: _sphericalInversionMode,
                 sphericalInversionRadius: _sphericalInversionRadius,
+                sphereProjectionEnabled: _sphereProjectionEnabled,
+                sphereProjectionBlend: _sphereProjectionBlend,
+                sphereProjectionRadius: _sphereProjectionRadius,
                 platformRadius: _platformRadius,
                 platformEnabled: _platformEnabled,
                 audioLevel: _audioLevel,
@@ -3375,6 +3405,9 @@ final class RenderSettings: @unchecked Sendable {
                 c.lightingMode = _lightingMode
                 c.sphericalInversionMode = _sphericalInversionMode
                 c.sphericalInversionRadius = _sphericalInversionRadius
+                c.sphereProjectionEnabled = _sphereProjectionEnabled
+                c.sphereProjectionBlend = _sphereProjectionBlend
+                c.sphereProjectionRadius = _sphereProjectionRadius
                 c.platformRadius = _platformRadius
                 c.platformEnabled = _platformEnabled
                 return c
@@ -3387,6 +3420,9 @@ final class RenderSettings: @unchecked Sendable {
                 _lightingMode = newValue.lightingMode
                 _sphericalInversionMode = newValue.sphericalInversionMode
                 _sphericalInversionRadius = max(0.2, min(12.0, newValue.sphericalInversionRadius))
+                _sphereProjectionEnabled = newValue.sphereProjectionEnabled
+                _sphereProjectionBlend = max(0.0, min(1.0, newValue.sphereProjectionBlend))
+                _sphereProjectionRadius = max(0.2, min(12.0, newValue.sphereProjectionRadius))
                 _platformRadius = max(0.5, min(3.0, newValue.platformRadius))
                 _platformEnabled = newValue.platformEnabled
             }

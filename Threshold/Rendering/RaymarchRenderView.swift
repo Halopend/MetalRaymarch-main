@@ -166,6 +166,9 @@ private final class ThresholdMacRenderer {
         let colorIterations: Int32
         let sphericalInversionMode: Int32
         let sphericalInversionRadius: Int32
+        let sphereProjectionEnabled: Bool
+        let sphereProjectionBlend: Int32
+        let sphereProjectionRadius: Int32
         let safetyBubbleEnabled: Bool
         let safetyBubbleRadius: Int32
         let safetyBubbleShape: Int32
@@ -185,6 +188,9 @@ private final class ThresholdMacRenderer {
             colorIterations = Self.quantize(settings.colorIterations)
             sphericalInversionMode = settings.sphericalInversionMode.rawValue
             sphericalInversionRadius = Self.quantize(settings.sphericalInversionRadius)
+            sphereProjectionEnabled = settings.sphereProjectionEnabled
+            sphereProjectionBlend = Self.quantize(settings.sphereProjectionBlend)
+            sphereProjectionRadius = Self.quantize(settings.sphereProjectionRadius)
             safetyBubbleEnabled = settings.safetyBubbleEnabled
             safetyBubbleRadius = Self.quantize(settings.safetyBubbleRadius)
             safetyBubbleShape = Self.quantize(settings.safetyBubbleShape)
@@ -1165,6 +1171,8 @@ private final class ThresholdMacRenderer {
                         lightingSoftness: settings.lightingSoftness,
                         sphericalInversionMode: settings.sphericalInversionMode.rawValue,
                         sphericalInversionRadius: settings.sphericalInversionRadius,
+                        sphereProjectionBlend: settings.sphereProjectionEnabled ? settings.sphereProjectionBlend : 0,
+                        sphereProjectionRadius: settings.sphereProjectionRadius,
                         stepMultiplier: settings.stepMultiplier,
                         boundingSphereRadius: settings.estimatedBoundingSphereRadius,
                         springDisplacementX: settings.springDisplacement.x,

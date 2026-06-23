@@ -14,6 +14,11 @@ struct DisplayConfig: Codable, Equatable, Sendable {
     var lightingMode: LightingMode = .animated
     var sphericalInversionMode: SphericalInversionMode = .off
     var sphericalInversionRadius: Float = 2.0
+    /// Optional post-sphere-fold radial projection layered on the standard
+    /// Mandelbox ("Accidental Sphere Projection" look) as a togglable option.
+    var sphereProjectionEnabled: Bool = false
+    var sphereProjectionBlend: Float = 1.0
+    var sphereProjectionRadius: Float = 1.0
     var platformRadius: Float = 3.0
     /// When `false`, the renderer skips building the glass-floor field in
     /// the immersive space. The radius value is preserved so toggling back
@@ -24,6 +29,7 @@ struct DisplayConfig: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case showMusicShortcuts, lightingPlay, lightingMode
         case sphericalInversionMode, sphericalInversionRadius, platformRadius
+        case sphereProjectionEnabled, sphereProjectionBlend, sphereProjectionRadius
         case platformEnabled
     }
 
@@ -36,6 +42,9 @@ struct DisplayConfig: Codable, Equatable, Sendable {
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode) ?? .animated
         sphericalInversionMode = try container.decodeIfPresent(SphericalInversionMode.self, forKey: .sphericalInversionMode) ?? .off
         sphericalInversionRadius = try container.decodeIfPresent(Float.self, forKey: .sphericalInversionRadius) ?? 2.0
+        sphereProjectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled) ?? false
+        sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend) ?? 1.0
+        sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius) ?? 1.0
         platformRadius = try container.decodeIfPresent(Float.self, forKey: .platformRadius) ?? 3.0
         platformEnabled = try container.decodeIfPresent(Bool.self, forKey: .platformEnabled) ?? true
     }

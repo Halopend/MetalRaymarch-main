@@ -336,6 +336,13 @@ final class UISettingsCache {
         settings.sphericalInversionRadius = display.sphericalInversionRadius
     }
 
+    func commitSphereProjection() {
+        guard let settings else { return }
+        settings.sphereProjectionEnabled = display.sphereProjectionEnabled
+        settings.sphereProjectionBlend = display.sphereProjectionBlend
+        settings.sphereProjectionRadius = display.sphereProjectionRadius
+    }
+
     func commitPlatformRadius() {
         settings?.platformRadius = display.platformRadius
     }
