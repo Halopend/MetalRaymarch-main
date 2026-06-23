@@ -732,11 +732,11 @@ actor Renderer {
 
         frame.endUpdate()
 
-        // Drive the compositor's runtime render quality from the user's
-        // resolution slider before querying the drawable, so the drawable is
+        // Drive the compositor's runtime render quality from the dedicated
+        // Render Quality setting before querying the drawable, so the drawable is
         // sized for the requested quality. This is the visionOS-native (and
         // foveation-aware) resolution control — see applyRenderQualityIfNeeded.
-        applyRenderQualityIfNeeded(resolutionScale: appModel.renderSettings.resolutionScale)
+        applyRenderQualityIfNeeded(renderQuality: appModel.renderSettings.renderQuality)
 
         guard let timing = frame.predictTiming() else { return }
         let clockWaitStart = CACurrentMediaTime()

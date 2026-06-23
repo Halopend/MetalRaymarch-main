@@ -617,6 +617,9 @@ extension ContentView {
             }
 
             // ── Detail/Framerate Budget ──
+            // visionOS uses the compositor's Render Quality (below) for resolution;
+            // the MetalFX-driven detail budget only applies on Mac/iOS.
+            #if os(macOS) || os(iOS)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(effectiveDirectBudgetLabel)
@@ -716,7 +719,34 @@ extension ContentView {
                         .foregroundStyle(.secondary)
                 }
             }
-            
+            #endif
+
+            #if os(visionOS)
+            // ── Render Quality (Vision Pro compositor native resolution) ──
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Render Quality")
+                    Spacer()
+                    Text("\(Int((cache.quality.renderQuality * 100).rounded()))%")
+                        .fontWeight(.bold)
+                        .monospacedDigit()
+                }
+
+                Slider(value: Binding(
+                    get: { cache.quality.renderQuality },
+                    set: { newValue in
+                        let snapped = (newValue * 20).rounded() / 20   // 5% steps
+                        cache.quality.renderQuality = snapped
+                        cache.push(\.renderQuality, value: snapped)
+                    }
+                ), in: 0.5...1.0, step: 0.05)
+
+                Text("Vision Pro: the compositor's native, gaze-foveated resolution. 100% is the sharpest (renders at the full panel); lower trades crispness for GPU headroom with a smoothed transition. Independent of the detail budget above.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            #endif
+
             Divider()
         }
     }

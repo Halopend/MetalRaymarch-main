@@ -827,6 +827,13 @@ extension ContentView {
                     .foregroundStyle(.secondary)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
+            VStack(alignment: .leading, spacing: 8) {
+                RenderDiagnosticsView()
+                Text("Live from the renderer. 'Drawable' is the actual per-eye render-target size the compositor granted — at 100% render quality it should reach the panel's native resolution. Render quality tracks the resolution slider.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+
 #if DEBUG
             VStack(alignment: .leading, spacing: 8) {
                 HStack { Image(systemName: "timer").foregroundStyle(themeColor); Text("Benchmarking").font(.headline) }

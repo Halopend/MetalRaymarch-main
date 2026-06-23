@@ -243,6 +243,12 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
         let timestamp = operation.timestamp
         let layer = layer(for: operation.source)
 
+        if operation.source == .slider {
+            // Manual edit: ask the music engine to re-zero this target's drift/
+            // decay/phase so audio variation restarts cleanly around the new value.
+            cache.renderSettings?.requestMusicRecenter(targetID: operation.targetID)
+        }
+
         let formulaBatch = ParameterNodeRegistry.shared.formulaBatch(for: cache.fractalType)
         if let node = formulaBatch.floatNodes.first(where: { $0.id == operation.targetID }) {
             node.bootstrapBaseIfNeeded(from: node.readValue(cache), timestamp: timestamp)
@@ -250,6 +256,12 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             let incoming = operation.value.resolved(from: current)
             let resolved = node.applyLayer(layer, value: incoming, smoothingTime: operation.smoothing.smoothingTime, timestamp: timestamp)
             node.writeValue(cache, resolved)
+            if operation.source == .slider {
+                // A formula slider writes only this per-node stack; re-anchor the
+                // separate settings-path stack the audio layer composes on so the
+                // music center follows the edit instead of a frozen bootstrap.
+                recenterMusicBase(targetID: operation.targetID, to: incoming)
+            }
             if debugTraceEnabled {
                 print("🧮 ParamOp frame=\(operation.frameIndex) target=\(operation.targetID) src=\(operation.source.rawValue) value=\(resolved)")
             }
@@ -272,6 +284,14 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
     private func apply(_ operation: ParameterOperation, settings: RenderSettings) {
         let timestamp = operation.timestamp
         let layer = layer(for: operation.source)
+
+        if operation.source == .gesture {
+            // Manual gesture edit: the .gesture layer already re-anchors the base
+            // (same stack the audio layer uses); also re-zero the engine's
+            // accumulated drift/decay/phase so variation restarts around it.
+            settings.requestMusicRecenter(targetID: operation.targetID)
+        }
+
         if let formulaID = ParameterTargetID.parseFormulaID(operation.targetID) {
             let fractalType = formulaID.fractalType
             let formulaIndex = formulaID.formulaIndex
@@ -360,6 +380,29 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             return 0
         case .layerLerp:
             return requested
+        }
+    }
+
+    /// Re-anchor the music "center of variation" for a formula target to a fresh
+    /// manual value. The audio layer composes additively on the settings-path
+    /// `formulaStacks`, but a formula slider writes a *separate* per-node stack, so
+    /// without this the audio base stays frozen at its first bootstrap and
+    /// overwrites the slider every frame. No-op until the stack exists (i.e. until
+    /// audio has touched the target). Core/effect targets self-recenter via the
+    /// shared `coreStacks` `.ui` write, so they are intentionally excluded here.
+    func recenterMusicBase(targetID: String, to value: Float) {
+        guard ParameterTargetID.parseFormulaID(targetID) != nil else { return }
+        let timestamp = CFAbsoluteTimeGetCurrent()
+        let touched: Bool = _state.withLock { state in
+            guard var stack = state.formulaStacks[targetID] else { return false }
+            stack.recenterBase(to: value, timestamp: timestamp, clearGesture: true)
+            state.formulaStacks[targetID] = stack
+            return true
+        }
+        if touched {
+            // Collapse the live snapshot to the new base so the ghost marker
+            // doesn't flash a stale offset before the next audio frame recomputes.
+            recordLiveValue(targetID, base: value, resolved: value)
         }
     }
 

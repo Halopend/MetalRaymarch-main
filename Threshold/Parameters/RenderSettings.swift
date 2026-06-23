@@ -121,7 +121,8 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
-    
+    private var _renderQuality: Float = 1.0         // visionOS compositor drawable scale (1.0 = native)
+
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
     private var _tileSize: Int = 0                   // 0=disabled, 2=2x2, 4=4x4, 8=8x8 adaptive hierarchical
@@ -651,7 +652,17 @@ final class RenderSettings: @unchecked Sendable {
         // Sweet spot is 0.67-0.75 for best quality/performance balance
         set { withLock { _resolutionScale = max(0.33, min(1.0, newValue)) } }
     }
-    
+
+    /// visionOS-only: drives `layerRenderer.renderQuality`, the compositor's
+    /// native, gaze-foveated drawable resolution. 1.0 = native (sharpest); lower
+    /// lets the compositor render a smaller drawable and upscale it with a
+    /// smoothed transition. Orthogonal to `resolutionScale` (the MetalFX input
+    /// scale) — this is the preferred sharpness/perf lever on Vision Pro.
+    var renderQuality: Float {
+        get { withLock { _renderQuality } }
+        set { withLock { _renderQuality = max(0.5, min(1.0, newValue)) } }
+    }
+
     var fractalType: FractalModelType {
         get { withLock { _fractalType } }
         set {
@@ -2434,6 +2445,10 @@ final class RenderSettings: @unchecked Sendable {
     private var _stWorldRotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
     private var _stDetailScale: Float = 1
     private var _sceneLoadGeneration: UInt64 = 0
+    /// Targets whose music "center of variation" the user just reset manually
+    /// (slider/gesture). Drained by the music-reactive engine each frame. Only
+    /// populated while audio reactivity is enabled, so the set stays bounded.
+    private var _musicRecenterRequests: Set<String> = []
 
     /// Configured "Same Scene Transition Time" in seconds. Clamped to 0...10.
     var sceneTransitionDuration: Float {
@@ -2446,6 +2461,27 @@ final class RenderSettings: @unchecked Sendable {
     /// preset load and reset accumulated state like drift offsets.
     var sceneLoadGeneration: UInt64 {
         withLock { _sceneLoadGeneration }
+    }
+
+    /// Record that the user manually changed `targetID` (slider/gesture) so the
+    /// music-reactive engine re-zeros that target's accumulated drift/decay/phase
+    /// and audio variation restarts around the fresh value. Guarded on the
+    /// audio-reactive flag so non-reactive sessions don't accumulate entries.
+    func requestMusicRecenter(targetID: String) {
+        withLock {
+            guard _fractalAudioReactiveEnabled else { return }
+            _musicRecenterRequests.insert(targetID)
+        }
+    }
+
+    /// Atomically read and clear the pending music-recenter requests.
+    func drainMusicRecenterRequests() -> Set<String> {
+        withLock {
+            guard !_musicRecenterRequests.isEmpty else { return [] }
+            let drained = _musicRecenterRequests
+            _musicRecenterRequests.removeAll(keepingCapacity: true)
+            return drained
+        }
     }
 
     /// Snapshot the currently displayed transform/shape parameters before a new
@@ -3155,6 +3191,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.baseFractalIterations = _baseFractalIterations
                 c.baseMaxRaySteps = _baseMaxRaySteps
                 c.resolutionScale = _resolutionScale
+                c.renderQuality = _renderQuality
                 c.tileSize = _tileSize
                 c.debugHierarchical = _debugHierarchical
                 c.coherentPacketEnabled = _coherentPacketEnabled
@@ -3169,6 +3206,7 @@ final class RenderSettings: @unchecked Sendable {
                 _baseMaxRaySteps = newValue.baseMaxRaySteps
                 _maxRaySteps = newValue.baseMaxRaySteps
                 _resolutionScale = newValue.resolutionScale
+                _renderQuality = newValue.renderQuality
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled

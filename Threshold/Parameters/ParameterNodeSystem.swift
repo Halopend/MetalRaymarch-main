@@ -99,33 +99,6 @@ class FloatParameterNode: AnyParameterNodeBase, @unchecked Sendable {
             layerStack.setBaseIfNeeded(value, timestamp: timestamp)
         }
     }
-
-    /// Read-only snapshot of the layer composition for diagnostics/HUDs.
-    /// Peeks the last-resolved layer values without advancing smoothing state.
-    func inspectLayers() -> ParameterLayerInspection {
-        _layerStack.withLock { layerStack in
-            layerStack.inspect()
-        }
-    }
-}
-
-/// Diagnostic snapshot of how a parameter's final value is composed:
-/// the pre-music base (UI/gesture/system), the additive music offset,
-/// and the clamped final value within the node's range.
-struct ParameterLayerInspection: Sendable {
-    let range: ClosedRange<Float>
-    /// Resolved value through the absolute layers (UI → precompute → gesture → system).
-    let baseValue: Float
-    /// Current additive music-layer offset (0 when music reactivity is inactive).
-    let musicOffset: Float
-    /// Final value after adding the music offset and clamping to the range.
-    let finalValue: Float
-
-    /// True when base + offset exceeds the range and the final value is pinned
-    /// at a bound — the state where controls/presets appear to "stop working".
-    var isPinnedLow: Bool { baseValue + musicOffset < range.lowerBound }
-    var isPinnedHigh: Bool { baseValue + musicOffset > range.upperBound }
-    var isPinned: Bool { isPinnedLow || isPinnedHigh }
 }
 
 /// @unchecked Sendable justification: stores immutable metadata plus MainActor-only closures.
@@ -219,6 +192,16 @@ struct ParameterLayerStack: Sendable {
         ui = ParameterLayerEntry(rawValue: value, smoothingTime: nil, timestamp: timestamp)
     }
 
+    /// Force the anchor (`.ui`) layer to a fresh value, bypassing the one-shot
+    /// `setBaseIfNeeded` guard. Used when the user manually re-sets a parameter
+    /// (slider) so the additive music layer modulates around the new value
+    /// instead of a stale bootstrap. `clearGesture` drops any prior gesture
+    /// override so the manual value is authoritative.
+    mutating func recenterBase(to value: Float, timestamp: TimeInterval, clearGesture: Bool) {
+        ui = ParameterLayerEntry(rawValue: value, smoothingTime: nil, timestamp: timestamp)
+        if clearGesture { gesture = nil }
+    }
+
     @discardableResult
     mutating func apply(layer: ParameterLayer,
                         value: Float,
@@ -289,29 +272,6 @@ struct ParameterLayerStack: Sendable {
         music = musicEntry
 
         return min(range.upperBound, max(range.lowerBound, value))
-    }
-
-    /// Non-mutating peek at the current layer composition. Uses each entry's
-    /// last-resolved (smoothed) value without advancing smoothing timestamps,
-    /// so it is safe to call from UI at any rate.
-    func inspect() -> ParameterLayerInspection {
-        let peek: (ParameterLayerEntry?) -> Float? = { entry in
-            guard let entry else { return nil }
-            return entry.smoothingTime.map { $0 > 0 ? entry.lastResolved : entry.rawValue } ?? entry.rawValue
-        }
-
-        var base = peek(ui) ?? defaultValue
-        if let p = peek(precompute) { base = p }
-        if let g = peek(gesture) { base = g }
-        if let s = peek(system) { base = s }
-        base = min(range.upperBound, max(range.lowerBound, base))
-
-        let offset = music?.lastResolved ?? 0
-        let final = min(range.upperBound, max(range.lowerBound, base + offset))
-        return ParameterLayerInspection(range: range,
-                                        baseValue: base,
-                                        musicOffset: offset,
-                                        finalValue: final)
     }
 
     // MARK: - Internal helpers

@@ -189,16 +189,17 @@ extension Renderer {
     /// drawable's color texture from `layerRenderer.renderQuality` (clamped to
     /// the configuration's `maxRenderQuality`). If the app never sets it, it
     /// stays at `capabilities.defaultRenderQuality` — well below native — so the
-    /// whole image is soft even at resolutionScale 1.0 with MetalFX bypassed.
-    /// Drive it from the user's resolution ("Detail Budget") slider: 1.0 =
-    /// native (sharpest), lower = the compositor renders a smaller drawable and
-    /// upscales it natively (foveation-aware, with a smoothed transition).
-    /// Render-quality only takes effect when foveation is enabled.
-    func applyRenderQualityIfNeeded(resolutionScale: Float) {
+    /// whole image is soft even at native render scale with MetalFX bypassed.
+    /// Driven by the dedicated Render Quality setting (exposed in the Performance
+    /// section): 1.0 = native (sharpest), lower = the compositor renders a
+    /// smaller drawable and upscales it natively (foveation-aware, with a
+    /// smoothed transition). Render-quality only takes effect when foveation is
+    /// enabled.
+    func applyRenderQualityIfNeeded(renderQuality: Float) {
         if #available(visionOS 26.0, *) {
             guard layerRenderer.configuration.isFoveationEnabled else { return }
             // maxRenderQuality is configured to 1.0; the system clamps to it.
-            let target = max(0.0, min(resolutionScale, 1.0))
+            let target = max(0.0, min(renderQuality, 1.0))
             guard abs(target - lastAppliedRenderQuality) > 0.001 else { return }
             lastAppliedRenderQuality = target
             layerRenderer.renderQuality = LayerRenderer.RenderQuality(target)

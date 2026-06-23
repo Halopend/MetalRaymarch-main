@@ -601,3 +601,44 @@ struct FPSIndicatorView: View {
         .dsGlass(in: Capsule())
     }
 }
+
+// MARK: - Render Diagnostics (isolated to RenderMetrics observation)
+
+/// Live readout of the actual render resolution and quality. Reads
+/// `renderMetrics` so its low-frequency updates only invalidate this view.
+/// Lets the user confirm in-headset that the drawable is at native resolution
+/// and watch the render quality track the resolution slider.
+struct RenderDiagnosticsView: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        let metrics = appModel.renderMetrics
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "viewfinder").font(.caption)
+                Text("Render diagnostics").font(.headline)
+            }
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
+                GridRow {
+                    Text("Drawable").foregroundStyle(.secondary)
+                    Text(metrics.drawableWidth > 0
+                         ? "\(metrics.drawableWidth) × \(metrics.drawableHeight) px"
+                         : "—")
+                }
+                GridRow {
+                    Text("Render quality").foregroundStyle(.secondary)
+                    Text(metrics.renderQuality > 0 ? "\(Int((metrics.renderQuality * 100).rounded()))%" : "—")
+                }
+                GridRow {
+                    Text("Path").foregroundStyle(.secondary)
+                    Text(metrics.renderPath)
+                }
+                GridRow {
+                    Text("Foveation").foregroundStyle(.secondary)
+                    Text(metrics.foveationEnabled ? "on" : "off")
+                }
+            }
+            .font(.caption.monospacedDigit())
+        }
+    }
+}

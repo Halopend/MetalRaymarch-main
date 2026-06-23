@@ -15,6 +15,16 @@ import CoreGraphics
 @Observable
 final class RenderMetrics {
     var fps: Double = 0
+
+    // In-headset render diagnostics, updated from the render loop only when a
+    // value changes. Lets the user confirm the actual drawable resolution and
+    // the runtime render quality the compositor granted (see
+    // Renderer.publishRenderDiagnostics).
+    var drawableWidth: Int = 0
+    var drawableHeight: Int = 0
+    var renderQuality: Float = 0      // current target, driven by the resolution slider
+    var foveationEnabled: Bool = false
+    var renderPath: String = "—"
 }
 
 /// High-frequency hand tracking UI state isolated from AppModel so that

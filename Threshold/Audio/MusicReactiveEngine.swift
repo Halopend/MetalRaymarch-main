@@ -153,6 +153,18 @@ final class MusicReactiveEngine {
         let mappings = settings.musicReactiveMappings
         refreshResolvedMappingsIfNeeded(for: activeFractalType, mappings: mappings)
 
+        // Drain manual re-center requests AFTER the mapping refresh (so the
+        // targetID→target map is current) and BEFORE the offset loop (so this
+        // frame already reflects the reset). Re-zeros drift/decay/phase for any
+        // target the user just moved manually, so variation restarts from zero
+        // around the fresh value instead of carrying a stale offset.
+        let recenterRequests = settings.drainMusicRecenterRequests()
+        if !recenterRequests.isEmpty {
+            for mapping in activeResolvedMappings where recenterRequests.contains(mapping.targetID) {
+                resetState(for: mapping.target)
+            }
+        }
+
         let slotGainLookup = slotGainLookup(for: activeFractalType,
                                             tripletGains: settings.tripletMusicGains)
 
@@ -291,6 +303,9 @@ final class MusicReactiveEngine {
         layerActive = false
         clearCurveState()
         resetDamping()
+        // Discard any pending re-center requests so they don't linger across an
+        // audio-off/on cycle (the curve state was just cleared anyway).
+        _ = settings.drainMusicRecenterRequests()
     }
 
     // MARK: - Internals
