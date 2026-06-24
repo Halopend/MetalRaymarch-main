@@ -35,15 +35,17 @@ private enum GH {
         .ring:   CGPoint(x: 0.93,  y: 0.69),
     ]
 
-    static let stageHeight: CGFloat = 250
-    static let handWidthFactor: CGFloat = 0.42
-    static let handWidthCap: CGFloat = 320
-    static let orbDiameter: CGFloat = 30
-    static let orbHit: CGFloat = 48
-    static let lineInset: CGFloat = 20   // gap between orb edge and pairing line
+    static let stageHeight: CGFloat = 320
+    /// Center gap reserved for the pairing-line chips. Hands fill the rest, so the
+    /// channel never collapses regardless of pane width (more robust than a fixed cap).
+    static let channelMin: CGFloat = 230
+    static let handWidthCap: CGFloat = 440
+    static let orbDiameter: CGFloat = 36
+    static let orbHit: CGFloat = 54
+    static let lineInset: CGFloat = 22   // gap between orb edge and pairing line
 
     static func handWidth(_ W: CGFloat) -> CGFloat {
-        min(W * handWidthFactor, handWidthCap, (stageHeight - 24) * handAspect)
+        max(120, min((W - channelMin) / 2, handWidthCap, (stageHeight - 20) * handAspect))
     }
     static func handCenterX(_ hand: GestureHandMode, _ W: CGFloat) -> CGFloat {
         let hw = handWidth(W)
@@ -115,7 +117,7 @@ extension ContentView {
             .renderingMode(.template)
             .aspectRatio(contentMode: .fit)
             .frame(width: hw, height: hh)
-            .foregroundStyle(.secondary.opacity(0.20))
+            .foregroundStyle(.secondary.opacity(0.28))
             .scaleEffect(x: hand == .left ? 1 : -1, y: 1)
             .position(x: GH.handCenterX(hand, W), y: GH.stageHeight / 2)
             .allowsHitTesting(false)
