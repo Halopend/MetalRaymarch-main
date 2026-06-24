@@ -15,113 +15,43 @@ import UIKit
 import AppKit
 #endif
 
-struct HoldToSaveResetButton: View {
-    let onTapReset: () -> Void
-    let onHoldReady: () -> Void
-
-    @State private var isPressing = false
-    @State private var holdProgress: CGFloat = 0
-    @State private var holdTask: Task<Void, Never>?
-    @State private var holdCompleted = false
-
-    private let holdArmDelay: TimeInterval = 0.25
-    private let holdDuration: TimeInterval = 1.1
-
-    private var totalHoldDuration: TimeInterval {
-        holdArmDelay + holdDuration
-    }
+/// Bottom-bar controls: a plain Reset button paired with a separate "+" button
+/// that opens the save-destination flow. Replaces the former hold-to-save capsule
+/// so saving is an explicit tap on its own control rather than a long-press.
+struct ResetAndSaveControls: View {
+    let onReset: () -> Void
+    let onAdd: () -> Void
 
     var body: some View {
-        ZStack {
-            Capsule()
-                .fill(Color.green.opacity(0.12))
-
-            GeometryReader { geo in
-                Capsule()
-                    .fill(Color.green.opacity(0.28))
-                    .frame(width: max(0, geo.size.width * holdProgress))
-            }
-            .clipShape(Capsule())
-
-            HStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.primary.opacity(0.15), lineWidth: 2)
-                        .frame(width: 18, height: 18)
-                    Circle()
-                        .trim(from: 0, to: holdProgress)
-                        .stroke(Color.green,
-                                style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 18, height: 18)
-
-                    Image(systemName: isPressing ? "square.and.arrow.down" : "arrow.counterclockwise")
-                        .font(.system(size: 9, weight: .semibold))
+        HStack(spacing: 8) {
+            Button(action: onReset) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Reset")
+                        .font(.subheadline.weight(.semibold))
                 }
-
-                Text(isPressing ? "Save" : "Reset")
-                    .font(.subheadline.weight(.semibold))
-                    .monospacedDigit()
+                .padding(.horizontal, 14)
+                .frame(height: 34)
+                .contentShape(Capsule())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-        .frame(width: 118, height: 34)
-        .contentShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.green.opacity(0.45), lineWidth: 1)
-        )
-        .animation(.easeInOut(duration: 0.15), value: holdProgress)
-        .animation(.easeInOut(duration: 0.2), value: isPressing)
-        .help("Tap to reset. Long press to choose where to save the current settings.")
-        .onTapGesture {
-            guard !isPressing else { return }
-            onTapReset()
-        }
-        .onLongPressGesture(minimumDuration: totalHoldDuration, maximumDistance: 24, pressing: handlePressingChanged) {
-            completeHold()
-        }
-    }
+            .buttonStyle(.plain)
+            .foregroundStyle(.primary)
+            .background(Capsule().fill(Color.green.opacity(0.12)))
+            .overlay(Capsule().stroke(Color.green.opacity(0.45), lineWidth: 1))
+            .help("Reset the current fractal to its saved settings.")
 
-    private func handlePressingChanged(_ pressing: Bool) {
-        if pressing {
-            holdCompleted = false
-            isPressing = true
-            holdTask?.cancel()
-            holdTask = Task { @MainActor in
-                let start = Date()
-                while !Task.isCancelled {
-                    let elapsed = Date().timeIntervalSince(start)
-                    let activeHoldElapsed = max(0.0, elapsed - holdArmDelay)
-                    holdProgress = min(1.0, activeHoldElapsed / holdDuration)
-                    if elapsed >= totalHoldDuration { break }
-                    try? await Task.sleep(nanoseconds: 33_000_000)
-                }
+            Button(action: onAdd) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                    .frame(width: 34, height: 34)
+                    .contentShape(Circle())
             }
-        } else {
-            holdTask?.cancel()
-            holdTask = nil
-            isPressing = false
-            if !holdCompleted {
-                holdProgress = 0
-            }
-        }
-    }
-
-    private func completeHold() {
-        holdCompleted = true
-        holdTask?.cancel()
-        holdTask = nil
-        holdProgress = 1
-        isPressing = false
-        onHoldReady()
-
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            holdProgress = 0
-            isPressing = false
-            holdCompleted = false
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.green)
+            .background(Circle().fill(Color.green.opacity(0.12)))
+            .overlay(Circle().stroke(Color.green.opacity(0.45), lineWidth: 1))
+            .help("Save the current settings as a new scene.")
         }
     }
 }
