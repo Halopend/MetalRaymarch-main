@@ -54,7 +54,7 @@ extension ContentView {
 
     private var gestureAssignmentsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            gesturePictographicAssignmentPanel
+            gestureHandConstellationPanel
 
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 8) {
