@@ -538,7 +538,10 @@ final class ParameterNodeRegistry: @unchecked Sendable {
                 display: GestureDisplayMetadata(
                     title: "\(prefix) XYZ",
                     subtitle: descriptor.name,
-                    icon: "move.3d"
+                    // Match the icon family of the triplet's scalar components so the
+                    // same concept reads identically across the two-hand and single-
+                    // finger menus (e.g. a "Scale" group uses the scale glyph, not move.3d).
+                    icon: Self.icon(for: prefix)
                 )
             ))
         }

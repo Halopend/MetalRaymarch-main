@@ -1152,12 +1152,13 @@ final class GestureController {
             }
             if active && state.isActive {
                 let currentPos = hand.pinchPosition(digit: digit)
-                // Use horizontal (X) or vertical (Y) delta based on slot direction
+                // Map the finger-movement axis from the slot direction:
+                // horizontal → X (left/right), depth → Z (toward/away), vertical → Y (up/down).
                 let axisDelta: Float
-                if slot.direction == .horizontal {
-                    axisDelta = currentPos.x - state.prevPos.x
-                } else {
-                    axisDelta = currentPos.y - state.prevPos.y
+                switch slot.direction {
+                case .horizontal: axisDelta = currentPos.x - state.prevPos.x
+                case .depth:      axisDelta = currentPos.z - state.prevPos.z
+                default:          axisDelta = currentPos.y - state.prevPos.y
                 }
                 let sensitivity = settings.gestureSensitivity
                 let rangeSpan = node.range.upperBound - node.range.lowerBound

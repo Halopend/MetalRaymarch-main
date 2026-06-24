@@ -103,6 +103,8 @@ extension ContentView {
             Text("Tap a fingertip to map one hand  ·  tap the line between matching fingers for a both-hands gesture.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+
+            gestureAssignmentsSummary
         }
     }
 
@@ -144,55 +146,199 @@ extension ContentView {
     }
 
     // ── Single-hand fingertip orb (Menu) ─────────────────────────────────────
+    //
+    // Param-first menu: each control is listed ONCE; you pick which axis it claims.
+    //   • Whole-finger bindings (Translate, an XYZ triplet) → "Claim All Axes".
+    //   • Scalar params → "Claim Vertical / Horizontal / Depth".
+    // The verb flips to "Reclaim" when the target axis (or the whole finger) is
+    // already taken, so free vs. occupied reads at a glance. A finger is EITHER one
+    // whole-finger binding OR per-axis scalars (within-finger mutual exclusion).
 
     @ViewBuilder
     private func fingertipOrbMenu(_ hand: GestureHandMode, _ finger: FingerDigit) -> some View {
         let paired = cache.gestureBinding(for: GestureSlot(hand: .both, finger: finger)) != .core(.none)
-        let vSlot = GestureSlot(hand: hand, finger: finger, direction: .vertical)
-        let hSlot = GestureSlot(hand: hand, finger: finger, direction: .horizontal)
-        let zSlot = GestureSlot(hand: hand, finger: finger, direction: .depth)
-        let vB = cache.gestureBinding(for: vSlot)
-        let hB = cache.gestureBinding(for: hSlot)
-        let zB = cache.gestureBinding(for: zSlot)
-        let lit = [vB, hB, zB].filter { $0 != .core(.none) }.count
-        let dominant = [vB, hB, zB].first { $0 != .core(.none) }
+        let whole = currentWholeBinding(hand, finger)
+        let vB = cache.gestureBinding(for: GestureSlot(hand: hand, finger: finger, direction: .vertical))
+        let hB = cache.gestureBinding(for: GestureSlot(hand: hand, finger: finger, direction: .horizontal))
+        let zB = cache.gestureBinding(for: GestureSlot(hand: hand, finger: finger, direction: .depth))
+        let scalarCount = [vB, hB, zB].filter { $0 != .core(.none) }.count
+        let lit = whole != nil ? 3 : scalarCount
+        let centerIcon = paired ? "arrow.left.arrow.right"
+            : (whole?.icon ?? [vB, hB, zB].first { $0 != .core(.none) }?.icon ?? "plus")
+
         let bindings = GestureActionBinding.availableBindings(for: cache.fractalType, handMode: hand)
+        let threeAxis = bindings.filter { $0.isThreeAxisFinger }
+        let scalars = bindings.filter { $0.isScalarParam }
 
         Menu {
-            gestureAxisMenuSection("Vertical", vSlot, vB, bindings)
-            gestureAxisMenuSection("Horizontal", hSlot, hB, bindings)
-            gestureAxisMenuSection("Depth", zSlot, zB, bindings)
-            if lit > 0 {
-                Divider()
-                Button("Clear Finger", role: .destructive) {
-                    cache.setGestureBinding(.core(.none), for: vSlot)
-                    cache.setGestureBinding(.core(.none), for: hSlot)
-                    cache.setGestureBinding(.core(.none), for: zSlot)
+            if !threeAxis.isEmpty {
+                Section("Whole finger") {
+                    ForEach(threeAxis, id: \.self) { b in
+                        Menu {
+                            wholeFingerClaimButton(b, hand, finger)
+                        } label: {
+                            Label(b.contextualDisplayName(for: cache.fractalType), systemImage: b.icon)
+                        }
+                    }
                 }
             }
+            Section("Single-axis dials") {
+                ForEach(scalars, id: \.self) { p in
+                    Menu {
+                        axisClaimButton(p, .vertical, hand, finger)
+                        axisClaimButton(p, .horizontal, hand, finger)
+                        axisClaimButton(p, .depth, hand, finger)
+                    } label: {
+                        Label(p.contextualDisplayName(for: cache.fractalType), systemImage: p.icon)
+                    }
+                }
+            }
+            if lit > 0 {
+                Divider()
+                Button("Clear Finger", role: .destructive) { clearFinger(hand, finger) }
+            }
         } label: {
-            FingerOrbLabel(paired: paired, litCount: lit,
-                           iconName: paired ? "arrow.left.arrow.right" : (dominant?.icon ?? "plus"))
+            FingerOrbLabel(paired: paired, litCount: lit, iconName: centerIcon)
         }
         .buttonStyle(.plain)
     }
 
     @ViewBuilder
-    private func gestureAxisMenuSection(_ title: String, _ slot: GestureSlot,
-                                        _ current: GestureActionBinding,
-                                        _ bindings: [GestureActionBinding]) -> some View {
-        Section(title) {
-            ForEach(bindings, id: \.self) { action in
-                Button {
-                    cache.setGestureBinding(action, for: slot)
-                } label: {
-                    HStack {
-                        Label(action.contextualDisplayName(for: cache.fractalType), systemImage: action.icon)
-                        if current == action { Image(systemName: "checkmark") }
-                    }
+    private func wholeFingerClaimButton(_ b: GestureActionBinding,
+                                        _ hand: GestureHandMode, _ finger: FingerDigit) -> some View {
+        let isCurrent = currentWholeBinding(hand, finger) == b
+        let hasOther = fingerHasAnyBinding(hand, finger) && !isCurrent
+        Button {
+            if isCurrent { clearFinger(hand, finger) } else { claimAllAxes(b, hand, finger) }
+        } label: {
+            if isCurrent { Label("Remove (all axes)", systemImage: "checkmark") }
+            else { Text(hasOther ? "Reclaim All Axes" : "Claim All Axes") }
+        }
+    }
+
+    @ViewBuilder
+    private func axisClaimButton(_ p: GestureActionBinding, _ axis: GestureDirection,
+                                 _ hand: GestureHandMode, _ finger: FingerDigit) -> some View {
+        let slot = GestureSlot(hand: hand, finger: finger, direction: axis)
+        let occupant = cache.gestureBinding(for: slot)
+        let whole = currentWholeBinding(hand, finger)
+        let isThisHere = (whole == nil && occupant == p)
+        let taken = (whole != nil) || (occupant != .core(.none) && !isThisHere)
+        Button {
+            if isThisHere { cache.setGestureBinding(.core(.none), for: slot) }
+            else { claimScalar(p, axis, hand, finger) }
+        } label: {
+            if isThisHere { Label("Remove \(axis.displayName)", systemImage: "checkmark") }
+            else { Text("\(taken ? "Reclaim" : "Claim") \(axis.displayName)") }
+        }
+    }
+
+    // ── Within-finger binding actions ────────────────────────────────────────
+
+    /// The whole-finger (3-axis) binding occupying this finger, if any. By
+    /// convention a 3-axis binding is stored in the finger's vertical slot.
+    private func currentWholeBinding(_ hand: GestureHandMode, _ finger: FingerDigit) -> GestureActionBinding? {
+        let vB = cache.gestureBinding(for: GestureSlot(hand: hand, finger: finger, direction: .vertical))
+        return vB.isThreeAxisFinger ? vB : nil
+    }
+
+    private func fingerHasAnyBinding(_ hand: GestureHandMode, _ finger: FingerDigit) -> Bool {
+        GestureDirection.allCases.contains {
+            cache.gestureBinding(for: GestureSlot(hand: hand, finger: finger, direction: $0)) != .core(.none)
+        }
+    }
+
+    private func claimAllAxes(_ b: GestureActionBinding, _ hand: GestureHandMode, _ finger: FingerDigit) {
+        cache.setGestureBinding(.core(.none), for: GestureSlot(hand: hand, finger: finger, direction: .horizontal))
+        cache.setGestureBinding(.core(.none), for: GestureSlot(hand: hand, finger: finger, direction: .depth))
+        cache.setGestureBinding(b, for: GestureSlot(hand: hand, finger: finger, direction: .vertical))
+    }
+
+    private func claimScalar(_ p: GestureActionBinding, _ axis: GestureDirection,
+                             _ hand: GestureHandMode, _ finger: FingerDigit) {
+        // Claiming a single axis displaces any whole-finger binding first.
+        if currentWholeBinding(hand, finger) != nil {
+            cache.setGestureBinding(.core(.none), for: GestureSlot(hand: hand, finger: finger, direction: .vertical))
+        }
+        cache.setGestureBinding(p, for: GestureSlot(hand: hand, finger: finger, direction: axis))
+    }
+
+    private func clearFinger(_ hand: GestureHandMode, _ finger: FingerDigit) {
+        for dir in GestureDirection.allCases {
+            cache.setGestureBinding(.core(.none), for: GestureSlot(hand: hand, finger: finger, direction: dir))
+        }
+    }
+
+    // ── Assignments summary (communicates EVERY per-axis binding) ────────────
+
+    @ViewBuilder
+    var gestureAssignmentsSummary: some View {
+        let hasAny = FingerDigit.allCases.contains { f in
+            cache.gestureBinding(for: GestureSlot(hand: .both, finger: f)) != .core(.none)
+                || fingerHasAnyBinding(.left, f) || fingerHasAnyBinding(.right, f)
+        }
+        VStack(alignment: .leading, spacing: 4) {
+            if hasAny {
+                ForEach(FingerDigit.allCases, id: \.self) { finger in
+                    summaryRows(for: finger)
+                }
+            } else {
+                Text("No finger gestures assigned yet.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private func summaryRows(for finger: FingerDigit) -> some View {
+        let both = cache.gestureBinding(for: GestureSlot(hand: .both, finger: finger))
+        if both != .core(.none) {
+            HStack(spacing: 8) {
+                Text("Both · \(finger.displayName)")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    .frame(width: 96, alignment: .leading)
+                summaryChip("⇄", both.icon, both.contextualDisplayName(for: cache.fractalType))
+                Spacer(minLength: 0)
+            }
+        } else {
+            ForEach([GestureHandMode.left, GestureHandMode.right], id: \.self) { hand in
+                if fingerHasAnyBinding(hand, finger) {
+                    summaryFingerRow(hand, finger)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func summaryFingerRow(_ hand: GestureHandMode, _ finger: FingerDigit) -> some View {
+        HStack(spacing: 6) {
+            Text("\(hand == .left ? "L" : "R") · \(finger.displayName)")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            if let whole = currentWholeBinding(hand, finger) {
+                summaryChip("XYZ", whole.icon, whole.contextualDisplayName(for: cache.fractalType))
+            } else {
+                ForEach(GestureDirection.allCases, id: \.self) { dir in
+                    let b = cache.gestureBinding(for: GestureSlot(hand: hand, finger: finger, direction: dir))
+                    if b != .core(.none) {
+                        summaryChip(dir.glyph, b.icon, b.contextualDisplayName(for: cache.fractalType))
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func summaryChip(_ axisGlyph: String, _ icon: String, _ text: String) -> some View {
+        HStack(spacing: 3) {
+            Text(axisGlyph).font(.system(size: 9, weight: .bold)).foregroundStyle(GH.blue)
+            Image(systemName: icon).font(.system(size: 9))
+            Text(text).font(.caption2).lineLimit(1)
+        }
+        .foregroundStyle(GH.label.opacity(0.9))
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(Capsule().fill(Color.secondary.opacity(0.10)))
     }
 
     // ── Both-hands pairing chip (Menu) ───────────────────────────────────────
@@ -311,5 +457,34 @@ private struct PairLineShape: Shape {
         p.move(to: CGPoint(x: x1, y: y))
         p.addLine(to: CGPoint(x: x2, y: y))
         return p
+    }
+}
+
+// MARK: - Binding arity helpers
+
+extension GestureActionBinding {
+    /// Bindings that consume all three movement axes at once (direction is ignored
+    /// by the engine): Translate and the XYZ parameter triplets.
+    var isThreeAxisFinger: Bool {
+        switch self {
+        case .core(.translate), .parameterTriplet: return true
+        default: return false
+        }
+    }
+    /// A single 1-D scalar parameter, assignable to one chosen axis.
+    var isScalarParam: Bool {
+        if case .parameter = self { return true }
+        return false
+    }
+}
+
+extension GestureDirection {
+    /// Compact glyph for the assignments summary.
+    var glyph: String {
+        switch self {
+        case .vertical:   return "↕"
+        case .horizontal: return "↔"
+        case .depth:      return "⤢"
+        }
     }
 }
