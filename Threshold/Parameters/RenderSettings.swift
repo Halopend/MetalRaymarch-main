@@ -244,6 +244,7 @@ final class RenderSettings: @unchecked Sendable {
     // it never rescales the accumulated phase, which is what used to snap the colours.
     private var _huePhase: Float = 0.0                      // Hue rotation phase (radians, wrapped to [0,2π))
     private var _pulsePhase: Float = 0.0                    // Pulse phase (radians, wrapped to [0,2π))
+    private var _fogHuePhase: Float = 0.0                   // Fog-tint hue cycle phase (radians, wrapped to [0,2π))
     private var _gradientPhase: Float = 0.0                 // Gradient cycle offset phase (wrapped to [0,1))
     private var _animationActivityFactor: Float = 1.0
     private var _animationKillSwitchActive: Bool = false
@@ -632,6 +633,15 @@ final class RenderSettings: @unchecked Sendable {
     func audioModulateSaturation(_ value: Float) {
         withLock {
             _colorSchemeSaturation = max(0.0, min(3.0, value))
+        }
+    }
+
+    /// Modulate the safety-bubble inner radius. Writes the private backing value
+    /// directly (no persistence) so the audio layer can drive it every frame
+    /// without spamming disk, mirroring the other `audioModulate*` effects.
+    func audioModulateSafetyBubbleRadius(_ value: Float) {
+        withLock {
+            _safetyBubbleRadius = max(0.5, min(2.5, value))
         }
     }
     
@@ -1843,6 +1853,14 @@ final class RenderSettings: @unchecked Sendable {
                 _pulsePhase += lightStep * _pulseEffect.speed * twoPi
                 _pulsePhase = _pulsePhase.truncatingRemainder(dividingBy: twoPi)
             }
+            if _fogEffect.hueRotateEnabled {
+                // Fog tint cycles its hue on its own timer. Uses the same
+                // master-variation-scaled `lightStep` as the global hue rotation
+                // so the Color Shift Speed slider calms it too; no audio coupling
+                // keeps it a steady atmospheric drift.
+                _fogHuePhase += lightStep * _fogEffect.hueRotateSpeed * twoPi
+                _fogHuePhase = _fogHuePhase.truncatingRemainder(dividingBy: twoPi)
+            }
             if _gradientCycleEffect.enabled {
                 _gradientPhase += lightStep * _gradientCycleEffect.speed
                 _gradientPhase = _gradientPhase.truncatingRemainder(dividingBy: 1.0)
@@ -1900,6 +1918,61 @@ final class RenderSettings: @unchecked Sendable {
         }
     }
     
+    /// The fog tint to render this frame. When the fog hue-cycle is enabled, the
+    /// configured tint is rotated through the hue wheel by the accumulated
+    /// `_fogHuePhase`; otherwise the raw configured color is returned. Caller must
+    /// hold the settings lock (reads `_fogEffect` / `_fogHuePhase` backing values).
+    private func effectiveFogColorLocked() -> SIMD3<Float> {
+        guard _fogEffect.hueRotateEnabled else { return _fogEffect.color }
+        let turns = _fogHuePhase / (Float.pi * 2.0)   // radians → [0,1) hue turns
+        return Self.shiftHue(_fogEffect.color, byTurns: turns)
+    }
+
+    /// Rotates an RGB color's hue by `byTurns` (1.0 = full wheel), preserving
+    /// saturation and value. Pure function; used for the fog hue cycle.
+    static func shiftHue(_ rgb: SIMD3<Float>, byTurns: Float) -> SIMD3<Float> {
+        let r = rgb.x, g = rgb.y, b = rgb.z
+        let maxC = max(r, max(g, b))
+        let minC = min(r, min(g, b))
+        let delta = maxC - minC
+
+        var h: Float = 0
+        if delta > 1e-6 {
+            if maxC == r {
+                h = (g - b) / delta
+            } else if maxC == g {
+                h = 2 + (b - r) / delta
+            } else {
+                h = 4 + (r - g) / delta
+            }
+            h /= 6
+        }
+        let s = maxC > 1e-6 ? delta / maxC : 0
+        let v = maxC
+
+        // Shift hue and wrap into [0,1).
+        h = (h + byTurns).truncatingRemainder(dividingBy: 1.0)
+        if h < 0 { h += 1 }
+
+        if s <= 1e-6 { return SIMD3<Float>(v, v, v) }   // grey: hue is undefined
+
+        let sector = h * 6.0
+        let i = Int(floor(sector)) % 6
+        let f = sector - floor(sector)
+        let p = v * (1 - s)
+        let q = v * (1 - f * s)
+        let t = v * (1 - (1 - f) * s)
+
+        switch i {
+        case 0: return SIMD3<Float>(v, t, p)
+        case 1: return SIMD3<Float>(q, v, p)
+        case 2: return SIMD3<Float>(p, v, t)
+        case 3: return SIMD3<Float>(p, q, v)
+        case 4: return SIMD3<Float>(t, p, v)
+        default: return SIMD3<Float>(v, p, q)
+        }
+    }
+
     private func makeColorSchemeParamsLocked() -> ColorSchemeParams {
         let currentNeon = _targetColorScheme.neonParams
         let previousNeon = _colorScheme.neonParams
@@ -2088,7 +2161,7 @@ final class RenderSettings: @unchecked Sendable {
                 lightingSoftness: _lightingSoftness,
                 fogEnabled: _fogEffect.enabled,
                 fogIntensity: _fogEffect.intensity,
-                fogColor: _fogEffect.color,
+                fogColor: effectiveFogColorLocked(),
                 worldRotation: _worldRotation,
                 detailScale: _detailScale,
                 geometryState: _geometryState,

@@ -128,6 +128,26 @@ enum MusicReactiveSource: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// Groups music-reactive targets so the "Add Control" menu can present collapsible
+/// sub-sections instead of one long flat list. Formula param slots get their own
+/// fractal-named section handled separately by the UI.
+enum MusicReactiveTargetCategory: String, CaseIterable, Sendable {
+    case geometry = "Geometry"
+    case color = "Color"
+    case light = "Light & Effects"
+
+    var icon: String {
+        switch self {
+        case .geometry: return "cube.transparent"
+        case .color: return "paintpalette"
+        case .light: return "sun.max"
+        }
+    }
+
+    /// Display order for the universal (non-formula) sections.
+    static let universalOrder: [MusicReactiveTargetCategory] = [.geometry, .color, .light]
+}
+
 enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     // Universal core parameters (work with every fractal type)
     case fractalScale
@@ -140,6 +160,9 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     case bloom
     case hueSpeed
     case saturation
+
+    // Universal geometry parameter — safety bubble inner radius.
+    case safetyBubbleRadius
 
     // Dynamic formula-parameter slots — resolve via FormulaCatalog for the active fractal.
     // formulaParam0 maps to the 1st non-bool param, formulaParam1 to the 2nd, etc.
@@ -179,7 +202,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
     /// Formula param slots beyond what the active fractal supports are hidden.
     static var availableCases: [MusicReactiveTarget] {
         [.fractalScale, .colorMix, .iterations,
-         .glow, .fog, .bloom, .hueSpeed, .saturation]
+         .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius]
     }
 
     /// Returns the full list of available targets for a given fractal type,
@@ -188,7 +211,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         let formulaCount = floatFormulaParams(for: fractalType).count
         let formulaSlots = Array(allFormulaParamCases.prefix(formulaCount))
         return [.fractalScale, .colorMix, .iterations,
-                .glow, .fog, .bloom, .hueSpeed, .saturation] + formulaSlots
+                .glow, .fog, .bloom, .hueSpeed, .saturation, .safetyBubbleRadius] + formulaSlots
     }
 
     /// Whether this target is a dynamic formula parameter slot.
@@ -235,6 +258,26 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         return displayName
     }
 
+    /// Category used to group this target in the "Add Control" menu. Formula param
+    /// slots are surfaced under their own fractal-named section by the UI, so they
+    /// fall through to `.geometry` here and are never read via this property.
+    var category: MusicReactiveTargetCategory {
+        switch self {
+        case .fractalScale, .iterations, .safetyBubbleRadius:
+            return .geometry
+        case .colorMix, .hueSpeed, .saturation:
+            return .color
+        case .glow, .fog, .bloom:
+            return .light
+        case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
+             .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
+             .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
+             .formulaParam12, .formulaParam13, .formulaParam14, .formulaParam15,
+             .foldingLimit, .sphereRadius:
+            return .geometry
+        }
+    }
+
     var displayName: String {
         switch self {
         case .fractalScale: return "Fractal Scale"
@@ -245,6 +288,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return "Bloom"
         case .hueSpeed: return "Hue Speed"
         case .saturation: return "Saturation"
+        case .safetyBubbleRadius: return "Inner Radius"
         case .formulaParam0: return "Formula Param 1"
         case .formulaParam1: return "Formula Param 2"
         case .formulaParam2: return "Formula Param 3"
@@ -283,6 +327,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return "sun.max"
         case .hueSpeed: return "dial.high"
         case .saturation: return "circle.lefthalf.filled"
+        case .safetyBubbleRadius: return "circle.dashed"
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
@@ -311,6 +356,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return 0.0...2.0
         case .hueSpeed: return 0.0...0.5
         case .saturation: return 0.0...3.0
+        case .safetyBubbleRadius: return 0.5...2.5
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
@@ -330,6 +376,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return .beat
         case .hueSpeed: return .treble
         case .saturation: return .mid
+        case .safetyBubbleRadius: return .composite
         case .formulaParam0: return .bass
         case .formulaParam1: return .mid
         case .formulaParam2: return .treble
@@ -362,6 +409,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom:         return .pulse
         case .hueSpeed:      return .drift
         case .saturation:    return .drift
+        case .safetyBubbleRadius: return .drift
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
@@ -377,7 +425,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .glow, .bloom, .hueSpeed, .saturation:
             return true
         case .fractalScale, .colorMix, .iterations,
-             .fog,
+             .fog, .safetyBubbleRadius,
              .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,
@@ -409,6 +457,7 @@ enum MusicReactiveTarget: String, CaseIterable, Codable, Sendable {
         case .bloom: return ParameterTargetID.Effect.bloom
         case .hueSpeed: return ParameterTargetID.Effect.hueSpeed
         case .saturation: return ParameterTargetID.Effect.saturation
+        case .safetyBubbleRadius: return ParameterTargetID.Effect.safetyBubbleRadius
         case .formulaParam0, .formulaParam1, .formulaParam2, .formulaParam3,
              .formulaParam4, .formulaParam5, .formulaParam6, .formulaParam7,
              .formulaParam8, .formulaParam9, .formulaParam10, .formulaParam11,

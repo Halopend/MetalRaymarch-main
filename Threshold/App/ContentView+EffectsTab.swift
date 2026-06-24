@@ -112,6 +112,19 @@ extension ContentView {
                     enabled: Binding(get: { cache.lighting.hueRotationEffect.enabled }, set: { cache.lighting.hueRotationEffect.enabled = $0 }),
                     onChanged: { cache.commitHueRotationEffect() },
                     showToggle: false)
+                Divider().padding(.leading, 159)
+                EffectSliderRow(icon: "cloud.fog.fill", label: "Fog Hue Cycle",
+                    value: Binding(get: { cache.lighting.fogEffect.hueRotateSpeed }, set: { cache.lighting.fogEffect.hueRotateSpeed = $0 }),
+                    range: 0...0.5,
+                    enabled: Binding(get: { cache.lighting.fogEffect.hueRotateEnabled }, set: { cache.lighting.fogEffect.hueRotateEnabled = $0 }),
+                    onChanged: { cache.commitFogEffect() })
+                if cache.lighting.fogEffect.hueRotateEnabled {
+                    Text("Cycles the Fog Tint's hue over time, separate from Hue Rotation. Pick a vivid Fog Tint in the Static tab to see it.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 24)
+                }
             }
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue.opacity(0.06)))

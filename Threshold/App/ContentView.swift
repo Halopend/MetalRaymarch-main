@@ -114,6 +114,7 @@ struct ContentView: View {
         var count = 0
         if cache.lighting.gradientCycleEffect.enabled { count += 1 }
         if cache.lighting.hueRotationEffect.enabled { count += 1 }
+        if cache.lighting.fogEffect.hueRotateEnabled { count += 1 }
         if cache.lighting.pulseEffect.enabled { count += 1 }
         if cache.lighting.linearRailEffect.enabled { count += 1 }
         if cache.lighting.beatFlashEffect.enabled { count += 1 }
@@ -550,11 +551,11 @@ struct ContentView: View {
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(colorScheme == .dark ? 0.82 : 0.72))
+                    .fill(colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.72))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.10 : 0.14), lineWidth: 1)
+                    .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.14), lineWidth: 1)
             )
             .thresholdGlassBackground(cornerRadius: 18)
     }
@@ -1178,9 +1179,9 @@ struct ContentView: View {
                         .disabled(animationManager.isPlaying)
                 }
 
-                HoldToSaveResetButton(
-                    onTapReset: resetCurrentFractalSettings,
-                    onHoldReady: {
+                ResetAndSaveControls(
+                    onReset: resetCurrentFractalSettings,
+                    onAdd: {
                         showSaveDestinationSheet = true
                     }
                 )
@@ -1384,7 +1385,7 @@ struct ContentView: View {
 
 // MARK: - Extracted Components
 //
-// HoldToSaveResetButton, ActivityLightButton, PresetPreviewGenerator,
+// ResetAndSaveControls, ActivityLightButton, PresetPreviewGenerator,
 // PresetPreviewCard, SaveDestinationSheet, ExternalFileImportSheet, and
 // FPSIndicatorView moved to ContentViewComponents.swift (Phase 3 refactor).
 // The platform-gated View helpers (thresholdGlassBackground, etc.) moved to

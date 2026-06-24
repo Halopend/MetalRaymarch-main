@@ -186,19 +186,29 @@ struct FogEffect: LightingEffect {
     var enabled: Bool = true
     var intensity: Float = 0.32     // Fog density (0-1)
     var color: SIMD3<Float> = Self.defaultColor
+    /// When true, the fog tint cycles its hue over time on its own timer,
+    /// independent of the global Hue Rotation effect.
+    var hueRotateEnabled: Bool = false
+    /// Fog-tint hue cycle speed (0–0.5), independent of the global hue rotation.
+    var hueRotateSpeed: Float = 0.1
 
     static let defaultColor = SIMD3<Float>(0.01, 0.015, 0.02)
 
     enum CodingKeys: String, CodingKey {
         case enabled, intensity, colorRed, colorGreen, colorBlue
+        case hueRotateEnabled, hueRotateSpeed
     }
 
     init(enabled: Bool = true,
          intensity: Float = 0.32,
-         color: SIMD3<Float> = FogEffect.defaultColor) {
+         color: SIMD3<Float> = FogEffect.defaultColor,
+         hueRotateEnabled: Bool = false,
+         hueRotateSpeed: Float = 0.1) {
         self.enabled = enabled
         self.intensity = intensity
         self.color = color
+        self.hueRotateEnabled = hueRotateEnabled
+        self.hueRotateSpeed = hueRotateSpeed
     }
 
     init(from decoder: Decoder) throws {
@@ -210,6 +220,8 @@ struct FogEffect: LightingEffect {
             try container.decodeIfPresent(Float.self, forKey: .colorGreen) ?? Self.defaultColor.y,
             try container.decodeIfPresent(Float.self, forKey: .colorBlue) ?? Self.defaultColor.z
         )
+        hueRotateEnabled = try container.decodeIfPresent(Bool.self, forKey: .hueRotateEnabled) ?? false
+        hueRotateSpeed = try container.decodeIfPresent(Float.self, forKey: .hueRotateSpeed) ?? 0.1
     }
 
     func encode(to encoder: Encoder) throws {
@@ -219,6 +231,8 @@ struct FogEffect: LightingEffect {
         try container.encode(color.x, forKey: .colorRed)
         try container.encode(color.y, forKey: .colorGreen)
         try container.encode(color.z, forKey: .colorBlue)
+        try container.encode(hueRotateEnabled, forKey: .hueRotateEnabled)
+        try container.encode(hueRotateSpeed, forKey: .hueRotateSpeed)
     }
     
     var primaryValue: Float {

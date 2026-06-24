@@ -328,7 +328,7 @@ struct MusicTabContent: View {
         let formulaTargets = available.filter { $0.isFormulaParam }
         let universalTargets = available.filter { !$0.isFormulaParam }
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 10) {
             Text("Add Music Control")
                 .font(.headline)
 
@@ -337,68 +337,80 @@ struct MusicTabContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                if !formulaTargets.isEmpty {
-                    addTargetSection(
-                        title: "\(cache.fractalType.displayName) Params",
-                        targets: formulaTargets,
-                        label: { target in
-                            target.displayName(for: cache.fractalType)
-                        },
-                        icon: { target in
-                            target.icon(for: cache.fractalType)
-                        }
-                    )
-                }
+                Text("Pick a category, then a parameter to map.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
 
-                if !universalTargets.isEmpty {
-                    addTargetSection(
-                        title: "Universal",
-                        targets: universalTargets,
-                        label: { target in
-                            target.displayName
-                        },
-                        icon: { target in
-                            target.icon
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(MusicReactiveTargetCategory.universalOrder, id: \.self) { category in
+                            let targets = universalTargets.filter { $0.category == category }
+                            if !targets.isEmpty {
+                                addTargetDisclosure(
+                                    title: category.rawValue,
+                                    systemImage: category.icon,
+                                    targets: targets
+                                )
+                            }
                         }
-                    )
+
+                        if !formulaTargets.isEmpty {
+                            addTargetDisclosure(
+                                title: "\(cache.fractalType.displayName) Params",
+                                systemImage: "function",
+                                targets: formulaTargets
+                            )
+                        }
+                    }
                 }
+                .frame(maxHeight: 340)
             }
         }
         .padding(14)
-        .frame(minWidth: 280, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 300, alignment: .topLeading)
     }
 
+    /// One collapsible category in the "Add Control" menu. Collapsed by default so
+    /// the popover stays short instead of presenting one long flat list.
     @ViewBuilder
-    private func addTargetSection(
+    private func addTargetDisclosure(
         title: String,
-        targets: [MusicReactiveTarget],
-        label: @escaping (MusicReactiveTarget) -> String,
-        icon: @escaping (MusicReactiveTarget) -> String
+        systemImage: String,
+        targets: [MusicReactiveTarget]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(targets, id: \.self) { target in
+                    Button {
+                        addMapping(target)
+                        isShowingVisualizationAddPopover = false
+                    } label: {
+                        HStack(spacing: 8) {
+                            Label(target.displayName(for: cache.fractalType),
+                                  systemImage: target.icon(for: cache.fractalType))
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
-            ForEach(targets, id: \.self) { target in
-                Button {
-                    addMapping(target)
-                    isShowingVisualizationAddPopover = false
-                } label: {
-                    HStack(spacing: 8) {
-                        Label(label(target), systemImage: icon(target))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        if target.hasFlashingRisk {
-                            FlashingLightIndicator()
+                            if target.hasFlashingRisk {
+                                FlashingLightIndicator()
+                            }
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+            }
+            .padding(.top, 4)
+        } label: {
+            HStack(spacing: 8) {
+                Label(title, systemImage: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(targets.count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -1428,13 +1440,6 @@ struct MusicTabContent: View {
                                         }
 
                                         Spacer()
-
-                                        Button { removeMapping(at: index) } label: {
-                                            Image(systemName: "trash")
-                                                .font(.caption2)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .foregroundStyle(.secondary)
                                     }
 
                                     Picker("Source", selection: Binding(
@@ -1473,8 +1478,27 @@ struct MusicTabContent: View {
                                         get: { mappingAt(index)?.smoothingWindow ?? 0.0 },
                                         set: { newValue in updateMapping(index) { $0.smoothingWindow = newValue; $0.sanitizeInPlace() } }
                                     ), range: 0...2)
+
+                                    // Remove control: comfortably sized and bottom-leading so it's
+                                    // an easy tap target and stays clear of the right-edge scrollbar.
+                                    HStack(spacing: 8) {
+                                        Button(role: .destructive) {
+                                            removeMapping(at: index)
+                                        } label: {
+                                            Label("Remove", systemImage: "trash")
+                                                .font(.caption.weight(.semibold))
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 2)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        .tint(.red)
+
+                                        Spacer()
+                                    }
+                                    .padding(.top, 4)
                                 }
-                                .padding(6)
+                                .padding(8)
                                 .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
                             }
                         }
