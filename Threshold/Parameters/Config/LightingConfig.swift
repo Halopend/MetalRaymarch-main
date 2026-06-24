@@ -10,6 +10,10 @@ import Foundation
 
 struct LightingConfig: Codable, Equatable, Sendable {
     var lightingPreset: LightingPreset = .off
+    /// Master speed for time-based light variation (hue/pulse/gradient cycle).
+    /// 1.0 = full speed, 0.0 = lights hold steady. Default 0.5 keeps presets from
+    /// sweeping colours too fast; the user can raise it for intense looks.
+    var lightVariationRate: Float = 0.5
     var hueRotationEffect: HueRotationEffect = HueRotationEffect()
     var pulseEffect: PulseEffect = PulseEffect()
     var glowEffect: GlowEffect = GlowEffect()
@@ -22,6 +26,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
     var juliaDriftEffect: JuliaDriftEffect = JuliaDriftEffect()
 
     init(lightingPreset: LightingPreset = .off,
+         lightVariationRate: Float = 0.5,
          hueRotationEffect: HueRotationEffect = HueRotationEffect(),
          pulseEffect: PulseEffect = PulseEffect(),
          glowEffect: GlowEffect = GlowEffect(),
@@ -33,6 +38,7 @@ struct LightingConfig: Codable, Equatable, Sendable {
          polarRotationEffect: PolarRotationEffect = PolarRotationEffect(),
          juliaDriftEffect: JuliaDriftEffect = JuliaDriftEffect()) {
         self.lightingPreset = lightingPreset
+        self.lightVariationRate = lightVariationRate
         self.hueRotationEffect = hueRotationEffect
         self.pulseEffect = pulseEffect
         self.glowEffect = glowEffect
@@ -46,13 +52,14 @@ struct LightingConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect
+        case lightingPreset, lightVariationRate, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect
         case gradientCycleEffect, linearRailEffect, beatFlashEffect, polarRotationEffect, juliaDriftEffect
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         lightingPreset = try container.decodeIfPresent(LightingPreset.self, forKey: .lightingPreset) ?? .off
+        lightVariationRate = try container.decodeIfPresent(Float.self, forKey: .lightVariationRate) ?? 0.5
         hueRotationEffect = try container.decodeIfPresent(HueRotationEffect.self, forKey: .hueRotationEffect) ?? HueRotationEffect()
         pulseEffect = try container.decodeIfPresent(PulseEffect.self, forKey: .pulseEffect) ?? PulseEffect()
         glowEffect = try container.decodeIfPresent(GlowEffect.self, forKey: .glowEffect) ?? GlowEffect()

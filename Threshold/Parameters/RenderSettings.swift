@@ -236,7 +236,9 @@ final class RenderSettings: @unchecked Sendable {
     
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
-    private var _colorAnimTime: Float = 0.0                 // Running animation time
+    private var _colorAnimTime: Float = 0.0                 // Running animation time (raw — drives position effects like Linear Rail)
+    private var _lightAnimTime: Float = 0.0                 // Light-variation time, scaled by _lightVariationRate — drives hue/pulse/gradient cycling
+    private var _lightVariationRate: Float = 0.5            // Master speed for color/brightness light variation (0 = hold steady, 1 = full speed). Default 0.5 keeps presets from sweeping colours too fast.
     private var _animationActivityFactor: Float = 1.0
     private var _animationKillSwitchActive: Bool = false
     private var _animationKillSwitchRemaining: Float = 0.0
@@ -1652,7 +1654,19 @@ final class RenderSettings: @unchecked Sendable {
             persistLighting()
         }
     }
-    
+
+    /// Master speed for time-based light/color variation — hue rotation, pulse,
+    /// and gradient cycle. 1.0 = full speed, 0.0 = lights hold steady. Lets the
+    /// user calm overly-flashy animation without disabling individual effects or
+    /// touching geometry/camera motion (Linear Rail, Polar Rotation, etc.).
+    var lightVariationRate: Float {
+        get { withLock { _lightVariationRate } }
+        set {
+            withLock { _lightVariationRate = max(0.0, min(1.0, newValue)) }
+            persistLighting()
+        }
+    }
+
     /// Hue rotation effect (color cycling through YIQ space)
     var hueRotationEffect: HueRotationEffect {
         get { withLock { _hueRotationEffect } }
@@ -1800,8 +1814,11 @@ final class RenderSettings: @unchecked Sendable {
                 }
             }
 
-            // Update animation time
+            // Update animation time. _colorAnimTime is the raw clock (position effects);
+            // _lightAnimTime is scaled by the master variation rate so the user can slow
+            // down flashy hue/pulse/gradient cycling without freezing camera motion.
             _colorAnimTime += deltaTime * _animationActivityFactor
+            _lightAnimTime += deltaTime * _animationActivityFactor * _lightVariationRate
 
             // Accumulate polar rotation angle when enabled and fractal supports it
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
@@ -1929,12 +1946,12 @@ final class RenderSettings: @unchecked Sendable {
             gradientStopCount: Int32(gradCount),
             colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
             gradientRepeat: gradState.gradient.repeatCount,
-            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_colorAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
+            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_lightAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
             gradientSmoothing: gradState.gradient.smoothing,
             gradientLoopSmooth: _gradientCycleEffect.mirrorLoop ? 1 : 0,
             _gradPad: (0.0),
             // === MODULAR LIGHTING EFFECTS ===
-            animTime: _colorAnimTime,
+            animTime: _lightAnimTime,
             hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,
             hueRotationSpeed: _hueRotationEffect.speed,
             hueRotationIntensity: _hueRotationEffect.intensity * animationActivity,
@@ -3271,6 +3288,7 @@ final class RenderSettings: @unchecked Sendable {
             withLock {
                 var c = LightingConfig()
                 c.lightingPreset = _lightingPreset
+                c.lightVariationRate = _lightVariationRate
                 c.hueRotationEffect = _hueRotationEffect
                 c.pulseEffect = _pulseEffect
                 c.glowEffect = _glowEffect
@@ -3287,6 +3305,7 @@ final class RenderSettings: @unchecked Sendable {
         set {
             withLock {
                 _lightingPreset = newValue.lightingPreset
+                _lightVariationRate = newValue.lightVariationRate
                 _hueRotationEffect = newValue.hueRotationEffect
                 _pulseEffect = newValue.pulseEffect
                 _glowEffect = newValue.glowEffect

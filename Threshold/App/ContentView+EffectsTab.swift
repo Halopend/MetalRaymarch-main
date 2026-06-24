@@ -68,6 +68,8 @@ extension ContentView {
         VStack(spacing: 12) {
             dynamicPresetDisclosure
 
+            lightVariationControls
+
             // ── Color Animation ──
             VStack(spacing: 4) {
                 EffectSliderRow(icon: "arrow.trianglehead.2.clockwise.rotate.90", label: "Gradient Cycle",
@@ -168,6 +170,35 @@ extension ContentView {
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+    }
+
+    /// Master "calm" control — scales how fast all time-based color animation
+    /// (hue rotation, gradient cycle, pulse) shifts, so the user can dial back
+    /// fast/intense colour sweeping without disabling individual effects.
+    private var lightVariationControls: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Label("Color Shift Speed", systemImage: "paintpalette.fill")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text("\(Int((cache.lighting.lightVariationRate * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            EffectSliderRow(icon: "tortoise.fill", label: "Color Shift",
+                value: Binding(get: { cache.lighting.lightVariationRate }, set: { cache.lighting.lightVariationRate = $0 }),
+                range: 0...1,
+                enabled: .constant(true),
+                onChanged: { cache.commitLightVariationRate() },
+                showToggle: false)
+            Text("Master speed for colour shifting — scales hue rotation, gradient cycle, and pulse together across every preset. Starts at a calm 50%; raise it for intense looks, drop to 0% to hold the colours steady.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.teal.opacity(0.06)))
     }
 
     private var linearRailControls: some View {

@@ -351,6 +351,10 @@ final class UISettingsCache {
         push(\.gradientCycleEffect, value: lighting.gradientCycleEffect)
     }
 
+    func commitLightVariationRate() {
+        push(\.lightVariationRate, value: lighting.lightVariationRate)
+    }
+
     func commitLinearRailEffect() {
         push(\.linearRailEffect, value: lighting.linearRailEffect)
     }
