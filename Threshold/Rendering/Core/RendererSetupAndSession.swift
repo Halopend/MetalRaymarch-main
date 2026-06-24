@@ -5,6 +5,18 @@ import Metal
 extension Renderer {
     /// Setup residency set for GPU resource pre-validation
     func setupResidencySet() {
+        #if targetEnvironment(simulator)
+        // MTLResidencySet is unsupported on the Simulator. With Metal API
+        // Validation on (the default for Debug builds launched from Xcode),
+        // `makeResidencySet` doesn't return an error — the validation layer
+        // calls MTLReportFailure → __assert_rtn → abort(), which the do/catch
+        // below cannot intercept (it's a C-level abort, not a Swift throw).
+        // Residency sets are a pure perf optimization; every use is guarded
+        // with `if let set = residencySet`, so skipping here is safe and only
+        // affects the Simulator. Real devices keep the full path.
+        residencySet = nil
+        return
+        #else
         if #available(visionOS 2.0, iOS 18.0, macOS 15.0, *) {
             let descriptor = MTLResidencySetDescriptor()
             descriptor.label = "FractalResidencySet"
@@ -28,6 +40,7 @@ extension Renderer {
                 residencySet = nil
             }
         }
+        #endif
     }
 
     /// Batch-add multiple textures to the residency set with a single commit + requestResidency.

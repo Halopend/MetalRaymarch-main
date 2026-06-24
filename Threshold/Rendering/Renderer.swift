@@ -769,7 +769,7 @@ actor Renderer {
 
         // Publish the actual drawable resolution + quality to the control window
         // so the user can confirm native render resolution in-headset.
-        publishRenderDiagnostics(drawable: drawable)
+        wpublishRenderDiagnostics(drawable: drawable)
 
         // Wait for a buffer to become available. With maxBuffersInFlight=2, the
         // cheap CPU encode of frame N+1 overlaps the GPU render of N, so encode
