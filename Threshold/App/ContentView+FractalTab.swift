@@ -691,7 +691,7 @@ extension ContentView {
             // ── Render Quality (Vision Pro compositor native resolution) ──
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Render Quality")
+                    Text("Priority")
                     Spacer()
                     Text("\(Int((cache.quality.renderQuality * 100).rounded()))%")
                         .fontWeight(.bold)
@@ -705,7 +705,11 @@ extension ContentView {
                         cache.quality.renderQuality = snapped
                         cache.push(\.renderQuality, value: snapped)
                     }
-                ), in: 0.1...QualityConfig.visionMaxRenderQuality, step: 0.05)
+                ), in: 0.1...QualityConfig.visionMaxRenderQuality, step: 0.05,
+                minimumValueLabel: Text("Smooth").font(.caption2).foregroundStyle(.secondary),
+                maximumValueLabel: Text("Sharp").font(.caption2).foregroundStyle(.secondary)) {
+                    Text("Priority")
+                }
 
                 Text("Vision Pro: the compositor's native, gaze-foveated resolution. The top of the range is the configured ceiling (a memory/quality balance) and the sharpest; lower trades crispness for GPU headroom with a smoothed transition. Very low values (10–20%) probe max framerate.")
                     .font(.caption2)
