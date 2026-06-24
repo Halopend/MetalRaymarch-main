@@ -21,19 +21,18 @@ struct ContentStageConfiguration: CompositorLayerConfiguration {
 
         configuration.layout = supportedLayouts.contains(.layered) ? .layered : .dedicated
 
-        // === RENDER QUALITY RANGE (visionOS 26+) ===
-        // Setting maxRenderQuality allows CompositorServices to provide multiple drawable
-        // candidates at different texture sizes. This app intentionally does NOT do
-        // runtime render-quality scaling; we pick a fixed/default candidate.
+        // === RENDER QUALITY (visionOS 26+) ===
+        // The platform DEFAULT runtime render quality is below native, which is why
+        // the image looked uniformly soft. The app drives layerRenderer.renderQuality
+        // at runtime (see Renderer.applyRenderQualityIfNeeded), bounded by this
+        // ceiling. maxRenderQuality governs the drawable texture MEMORY allocation,
+        // so we set it to the minimum our content needs per Apple's guidance — the
+        // runtime slider scales within it for free (no realloc). Shared with the
+        // Render Quality slider's top via QualityConfig.visionMaxRenderQuality.
         if #available(visionOS 26.0, *) {
             if configuration.isFoveationEnabled {
-                // Raise the ceiling to native. The platform DEFAULT runtime
-                // render quality is below native, which is why the image looked
-                // uniformly soft even at resolutionScale 1.0 — the app now
-                // drives layerRenderer.renderQuality up to this ceiling at
-                // runtime (see Renderer.applyRenderQualityIfNeeded).
-                configuration.maxRenderQuality = LayerRenderer.RenderQuality(1.0)
-                print("✓ maxRenderQuality = 1.0 (platform defaultRenderQuality: \(capabilities.defaultRenderQuality))")
+                configuration.maxRenderQuality = LayerRenderer.RenderQuality(QualityConfig.visionMaxRenderQuality)
+                print("✓ maxRenderQuality = \(QualityConfig.visionMaxRenderQuality) (platform defaultRenderQuality: \(capabilities.defaultRenderQuality))")
             }
         }
     }

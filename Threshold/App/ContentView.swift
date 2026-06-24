@@ -169,32 +169,15 @@ struct ContentView: View {
     #endif
         }
 
-    @AppStorage("qualityGoalPreference.v2") var qualityGoalPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
-    @AppStorage("qualityGoalLastDirectPreference.v1") var qualityGoalLastDirectPreferenceRaw: Int = QualityGoalPreference.detail.rawValue
+    @AppStorage("qualityGoalPreference.v3") var qualityGoalPreferenceRaw: Int = QualityGoalPreference.simplified.rawValue
     var qualityGoalPreference: QualityGoalPreference {
-        QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .detail
+        QualityGoalPreference(rawValue: qualityGoalPreferenceRaw) ?? .simplified
     }
 
-    private var lastDirectBudgetPreference: QualityGoalPreference {
-        let candidate = QualityGoalPreference(rawValue: qualityGoalLastDirectPreferenceRaw) ?? .detail
-        return candidate == .framerate ? .framerate : .detail
-    }
-
-    var effectiveDirectBudgetPreference: QualityGoalPreference {
-        if qualityGoalPreference == .control { return lastDirectBudgetPreference }
-        return qualityGoalPreference == .framerate ? .framerate : .detail
-    }
-
-    var effectiveDirectBudgetLabel: String {
-        effectiveDirectBudgetPreference == .framerate ? "Trade Resolution for Framerate" : "Detail Budget"
-    }
+    var effectiveDirectBudgetLabel: String { "Detail Budget" }
 
     var effectiveDirectBudgetUnavailableText: String {
-        if effectiveDirectBudgetPreference == .framerate {
-            return "Trading resolution for framerate is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling."
-        }
-
-        return "\(effectiveDirectBudgetLabel) is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling."
+        "Detail Budget is unavailable in Adaptive Compute mode. Switch Renderer Mode to Fragment or Quad Shared to enable MetalFX spatial upscaling."
     }
 
     // Developer state

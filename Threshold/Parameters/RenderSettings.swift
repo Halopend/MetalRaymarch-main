@@ -121,7 +121,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereRadius: Float = 0.5
     private var _colorIterations: Float = 8.0       // Lower = faster (was 10)
     private var _resolutionScale: Float = 1.0       // Render scale for MetalFX (1.0 = native)
-    private var _renderQuality: Float = 1.0         // visionOS compositor drawable scale (1.0 = native)
+    private var _renderQuality: Float = 0.5         // visionOS compositor drawable scale (default 0.5; 1.0 = native)
 
     private var _fractalType: FractalModelType = .mandelbox  // Current fractal type
     private var _formulaParams: FormulaParams = FractalModelType.mandelbox.defaultFormulaParams()  // Generic formula params
@@ -660,7 +660,7 @@ final class RenderSettings: @unchecked Sendable {
     /// scale) — this is the preferred sharpness/perf lever on Vision Pro.
     var renderQuality: Float {
         get { withLock { _renderQuality } }
-        set { withLock { _renderQuality = max(0.5, min(1.0, newValue)) } }
+        set { withLock { _renderQuality = max(0.1, min(QualityConfig.visionMaxRenderQuality, newValue)) } }
     }
 
     var fractalType: FractalModelType {
@@ -3206,7 +3206,7 @@ final class RenderSettings: @unchecked Sendable {
                 _baseMaxRaySteps = newValue.baseMaxRaySteps
                 _maxRaySteps = newValue.baseMaxRaySteps
                 _resolutionScale = newValue.resolutionScale
-                _renderQuality = newValue.renderQuality
+                _renderQuality = max(0.1, min(QualityConfig.visionMaxRenderQuality, newValue.renderQuality))
                 _tileSize = newValue.tileSize
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled

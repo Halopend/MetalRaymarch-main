@@ -319,16 +319,13 @@ enum RendererModeOption: String, CaseIterable {
 }
 
 enum QualityGoalPreference: Int, CaseIterable {
-    case framerate = 0
-    case detail = 1
-    case control = 2
+    case simplified = 0
+    case advanced = 1
 
     var displayName: String {
         switch self {
-        case .framerate: return "Framerate"
-        case .detail: return "Detail"
-        case .control: return "Control"
+        case .simplified: return "Simplified"
+        case .advanced: return "Advanced"
         }
     }
-
 }

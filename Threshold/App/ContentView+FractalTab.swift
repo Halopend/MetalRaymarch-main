@@ -529,9 +529,6 @@ extension ContentView {
                         get: { qualityGoalPreference },
                         set: { newValue in
                             qualityGoalPreferenceRaw = newValue.rawValue
-                            if newValue == .framerate || newValue == .detail {
-                                qualityGoalLastDirectPreferenceRaw = newValue.rawValue
-                            }
                         }
                     )) {
                         ForEach(QualityGoalPreference.allCases, id: \.rawValue) { goal in
@@ -541,7 +538,7 @@ extension ContentView {
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 340)
                 }
-                Text("Framerate and Detail apply curated presets. Control unlocks free-form iteration and resolution sliders.")
+                Text("Simplified uses curated presets. Advanced unlocks free-form sliders for fine-tuning.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -549,7 +546,7 @@ extension ContentView {
             Text("Iteration Budget")
                 .font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if qualityGoalPreference != .control {
+            if qualityGoalPreference != .advanced {
                 HStack(spacing: 8) {
                     ForEach(QualityPreset.allCases, id: \.rawValue) { preset in
                         Button {
@@ -629,36 +626,17 @@ extension ContentView {
                         .monospacedDigit()
                 }
 
-                if qualityGoalPreference != .control {
+                if qualityGoalPreference != .advanced {
                     HStack(spacing: 8) {
-                        let presets: [(label: String, scale: Float, icon: String?)] = {
-                            // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full
-                            let items: [(String, Float, String, String)] = [
-                                // Detail mode: use a dashed screen outline + inner grid to convey pixel density.
-                                // Low is 0.34 (not 0.33) so it stays under MetalFX temporal's 3× cap.
-                                ("Low", 0.34, "circle.grid.2x2", QualityPreset.low.icon),
-                                ("Medium", 0.50, "circle.grid.3x3", QualityPreset.medium.icon),
-                                ("High", 0.75, "circle.grid.3x3.fill", QualityPreset.high.icon),
-                                ("Full", 1.0, "circle.grid.3x3.circle.fill", QualityPreset.ultra.icon)
-                            ]
-
-                            switch effectiveDirectBudgetPreference {
-                            case .detail:
-                                // Increasing detail left-to-right.
-                                return items.map { (label: $0.0, scale: $0.1, icon: $0.2) }
-                            case .framerate:
-                                // Keep scale/order behavior, but label by framerate budget semantics.
-                                // Left→right should read Low/Medium/High/Full for framerate.
-                                let scalesAndIcons = items.reversed().map { (scale: $0.1, icon: $0.3) }
-                                let framerateLabels = ["Low", "Medium", "High", "Full"]
-                                return zip(framerateLabels, scalesAndIcons).map { pair in
-                                    (label: pair.0, scale: pair.1.scale, icon: pair.1.icon)
-                                }
-                            case .control:
-                                // Unreachable because we normalize control to the last direct preference.
-                                return items.map { (label: $0.0, scale: $0.1, icon: $0.2) }
-                            }
-                        }()
+                        // Shared labels (must match Iteration Budget wording): Low / Medium / High / Full.
+                        // Dashed screen outline + inner grid conveys pixel density; increasing detail
+                        // left-to-right. Low is 0.34 (not 0.33) so it stays under MetalFX temporal's 3× cap.
+                        let presets: [(label: String, scale: Float, icon: String)] = [
+                            ("Low", 0.34, "circle.grid.2x2"),
+                            ("Medium", 0.50, "circle.grid.3x3"),
+                            ("High", 0.75, "circle.grid.3x3.fill"),
+                            ("Full", 1.0, "circle.grid.3x3.circle.fill")
+                        ]
 
                         ForEach(presets, id: \.label) { preset in
                             Button {
@@ -666,17 +644,11 @@ extension ContentView {
                                 cache.push(\.resolutionScale, value: preset.scale)
                             } label: {
                                 VStack(spacing: 2) {
-                                    if let icon = preset.icon {
-                                        if effectiveDirectBudgetPreference == .framerate {
-                                            Image(systemName: icon).font(.caption)
-                                        } else {
-                                            ZStack {
-                                                Image(systemName: "rectangle.dashed")
-                                                    .font(.caption)
-                                                Image(systemName: icon)
-                                                    .font(.caption2)
-                                            }
-                                        }
+                                    ZStack {
+                                        Image(systemName: "rectangle.dashed")
+                                            .font(.caption)
+                                        Image(systemName: preset.icon)
+                                            .font(.caption2)
                                     }
                                     Text(preset.label).font(.caption2)
                                     Text("\(Int(preset.scale * 100))%").font(.caption.monospacedDigit())
@@ -691,7 +663,7 @@ extension ContentView {
                     }
                 }
 
-                if qualityGoalPreference == .control {
+                if qualityGoalPreference == .advanced {
                     Slider(value: Binding(
                         get: { cache.quality.resolutionScale },
                         set: { newValue in
@@ -708,13 +680,7 @@ extension ContentView {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
-                    Group {
-                    #if os(macOS) || os(iOS)
-                        Text("MetalFX uses temporal upscaling when available. 50% to 75% is the usual quality/performance sweet spot.")
-                    #else
-                        Text("MetalFX on visionOS is spatial-only. 75% to 85% is the usual quality/performance sweet spot.")
-                    #endif
-                    }
+                    Text("MetalFX uses temporal upscaling when available. 50% to 75% is the usual quality/performance sweet spot.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -739,9 +705,9 @@ extension ContentView {
                         cache.quality.renderQuality = snapped
                         cache.push(\.renderQuality, value: snapped)
                     }
-                ), in: 0.5...1.0, step: 0.05)
+                ), in: 0.1...QualityConfig.visionMaxRenderQuality, step: 0.05)
 
-                Text("Vision Pro: the compositor's native, gaze-foveated resolution. 100% is the sharpest (renders at the full panel); lower trades crispness for GPU headroom with a smoothed transition. Independent of the detail budget above.")
+                Text("Vision Pro: the compositor's native, gaze-foveated resolution. The top of the range is the configured ceiling (a memory/quality balance) and the sharpest; lower trades crispness for GPU headroom with a smoothed transition. Very low values (10–20%) probe max framerate.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

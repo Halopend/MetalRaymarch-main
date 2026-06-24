@@ -10,13 +10,20 @@
 import Foundation
 
 struct QualityConfig: Codable, Equatable, Sendable {
+    /// visionOS compositor render-quality ceiling. Single source of truth for both
+    /// `configuration.maxRenderQuality` (set at layer creation — governs drawable
+    /// texture memory) and the Render Quality slider's top. 0.8 follows Apple's
+    /// "set max to the minimum your content needs" guidance: it trims drawable
+    /// memory vs 1.0 while staying visually near-native.
+    static let visionMaxRenderQuality: Float = 0.8
+
     // User-set base values
     var baseFractalIterations: Int = 9
     var baseMaxRaySteps: Int = 64
 
     // Resolution / tiling
     var resolutionScale: Float = 1.0   // 0.33 - 1.0 (MetalFX spatial upscale input scale)
-    var renderQuality: Float = 1.0     // 0.5 - 1.0 (visionOS compositor drawable scale; 1.0 = native)
+    var renderQuality: Float = 0.5     // 0.1 - 1.0 (visionOS compositor drawable scale; 1.0 = native). Default 0.5 favors framerate; 0.1 floor is for probing max framerate.
     var tileSize: Int = 0              // 0=disabled, 2/4/8 adaptive hierarchical
 
     // Debug
@@ -34,7 +41,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         baseFractalIterations = max(2, min(24, baseFractalIterations))
         baseMaxRaySteps = max(16, min(200, baseMaxRaySteps))
         resolutionScale = max(0.33, min(1.0, resolutionScale))
-        renderQuality = max(0.5, min(1.0, renderQuality))
+        renderQuality = max(0.1, min(Self.visionMaxRenderQuality, renderQuality))
         foveationStrength = max(0.0, min(1.0, foveationStrength))
     }
 
@@ -58,7 +65,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         baseFractalIterations = try c.decodeIfPresent(Int.self,   forKey: .baseFractalIterations) ?? 9
         baseMaxRaySteps       = try c.decodeIfPresent(Int.self,   forKey: .baseMaxRaySteps)       ?? 64
         resolutionScale       = try c.decodeIfPresent(Float.self, forKey: .resolutionScale)       ?? 1.0
-        renderQuality         = try c.decodeIfPresent(Float.self, forKey: .renderQuality)         ?? 1.0
+        renderQuality         = try c.decodeIfPresent(Float.self, forKey: .renderQuality)         ?? 0.5
         tileSize              = try c.decodeIfPresent(Int.self,   forKey: .tileSize)              ?? 0
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
