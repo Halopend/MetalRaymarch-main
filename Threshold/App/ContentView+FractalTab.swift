@@ -423,14 +423,18 @@ extension ContentView {
     }
 
     private var sphereProjectionSection: some View {
+        // Space-module capability: sphere projection is no longer Mandelbox-only.
+        // Mandelbox uses its native per-fold projection; every other supported
+        // fractal gets a domain-space sphere warp at the dispatch boundary.
         let isMandelbox = cache.fractalType == .mandelbox
+        let supportsProjection = cache.fractalType.supports(.sphereProjection)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Sphere Projection", systemImage: AppIcons.globeAsiaAustralia)
                     .font(.headline)
-                    .foregroundStyle(isMandelbox ? .primary : .secondary)
+                    .foregroundStyle(supportsProjection ? .primary : .secondary)
                 Spacer()
-                if isMandelbox {
+                if supportsProjection {
                     Toggle("", isOn: Binding(
                         get: { cache.display.sphereProjectionEnabled },
                         set: { newValue in
@@ -444,12 +448,14 @@ extension ContentView {
                 }
             }
 
-            Text("Radially projects each fold onto a sphere right after the sphere-fold step — the \u{201C}accidental sphere\u{201D} look, blended onto the standard Mandelbox. Box detail melts into a glowing spherical shell.")
+            Text(isMandelbox
+                 ? "Radially projects each fold onto a sphere right after the sphere-fold step — the \u{201C}accidental sphere\u{201D} look. Box detail melts into a glowing spherical shell."
+                 : "Warps space radially toward a sphere before the fractal is evaluated — pulls this shape\u{2019}s detail onto a spherical shell. Blend low for a subtle bulge, high for a full sphere melt.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if isMandelbox {
+            if supportsProjection {
                 if cache.display.sphereProjectionEnabled {
                     EffectSliderRow(icon: "circle.lefthalf.filled", label: "Projection",
                         value: Binding(get: { cache.display.sphereProjectionBlend }, set: { cache.display.sphereProjectionBlend = $0 }),
@@ -466,7 +472,7 @@ extension ContentView {
                         showToggle: false)
                 }
             } else {
-                Label("Only affects the Mandelbox fractal — switch to Mandelbox to use this.", systemImage: AppIcons.infoCircle)
+                Label("Not available for this fractal.", systemImage: AppIcons.infoCircle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -53,6 +53,22 @@ struct FractalShapeDefaults {
     var fractalScale: Float = 2.8
 }
 
+// MARK: - Space Transforms (capability key)
+
+/// Space-domain transforms a fractal can carry. These are "modules" in the
+/// space domain: a scene declares them with a type key (see `ModuleKey.space`)
+/// and the renderer applies them around the formula DE rather than inside it.
+///
+/// Mirrors `EffectTag` exactly — a fractal advertises which transforms are
+/// meaningful via `supportedSpaceTransforms`, gated in the UI with
+/// `FractalModelType.supports(_:SpaceTransform)`.
+enum SpaceTransform: String, Codable, CaseIterable, Sendable {
+    /// Radial sphere projection. On Mandelbox this is the native per-fold
+    /// projection inside `Map()`; on every other fractal it is applied as a
+    /// domain-space warp at the dispatch boundary (`applySphereProjectionDomain`).
+    case sphereProjection
+}
+
 // MARK: - Protocol
 
 protocol FractalTypeDescriptor: Sendable {
@@ -63,6 +79,9 @@ protocol FractalTypeDescriptor: Sendable {
     var codableString: String { get }
     var supportedCoreGestureActions: [FingerGestureAction] { get }
     var supportedEffectTags: Set<EffectTag> { get }
+    /// Space-domain transforms this fractal supports (e.g. sphere projection).
+    /// Defaults to `universalSpaceTransforms`; override to prune by fractal.
+    var supportedSpaceTransforms: Set<SpaceTransform> { get }
     var isSelectableInUI: Bool { get }
     func defaultFormulaParams() -> FormulaParams
 
@@ -94,6 +113,16 @@ extension FractalTypeDescriptor {
     static var universalEffectTags: Set<EffectTag> {
         [.hueRotation, .pulse, .glow, .bloom, .fog, .gradientCycle, .linearRail]
     }
+
+    /// Space transforms enabled for every fractal by default. Sphere projection
+    /// works across all types because it is applied as a domain warp at the
+    /// dispatch boundary (non-Mandelbox) or natively inside `Map()` (Mandelbox).
+    /// "Enable broadly, prune by eye": individual descriptors can override
+    /// `supportedSpaceTransforms` to `[]` (or a subset) once tuned visually.
+    static var universalSpaceTransforms: Set<SpaceTransform> { [.sphereProjection] }
+
+    /// Default: every fractal supports the universal space transforms.
+    var supportedSpaceTransforms: Set<SpaceTransform> { Self.universalSpaceTransforms }
 
     /// Default core gesture actions for non-Mandelbox types.
     static var standardCoreGestureActions: [FingerGestureAction] {

@@ -278,6 +278,36 @@ FORCE_INLINE float3 mapProjectToSphere(float3 p, float radius) {
     return p * (radius / len);
 }
 
+// === SPACE MODULE: cross-fractal sphere projection (domain warp) ============
+// Mandelbox applies sphere projection per-fold inside Map(). For every other
+// fractal we generalize it as a SPACE-DOMAIN warp applied to the sample point
+// before the formula DE is evaluated (in the non-Mandelbox dispatch branch).
+//
+//   f(p) = p * ((1-b) + b * R / |p|)
+//
+// i.e. blend the point radially toward a sphere of radius R. b in [0, 0.98].
+// Identity when blend <= 0, so existing scenes are unaffected.
+FORCE_INLINE float3 applySphereProjectionDomain(float3 p, float blend, float radius) {
+    if (blend <= 0.0f) { return p; }
+    float r = length(p);
+    if (r <= 1e-5f) { return p; }
+    float b = clamp(blend, 0.0f, 0.98f);
+    float s = (1.0f - b) + b * radius / r;
+    return p * s;
+}
+
+// Conservative distance-estimator divisor for the warp above: the maximum
+// singular value of f's Jacobian (the tangential stretch s(r)). Dividing the
+// warped-space distance by this keeps the raymarch from overstepping the
+// surface. Returns 1 when projection is off so the math is a pure no-op.
+FORCE_INLINE float sphereProjectionDEScale(float3 p, float blend, float radius) {
+    if (blend <= 0.0f) { return 1.0f; }
+    float r = length(p);
+    if (r <= 1e-5f) { return 1.0f; }
+    float b = clamp(blend, 0.0f, 0.98f);
+    return max((1.0f - b) + b * radius / r, 1e-3f);
+}
+
 FORCE_INLINE void applySphericalInversionRay(thread float3 &origin, thread float3 &direction, int mode, float radius) {
     if (mode == 0) { return; }
     float safeRadius = max(radius, 0.2f);
@@ -661,7 +691,10 @@ FORCE_INLINE float MapUnified(float3 pos, FractalParams params, float foldingLim
         return Map(pos, params, foldingLimit, iterations);  // bubble applied inside Map()
     }
     int loopCount = is_function_constant_defined(FC_FRACTAL_ITERATIONS) ? FC_FRACTAL_ITERATIONS : iterations;
-    float d = FractalDE_Dispatch(pos, type, fp, loopCount);
+    // Space module: cross-fractal sphere projection (domain warp; no-op when off).
+    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
+    float d = FractalDE_Dispatch(q, type, fp, loopCount)
+              / sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius);
     return applySafetyBubble(d, pos, params);
 }
 
@@ -672,7 +705,10 @@ FORCE_INLINE float MapDistOnlyUnified(float3 pos, FractalParams params, float fo
         return MapDistOnly(pos, params, foldingLimit, iterations);  // bubble applied inside
     }
     int loopCount = is_function_constant_defined(FC_SHADOW_ITERATIONS) ? FC_SHADOW_ITERATIONS : iterations;
-    float d = FractalDE_Dispatch(pos, type, fp, loopCount);
+    // Space module: cross-fractal sphere projection (domain warp; no-op when off).
+    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
+    float d = FractalDE_Dispatch(q, type, fp, loopCount)
+              / sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius);
     return applySafetyBubble(d, pos, params);
 }
 
@@ -689,7 +725,10 @@ FORCE_INLINE float MapContinuousUnified(float3 pos, FractalParams params, float 
     int loopCount = max(isMB
                         ? int(ceil(fractionalIterations))
                         : int(fractionalIterations), 1);
-    float d = FractalDE_Dispatch(pos, type, fp, loopCount);
+    // Space module: cross-fractal sphere projection (domain warp; no-op when off).
+    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
+    float d = FractalDE_Dispatch(q, type, fp, loopCount)
+              / sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius);
     return applySafetyBubble(d, pos, params);
 }
 
@@ -1112,10 +1151,15 @@ FORCE_INLINE float MapWithOrbitCacheUnified(float3 pos, FractalParams params, fl
         return MapWithOrbitCache(pos, params, foldingLimit, iterations, cache);
     }
     
-    // Non-Mandelbox: use formula orbit tracking
+    // Non-Mandelbox: use formula orbit tracking.
+    // Space module: warp the sample point so the orbit trap (coloring) and the
+    // cached center distance (used by GetNormal) are evaluated in the same
+    // warped space as the marching DE. No-op when projection is off.
+    float3 q = applySphereProjectionDomain(pos, params.sphereProjBlend, params.sphereProjRadius);
     OrbitData orbit;
-    float d = FractalDE_WithOrbit(pos, type, fp, iterations, colorIterations, orbit);
-    
+    float d = FractalDE_WithOrbit(q, type, fp, iterations, colorIterations, orbit)
+              / sphereProjectionDEScale(pos, params.sphereProjBlend, params.sphereProjRadius);
+
     // Apply safety bubble to non-Mandelbox fractals
     d = applySafetyBubble(d, pos, params);
     
@@ -1196,9 +1240,12 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
             dot(cache.jacobian[2], pDir)
         );
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
-    } else if ((type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia) && cache.valid) {
+    } else if ((type == FractalTypeMandelbulb || type == FractalTypeMandelbulbJulia)
+               && cache.valid && params.sphereProjBlend <= 0.0f) {
         // Mandelbulb-specific fast path: use cached escape direction as the base
-        // normal and refine it with only two tangent-space DE probes.
+        // normal and refine it with only two tangent-space DE probes. Skipped
+        // when sphere projection is active so the warped finite-difference path
+        // (below) produces correct normals on the projected surface.
         return ApproximateMandelbulbNormal(pos, distance, params, foldingLimit, iterations, fp, cache.distance, cache);
     } else if (cache.valid && type == FractalTypeMandelbox) {
         // Fallback: use cached center distance, reduced iterations
@@ -1219,11 +1266,17 @@ FORCE_INLINE float3 GetNormal(float3 pos, float distance, FractalParams params, 
         // the center DE from the hit evaluation — reuse it.
         int normalIters = ReducedSecondaryIterations(iterations, type, false);
         float e = max(distance * 0.0005f, 0.0001f);
-        float d0 = cache.distance;
+        // Space module: warp the probe points to match the marching DE. The
+        // cached center distance is post-scale; recover the unscaled warped
+        // center (d0 * scale) so the finite-difference gradient is consistent.
+        // All three reduce to the original code when projection is off.
+        float blend = params.sphereProjBlend;
+        float prad = params.sphereProjRadius;
+        float d0 = cache.distance * sphereProjectionDEScale(pos, blend, prad);
         float3 gradient = float3(
-            FractalDE_Dispatch(pos + float3(e,0,0), type, fp, normalIters) - d0,
-            FractalDE_Dispatch(pos + float3(0,e,0), type, fp, normalIters) - d0,
-            FractalDE_Dispatch(pos + float3(0,0,e), type, fp, normalIters) - d0
+            FractalDE_Dispatch(applySphereProjectionDomain(pos + float3(e,0,0), blend, prad), type, fp, normalIters) - d0,
+            FractalDE_Dispatch(applySphereProjectionDomain(pos + float3(0,e,0), blend, prad), type, fp, normalIters) - d0,
+            FractalDE_Dispatch(applySphereProjectionDomain(pos + float3(0,0,e), blend, prad), type, fp, normalIters) - d0
         );
         return gradient * rsqrt(dot(gradient, gradient) + kPowEpsilon);
     } else {

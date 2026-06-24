@@ -34,9 +34,13 @@ enum FractalModelType: Int32, CaseIterable {
     var icon: String { descriptor.icon }
     var category: String { descriptor.category }
     var supportedEffectTags: Set<EffectTag> { descriptor.supportedEffectTags }
+    var supportedSpaceTransforms: Set<SpaceTransform> { descriptor.supportedSpaceTransforms }
 
     /// Quick check whether a given effect tag is meaningful for this fractal.
     func supports(_ tag: EffectTag) -> Bool { descriptor.supportedEffectTags.contains(tag) }
+
+    /// Quick check whether a given space-domain transform applies to this fractal.
+    func supports(_ transform: SpaceTransform) -> Bool { descriptor.supportedSpaceTransforms.contains(transform) }
 
     func defaultFormulaParams() -> FormulaParams {
         if FormulaCatalog.shared.descriptor(for: self) != nil {

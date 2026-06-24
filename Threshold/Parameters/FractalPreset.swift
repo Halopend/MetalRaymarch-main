@@ -64,6 +64,18 @@ struct FractalPreset: Codable, Identifiable {
     var safetyBubbleRadius: Float?
     var safetyBubbleShape: Float?
     var safetyBubbleBlend: Float?
+
+    // === SPACE TRANSFORMS (Space module) ===
+    // Domain/space-level transforms owned by DisplayConfig. These were previously
+    // dropped on save/load (the fields existed only in DisplayConfig, never in the
+    // preset), so a scene authored with sphere inversion/projection silently lost
+    // them. Optional for backward compatibility — older files decode to nil and the
+    // live settings keep their current values.
+    var sphericalInversionMode: SphericalInversionMode?
+    var sphericalInversionRadius: Float?
+    var sphereProjectionEnabled: Bool?
+    var sphereProjectionBlend: Float?
+    var sphereProjectionRadius: Float?
     
     // === MODULAR LIGHTING EFFECTS (v2.0) ===
     // Card-based lighting system with presets
@@ -98,6 +110,14 @@ struct FractalPreset: Codable, Identifiable {
     /// a built-in formula. Older app versions ignore this field.
     var embeddedFormula: EmbeddedFormula?
 
+    // === MODULE LAYER (additive, backward-compatible) ===
+    /// Scene schema version. Purely diagnostic — decoding never depends on it.
+    var schemaVersion: Int?
+    /// Typed/keyed params grouped by module (see `ModuleRegistry`). Coexists with
+    /// the flat fields above: on load, flat fields apply first, then these module
+    /// blocks apply with per-fractal capability filtering. Absent in older scenes.
+    var modules: [String: ModuleParamBlock]?
+
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, thumbnailData, rating
         case fractalIterations, maxRaySteps, colorMix, colorIterations, position, scale
@@ -106,6 +126,9 @@ struct FractalPreset: Codable, Identifiable {
         case minDistance, fractalScale, foldingLimit, sphereRadius, formulaParamValues
         case worldRotationX, worldRotationY, worldRotationZ, worldRotationW, detailScale
         case resolutionScale, tileSize, safetyBubbleEnabled, safetyBubbleRadius, safetyBubbleShape, safetyBubbleBlend
+        // Space module (domain transforms)
+        case sphericalInversionMode, sphericalInversionRadius
+        case sphereProjectionEnabled, sphereProjectionBlend, sphereProjectionRadius
         // v2.0 modular lighting effects
         case lightingMode, lightingPreset, hueRotationEffect, pulseEffect, glowEffect, bloomEffect, fogEffect, gradientCycleEffect, linearRailEffect
         // Color scheme auto-transition
@@ -115,6 +138,7 @@ struct FractalPreset: Codable, Identifiable {
         case musicReactiveMappings  // legacy — mappings only
         case audioReactiveConfig    // canonical — full config
         case embeddedFormula        // optional self-contained DE shader payload
+        case schemaVersion, modules // module layer (typed/keyed params)
     }
     
     init(id: UUID = UUID(), name: String, createdAt: Date = Date(), thumbnailData: Data? = nil) {
@@ -186,7 +210,14 @@ struct FractalPreset: Codable, Identifiable {
         safetyBubbleRadius = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleRadius)
         safetyBubbleShape = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleShape)
         safetyBubbleBlend = try container.decodeIfPresent(Float.self, forKey: .safetyBubbleBlend)
-        
+
+        // Space module (domain transforms) — optional; older files have none.
+        sphericalInversionMode = try container.decodeIfPresent(SphericalInversionMode.self, forKey: .sphericalInversionMode)
+        sphericalInversionRadius = try container.decodeIfPresent(Float.self, forKey: .sphericalInversionRadius)
+        sphereProjectionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sphereProjectionEnabled)
+        sphereProjectionBlend = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionBlend)
+        sphereProjectionRadius = try container.decodeIfPresent(Float.self, forKey: .sphereProjectionRadius)
+
         // v2.0 modular lighting effects
         lightingMode = try container.decodeIfPresent(LightingMode.self, forKey: .lightingMode)
         lightingPreset = try container.decodeIfPresent(LightingPreset.self, forKey: .lightingPreset)
@@ -231,6 +262,10 @@ struct FractalPreset: Codable, Identifiable {
         } else {
             embeddedFormula = nil
         }
+
+        // Module layer (typed/keyed params). Optional — older scenes have none.
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        modules = try container.decodeIfPresent([String: ModuleParamBlock].self, forKey: .modules)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -271,7 +306,14 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(safetyBubbleRadius, forKey: .safetyBubbleRadius)
         try container.encodeIfPresent(safetyBubbleShape, forKey: .safetyBubbleShape)
         try container.encodeIfPresent(safetyBubbleBlend, forKey: .safetyBubbleBlend)
-        
+
+        // Space module (domain transforms)
+        try container.encodeIfPresent(sphericalInversionMode, forKey: .sphericalInversionMode)
+        try container.encodeIfPresent(sphericalInversionRadius, forKey: .sphericalInversionRadius)
+        try container.encodeIfPresent(sphereProjectionEnabled, forKey: .sphereProjectionEnabled)
+        try container.encodeIfPresent(sphereProjectionBlend, forKey: .sphereProjectionBlend)
+        try container.encodeIfPresent(sphereProjectionRadius, forKey: .sphereProjectionRadius)
+
         // v2.0 modular lighting effects
         try container.encodeIfPresent(lightingMode, forKey: .lightingMode)
         try container.encodeIfPresent(lightingPreset, forKey: .lightingPreset)
@@ -296,6 +338,10 @@ struct FractalPreset: Codable, Identifiable {
         try container.encodeIfPresent(audioReactiveConfig?.musicReactiveMappings ?? musicReactiveMappings,
                                       forKey: .musicReactiveMappings)
         try container.encodeIfPresent(embeddedFormula, forKey: .embeddedFormula)
+
+        // Module layer (typed/keyed params)
+        try container.encodeIfPresent(schemaVersion, forKey: .schemaVersion)
+        try container.encodeIfPresent(modules, forKey: .modules)
     }
     
     // MARK: - Function Constant Derivation
@@ -443,6 +489,13 @@ struct FractalPreset: Codable, Identifiable {
         // ── Display domain (1 lock acquisition) ──
         let disp = settings.displayConfig
         preset.lightingMode = disp.lightingMode
+        // Space-module transforms live in DisplayConfig — capture them so they
+        // round-trip through save/load (previously dropped).
+        preset.sphericalInversionMode = disp.sphericalInversionMode
+        preset.sphericalInversionRadius = disp.sphericalInversionRadius
+        preset.sphereProjectionEnabled = disp.sphereProjectionEnabled
+        preset.sphereProjectionBlend = disp.sphereProjectionBlend
+        preset.sphereProjectionRadius = disp.sphereProjectionRadius
 
         // ── Safety bubble domain (1 lock acquisition) ──
         let sb = settings.safetyBubbleConfig
@@ -546,7 +599,24 @@ struct FractalPreset: Codable, Identifiable {
         if let safetyBubbleBlend = safetyBubbleBlend {
             settings.safetyBubbleBlend = safetyBubbleBlend
         }
-        
+
+        // Space module (domain transforms) — restore when present.
+        if let sphericalInversionMode = sphericalInversionMode {
+            settings.sphericalInversionMode = sphericalInversionMode
+        }
+        if let sphericalInversionRadius = sphericalInversionRadius {
+            settings.sphericalInversionRadius = sphericalInversionRadius
+        }
+        if let sphereProjectionEnabled = sphereProjectionEnabled {
+            settings.sphereProjectionEnabled = sphereProjectionEnabled
+        }
+        if let sphereProjectionBlend = sphereProjectionBlend {
+            settings.sphereProjectionBlend = sphereProjectionBlend
+        }
+        if let sphereProjectionRadius = sphereProjectionRadius {
+            settings.sphereProjectionRadius = sphereProjectionRadius
+        }
+
         // v2.0 modular lighting effects
         if let lightingMode = lightingMode {
             settings.lightingMode = lightingMode
@@ -603,6 +673,18 @@ struct FractalPreset: Codable, Identifiable {
             audioConfig.musicReactiveMappings = mappings
             audioConfig.fractalAudioReactiveEnabled = true
             settings.audioReactiveConfig = audioConfig
+        }
+
+        // === MODULE LAYER ===
+        // Apply typed/keyed module params AFTER the flat fields, so a module can
+        // refine a flat preset. Each param is capability-filtered against the
+        // active fractal (e.g. sphere projection on an unsupported type is
+        // skipped). No-op for older scenes that carry no `modules` block.
+        if let modules = modules {
+            for (rawKey, block) in modules {
+                guard let key = ModuleKey(rawValue: rawKey) else { continue }
+                ModuleRegistry.apply(key, block: block, to: settings)
+            }
         }
     }
     
