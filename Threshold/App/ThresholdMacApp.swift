@@ -171,7 +171,7 @@ private struct ThresholdMacRootView: View {
         Button {
             toggleControlsPin()
         } label: {
-            Image(systemName: isControlsPinnedOpen ? "pin.fill" : "pin")
+            Image(systemName: isControlsPinnedOpen ? AppIcons.pinFill : AppIcons.pin)
                 .font(.system(size: 13, weight: .semibold))
                 .frame(width: 28, height: 28)
         }

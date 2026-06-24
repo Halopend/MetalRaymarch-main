@@ -43,7 +43,7 @@ struct TransitionTabContent: View {
     private var transitionTimeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Same Scene Transition Time", systemImage: "timer")
+                Label("Same Scene Transition Time", systemImage: AppIcons.timer)
                     .font(.subheadline.bold())
                 Spacer()
                 Text(durationLabel)

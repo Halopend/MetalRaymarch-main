@@ -67,7 +67,7 @@ extension ContentView {
 
     var gestureHandConstellationPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Hand Assignments", systemImage: "hand.point.up.left.and.text")
+            Label("Hand Assignments", systemImage: AppIcons.handPointUpLeftAndText)
                 .font(.subheadline.weight(.semibold))
 
             GeometryReader { geo in
@@ -211,7 +211,7 @@ extension ContentView {
         Button {
             if isCurrent { clearFinger(hand, finger) } else { claimAllAxes(b, hand, finger) }
         } label: {
-            if isCurrent { Label("Remove (all axes)", systemImage: "checkmark") }
+            if isCurrent { Label("Remove (all axes)", systemImage: AppIcons.checkmark) }
             else { Text(hasOther ? "Reclaim All Axes" : "Claim All Axes") }
         }
     }
@@ -228,7 +228,7 @@ extension ContentView {
             if isThisHere { cache.setGestureBinding(.core(.none), for: slot) }
             else { claimScalar(p, axis, hand, finger) }
         } label: {
-            if isThisHere { Label("Remove \(axis.displayName)", systemImage: "checkmark") }
+            if isThisHere { Label("Remove \(axis.displayName)", systemImage: AppIcons.checkmark) }
             else { Text("\(taken ? "Reclaim" : "Claim") \(axis.displayName)") }
         }
     }
@@ -333,7 +333,7 @@ extension ContentView {
     private func summaryChip(_ axisGlyph: String, _ icon: String, _ text: String) -> some View {
         HStack(spacing: 3) {
             Text(axisGlyph).font(.system(size: 9, weight: .bold)).foregroundStyle(GH.blue)
-            Image(systemName: icon).font(.system(size: 9))
+            Image(systemName: icon).font(.system(size: IconSize.micro))
             Text(text).font(.caption2).lineLimit(1)
         }
         .foregroundStyle(GH.label.opacity(0.9))
@@ -357,7 +357,7 @@ extension ContentView {
                 } label: {
                     HStack {
                         Label(action.contextualDisplayName(for: cache.fractalType), systemImage: action.icon)
-                        if both == action { Image(systemName: "checkmark") }
+                        if both == action { Image(systemName: AppIcons.checkmark) }
                     }
                 }
             }

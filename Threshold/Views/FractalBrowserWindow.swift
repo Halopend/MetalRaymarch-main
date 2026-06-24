@@ -595,13 +595,13 @@ struct FractalBrowserWindow: View {
     private var buddhabrotToolsPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("3D Buddhabrot", systemImage: "atom")
+                Label("3D Buddhabrot", systemImage: AppIcons.atom)
                     .font(.headline)
                 Spacer()
                 Button {
                     appModel.runtimeViewMode = .buddhabrot
                 } label: {
-                    Label("Launch Buddhabrot", systemImage: "play.fill")
+                    Label("Launch Buddhabrot", systemImage: AppIcons.playFill)
                 }
                 .buttonStyle(.borderedProminent)
             }

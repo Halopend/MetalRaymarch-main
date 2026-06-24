@@ -31,7 +31,7 @@ extension ContentView {
     private var coloringGradientContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Gradient Coloring", systemImage: "paintbrush.fill")
+                Label("Gradient Coloring", systemImage: AppIcons.paintbrushFill)
                     .font(.headline)
                 Spacer()
                 Text("Current: \(cache.color.gradientState.gradientPreset?.displayName ?? cache.gradientLibrary.savedCustomGradients.first(where: { $0.id == cache.color.gradientState.gradient.id })?.name ?? "Custom")")
@@ -78,7 +78,7 @@ extension ContentView {
                                     .allowsHitTesting(false)
                                 Text(saved.name).font(.caption2).lineLimit(1)
                                 if isActive {
-                                    Label("Selected", systemImage: "checkmark.circle.fill")
+                                    Label("Selected", systemImage: AppIcons.checkmarkCircleFill)
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(.blue)
                                 }
@@ -92,18 +92,18 @@ extension ContentView {
                                 renamingGradientName = saved.name
                                 renamingGradientIndex = index
                             } label: {
-                                Label("Rename", systemImage: "pencil")
+                                Label("Rename", systemImage: AppIcons.pencil)
                             }
                             Button {
                                 cache.updateSavedGradient(at: index)
                             } label: {
-                                Label("Overwrite with Current", systemImage: "arrow.down.circle")
+                                Label("Overwrite with Current", systemImage: AppIcons.arrowDownCircle)
                             }
                             Divider()
                             Button(role: .destructive) {
                                 cache.deleteSavedGradient(at: index)
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label("Delete", systemImage: AppIcons.trash)
                             }
                         }
                         .onLongPressGesture(minimumDuration: 0.5) {
@@ -125,7 +125,7 @@ extension ContentView {
                             Image(systemName: preset.icon).font(.caption)
                             Text(preset.displayName).font(.caption2).lineLimit(1)
                             if isSelected {
-                                Label("Selected", systemImage: "checkmark.circle.fill")
+                                Label("Selected", systemImage: AppIcons.checkmarkCircleFill)
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(.blue)
                             }
@@ -140,7 +140,7 @@ extension ContentView {
             // ── Save / Edit Buttons ──
             HStack(spacing: 8) {
                 Button { showStopsPopover = true } label: {
-                    Label("Edit Gradient", systemImage: "slider.horizontal.3")
+                    Label("Edit Gradient", systemImage: AppIcons.sliderHorizontal3)
                         .font(.caption)
                 }
                 .buttonStyle(.bordered).tint(cache.color.gradientState.gradientPreset == nil ? .blue : .secondary)
@@ -166,7 +166,7 @@ extension ContentView {
     private var coloringMappingContent: some View {
         VStack(spacing: 12) {
             HStack {
-                Label("Mapping Mode", systemImage: "target").font(.headline)
+                Label("Mapping Mode", systemImage: AppIcons.target).font(.headline)
                 Spacer()
                 Text(cache.color.gradientState.gradient.mappingMode.displayName)
                     .font(.caption2.weight(.semibold))
@@ -193,7 +193,7 @@ extension ContentView {
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
                                 if isSelected {
-                                    Image(systemName: "checkmark.circle.fill")
+                                    Image(systemName: AppIcons.checkmarkCircleFill)
                                         .font(.caption2)
                                         .foregroundStyle(.blue)
                                 }
@@ -291,7 +291,7 @@ extension ContentView {
 
     private var coloringGradingContent: some View {
         VStack(spacing: 12) {
-            Label("Color Grading", systemImage: "camera.filters").font(.headline)
+            Label("Color Grading", systemImage: AppIcons.cameraFilters).font(.headline)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // Tone controls

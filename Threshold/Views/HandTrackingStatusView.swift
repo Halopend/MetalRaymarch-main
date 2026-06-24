@@ -36,12 +36,12 @@ struct HandTrackingStatusView: View {
             if state.leftHandTracked || state.rightHandTracked {
                 HStack(spacing: 4) {
                     if state.leftHandTracked {
-                        Image(systemName: "hand.raised.fill")
+                        Image(systemName: AppIcons.handRaisedFill)
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }
                     if state.rightHandTracked {
-                        Image(systemName: "hand.raised.fill")
+                        Image(systemName: AppIcons.handRaisedFill)
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }

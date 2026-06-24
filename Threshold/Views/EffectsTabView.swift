@@ -15,7 +15,7 @@ struct FogColorPickerRow: View {
 
     var body: some View {
         HStack {
-            Label(title, systemImage: "paintpalette.fill")
+            Label(title, systemImage: AppIcons.paintpaletteFill)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

@@ -82,7 +82,7 @@ struct FirstLaunchWindowView: View {
     private var safetyPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Label("Heads up: flashing lights", systemImage: "bolt.trianglebadge.exclamationmark.fill")
+                Label("Heads up: flashing lights", systemImage: AppIcons.boltTrianglebadgeExclamationmarkFill)
                     .font(.title2.weight(.bold))
                     .foregroundStyle(.primary)
                 Text("Some Threshold scenes contain rapidly changing colors, gradients, and audio-driven flashes that may be uncomfortable for people sensitive to flashing or strobing light.")
@@ -247,12 +247,12 @@ struct FirstLaunchWindowView: View {
             // Settings tab reflects the user's choice if they bail out
             // and re-open it.
             HStack(spacing: 12) {
-                Image(systemName: leftHanded ? "hand.raised.fingers.spread" : "hand.raised.fingers.spread.fill")
+                Image(systemName: leftHanded ? AppIcons.handRaisedFingersSpread : AppIcons.handRaisedFingersSpreadFill)
                     .font(.title3)
                     .foregroundStyle(leftHanded ? .indigo : .blue)
                 Picker("Dominant hand", selection: $leftHanded) {
-                    Label("Right", systemImage: "hand.raised.fingers.spread.fill").tag(false)
-                    Label("Left",  systemImage: "hand.raised.fingers.spread").tag(true)
+                    Label("Right", systemImage: AppIcons.handRaisedFingersSpreadFill).tag(false)
+                    Label("Left",  systemImage: AppIcons.handRaisedFingersSpread).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 320)
@@ -389,7 +389,7 @@ struct FirstLaunchWindowView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    Image(systemName: shareAnalytics ? "person.3.fill" : "person.slash")
+                    Image(systemName: shareAnalytics ? AppIcons.person3Fill : AppIcons.personSlash)
                         .font(.title3)
                         .foregroundStyle(shareAnalytics ? .blue : .secondary)
                     VStack(alignment: .leading, spacing: 2) {
@@ -421,13 +421,13 @@ struct FirstLaunchWindowView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Label("What you're sharing:", systemImage: "checkmark.circle")
+                    Label("What you're sharing:", systemImage: AppIcons.checkmarkCircle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text("• Settings snapshots that can become community collections\n• Aggregated usage stats (e.g. which fractals are popular)\n• Your display name, if you add one, for attribution")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    Label("What we don't collect:", systemImage: "xmark.circle")
+                    Label("What we don't collect:", systemImage: AppIcons.xmarkCircle)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
@@ -541,8 +541,8 @@ private struct OnboardingTutorialVideoView: View {
                     .disabled(true)
             } else {
                 VStack(spacing: 12) {
-                    Image(systemName: "hands.sparkles")
-                        .font(.system(size: 40))
+                    Image(systemName: AppIcons.handsSparkles)
+                        .font(.system(size: IconSize.hero))
                         .foregroundStyle(.secondary)
                     Text(missingTitle)
                         .font(.subheadline.weight(.medium))

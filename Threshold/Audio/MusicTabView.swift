@@ -234,7 +234,7 @@ struct MusicTabContent: View {
                 Spacer(minLength: 0)
 
                 Label(audioAnalyzer.isCapturing ? "Live" : "Ready",
-                      systemImage: audioAnalyzer.isCapturing ? "waveform.circle.fill" : "circle.dashed")
+                      systemImage: audioAnalyzer.isCapturing ? AppIcons.waveformCircleFill : AppIcons.circleDashed)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(audioAnalyzer.isCapturing ? .green : .secondary)
             }
@@ -305,7 +305,7 @@ struct MusicTabContent: View {
         Button {
             isShowingVisualizationAddPopover = true
         } label: {
-            Label("Add Control", systemImage: "plus.circle.fill")
+            Label("Add Control", systemImage: AppIcons.plusCircleFill)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(canAddVisualizationMapping ? .blue : .secondary)
                 .padding(.horizontal, 10)
@@ -364,7 +364,7 @@ struct MusicTabContent: View {
                         if !formulaTargets.isEmpty {
                             addTargetDisclosure(
                                 title: "\(cache.fractalType.displayName) Params",
-                                systemImage: "function",
+                                systemImage: AppIcons.function,
                                 targets: formulaTargets
                             )
                         }
@@ -405,7 +405,7 @@ struct MusicTabContent: View {
                     Text("\(targets.count)")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
-                    Image(systemName: "chevron.right")
+                    Image(systemName: AppIcons.chevronRight)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
@@ -481,7 +481,7 @@ struct MusicTabContent: View {
     private var presetsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Saved Reactivity Presets", systemImage: "square.stack.3d.up")
+                Label("Saved Reactivity Presets", systemImage: AppIcons.squareStack3dUp)
                     .font(.subheadline.bold())
                 Spacer()
                 Text("\(viewModel.musicPresets.count)")
@@ -499,7 +499,7 @@ struct MusicTabContent: View {
                 Button {
                     viewModel.saveMusicPreset(using: cache)
                 } label: {
-                    Label("Save", systemImage: "plus.circle.fill")
+                    Label("Save", systemImage: AppIcons.plusCircleFill)
                         .font(.caption)
                 }
                 .buttonStyle(.borderedProminent)
@@ -526,7 +526,7 @@ struct MusicTabContent: View {
 
     private func presetRow(_ preset: MusicReactivePreset) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "waveform")
+            Image(systemName: AppIcons.waveform)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -550,7 +550,7 @@ struct MusicTabContent: View {
             Button(role: .destructive) {
                 viewModel.deleteMusicPreset(preset.id)
             } label: {
-                Image(systemName: "trash")
+                Image(systemName: AppIcons.trash)
                     .font(.caption2)
             }
             .buttonStyle(.plain)
@@ -603,7 +603,7 @@ struct MusicTabContent: View {
                         .foregroundStyle(.secondary)
 
                     HStack(spacing: 6) {
-                        Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? "waveform.circle.fill" : "waveform.circle")
+                        Image(systemName: cache.audioReactive.fractalAudioReactiveEnabled ? AppIcons.waveformCircleFill : AppIcons.waveformCircle)
                             .font(.caption)
                         Text("\(activeMusicPermutationCount)")
                             .font(.caption.weight(.semibold).monospacedDigit())
@@ -728,19 +728,19 @@ struct MusicTabContent: View {
                 HStack(spacing: 24) {
                     Spacer()
                     Button { viewModel.previousTrack() } label: {
-                        Image(systemName: "backward.fill").font(.title3)
+                        Image(systemName: AppIcons.backwardFill).font(.title3)
                     }
                     .buttonStyle(.plain)
 
                     Button { viewModel.togglePlayPause() } label: {
-                        Image(systemName: music.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 40))
+                        Image(systemName: music.isPlaying ? AppIcons.pauseCircleFill : AppIcons.playCircleFill)
+                            .font(.system(size: IconSize.hero))
                     }
                     .buttonStyle(.plain)
                     .tint(music.accentColor)
 
                     Button { viewModel.nextTrack() } label: {
-                        Image(systemName: "forward.fill").font(.title3)
+                        Image(systemName: AppIcons.forwardFill).font(.title3)
                     }
                     .buttonStyle(.plain)
                     Spacer()
@@ -753,10 +753,10 @@ struct MusicTabContent: View {
                         openWindow(id: AppModel.libraryWindowID)
                     } label: {
                         HStack {
-                            Label("Change Song", systemImage: "music.note.list")
+                            Label("Change Song", systemImage: AppIcons.musicNoteList)
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
-                            Image(systemName: "arrow.up.right.square")
+                            Image(systemName: AppIcons.arrowUpRightSquare)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -776,10 +776,10 @@ struct MusicTabContent: View {
                             alignment: .leading,
                             spacing: 8
                         ) {
-                            musicQuickActionButton(title: "Songs", systemImage: "music.note", tab: .songs)
-                            musicQuickActionButton(title: "Playlists", systemImage: "music.note.list", tab: .playlists)
-                            musicQuickActionButton(title: "Albums", systemImage: "square.stack", tab: .albums)
-                            musicQuickActionButton(title: "Reactive", systemImage: "waveform.path.ecg", tab: .visualizations)
+                            musicQuickActionButton(title: "Songs", systemImage: AppIcons.musicNote, tab: .songs)
+                            musicQuickActionButton(title: "Playlists", systemImage: AppIcons.musicNoteList, tab: .playlists)
+                            musicQuickActionButton(title: "Albums", systemImage: AppIcons.squareStack, tab: .albums)
+                            musicQuickActionButton(title: "Reactive", systemImage: AppIcons.waveformPathEcg, tab: .visualizations)
                         }
                     }
                     #endif
@@ -787,7 +787,7 @@ struct MusicTabContent: View {
             } else {
                 // Empty state
                 VStack(spacing: 8) {
-                    Image(systemName: "music.note")
+                    Image(systemName: AppIcons.musicNote)
                         .font(.largeTitle)
                         .foregroundStyle(.secondary)
                     Text("Nothing Playing")
@@ -835,7 +835,7 @@ struct MusicTabContent: View {
         RoundedRectangle(cornerRadius: 8)
             .fill(.quaternary)
             .overlay(
-                Image(systemName: source == .appleMusic ? "apple.logo" : "music.note")
+                Image(systemName: source == .appleMusic ? AppIcons.appleLogo : AppIcons.musicNote)
                     .foregroundStyle(source == .appleMusic ? .pink.opacity(0.6) : .secondary)
             )
             .frame(width: 56, height: 56)
@@ -855,10 +855,10 @@ struct MusicTabContent: View {
                         cache.display.showMusicShortcuts.toggle()
                         cache.push(\.showMusicShortcuts, value: cache.display.showMusicShortcuts)
                     } label: {
-                        Label(cache.display.showMusicShortcuts ? "Hide Parameter Shortcuts" : "Show Parameter Shortcuts", systemImage: cache.display.showMusicShortcuts ? "checkmark.circle.fill" : "circle")
+                        Label(cache.display.showMusicShortcuts ? "Hide Parameter Shortcuts" : "Show Parameter Shortcuts", systemImage: cache.display.showMusicShortcuts ? AppIcons.checkmarkCircleFill : AppIcons.circle)
                     }
                 } label: {
-                    Label("Settings", systemImage: "gearshape")
+                    Label("Settings", systemImage: AppIcons.gearshape)
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -883,7 +883,7 @@ struct MusicTabContent: View {
             // Microphone row
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Image(systemName: audioAnalyzer.isMicrophoneCapturing ? "mic.fill" : "mic.slash.fill")
+                    Image(systemName: audioAnalyzer.isMicrophoneCapturing ? AppIcons.micFill : AppIcons.micSlashFill)
                         .font(.caption)
                         .foregroundStyle(audioAnalyzer.isMicrophoneCapturing ? .green : .secondary)
                     Text("Microphone")
@@ -917,7 +917,7 @@ struct MusicTabContent: View {
     private var macMicrophoneCaptureRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: audioAnalyzer.isMicrophoneCapturing ? "mic.fill" : "mic.slash.fill")
+                Image(systemName: audioAnalyzer.isMicrophoneCapturing ? AppIcons.micFill : AppIcons.micSlashFill)
                     .font(.caption)
                     .foregroundStyle(audioAnalyzer.isMicrophoneCapturing ? .green : .secondary)
                 Text("Audio Input")
@@ -953,7 +953,7 @@ struct MusicTabContent: View {
     private var systemAudioCaptureRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: systemAudioCapture.isCapturing ? "speaker.wave.2.fill" : "music.note")
+                Image(systemName: systemAudioCapture.isCapturing ? AppIcons.speakerWave2Fill : AppIcons.musicNote)
                     .font(.caption)
                     .foregroundStyle(systemAudioCapture.isCapturing ? .green : .secondary)
                 Text("System Audio")
@@ -1122,7 +1122,7 @@ struct MusicTabContent: View {
                         Button {
                             music.moveServiceUp(serviceID)
                         } label: {
-                            Image(systemName: "chevron.up")
+                            Image(systemName: AppIcons.chevronUp)
                                 .font(.caption2)
                         }
                         .disabled(idx == 0)
@@ -1131,7 +1131,7 @@ struct MusicTabContent: View {
                         Button {
                             music.moveServiceDown(serviceID)
                         } label: {
-                            Image(systemName: "chevron.down")
+                            Image(systemName: AppIcons.chevronDown)
                                 .font(.caption2)
                         }
                         .disabled(idx == order.count - 1)
@@ -1159,7 +1159,7 @@ struct MusicTabContent: View {
         let songs = viewModel.filteredSongs(for: activeID)
         return libraryPane(
             title: "Songs",
-            systemImage: "music.note",
+            systemImage: AppIcons.musicNote,
             accent: music.activeProvider?.accentColor ?? .blue,
             isLoading: music.isLibraryLoading(for: activeID),
             errorMessage: music.libraryError(for: activeID),
@@ -1180,7 +1180,7 @@ struct MusicTabContent: View {
         let playlists = viewModel.filteredPlaylists(for: activeID)
         return libraryPane(
             title: "Playlists",
-            systemImage: "music.note.list",
+            systemImage: AppIcons.musicNoteList,
             accent: .pink,
             isLoading: music.isLibraryLoading(for: activeID),
             errorMessage: music.libraryError(for: activeID),
@@ -1201,7 +1201,7 @@ struct MusicTabContent: View {
         let albums = viewModel.filteredAlbums(for: activeID)
         return libraryPane(
             title: "Albums",
-            systemImage: "square.stack",
+            systemImage: AppIcons.squareStack,
             accent: .teal,
             isLoading: music.isLibraryLoading(for: activeID),
             errorMessage: music.libraryError(for: activeID),
@@ -1302,7 +1302,7 @@ struct MusicTabContent: View {
                 TextField("Search", text: librarySearchBinding)
                     .textFieldStyle(.roundedBorder)
                 Button { viewModel.refreshLibrary() } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: AppIcons.arrowClockwise)
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -1323,12 +1323,12 @@ struct MusicTabContent: View {
                     AsyncImage(url: url) { img in
                         img.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        Image(systemName: "music.note").font(.caption2).foregroundStyle(.secondary)
+                        Image(systemName: AppIcons.musicNote).font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(width: 28, height: 28)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else {
-                    Image(systemName: "music.note").font(.caption2).foregroundStyle(.secondary)
+                    Image(systemName: AppIcons.musicNote).font(.caption2).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(track.title).font(.caption).lineLimit(1)
@@ -1353,12 +1353,12 @@ struct MusicTabContent: View {
                     AsyncImage(url: url) { img in
                         img.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        Image(systemName: "music.note.list").font(.caption2).foregroundStyle(.secondary)
+                        Image(systemName: AppIcons.musicNoteList).font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(width: 28, height: 28)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else {
-                    Image(systemName: "music.note.list").font(.caption2).foregroundStyle(.secondary)
+                    Image(systemName: AppIcons.musicNoteList).font(.caption2).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(pl.name).font(.caption).lineLimit(1)
@@ -1383,12 +1383,12 @@ struct MusicTabContent: View {
                     AsyncImage(url: url) { img in
                         img.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        Image(systemName: "square.stack").font(.caption2).foregroundStyle(.secondary)
+                        Image(systemName: AppIcons.squareStack).font(.caption2).foregroundStyle(.secondary)
                     }
                     .frame(width: 28, height: 28)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else {
-                    Image(systemName: "square.stack").font(.caption2).foregroundStyle(.secondary)
+                    Image(systemName: AppIcons.squareStack).font(.caption2).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(album.title).font(.caption).lineLimit(1)
@@ -1439,7 +1439,7 @@ struct MusicTabContent: View {
                                 }
                             }
                         } label: {
-                            Label("Shortcuts", systemImage: "sparkles")
+                            Label("Shortcuts", systemImage: AppIcons.sparkles)
                                 .font(.caption)
                         }
                         .buttonStyle(.bordered)
@@ -1513,7 +1513,7 @@ struct MusicTabContent: View {
                                         Button(role: .destructive) {
                                             removeMapping(at: index)
                                         } label: {
-                                            Label("Remove", systemImage: "trash")
+                                            Label("Remove", systemImage: AppIcons.trash)
                                                 .font(.caption.weight(.semibold))
                                                 .padding(.horizontal, 4)
                                                 .padding(.vertical, 2)

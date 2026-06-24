@@ -68,7 +68,7 @@ struct FormulaParamsEditor: View {
                     Button {
                         cache.resetFormulaParams()
                     } label: {
-                        Label("Reset", systemImage: "arrow.counterclockwise")
+                        Label("Reset", systemImage: AppIcons.arrowCounterclockwise)
                             .font(.caption)
                     }
                     .buttonStyle(.bordered)
@@ -289,7 +289,7 @@ private struct ParameterNodeRow: View {
                                         HStack {
                                             Label(finger.displayName, systemImage: finger.icon)
                                             if isCurrentSlot {
-                                                Image(systemName: "checkmark")
+                                                Image(systemName: AppIcons.checkmark)
                                             }
                                         }
                                     }
@@ -301,7 +301,7 @@ private struct ParameterNodeRow: View {
                             Button("Clear Gesture") { clearGestureMapping() }
                         }
                     } label: {
-                        Image(systemName: currentGestureSlot != nil ? (currentGestureSlot!.hand.icon) : "hand.point.up.left.fill")
+                        Image(systemName: currentGestureSlot != nil ? (currentGestureSlot!.hand.icon) : AppIcons.handPointUpLeftFill)
                             .font(.caption)
                             .foregroundStyle(currentGestureSlot != nil ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
                             .frame(width: 20)
@@ -314,7 +314,7 @@ private struct ParameterNodeRow: View {
                     Button {
                         toggleMusicMapping(musicTarget)
                     } label: {
-                        Image(systemName: hasMusicMapping(musicTarget) ? "waveform.circle.fill" : "waveform.circle")
+                        Image(systemName: hasMusicMapping(musicTarget) ? AppIcons.waveformCircleFill : AppIcons.waveformCircle)
                             .font(.caption)
                             .foregroundStyle(hasMusicMapping(musicTarget) ? AnyShapeStyle(.pink) : AnyShapeStyle(.tertiary))
                             .frame(width: 20)
@@ -328,7 +328,7 @@ private struct ParameterNodeRow: View {
                     Button {
                         isFlipped = true
                     } label: {
-                        Image(systemName: sensitivityIsCustom ? "gauge.with.dots.needle.67percent" : "gauge.with.dots.needle.50percent")
+                        Image(systemName: sensitivityIsCustom ? AppIcons.gaugeWithDotsNeedle67percent : AppIcons.gaugeWithDotsNeedle50percent)
                             .font(.caption)
                             .foregroundStyle(sensitivityIsCustom ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary.opacity(0.6)))
                             .frame(width: 20)
@@ -347,7 +347,7 @@ private struct ParameterNodeRow: View {
         VStack(spacing: 4) {
             // ── Row 1: Gesture sensitivity ──
             HStack(spacing: 8) {
-                Image(systemName: "gauge.with.dots.needle.67percent")
+                Image(systemName: AppIcons.gaugeWithDotsNeedle67percent)
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .frame(width: 16)
@@ -374,7 +374,7 @@ private struct ParameterNodeRow: View {
                     sensitivityValue = GestureSensitivityStore.defaultSensitivity
                     GestureSensitivityStore.shared.resetSensitivity(for: floatNode.id)
                 } label: {
-                    Image(systemName: "arrow.counterclockwise")
+                    Image(systemName: AppIcons.arrowCounterclockwise)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .frame(width: 16)
@@ -384,7 +384,7 @@ private struct ParameterNodeRow: View {
                 Button {
                     isFlipped = false
                 } label: {
-                    Image(systemName: "arrow.uturn.backward")
+                    Image(systemName: AppIcons.arrowUturnBackward)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .frame(width: 16)
@@ -400,7 +400,7 @@ private struct ParameterNodeRow: View {
 
                 // Source picker
                 HStack(spacing: 4) {
-                    Image(systemName: "waveform.circle")
+                    Image(systemName: AppIcons.waveformCircle)
                         .font(.caption)
                         .foregroundStyle(.pink)
                         .frame(width: 16)
@@ -432,7 +432,7 @@ private struct ParameterNodeRow: View {
                 if mappingIndex != nil {
                     // Response curve
                     HStack(spacing: 4) {
-                        Image(systemName: "waveform")
+                        Image(systemName: AppIcons.waveform)
                             .font(.caption2)
                             .foregroundStyle(.pink)
                             .frame(width: 16)
@@ -694,7 +694,7 @@ private struct TripletRow: View {
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
-                Image(systemName: "move.3d")
+                Image(systemName: AppIcons.move3d)
                     .font(.caption)
                     .foregroundStyle(.purple)
                     .frame(width: 16)
@@ -717,7 +717,7 @@ private struct TripletRow: View {
                                     } label: {
                                         HStack {
                                             Label(finger.displayName, systemImage: finger.icon)
-                                            if isCurrent { Image(systemName: "checkmark") }
+                                            if isCurrent { Image(systemName: AppIcons.checkmark) }
                                         }
                                     }
                                 }
@@ -739,7 +739,7 @@ private struct TripletRow: View {
                             } else {
                                 Text("Not Assigned")
                             }
-                            Image(systemName: "chevron.up.chevron.down")
+                            Image(systemName: AppIcons.chevronUpChevronDown)
                                 .font(.caption2)
                         }
                         .font(.caption)
@@ -756,7 +756,7 @@ private struct TripletRow: View {
 
             if hasTripletMusicMapping {
                 HStack(spacing: 4) {
-                    Image(systemName: "waveform.circle.fill")
+                    Image(systemName: AppIcons.waveformCircleFill)
                         .font(.caption)
                         .foregroundStyle(.pink)
                         .frame(width: 16)

@@ -106,7 +106,7 @@ struct MusicLibraryWindow: View {
 
                 if scope != .songs {
                     Toggle(isOn: $shuffle) {
-                        Image(systemName: "shuffle")
+                        Image(systemName: AppIcons.shuffle)
                             .font(.caption)
                     }
                     .toggleStyle(.button)
@@ -116,7 +116,7 @@ struct MusicLibraryWindow: View {
                 Button {
                     music.refreshLibrary(for: activeID)
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: AppIcons.arrowClockwise)
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -164,7 +164,7 @@ struct MusicLibraryWindow: View {
         .listStyle(.plain)
         .overlay {
             if tracks.isEmpty {
-                ContentUnavailableView("No Songs", systemImage: "music.note", description: Text("No songs match your search."))
+                ContentUnavailableView("No Songs", systemImage: AppIcons.musicNote, description: Text("No songs match your search."))
             }
         }
     }
@@ -195,7 +195,7 @@ struct MusicLibraryWindow: View {
         .listStyle(.plain)
         .overlay {
             if playlists.isEmpty {
-                ContentUnavailableView("No Playlists", systemImage: "music.note.list", description: Text("No playlists match your search."))
+                ContentUnavailableView("No Playlists", systemImage: AppIcons.musicNoteList, description: Text("No playlists match your search."))
             }
         }
     }
@@ -211,7 +211,7 @@ struct MusicLibraryWindow: View {
                         isLoadingTracks = false
                     }
                 } label: {
-                    Label("Playlists", systemImage: "chevron.left")
+                    Label("Playlists", systemImage: AppIcons.chevronLeft)
                         .font(.subheadline)
                 }
                 .buttonStyle(.plain)
@@ -223,7 +223,7 @@ struct MusicLibraryWindow: View {
                 Button {
                     music.playPlaylist(playlist, shuffle: shuffle)
                 } label: {
-                    Label("Play All", systemImage: shuffle ? "shuffle" : "play.fill")
+                    Label("Play All", systemImage: shuffle ? AppIcons.shuffle : AppIcons.playFill)
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
@@ -245,7 +245,7 @@ struct MusicLibraryWindow: View {
                 .listStyle(.plain)
                 .overlay {
                     if playlistTracks.isEmpty {
-                        ContentUnavailableView("Empty Playlist", systemImage: "music.note", description: Text("This playlist has no tracks."))
+                        ContentUnavailableView("Empty Playlist", systemImage: AppIcons.musicNote, description: Text("This playlist has no tracks."))
                     }
                 }
             }
@@ -299,7 +299,7 @@ struct MusicLibraryWindow: View {
         .listStyle(.plain)
         .overlay {
             if albums.isEmpty {
-                ContentUnavailableView("No Albums", systemImage: "square.stack", description: Text("No albums match your search."))
+                ContentUnavailableView("No Albums", systemImage: AppIcons.squareStack, description: Text("No albums match your search."))
             }
         }
     }
@@ -353,7 +353,7 @@ struct MusicLibraryWindow: View {
                 }
             }
             Spacer()
-            Image(systemName: "chevron.right")
+            Image(systemName: AppIcons.chevronRight)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

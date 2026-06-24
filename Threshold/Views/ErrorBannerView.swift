@@ -29,7 +29,7 @@ struct ErrorBannerView: View {
                         errorReporter.dismiss()
                     }
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(systemName: AppIcons.xmarkCircleFill)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)

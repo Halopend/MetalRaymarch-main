@@ -30,7 +30,7 @@ struct GradientStopsPopover: View {
                 Button {
                     saveGradient()
                 } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
+                    Label("Save", systemImage: AppIcons.squareAndArrowDown)
                         .font(.caption)
                 }
                 .buttonStyle(.borderedProminent)
@@ -40,7 +40,7 @@ struct GradientStopsPopover: View {
             
             // ── Name field ──
             HStack(spacing: 8) {
-                Image(systemName: "character.cursor.ibeam")
+                Image(systemName: AppIcons.characterCursorIbeam)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 TextField("Gradient name", text: $gradientName)
@@ -89,7 +89,7 @@ struct GradientStopsPopover: View {
                 addStop()
             } label: {
                 HStack {
-                    Image(systemName: "plus.circle.fill")
+                    Image(systemName: AppIcons.plusCircleFill)
                     Text("Add Color Stop")
                 }
                 .font(.subheadline)
@@ -103,7 +103,7 @@ struct GradientStopsPopover: View {
             // ── Saved confirmation ──
             if showSavedConfirmation {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: AppIcons.checkmarkCircleFill)
                         .foregroundStyle(.green)
                     Text("Saved!")
                         .font(.caption.weight(.medium))
@@ -257,7 +257,7 @@ struct GradientStopRow: View {
                 Button {
                     onDelete()
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
+                    Image(systemName: AppIcons.xmarkCircleFill)
                         .font(.caption)
                         .foregroundStyle(.red)
                 }

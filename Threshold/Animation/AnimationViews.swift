@@ -50,7 +50,7 @@ struct AnimationEditorWindowView: View {
             } else {
                 ContentUnavailableView(
                     "Not Available",
-                    systemImage: "exclamationmark.triangle",
+                    systemImage: AppIcons.exclamationmarkTriangle,
                     description: Text("Animation manager not initialized")
                 )
             }
@@ -84,7 +84,7 @@ private struct AnimationEditorWorkspaceView: View {
             } else {
                 ContentUnavailableView(
                     "No Scene Selected",
-                    systemImage: "pencil.and.list.clipboard",
+                    systemImage: AppIcons.pencilAndListClipboard,
                     description: Text("Pick a scene in Video and open Edit to edit it here.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -131,7 +131,7 @@ struct SceneListView: View {
                         newSceneName = "Scene \(animationManager.scenes.count + 1)"
                         showingCreateSheet = true
                     } label: {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: AppIcons.plusCircleFill)
                             .font(.title3)
                     }
                 }
@@ -159,7 +159,7 @@ struct SceneListView: View {
                         newSceneName = "Scene \(animationManager.scenes.count + 1)"
                         showingCreateSheet = true
                     } label: {
-                        Image(systemName: "plus")
+                        Image(systemName: AppIcons.plus)
                     }
                 }
             }
@@ -174,7 +174,7 @@ struct SceneListView: View {
             if animationManager.scenes.isEmpty {
                 ContentUnavailableView(
                     "No Scenes",
-                    systemImage: "film.stack",
+                    systemImage: AppIcons.filmStack,
                     description: Text("Create a scene to animate between parameter states")
                 )
             } else {
@@ -212,7 +212,7 @@ struct SceneListView: View {
                             Button {
                                 animationManager.restoreDefaultScene(scene.id)
                             } label: {
-                                Label("Restore", systemImage: "arrow.uturn.backward")
+                                Label("Restore", systemImage: AppIcons.arrowUturnBackward)
                                     .font(.caption)
                             }
                             .buttonStyle(.bordered)
@@ -230,7 +230,7 @@ struct SceneListView: View {
                     Button {
                         showCreatePlaylist = true
                     } label: {
-                        Label("Create Playlist from Scenes", systemImage: "music.note.list")
+                        Label("Create Playlist from Scenes", systemImage: AppIcons.musicNoteList)
                     }
                     if let status = playlistCreationStatus {
                         Text(status)
@@ -270,7 +270,7 @@ struct SceneListView: View {
                         .lineLimit(1)
                     Spacer()
                     if animationManager.currentScene?.id == scene.id {
-                        Image(systemName: "checkmark")
+                        Image(systemName: AppIcons.checkmark)
                             .foregroundStyle(.blue)
                             .font(.caption)
                     }
@@ -309,9 +309,9 @@ struct SceneListView: View {
                 animationManager.deleteScene(scene)
             } label: {
                 if animationManager.isDefaultScene(scene) {
-                    Label("Hide", systemImage: "eye.slash")
+                    Label("Hide", systemImage: AppIcons.eyeSlash)
                 } else {
-                    Label("Delete", systemImage: "trash")
+                    Label("Delete", systemImage: AppIcons.trash)
                 }
             }
         }
@@ -396,23 +396,23 @@ struct SceneRowView: View {
                             )
                     }
                     if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: AppIcons.checkmarkCircleFill)
                             .foregroundStyle(.green)
                             .font(.caption)
                     }
                 }
                 
                 HStack(spacing: 12) {
-                    Label("\(scene.keyframes.count)", systemImage: "square.stack.3d.up")
-                    Label(formatDuration(scene.totalDuration), systemImage: "clock")
+                    Label("\(scene.keyframes.count)", systemImage: AppIcons.squareStack3dUp)
+                    Label(formatDuration(scene.totalDuration), systemImage: AppIcons.clock)
                     if scene.isLooping {
-                        Image(systemName: "repeat")
+                        Image(systemName: AppIcons.repeatIcon)
                     }
                     if scene.playbackMode != .forward {
                         Image(systemName: scene.playbackMode.icon)
                     }
                     if scene.attachedSong != nil {
-                        Image(systemName: "music.note")
+                        Image(systemName: AppIcons.musicNote)
                             .foregroundStyle(.pink)
                     }
                 }
@@ -428,7 +428,7 @@ struct SceneRowView: View {
                     Button {
                         onResetDefault()
                     } label: {
-                        Image(systemName: "arrow.uturn.backward")
+                        Image(systemName: AppIcons.arrowUturnBackward)
                     }
                     .buttonStyle(.bordered)
                     .tint(isResetButtonPressed ? .green : .red)
@@ -445,7 +445,7 @@ struct SceneRowView: View {
                 }
                 if let onPlay {
                     Button { onPlay() } label: {
-                        Image(systemName: "play.fill")
+                        Image(systemName: AppIcons.playFill)
                     }
                     .buttonStyle(.bordered)
                     .tint(.green)
@@ -453,7 +453,7 @@ struct SceneRowView: View {
                 }
                 if let onEdit {
                     Button { onEdit() } label: {
-                        Image(systemName: "pencil")
+                        Image(systemName: AppIcons.pencil)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -543,7 +543,7 @@ struct SceneEditorView: View {
                     Button {
                         closeEditor()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(systemName: AppIcons.xmarkCircleFill)
                             .foregroundStyle(.secondary)
                             .font(.title3)
                     }
@@ -570,7 +570,7 @@ struct SceneEditorView: View {
                     Button {
                         updateLightingAcrossKeyframes()
                     } label: {
-                        Label("Update Lighting", systemImage: "lightbulb.max")
+                        Label("Update Lighting", systemImage: AppIcons.lightbulbMax)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
@@ -579,7 +579,7 @@ struct SceneEditorView: View {
                     Button {
                         showSceneSettings.toggle()
                     } label: {
-                        Label("Settings", systemImage: "gearshape")
+                        Label("Settings", systemImage: AppIcons.gearshape)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
@@ -729,7 +729,7 @@ struct SceneEditorView: View {
                         scene.safetyBubbleShape = settings.safetyBubbleShape
                         scene.safetyBubbleBlend = settings.safetyBubbleBlend
                     } label: {
-                        Label("Capture Current Settings", systemImage: "camera.fill")
+                        Label("Capture Current Settings", systemImage: AppIcons.cameraFill)
                             .font(.caption)
                     }
                     .buttonStyle(.bordered)
@@ -766,7 +766,7 @@ struct SceneEditorView: View {
                         Button {
                             scene.attachedSong = nil
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
+                            Image(systemName: AppIcons.xmarkCircleFill)
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
@@ -795,7 +795,7 @@ struct SceneEditorView: View {
                 } label: {
                     Label(
                         scene.attachedSong == nil ? "Attach Now Playing" : "Replace with Now Playing",
-                        systemImage: "link.badge.plus"
+                        systemImage: AppIcons.linkBadgePlus
                     )
                     .font(.caption)
                 }
@@ -808,7 +808,7 @@ struct SceneEditorView: View {
                 } label: {
                     Label(
                         scene.attachedSong == nil ? "Browse Library" : "Choose from Library",
-                        systemImage: "music.note.list"
+                        systemImage: AppIcons.musicNoteList
                     )
                     .font(.caption)
                 }
@@ -903,14 +903,14 @@ struct SceneEditorView: View {
                         Button {
                             updateLightingAcrossKeyframes()
                         } label: {
-                            Image(systemName: "lightbulb.max")
+                            Image(systemName: AppIcons.lightbulbMax)
                         }
                         .disabled(scene.keyframes.isEmpty)
 
                         Button {
                             showSceneSettings.toggle()
                         } label: {
-                            Image(systemName: "gearshape")
+                            Image(systemName: AppIcons.gearshape)
                         }
                         .popover(isPresented: $showSceneSettings) {
                             sceneSettingsPopover
@@ -1000,7 +1000,7 @@ struct SceneEditorView: View {
                             }
                         }
                     } label: {
-                        Label("Capture", systemImage: "plus.circle.fill")
+                        Label("Capture", systemImage: AppIcons.plusCircleFill)
                             .font(.caption)
                     }
                 }
@@ -1054,7 +1054,7 @@ struct SceneEditorView: View {
     private var inlineMetaLeadingRow: some View {
         HStack(spacing: AnimationEditorLayout.metaSpacing) {
             Toggle(isOn: $scene.isLooping) {
-                Label("Loop", systemImage: "repeat")
+                Label("Loop", systemImage: AppIcons.repeatIcon)
                     .font(.caption)
             }
             .toggleStyle(.button)
@@ -1075,7 +1075,7 @@ struct SceneEditorView: View {
 
     private var durationControlRow: some View {
         HStack(spacing: 10) {
-            Label("Duration", systemImage: "timer")
+            Label("Duration", systemImage: AppIcons.timer)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Slider(value: $defaultDuration, in: 0.5...10.0, step: 0.5)
@@ -1312,7 +1312,7 @@ struct KeyframeRowView: View {
             HStack(spacing: 6) {
                 // Preview — apply keyframe to current render
                 Button { onJump() } label: {
-                    Image(systemName: "eye")
+                    Image(systemName: AppIcons.eye)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -1321,7 +1321,7 @@ struct KeyframeRowView: View {
                 
                 // Edit easing / details
                 Button { onEdit() } label: {
-                    Image(systemName: "slider.horizontal.3")
+                    Image(systemName: AppIcons.sliderHorizontal3)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -1331,15 +1331,15 @@ struct KeyframeRowView: View {
                 // More actions
                 Menu {
                     Button { onOverwrite() } label: {
-                        Label("Replace with Current", systemImage: "arrow.down.circle")
+                        Label("Replace with Current", systemImage: AppIcons.arrowDownCircle)
                     }
                     if let onDuplicate {
                         Button { onDuplicate() } label: {
-                            Label("Duplicate", systemImage: "plus.square.on.square")
+                            Label("Duplicate", systemImage: AppIcons.plusSquareOnSquare)
                         }
                     }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: AppIcons.ellipsisCircle)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -1510,7 +1510,7 @@ struct KeyframeEditorView: View {
                                 Button("Anticipate") { keyframe.bezierHandle = .anticipate }
                                 Button("Snappy") { keyframe.bezierHandle = .snappy }
                             } label: {
-                                Label("Bezier Preset", systemImage: "curve.bezier")
+                                Label("Bezier Preset", systemImage: AppIcons.curveBezier)
                                     .font(.subheadline)
                             }
                             .padding(.horizontal, 16)
@@ -1693,7 +1693,7 @@ struct LiveSessionRecordingControl: View {
             } label: {
                 if compact {
                     HStack(spacing: 6) {
-                        Image(systemName: animationManager.isRecording ? "stop.fill" : "record.circle")
+                        Image(systemName: animationManager.isRecording ? AppIcons.stopFill : AppIcons.recordCircle)
                         if animationManager.isRecording {
                             Text(formatTime(animationManager.recordingElapsed))
                                 .font(.caption.monospacedDigit())
@@ -1702,7 +1702,7 @@ struct LiveSessionRecordingControl: View {
                 } else {
                     Label(
                         animationManager.isRecording ? "Stop \(formatTime(animationManager.recordingElapsed))" : "Record Session",
-                        systemImage: animationManager.isRecording ? "stop.fill" : "record.circle"
+                        systemImage: animationManager.isRecording ? AppIcons.stopFill : AppIcons.recordCircle
                     )
                 }
             }

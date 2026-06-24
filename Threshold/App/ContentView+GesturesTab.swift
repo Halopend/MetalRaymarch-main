@@ -17,7 +17,7 @@ extension ContentView {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 8) {
                 HStack {
-                    Label("Gesture Controls", systemImage: "hand.draw").font(.headline)
+                    Label("Gesture Controls", systemImage: AppIcons.handDraw).font(.headline)
                     Spacer()
                 }
 
@@ -60,7 +60,7 @@ extension ContentView {
 
     private var gestureCoreBehaviorSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Core Behavior", systemImage: "slider.horizontal.3")
+            Label("Core Behavior", systemImage: AppIcons.sliderHorizontal3)
                 .font(.subheadline.weight(.semibold))
 
             // Compact 2-column grid of boolean behavior toggles
@@ -197,7 +197,7 @@ extension ContentView {
     private var gestureLabSection: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8) {
-                Label("Menu Toggle Tuning", systemImage: "menucard")
+                Label("Menu Toggle Tuning", systemImage: AppIcons.menucard)
                     .font(.caption.weight(.semibold))
 
                 EffectSliderRow(icon: "hand.tap", label: "Hold Time",
@@ -226,7 +226,7 @@ extension ContentView {
 
                 Divider()
 
-                Label("Two-Hand Pinch Tuning", systemImage: "hands.sparkles")
+                Label("Two-Hand Pinch Tuning", systemImage: AppIcons.handsSparkles)
                     .font(.caption.weight(.semibold))
 
                 EffectSliderRow(icon: "dot.radiowaves.left.and.right", label: "Min Distance",
@@ -278,7 +278,7 @@ extension ContentView {
                     showToggle: false)
             }
         } label: {
-            Label("Gesture Lab", systemImage: "wrench.and.screwdriver")
+            Label("Gesture Lab", systemImage: AppIcons.wrenchAndScrewdriver)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

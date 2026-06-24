@@ -158,7 +158,7 @@ struct FractalGridView: View {
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Animated Scenes",
-                systemImage: "sparkles.rectangle.stack",
+                systemImage: AppIcons.sparklesRectangleStack,
                 description: "Keyframed motion studies and full visual sequences.",
                 current: currentSceneSelectionLabel(
                     selection: activeSelection,
@@ -177,7 +177,7 @@ struct FractalGridView: View {
                             title: scene.name,
                             subtitle: scene.fractalType?.displayName ?? "Any fractal",
                             detail: scene.attachedSong?.title ?? "Visual-only scene",
-                            systemImage: scene.attachedSong == nil ? "sparkles.rectangle.stack" : "music.note",
+                            systemImage: scene.attachedSong == nil ? AppIcons.sparklesRectangleStack : AppIcons.musicNote,
                             showsFlashingWarning: scene.name.localizedCaseInsensitiveContains("ambient blur"),
                             isSelected: activeSelection == .animation(scene.id),
                             onEdit: { onEditScene?(scene) }
@@ -204,7 +204,7 @@ struct FractalGridView: View {
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Custom Scenes",
-                systemImage: "chevron.left.forwardslash.chevron.right",
+                systemImage: AppIcons.chevronLeftForwardslashChevronRight,
                 description: "Externally-supplied scenes with embedded custom distance estimators.",
                 current: currentSceneSelectionLabel(
                     selection: activeSelection,
@@ -223,7 +223,7 @@ struct FractalGridView: View {
                             title: preset.name,
                             subtitle: preset.embeddedFormula?.name ?? preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
-                            systemImage: "chevron.left.forwardslash.chevron.right",
+                            systemImage: AppIcons.chevronLeftForwardslashChevronRight,
                             thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
@@ -250,7 +250,7 @@ struct FractalGridView: View {
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Jumping Off",
-                systemImage: "photo.on.rectangle.angled",
+                systemImage: AppIcons.photoOnRectangleAngled,
                 description: "Static starting points for exploring a region of the fractal.",
                 current: currentSceneSelectionLabel(
                     selection: activeSelection,
@@ -269,7 +269,7 @@ struct FractalGridView: View {
                             title: preset.name,
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
-                            systemImage: "photo",
+                            systemImage: AppIcons.photo,
                             thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
@@ -296,7 +296,7 @@ struct FractalGridView: View {
         VStack(alignment: .leading, spacing: 10) {
             browserHeader(
                 title: "Music Reactive",
-                systemImage: "music.note",
+                systemImage: AppIcons.musicNote,
                 description: "Honed-in presets with reactive mappings ready to drive the scene from audio.",
                 current: currentSceneSelectionLabel(
                     selection: activeSelection,
@@ -315,7 +315,7 @@ struct FractalGridView: View {
                             title: preset.name,
                             subtitle: preset.fractalType.displayName,
                             detail: staticSceneDetail(for: preset),
-                            systemImage: "music.note",
+                            systemImage: AppIcons.musicNote,
                             thumbnailData: preset.thumbnailData,
                             isSelected: activeSelection == .staticPreset(preset.id),
                             onEdit: nil
@@ -496,7 +496,7 @@ struct FractalGridView: View {
                 Spacer(minLength: 0)
 
                 if isSelected {
-                    Label("Selected", systemImage: "checkmark.circle.fill")
+                    Label("Selected", systemImage: AppIcons.checkmarkCircleFill)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.blue)
                 }
@@ -576,7 +576,7 @@ struct FractalGridCell: View {
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: AppIcons.checkmarkCircleFill)
                             .font(.caption2)
                             .foregroundStyle(.blue)
                     }

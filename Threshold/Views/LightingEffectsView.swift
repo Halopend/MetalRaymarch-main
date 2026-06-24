@@ -23,7 +23,7 @@ struct PresetCardButton: View {
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(isSelected ? .white : .primary)
                 if isSelected {
-                    Label("Selected", systemImage: "checkmark.circle.fill")
+                    Label("Selected", systemImage: AppIcons.checkmarkCircleFill)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
                 }

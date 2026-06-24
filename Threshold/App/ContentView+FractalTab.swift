@@ -83,7 +83,7 @@ extension ContentView {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Label("Music Shape Control", systemImage: "waveform.path")
+                        Label("Music Shape Control", systemImage: AppIcons.waveformPath)
                             .font(.headline)
                         if hasFlashingMusicVisuals {
                             FlashingLightIndicator()
@@ -129,7 +129,7 @@ extension ContentView {
     private var fractalFormulaContent: some View {
         VStack(spacing: 12) {
             HStack {
-                Label("Fractal Formula", systemImage: "function")
+                Label("Fractal Formula", systemImage: AppIcons.function)
                     .font(.headline)
                 Spacer()
                 Text(cache.fractalType.displayName)
@@ -154,7 +154,7 @@ extension ContentView {
             // ── Safety Bubble ────────────────────────────────────────────────
             VStack(spacing: 8) {
                 HStack {
-                    Label("Safety Bubble", systemImage: "shield.lefthalf.filled").font(.headline)
+                    Label("Safety Bubble", systemImage: AppIcons.shieldLefthalfFilled).font(.headline)
                     Spacer()
                     Toggle("", isOn: $cache.safetyBubble.enabled)
                         .labelsHidden()
@@ -229,7 +229,7 @@ extension ContentView {
                     Text("Controls how strongly the bubble masks fractal geometry. Fine control at low values.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    Label("Blend mode cost varies by scene/fractal/zoom — different values can be expensive in different conditions (Mandelbox often runs better with Blend off, but can behave differently when zoomed in).", systemImage: "exclamationmark.triangle")
+                    Label("Blend mode cost varies by scene/fractal/zoom — different values can be expensive in different conditions (Mandelbox often runs better with Blend off, but can behave differently when zoomed in).", systemImage: AppIcons.exclamationmarkTriangle)
                         .font(.caption2)
                         .foregroundStyle(.orange)
                     EffectSliderRow(icon: "circle.righthalf.filled", label: "Blend",
@@ -253,7 +253,7 @@ extension ContentView {
 #if os(visionOS)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("Platform", systemImage: "circle.hexagongrid.fill")
+                    Label("Platform", systemImage: AppIcons.circleHexagongridFill)
                         .font(.headline)
                     Spacer()
                     if cache.display.platformEnabled {
@@ -297,12 +297,12 @@ extension ContentView {
             // ── Detail (Grab Gesture Transform) ──────────────────────────────
             VStack(spacing: 8) {
                 HStack {
-                    Label("Detail", systemImage: "move.3d").font(.headline)
+                    Label("Detail", systemImage: AppIcons.move3d).font(.headline)
                     Spacer()
                     Button {
                         appModel.renderSettings.resetDetailTransform()
                     } label: {
-                        Label("Reset", systemImage: "arrow.counterclockwise")
+                        Label("Reset", systemImage: AppIcons.arrowCounterclockwise)
                             .font(.caption)
                     }
                     .buttonStyle(.bordered)
@@ -314,7 +314,7 @@ extension ContentView {
                     .foregroundStyle(.tertiary)
                 
                 HStack {
-                    Label("Zoom", systemImage: "magnifyingglass").font(.caption)
+                    Label("Zoom", systemImage: AppIcons.magnifyingglass).font(.caption)
                     Spacer()
                     Text(String(format: "%.2f×", cache.liveDetailScale))
                         .font(.caption.monospacedDigit())
@@ -331,7 +331,7 @@ extension ContentView {
                     showToggle: false)
                 
                 HStack {
-                    Label("Rotation", systemImage: "rotate.3d").font(.caption)
+                    Label("Rotation", systemImage: AppIcons.rotate3d).font(.caption)
                     Spacer()
                     Text(String(format: "%.0f° %.0f° %.0f°", rotationEuler.x, rotationEuler.y, rotationEuler.z))
                         .font(.caption.monospacedDigit())
@@ -385,7 +385,7 @@ extension ContentView {
     private var sphericalInversionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Spherical Inversion", systemImage: "circle.dashed.inset.filled")
+                Label("Spherical Inversion", systemImage: AppIcons.circleDashedInsetFilled)
                     .font(.headline)
                 Spacer()
             }
@@ -426,7 +426,7 @@ extension ContentView {
         let isMandelbox = cache.fractalType == .mandelbox
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Sphere Projection", systemImage: "globe.asia.australia")
+                Label("Sphere Projection", systemImage: AppIcons.globeAsiaAustralia)
                     .font(.headline)
                     .foregroundStyle(isMandelbox ? .primary : .secondary)
                 Spacer()
@@ -466,7 +466,7 @@ extension ContentView {
                         showToggle: false)
                 }
             } else {
-                Label("Only affects the Mandelbox fractal — switch to Mandelbox to use this.", systemImage: "info.circle")
+                Label("Only affects the Mandelbox fractal — switch to Mandelbox to use this.", systemImage: AppIcons.infoCircle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -479,7 +479,7 @@ extension ContentView {
     private var fractalQualityContent: some View {
         VStack(spacing: 12) {
             HStack {
-                Label("Performance", systemImage: "gauge")
+                Label("Performance", systemImage: AppIcons.gauge)
                     .font(.headline)
                 Spacer()
                 FPSIndicatorView()
@@ -645,7 +645,7 @@ extension ContentView {
                             } label: {
                                 VStack(spacing: 2) {
                                     ZStack {
-                                        Image(systemName: "rectangle.dashed")
+                                        Image(systemName: AppIcons.rectangleDashed)
                                             .font(.caption)
                                         Image(systemName: preset.icon)
                                             .font(.caption2)

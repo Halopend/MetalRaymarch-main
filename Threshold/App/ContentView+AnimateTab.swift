@@ -22,7 +22,7 @@ extension ContentView {
 
     private var animateToolbar: some View {
         HStack(spacing: 10) {
-            Label("Scenes", systemImage: "film.stack")
+            Label("Scenes", systemImage: AppIcons.filmStack)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -49,7 +49,7 @@ extension ContentView {
                 Button {
                     openAnimationEditor()
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: AppIcons.plus)
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(.blue)
                         .frame(width: 30, height: 30)
@@ -70,7 +70,7 @@ extension ContentView {
             if let animationManager = appModel.animationManager {
                 List {
                     if animationManager.scenes.isEmpty {
-                        ContentUnavailableView("No Scenes", systemImage: "film.stack",
+                        ContentUnavailableView("No Scenes", systemImage: AppIcons.filmStack,
                             description: Text("Open Scene Editor to create animation scenes"))
                     } else {
                         ForEach(animationManager.scenes) { scene in

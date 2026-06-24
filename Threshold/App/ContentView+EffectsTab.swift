@@ -79,7 +79,7 @@ extension ContentView {
                     onChanged: { cache.commitGradientCycleEffect() })
                 if cache.lighting.gradientCycleEffect.enabled {
                     HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Image(systemName: AppIcons.arrowTriangle2Circlepath)
                             .font(.caption)
                             .frame(width: 16)
                         Text("Mirror Loop")
@@ -152,7 +152,7 @@ extension ContentView {
             if cache.fractalType.supports(.polarRotation) {
                 VStack(spacing: 8) {
                     HStack {
-                        Label("Polar Rotation", systemImage: "arrow.trianglehead.counterclockwise.rotate.90")
+                        Label("Polar Rotation", systemImage: AppIcons.arrowTriangleheadCounterclockwiseRotate90)
                             .font(.subheadline.weight(.medium))
                         Spacer()
                         Picker("", selection: Binding(
@@ -191,7 +191,7 @@ extension ContentView {
     private var lightVariationControls: some View {
         VStack(spacing: 6) {
             HStack {
-                Label("Color Shift Speed", systemImage: "paintpalette.fill")
+                Label("Color Shift Speed", systemImage: AppIcons.paintpaletteFill)
                     .font(.subheadline.weight(.medium))
                 Spacer()
                 Text("\(Int((cache.lighting.lightVariationRate * 100).rounded()))%")
@@ -217,7 +217,7 @@ extension ContentView {
     private var linearRailControls: some View {
         VStack(spacing: 8) {
             HStack {
-                Label("Linear Rail", systemImage: "arrow.left.and.right")
+                Label("Linear Rail", systemImage: AppIcons.arrowLeftAndRight)
                     .font(.subheadline.weight(.medium))
                 Spacer()
                 Picker("", selection: Binding(
@@ -274,7 +274,7 @@ extension ContentView {
 
     private var dynamicPresetDisclosure: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Dynamic Presets", systemImage: "sparkles")
+            Label("Dynamic Presets", systemImage: AppIcons.sparkles)
                 .font(.subheadline.weight(.medium))
 
             ScrollView(.horizontal, showsIndicators: false) {

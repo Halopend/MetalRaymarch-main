@@ -188,7 +188,7 @@ struct SongPickerSheet: View {
                             dismiss()
                         } label: {
                             HStack(spacing: 10) {
-                                Image(systemName: "music.note")
+                                Image(systemName: AppIcons.musicNote)
                                     .frame(width: 32, height: 32)
                                     .foregroundStyle(.secondary)
                                 VStack(alignment: .leading, spacing: 2) {
@@ -201,7 +201,7 @@ struct SongPickerSheet: View {
                                         .lineLimit(1)
                                 }
                                 Spacer()
-                                Image(systemName: "plus.circle")
+                                Image(systemName: AppIcons.plusCircle)
                                     .foregroundStyle(.blue)
                             }
                         }
@@ -212,7 +212,7 @@ struct SongPickerSheet: View {
                         if songs.isEmpty {
                             ContentUnavailableView(
                                 "No Songs",
-                                systemImage: "music.note",
+                                systemImage: AppIcons.musicNote,
                                 description: Text(searchText.isEmpty ? "Your library is empty." : "No songs match your search.")
                             )
                         }
@@ -220,7 +220,7 @@ struct SongPickerSheet: View {
                 } else {
                     ContentUnavailableView(
                         "No Music Service",
-                        systemImage: "music.note.list",
+                        systemImage: AppIcons.musicNoteList,
                         description: Text("Connect a music service first.")
                     )
                 }

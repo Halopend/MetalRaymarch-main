@@ -69,7 +69,7 @@ private struct ThresholdiOSRootView: View {
         Button {
             setControlsVisible(!isShowingControls)
         } label: {
-            Image(systemName: isShowingControls ? "slider.horizontal.3" : "slider.horizontal.below.rectangle")
+            Image(systemName: isShowingControls ? AppIcons.sliderHorizontal3 : AppIcons.sliderHorizontalBelowRectangle)
                 .font(.system(size: 16, weight: .semibold))
                 .frame(width: 40, height: 40)
                 .background(.ultraThinMaterial, in: Circle())

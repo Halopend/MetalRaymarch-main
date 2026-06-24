@@ -448,7 +448,7 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(color.opacity(0.16))
                             Image(systemName: icon)
-                                .font(.system(size: 18, weight: .semibold))
+                                .font(.system(size: IconSize.large, weight: .semibold))
                                 .foregroundStyle(color)
                         }
                         .frame(width: 44, height: 44)
@@ -521,7 +521,7 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: tab.icon)
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: IconSize.medium, weight: .semibold))
                             topDockBadge(for: tab)
                         }
                         Text(tab.rawValue)
@@ -687,7 +687,7 @@ struct ContentView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: IconSize.medium, weight: .semibold))
                     .frame(width: 18)
 
                 Text(title)
@@ -734,7 +734,7 @@ struct ContentView: View {
             action()
         } label: {
             Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: IconSize.medium, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .frame(height: 38)
                 .background(
@@ -1196,7 +1196,7 @@ struct ContentView: View {
         HStack(spacing: 6) {
             ActivityLightButton(
                 title: "Music permutations",
-                systemImage: "waveform",
+                systemImage: AppIcons.waveform,
                 color: .blue,
                 isActive: activeMusicPermutationCount > 0,
                 count: activeMusicPermutationCount > 0 ? activeMusicPermutationCount : nil,
@@ -1204,7 +1204,7 @@ struct ContentView: View {
             )
             ActivityLightButton(
                 title: "Dynamic color",
-                systemImage: "sparkles",
+                systemImage: AppIcons.sparkles,
                 color: .pink,
                 isActive: activeDynamicEffectCount > 0,
                 count: activeDynamicEffectCount > 0 ? activeDynamicEffectCount : nil,
@@ -1212,7 +1212,7 @@ struct ContentView: View {
             )
             ActivityLightButton(
                 title: "Playback",
-                systemImage: isAnimationPlaying ? "pause.fill" : "play.fill",
+                systemImage: isAnimationPlaying ? AppIcons.pauseFill : AppIcons.playFill,
                 color: .orange,
                 isActive: isAnimationPlaying,
                 count: nil,
@@ -1220,7 +1220,7 @@ struct ContentView: View {
             )
             ActivityLightButton(
                 title: "Kill switch",
-                systemImage: animationKillSwitchTask == nil ? "stop.circle" : "stop.circle.fill",
+                systemImage: animationKillSwitchTask == nil ? AppIcons.stopCircle : AppIcons.stopCircleFill,
                 color: .red,
                 isActive: hasActiveAnimationSystems,
                 count: nil,

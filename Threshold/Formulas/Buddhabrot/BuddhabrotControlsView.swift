@@ -19,13 +19,13 @@ struct BuddhabrotControlsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 // MARK: - Header
                 HStack {
-                    Label("Buddhabrot", systemImage: "atom")
+                    Label("Buddhabrot", systemImage: AppIcons.atom)
                         .font(.title2.bold())
                     Spacer()
                     Button {
                         appModel.runtimeViewMode = .raymarch
                     } label: {
-                        Label("Back to Fractal", systemImage: "arrow.left")
+                        Label("Back to Fractal", systemImage: AppIcons.arrowLeft)
                     }
                     .buttonStyle(.bordered)
                 }

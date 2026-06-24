@@ -26,8 +26,8 @@ struct ResetAndSaveControls: View {
         HStack(spacing: 8) {
             Button(action: onReset) {
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 11, weight: .semibold))
+                    Image(systemName: AppIcons.arrowCounterclockwise)
+                        .font(.system(size: IconSize.small, weight: .semibold))
                     Text("Reset")
                         .font(.subheadline.weight(.semibold))
                 }
@@ -42,7 +42,7 @@ struct ResetAndSaveControls: View {
             .help("Reset the current fractal to its saved settings.")
 
             Button(action: onAdd) {
-                Image(systemName: "plus")
+                Image(systemName: AppIcons.plus)
                     .font(.system(size: 14, weight: .bold))
                     .frame(width: 34, height: 34)
                     .contentShape(Circle())
@@ -75,7 +75,7 @@ struct ActivityLightButton: View {
                         .shadow(color: isActive ? color.opacity(0.65) : .clear, radius: 4)
 
                     Image(systemName: systemImage)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: IconSize.small, weight: .semibold))
                         .foregroundStyle(isActive ? color : .secondary)
                         .frame(width: 14, height: 14)
                 }
@@ -253,21 +253,21 @@ struct SaveDestinationSheet: View {
                     choice: .resetLocation,
                     title: "Reset Location",
                     subtitle: "Replace the current reset/default state.",
-                    systemImage: "arrow.counterclockwise"
+                    systemImage: AppIcons.arrowCounterclockwise
                 )
 
                 saveChoiceButton(
                     choice: .presetCustomName,
                     title: "Preset - Custom Name",
                     subtitle: "Save with a name you enter.",
-                    systemImage: "character.cursor.ibeam"
+                    systemImage: AppIcons.characterCursorIbeam
                 )
 
                 saveChoiceButton(
                     choice: .presetWithPreview,
                     title: "Save + Convert Preview",
                     subtitle: "Save a named preset with a generated image.",
-                    systemImage: "photo.badge.plus"
+                    systemImage: AppIcons.photoBadgePlus
                 )
             }
 
@@ -314,7 +314,7 @@ struct SaveDestinationSheet: View {
                 Spacer()
 
                 if self.choice == choice {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: AppIcons.checkmarkCircleFill)
                         .foregroundStyle(.blue)
                 }
             }
@@ -387,7 +387,7 @@ struct ExternalFileImportSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: iconName)
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(.system(size: IconSize.xlarge, weight: .semibold))
                     .foregroundStyle(accentColor)
                     .frame(width: 52, height: 52)
                     .background(Circle().fill(accentColor.opacity(0.14)))
@@ -453,7 +453,7 @@ struct ExternalFileImportSheet: View {
                 Button(role: .cancel) {
                     onCancel()
                 } label: {
-                    Label("Cancel", systemImage: "xmark")
+                    Label("Cancel", systemImage: AppIcons.xmark)
                 }
                 // The sheet uses .interactiveDismissDisabled(), so wire Esc
                 // explicitly to the Cancel action as the keyboard escape hatch.
@@ -464,14 +464,14 @@ struct ExternalFileImportSheet: View {
                 Button {
                     onPreview()
                 } label: {
-                    Label("Preview", systemImage: "eye")
+                    Label("Preview", systemImage: AppIcons.eye)
                 }
                 .buttonStyle(.bordered)
 
                 Button {
                     onImport()
                 } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
+                    Label("Import", systemImage: AppIcons.squareAndArrowDown)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(accentColor)
@@ -519,7 +519,7 @@ struct FPSIndicatorView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: appModel.isUsingSpecializedPipeline ? "bolt.fill" : "bolt.slash")
+            Image(systemName: appModel.isUsingSpecializedPipeline ? AppIcons.boltFill : AppIcons.boltSlash)
                 .font(.caption2)
                 .foregroundStyle(appModel.isUsingSpecializedPipeline ? .green : .orange)
             Circle().fill(indicatorColor).frame(width: 8, height: 8)
@@ -545,7 +545,7 @@ struct RenderDiagnosticsView: View {
         let metrics = appModel.renderMetrics
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Image(systemName: "viewfinder").font(.caption)
+                Image(systemName: AppIcons.viewfinder).font(.caption)
                 Text("Render diagnostics").font(.headline)
             }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 3) {
