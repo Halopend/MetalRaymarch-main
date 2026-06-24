@@ -55,7 +55,7 @@ enum AppIcons {
     static let circleDashedInsetFilled = "circle.dashed.inset.filled"
     static let circleHexagongridFill = "circle.hexagongrid.fill"
     static let clock = "clock"
-    static let curveBezier = "curve.bezier"
+    static let curveBezier = "beziercurve"  // "curve.bezier" does not exist as an SF Symbol (renders blank on visionOS); "beziercurve" is the real name
     static let docBadgeArrowUp = "doc.badge.arrow.up"
     static let docText = "doc.text"
     static let ellipsisCircle = "ellipsis.circle"

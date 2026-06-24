@@ -25,7 +25,7 @@ enum MenuToggleGestureMode: Int32, CaseIterable, Codable {
         switch self {
         case .middleToPalm: return "hand.point.up.left.fill"
         case .middleAndRingToPalm: return "hand.raised.fingers.spread"
-        case .fist: return "hand.closed.fill"
+        case .fist: return "hand.rays.fill"  // no fist glyph exists on visionOS; "hand.closed.fill" renders blank
         case .wristTap: return "hand.tap.fill"
         case .thumbToIndexPalmUp: return "hand.thumbsup.fill"
         case .ringToPalm: return "hand.point.up.fill"
