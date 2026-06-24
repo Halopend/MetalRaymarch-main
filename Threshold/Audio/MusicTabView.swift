@@ -318,7 +318,7 @@ struct MusicTabContent: View {
         .buttonStyle(.plain)
         .disabled(!canAddVisualizationMapping)
         .opacity(canAddVisualizationMapping ? 1.0 : 0.72)
-        .popover(isPresented: $isShowingVisualizationAddPopover, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+        .popover(isPresented: $isShowingVisualizationAddPopover, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
             visualizationAddPopoverContent
         }
     }
@@ -328,20 +328,23 @@ struct MusicTabContent: View {
         let formulaTargets = available.filter { $0.isFormulaParam }
         let universalTargets = available.filter { !$0.isFormulaParam }
 
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Add Music Control")
-                .font(.headline)
+        return AutoExpandingPopover(idealWidth: 300, maxHeight: 460) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Add Music Control")
+                    .font(.headline)
 
-            if available.isEmpty {
-                Text("All targets added")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Pick a category, then a parameter to map.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if available.isEmpty {
+                    Text("All targets added")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Pick a category, then a parameter to map.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
 
-                ScrollView(.vertical, showsIndicators: true) {
+                    // Plain VStack (no inner ScrollView): AutoExpandingPopover grows
+                    // the whole popover as categories expand, so revealed rows become
+                    // fully visible, and only caps + scrolls past maxHeight.
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(MusicReactiveTargetCategory.universalOrder, id: \.self) { category in
                             let targets = universalTargets.filter { $0.category == category }
@@ -363,11 +366,8 @@ struct MusicTabContent: View {
                         }
                     }
                 }
-                .frame(maxHeight: 340)
             }
         }
-        .padding(14)
-        .frame(width: 300, alignment: .topLeading)
     }
 
     /// One collapsible category in the "Add Control" menu. Collapsed by default so
@@ -551,7 +551,7 @@ struct MusicTabContent: View {
             sliderRow(label: "Damping", value: Binding(
                 get: { cache.audioReactive.fractalAudioDamping },
                 set: { v in cache.audioReactive.fractalAudioDamping = v; cache.push(\.fractalAudioDamping, value: v) }
-            ), range: 0...1)
+            ), range: 0...3)
         }
         .padding(12)
         .frame(minHeight: 148, alignment: .topLeading)

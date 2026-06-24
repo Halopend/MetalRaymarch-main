@@ -571,7 +571,7 @@ final class RenderSettings: @unchecked Sendable {
     var fractalAudioDamping: Float {
         get { withLock { _fractalAudioDamping } }
         set {
-            let clamped = max(0.0, min(1.0, newValue))
+            let clamped = max(0.0, min(3.0, newValue))
             withLock { _fractalAudioDamping = clamped }
             persistAudioReactive()
         }

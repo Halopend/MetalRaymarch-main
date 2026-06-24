@@ -13,7 +13,7 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
     var fractalAudioReactiveEnabled: Bool = false
     var fractalAudioAmount: Float = 0.25       // 0.0 - 1.0
     var fractalBeatPunch: Float = 0.3          // 0.0 - 1.0
-    var fractalAudioDamping: Float = 0.0       // 0.0 - 1.0
+    var fractalAudioDamping: Float = 0.0       // 0.0 - 3.0
 
     // Band sensitivities
     var bassSensitivity: Float = 1.0           // 0.0 - 2.0
@@ -51,7 +51,7 @@ struct AudioReactiveConfig: Codable, Equatable, Sendable {
     mutating func clamp() {
         fractalAudioAmount = max(0.0, min(1.0, fractalAudioAmount))
         fractalBeatPunch = max(0.0, min(1.0, fractalBeatPunch))
-        fractalAudioDamping = max(0.0, min(1.0, fractalAudioDamping))
+        fractalAudioDamping = max(0.0, min(3.0, fractalAudioDamping))
         bassSensitivity = max(0.0, min(2.0, bassSensitivity))
         midSensitivity = max(0.0, min(2.0, midSensitivity))
         trebleSensitivity = max(0.0, min(2.0, trebleSensitivity))

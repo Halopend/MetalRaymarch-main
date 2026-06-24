@@ -115,7 +115,7 @@ final class MusicReactiveEngine {
         }
         lastSceneLoadGeneration = sceneGeneration
 
-        let damping = max(0.0, min(1.0, settings.fractalAudioDamping))
+        let damping = max(0.0, min(3.0, settings.fractalAudioDamping))
 
         // Global damping has two effects, so the slider feels like a single
         // "calm the response" control instead of only softening the envelope:
@@ -123,8 +123,13 @@ final class MusicReactiveEngine {
         //   2. `motionScale` slows the response-curve dynamics (oscillation /
         //      decay / drift rates). Without this, oscillating curves keep
         //      wobbling at full speed and damping appears to "do nothing".
-        // At damping 0 → full speed (1.0); at damping 1 → ~15% speed (very calm).
-        let motionScale = 1.0 - 0.85 * damping
+        // At damping 0 → full speed (1.0); damping 1 → ~15% speed (very calm).
+        // The slider extends to 3 for triple-strength damping: beyond 1 the
+        // motion scale keeps easing down (continuous from 0.15) to a 0.05 floor
+        // at 3, so it never goes negative or inverts the oscillation direction.
+        let motionScale: Float = damping <= 1.0
+            ? (1.0 - 0.85 * damping)
+            : max(0.05, 0.15 - 0.05 * (damping - 1.0))
 
         let bass = applyDamping(current: dampedBass, target: bandLevels.bass, damping: damping, deltaTime: dt)
         dampedBass = bass
@@ -316,7 +321,7 @@ final class MusicReactiveEngine {
 
     @inline(__always)
     private func applyDamping(current: Float, target: Float, damping: Float, deltaTime: Float) -> Float {
-        let clampedDamping = max(0.0, min(1.0, damping))
+        let clampedDamping = max(0.0, min(3.0, damping))
         guard clampedDamping > 0.001 else { return target }
         let responseTime = 0.02 + clampedDamping * 0.5
         let blend = 1.0 - exp(-deltaTime / responseTime)
