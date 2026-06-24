@@ -13,6 +13,7 @@ enum ParameterTargetID {
         static let bloom = "effect.bloom"
         static let hueSpeed = "effect.hueSpeed"
         static let saturation = "effect.saturation"
+        static let safetyBubbleRadius = "effect.safetyBubbleRadius"
     }
 
     static let coreAndEffect: [String] = [
@@ -23,7 +24,8 @@ enum ParameterTargetID {
         Effect.fog,
         Effect.bloom,
         Effect.hueSpeed,
-        Effect.saturation
+        Effect.saturation,
+        Effect.safetyBubbleRadius
     ]
 
     static func formula(fractalType: FractalModelType, formulaIndex: Int, name: String) -> String {

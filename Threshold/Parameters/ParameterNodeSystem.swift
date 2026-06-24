@@ -470,6 +470,18 @@ final class ParameterNodeRegistry: @unchecked Sendable {
             writeValue: { cache, v in cache.color.colorSchemeSaturation = v; cache.commitColorSchemeSaturation() }
         )
 
+        effectNodes[ParameterTargetID.Effect.safetyBubbleRadius] = FloatParameterNode(
+            id: ParameterTargetID.Effect.safetyBubbleRadius,
+            name: "Safety Bubble Radius",
+            group: effectGroup,
+            icon: "circle.dashed",
+            defaultValue: 1.8,
+            range: 0.5...2.5,
+            isGestureMappable: false,
+            readValue: { $0.safetyBubble.radius },
+            writeValue: { cache, v in cache.safetyBubble.radius = v; cache.push(\.safetyBubbleRadius, value: v) }
+        )
+
         return (coreNodes, effectNodes)
     }
 

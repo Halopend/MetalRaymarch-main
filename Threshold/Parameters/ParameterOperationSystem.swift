@@ -172,6 +172,12 @@ final class ParameterOperationDispatcher: @unchecked Sendable {
             motionStrategy: .layerLerp,
             read: { $0.colorSchemeSaturation },
             write: { settings, value in settings.audioModulateSaturation(value) }
+        ),
+        ParameterTargetID.Effect.safetyBubbleRadius: CoreParameterDescriptor(
+            range: 0.5...2.5,
+            motionStrategy: .layerLerp,
+            read: { $0.safetyBubbleRadius },
+            write: { settings, value in settings.audioModulateSafetyBubbleRadius(value) }
         )
     ]
 
