@@ -1171,14 +1171,14 @@ struct ContentView: View {
             ToggleImmersiveSpaceButton()
                 .frame(minWidth: 260, alignment: .leading)
 
+            if let animationManager = appModel.animationManager {
+                LiveSessionRecordingControl(animationManager: animationManager, compact: true)
+                    .disabled(animationManager.isPlaying)
+            }
+
             Spacer(minLength: 12)
 
             HStack(spacing: 12) {
-                if let animationManager = appModel.animationManager {
-                    LiveSessionRecordingControl(animationManager: animationManager, compact: true)
-                        .disabled(animationManager.isPlaying)
-                }
-
                 ResetAndSaveControls(
                     onReset: resetCurrentFractalSettings,
                     onAdd: {

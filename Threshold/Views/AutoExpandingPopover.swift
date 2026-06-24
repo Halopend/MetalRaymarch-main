@@ -42,6 +42,15 @@ struct AutoExpandingPopover<Content: View>: View {
     var idealWidth: CGFloat = 300
     var maxHeight: CGFloat = 460
     var contentPadding: CGFloat = 14
+    /// When true, the popover always presents at `maxHeight` instead of growing with
+    /// its content. This trades the compact auto-expand look for a *stable* presented
+    /// size — which matters when the popover is anchored to drop *down* from a control:
+    /// a mid-interaction resize (e.g. expanding a category) can push the popover's
+    /// bottom past the screen edge, and AppKit responds by flipping the whole popover
+    /// to point *up*. Reserving the full height up front means the popover never
+    /// resizes after presentation, so AppKit picks the drop-down placement once and
+    /// keeps it.
+    var reservesMaxHeight: Bool = false
     @ViewBuilder var content: () -> Content
 
     @State private var measuredHeight: CGFloat = 0
@@ -50,7 +59,12 @@ struct AutoExpandingPopover<Content: View>: View {
 
     var body: some View {
         Group {
-            if isOverflowing {
+            if reservesMaxHeight {
+                ScrollView(.vertical, showsIndicators: true) {
+                    measuredContent
+                }
+                .frame(height: maxHeight)
+            } else if isOverflowing {
                 ScrollView(.vertical, showsIndicators: true) {
                     measuredContent
                 }

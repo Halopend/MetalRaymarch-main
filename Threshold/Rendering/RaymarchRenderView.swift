@@ -597,6 +597,15 @@ private final class ThresholdMacRenderer {
                                 uniformBuffer: MTLBuffer) {
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
+        // The raymarch proxy is a radius-100 ellipsoid drawn from the inside; the
+        // camera sits at its center and we shade the far wall it points at. "Zoom"
+        // scales that proxy by effectiveScale (detailScale up to 40), so when zoomed
+        // in the far wall recedes past the fixed projection far plane (farZ = 500)
+        // and the rasterizer clips the very center triangles the forward rays need —
+        // punching a background hole that widens as you zoom. Clamp depth instead of
+        // clipping so the proxy always covers the screen; the fragment shader writes
+        // its own per-pixel hit depth anyway, so clamped proxy z is inert.
+        encoder.setDepthClipMode(.clamp)
         for binding in meshBindings {
             encoder.setVertexBuffer(binding.buffer, offset: binding.offset, index: binding.bufferIndex)
         }

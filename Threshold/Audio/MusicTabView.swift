@@ -332,7 +332,7 @@ struct MusicTabContent: View {
         let formulaTargets = available.filter { $0.isFormulaParam }
         let universalTargets = available.filter { !$0.isFormulaParam }
 
-        return AutoExpandingPopover(idealWidth: 300, maxHeight: 460) {
+        return AutoExpandingPopover(idealWidth: 300, maxHeight: 460, reservesMaxHeight: true) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Add Music Control")
                     .font(.headline)
