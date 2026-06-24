@@ -53,21 +53,7 @@ extension ContentView {
     // ── Hand Assignments ───────────────────────────────────────────────────────
 
     private var gestureAssignmentsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            gestureHandConstellationPanel
-
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(GestureHandMode.allCases, id: \.self) { mode in
-                        gestureHandSection(mode: mode)
-                    }
-                }
-                .padding(.top, 4)
-            } label: {
-                Label("Detailed Assignments", systemImage: "list.bullet.rectangle")
-                    .font(.subheadline.weight(.semibold))
-            }
-        }
+        gestureHandConstellationPanel
     }
 
     // ── Core Behavior ──────────────────────────────────────────────────────────
