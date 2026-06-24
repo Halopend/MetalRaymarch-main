@@ -42,6 +42,12 @@ enum ResponseCurve: String, CaseIterable, Codable, Sendable {
         case .hybrid:     return "sparkles"
         }
     }
+
+    /// Display order for the UI curve picker: Follow → Living → Pulse → Wave.
+    /// (Separate from `allCases`/Codable, which keep declaration order & rawValues.)
+    static var pickerCases: [ResponseCurve] {
+        [.drift, .hybrid, .pulse, .sinusoidal]
+    }
 }
 
 enum LFOShape: String, CaseIterable, Codable, Sendable {

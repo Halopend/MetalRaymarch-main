@@ -41,6 +41,8 @@ struct MusicTabContent: View {
     #endif
     @State private var isShowingVisualizationAddPopover = false
     @State private var isHoldingVisualizationAddAdjustment = false
+    /// Which "Add Control" categories are currently expanded (keyed by section title).
+    @State private var expandedAddSections: Set<String> = []
 
     private var effectiveTabSelection: Binding<MusicPanelTab> {
         Binding(
@@ -177,6 +179,8 @@ struct MusicTabContent: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .onChange(of: isShowingVisualizationAddPopover) { _, isPresented in
             updateVisualizationAddPopoverAdjustment(isPresented: isPresented)
+            // Reset to all-collapsed each time the menu closes so it reopens compact.
+            if !isPresented { expandedAddSections.removeAll() }
         }
         #if os(macOS)
         .onChange(of: scenePhase) { _, newPhase in
@@ -372,45 +376,69 @@ struct MusicTabContent: View {
 
     /// One collapsible category in the "Add Control" menu. Collapsed by default so
     /// the popover stays short instead of presenting one long flat list.
+    ///
+    /// Custom disclosure (not `DisclosureGroup`) so the *entire* header row — label,
+    /// count, and chevron — toggles expansion, not just the chevron.
     @ViewBuilder
     private func addTargetDisclosure(
         title: String,
         systemImage: String,
         targets: [MusicReactiveTarget]
     ) -> some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(targets, id: \.self) { target in
-                    Button {
-                        addMapping(target)
-                        isShowingVisualizationAddPopover = false
-                    } label: {
-                        HStack(spacing: 8) {
-                            Label(target.displayName(for: cache.fractalType),
-                                  systemImage: target.icon(for: cache.fractalType))
-                                .frame(maxWidth: .infinity, alignment: .leading)
+        let isExpanded = expandedAddSections.contains(title)
 
-                            if target.hasFlashingRisk {
-                                FlashingLightIndicator()
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    if isExpanded {
+                        expandedAddSections.remove(title)
+                    } else {
+                        expandedAddSections.insert(title)
                     }
-                    .buttonStyle(.plain)
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    Label(title, systemImage: systemImage)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(targets.count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())   // whole row is the tap target
             }
-            .padding(.top, 4)
-        } label: {
-            HStack(spacing: 8) {
-                Label(title, systemImage: systemImage)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(targets.count)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(targets, id: \.self) { target in
+                        Button {
+                            addMapping(target)
+                            isShowingVisualizationAddPopover = false
+                        } label: {
+                            HStack(spacing: 8) {
+                                Label(target.displayName(for: cache.fractalType),
+                                      systemImage: target.icon(for: cache.fractalType))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if target.hasFlashingRisk {
+                                    FlashingLightIndicator()
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.22)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 2)
             }
         }
     }
@@ -1453,16 +1481,16 @@ struct MusicTabContent: View {
                                     .pickerStyle(.segmented)
 
                                     Picker("Curve", selection: Binding(
-                                        get: { mappingAt(index)?.responseCurve ?? .sinusoidal },
+                                        get: { mappingAt(index)?.responseCurve ?? .drift },
                                         set: { newValue in updateMapping(index) { $0.responseCurve = newValue } }
                                     )) {
-                                        ForEach(ResponseCurve.allCases, id: \.self) { curve in
+                                        ForEach(ResponseCurve.pickerCases, id: \.self) { curve in
                                             Label(curve.displayName, systemImage: curve.icon).tag(curve)
                                         }
                                     }
                                     .pickerStyle(.segmented)
 
-                                    if (mappingAt(index)?.responseCurve ?? .sinusoidal) == .hybrid {
+                                    if (mappingAt(index)?.responseCurve ?? .drift) == .hybrid {
                                         sliderRow(label: "Living", value: Binding(
                                             get: { mappingAt(index)?.hybridCombo ?? 0.35 },
                                             set: { newValue in updateMapping(index) { $0.hybridCombo = newValue; $0.sanitizeInPlace() } }
@@ -1567,7 +1595,9 @@ struct MusicTabContent: View {
     private func addMapping(_ target: MusicReactiveTarget) {
         var mappings = cache.audioReactive.musicReactiveMappings
         guard !mappings.contains(where: { $0.target == target }) else { return }
-        let mapping = target.defaultMapping(for: cache.fractalType, enabled: true)
+        var mapping = target.defaultMapping(for: cache.fractalType, enabled: true)
+        // Newly added controls default to Follow (the calm, drift response).
+        mapping.responseCurve = .drift
         mappings.append(mapping)
         cache.audioReactive.musicReactiveMappings = mappings
         cache.push(\.musicReactiveMappings, value: mappings)

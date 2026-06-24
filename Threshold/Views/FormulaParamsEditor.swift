@@ -444,7 +444,7 @@ private struct ParameterNodeRow: View {
                             },
                             set: { curve in updateMusicMapping(target) { $0.responseCurve = curve } }
                         )) {
-                            ForEach(ResponseCurve.allCases, id: \.self) { c in
+                            ForEach(ResponseCurve.pickerCases, id: \.self) { c in
                                 Image(systemName: c.icon).tag(c)
                             }
                         }
