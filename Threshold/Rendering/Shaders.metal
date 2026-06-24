@@ -1472,7 +1472,7 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
     // Pre-baked audio bands/energy (CPU computed) for reuse
     half bass = half(audio.bands.x);
     half mid = half(audio.bands.y);
-    half treble = half(audio.bands.z);
+    // treble (audio.bands.z) now feeds the hue spin rate on the CPU, not here.
     half beat = half(audio.bands.w);
     half audioEnergy = half(audio.energy.y);
 
@@ -1480,9 +1480,9 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
     // Only process if enabled - uses YIQ color space rotation
     // Intensity parameter allows blending rotated color back with original to prevent overpowering
     if (scheme.hueRotationEnabled) {
-        float audioHueBoost = fma(float(treble), 0.35f, 1.0f); // Treble excites hue spin
-        float rawAngle = scheme.animTime * scheme.hueRotationSpeed * 6.28318f * audioHueBoost;
-        float wrappedAngle = fmod(rawAngle, 6.28318f);
+        // Phase is pre-integrated on the CPU (speed + treble boost baked into the rate),
+        // so dragging the speed slider or a treble transient can't snap the hue here.
+        float wrappedAngle = fmod(scheme.hueCyclePhase, 6.28318f);
         half hueAngle = half(wrappedAngle);
         half cosH = cos(hueAngle);
         half sinH = sin(hueAngle);
@@ -1512,8 +1512,8 @@ half3 PostEffectsWithScheme(half3 rgb, half2 xy, ColorSchemeParams scheme, Preco
     // Rhythmic brightness and saturation variation
     half pulse = 1.0h;
     if (scheme.pulseEnabled) {
-        float rawPulseAngle = scheme.animTime * scheme.pulseSpeed * 6.28318f;
-        half pulseWave = 0.5h + 0.5h * sin(half(fmod(rawPulseAngle, 6.28318f)));
+        // Phase pre-integrated on the CPU (∫ speed·dt) so changing pulse speed never snaps the wave.
+        half pulseWave = 0.5h + 0.5h * sin(half(fmod(scheme.pulseCyclePhase, 6.28318f)));
         // Audio modulates pulse amplitude slightly (beat spikes it)
         half pulseAudio = 1.0h + audioEnergy * 0.35h + beat * 0.25h;
         pulse = 1.0h + half(scheme.pulseAmount) * (pulseWave - 0.5h) * pulseAudio;

@@ -147,12 +147,12 @@ typedef struct
     
     // Hue Rotation Effect - rotates colors through YIQ space
     int hueRotationEnabled;           // 0 = off, 1 = on
-    float hueRotationSpeed;           // Rotation speed (0-0.5)
+    float hueCyclePhase;              // Pre-integrated rotation phase in radians (∫ speed·dt on CPU, treble boost baked in) — avoids phase snaps on speed/audio changes
     float hueRotationIntensity;       // Blend intensity (0-1), prevents overpowering
-    
+
     // Pulse Effect - rhythmic brightness/saturation variation
     int pulseEnabled;                 // 0 = off, 1 = on
-    float pulseSpeed;                 // Pulse frequency (0-2)
+    float pulseCyclePhase;            // Pre-integrated pulse phase in radians (∫ speed·dt on CPU) — avoids phase snaps on speed changes
     float pulseAmount;                // Pulse intensity (0-1)
     
     // Glow Effect - ray-step based inner glow

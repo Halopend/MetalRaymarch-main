@@ -237,8 +237,14 @@ final class RenderSettings: @unchecked Sendable {
     // === MODULAR LIGHTING EFFECTS ===
     // Card-based lighting system with presets and individual effect toggles
     private var _colorAnimTime: Float = 0.0                 // Running animation time (raw — drives position effects like Linear Rail)
-    private var _lightAnimTime: Float = 0.0                 // Light-variation time, scaled by _lightVariationRate — drives hue/pulse/gradient cycling
+    private var _lightAnimTime: Float = 0.0                 // Light-variation time, scaled by _lightVariationRate (reserved / general light clock)
     private var _lightVariationRate: Float = 0.5            // Master speed for color/brightness light variation (0 = hold steady, 1 = full speed). Default 0.5 keeps presets from sweeping colours too fast.
+    // Integrated cycle phases. Each is ∫ rate·dt rather than clock·speed, so changing a
+    // speed slider (or an audio transient nudging the rate) only bends the future curve —
+    // it never rescales the accumulated phase, which is what used to snap the colours.
+    private var _huePhase: Float = 0.0                      // Hue rotation phase (radians, wrapped to [0,2π))
+    private var _pulsePhase: Float = 0.0                    // Pulse phase (radians, wrapped to [0,2π))
+    private var _gradientPhase: Float = 0.0                 // Gradient cycle offset phase (wrapped to [0,1))
     private var _animationActivityFactor: Float = 1.0
     private var _animationKillSwitchActive: Bool = false
     private var _animationKillSwitchRemaining: Float = 0.0
@@ -1818,7 +1824,29 @@ final class RenderSettings: @unchecked Sendable {
             // _lightAnimTime is scaled by the master variation rate so the user can slow
             // down flashy hue/pulse/gradient cycling without freezing camera motion.
             _colorAnimTime += deltaTime * _animationActivityFactor
-            _lightAnimTime += deltaTime * _animationActivityFactor * _lightVariationRate
+            let lightStep = deltaTime * _animationActivityFactor * _lightVariationRate
+            _lightAnimTime += lightStep
+
+            // Integrate cycle phases from the *current* speeds (and audio coupling) rather
+            // than multiplying an accumulated clock by a live speed. This is the fix for
+            // colours snapping when you drag a cycle speed, and for hue jumping on treble
+            // transients: a rate change now only affects how fast the phase advances next.
+            let twoPi = Float.pi * 2.0
+            if _hueRotationEffect.enabled {
+                // Treble excites the spin rate (same coupling as before — now integrated,
+                // so a treble spike speeds the drift instead of teleporting the hue).
+                let audioHueBoost = 1.0 + _trebleLevel * 0.35
+                _huePhase += lightStep * _hueRotationEffect.speed * twoPi * audioHueBoost
+                _huePhase = _huePhase.truncatingRemainder(dividingBy: twoPi)
+            }
+            if _pulseEffect.enabled {
+                _pulsePhase += lightStep * _pulseEffect.speed * twoPi
+                _pulsePhase = _pulsePhase.truncatingRemainder(dividingBy: twoPi)
+            }
+            if _gradientCycleEffect.enabled {
+                _gradientPhase += lightStep * _gradientCycleEffect.speed
+                _gradientPhase = _gradientPhase.truncatingRemainder(dividingBy: 1.0)
+            }
 
             // Accumulate polar rotation angle when enabled and fractal supports it
             if _polarRotationEffect.enabled && _fractalType.supports(.polarRotation) {
@@ -1946,17 +1974,17 @@ final class RenderSettings: @unchecked Sendable {
             gradientStopCount: Int32(gradCount),
             colorMappingMode: Int32(gradState.gradient.mappingMode.rawValue),
             gradientRepeat: gradState.gradient.repeatCount,
-            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? fmod(_lightAnimTime * _gradientCycleEffect.speed, 1.0) : 0),
+            gradientOffset: gradState.gradient.offset + (_gradientCycleEffect.enabled ? _gradientPhase : 0),
             gradientSmoothing: gradState.gradient.smoothing,
             gradientLoopSmooth: _gradientCycleEffect.mirrorLoop ? 1 : 0,
             _gradPad: (0.0),
             // === MODULAR LIGHTING EFFECTS ===
             animTime: _lightAnimTime,
             hueRotationEnabled: _hueRotationEffect.enabled ? 1 : 0,
-            hueRotationSpeed: _hueRotationEffect.speed,
+            hueCyclePhase: _huePhase,
             hueRotationIntensity: _hueRotationEffect.intensity * animationActivity,
             pulseEnabled: _pulseEffect.enabled ? 1 : 0,
-            pulseSpeed: _pulseEffect.speed,
+            pulseCyclePhase: _pulsePhase,
             pulseAmount: _pulseEffect.amount * animationActivity,
             glowEnabled: _glowEffect.enabled ? 1 : 0,
             glowIntensity: _glowEffect.intensity,
