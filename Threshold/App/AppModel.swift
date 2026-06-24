@@ -1186,12 +1186,18 @@ class AppModel {
         isMenuWindowVisible = false
         isMenuHovering = false
         menuAdjustmentDepth = 0
-        // Hide via opacity + hit-testing (driven by isMenuWindowVisible in ContentView)
-        // instead of tearing down the window. Calling dismissWindow here destroys the
-        // entire (heavy) ContentView, and the next open rebuilds it on the main thread —
-        // that rebuild stalls the @MainActor hand-gesture task, which reads as the menu /
-        // app briefly freezing on each toggle. Keeping the window instance alive makes the
-        // reopen a cheap no-op and removes the hitch.
+        // Truly dismiss the window so it actually closes — no lingering, invisible
+        // window scene (the old opacity-only hide left a "ghost" window in place).
+        // On visionOS the system re-presents unlocked windows in front of the person on
+        // reopen; there is no API to restore an exact prior floating position (see Apple's
+        // "Adopting best practices for persistent UI"). On macOS this handler is nil, so
+        // nothing is torn down there (menu content visibility is unconditional on Mac).
+        //
+        // Trade-off the prior opacity-hide avoided: dismiss tears down the heavy
+        // ContentView and the reopen rebuilds it on the main thread, which can briefly
+        // hitch the @MainActor hand-gesture task. If that reopen hitch is noticeable in
+        // use, revert to the opacity-hide (drop this call, keep isMenuWindowVisible).
+        dismissMenuWindowHandler?()
         refreshMenuInteractionState()
     }
 
