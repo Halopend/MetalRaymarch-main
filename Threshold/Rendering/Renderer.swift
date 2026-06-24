@@ -1303,6 +1303,7 @@ actor Renderer {
             // === GMT-FRACTALS OPTIMIZATIONS ===
             stepMultiplier: settingsSnapshot.stepMultiplier,
             boundingSphereRadius: 0.0,  // Disabled: Mandelbox extent varies with minDistance/scale; needs dynamic radius
+            smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
             blendFactor: settingsSnapshot.isGeometryGestureActive ? 1.0 : (settingsSnapshot.geometryState == .stable ? 0.1 : 0.5),
             springDisplacementX: settingsSnapshot.springDisplacement.x,
             springDisplacementY: settingsSnapshot.springDisplacement.y,

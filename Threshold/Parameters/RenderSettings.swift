@@ -99,7 +99,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _sphereProjectionEnabled: Bool = false
     private var _sphereProjectionBlend: Float = 1.0
     private var _sphereProjectionRadius: Float = 1.0
-    private var _platformRadius: Float = 3.0
+    private var _platformRadius: Float = 1.888
     private var _platformEnabled: Bool = true
     private var _audioLevel: Float = 0.0            // Current audio level (0-1) for reactive lighting
     private var _bassLevel: Float = 0.0             // Bass frequency energy (0-1)
@@ -129,6 +129,7 @@ final class RenderSettings: @unchecked Sendable {
     private var _debugHierarchical: Bool = false     // Visualize adaptive hierarchy levels
     private var _coherentPacketEnabled: Bool = loadBool("coherentPacketEnabled", default: false)  // Experimental predict-validate raymarch (Stages 0-3)
     private var _foveationStrength: Float = loadFloat("foveationStrength", default: 0.0)  // Peripheral step reduction on the 8x8 compute path (0 = off)
+    private var _smartAdvanceEnabled: Bool = loadBool("smartAdvanceEnabled", default: false)  // Grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient)
     private var _limitFlash: Float = 0.0             // Flash intensity when gesture hits parameter limit (0-1, decays)
     
     // HUD display
@@ -300,6 +301,17 @@ final class RenderSettings: @unchecked Sendable {
     private var _detailScale: Float = 1.0         // Two-point grab scale factor (multiplied with _scale)
     private var _targetDetailScale: Float = 1.0
 
+    // Animation-override model for rotation (quaternion) and zoom (detailScale).
+    // These mirror the animationBase + manualOffset model used by position/shape so a
+    // grab gesture overrides rotation/zoom even while the playing scene animates them.
+    // applyKeyframe writes the scene value into the *base*; the grab writes the manual
+    // override; the effective target is base ∘ override (quaternion compose for rotation,
+    // additive for detailScale). identity/zero override == "no override".
+    private var _animationBaseWorldRotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    private var _manualRotationOffset: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)  // identity = none
+    private var _animationBaseDetailScale: Float = 1.0
+    private var _manualOffsetDetailScale: Float = 0.0
+
     // === ANIMATION BASE + MANUAL OFFSETS ===
     // Animation drives base values. Manual gestures apply offsets when animation is playing.
     private var _isAnimationPlaying: Bool = false
@@ -470,7 +482,7 @@ final class RenderSettings: @unchecked Sendable {
     var platformRadius: Float {
         get { withLock { _platformRadius } }
         set {
-            withLock { _platformRadius = max(0.5, min(3.0, newValue)) }
+            withLock { _platformRadius = max(0.5, min(2.5, newValue)) }
             persistDisplay()
         }
     }
@@ -896,6 +908,19 @@ final class RenderSettings: @unchecked Sendable {
         set {
             let clamped = max(0.0, min(1.0, newValue))
             withLock { _foveationStrength = clamped }
+            persistQuality()
+        }
+    }
+
+    /// Smart advance: grazing-aware lead-ahead sphere tracing. When on, the
+    /// march reads the along-ray DE gradient each step and steps further through
+    /// grazing/receding regions (where plain tracing creeps), guarded by the same
+    /// overstep-failure retreat as the Keinert over-relaxation. Off by default;
+    /// affects every raymarch path (Mac fragment + visionOS compute).
+    var smartAdvanceEnabled: Bool {
+        get { withLock { _smartAdvanceEnabled } }
+        set {
+            withLock { _smartAdvanceEnabled = newValue }
             persistQuality()
         }
     }
@@ -2149,6 +2174,7 @@ final class RenderSettings: @unchecked Sendable {
                 debugHierarchical: _debugHierarchical,
                 coherentPacketEnabled: _coherentPacketEnabled,
                 foveationStrength: _foveationStrength,
+                smartAdvanceEnabled: _smartAdvanceEnabled,
                 limitFlash: _limitFlash,
                 activeGestureIndex: _activeGestureIndex,
                 safetyBubbleEnabled: _safetyBubbleEnabled,
@@ -2343,6 +2369,16 @@ final class RenderSettings: @unchecked Sendable {
         set { withLock { _animationBasePosition = newValue } }
     }
 
+    var animationBaseWorldRotation: simd_quatf {
+        get { withLock { _animationBaseWorldRotation } }
+        set { withLock { _animationBaseWorldRotation = newValue } }
+    }
+
+    var animationBaseDetailScale: Float {
+        get { withLock { _animationBaseDetailScale } }
+        set { withLock { _animationBaseDetailScale = newValue } }
+    }
+
     var animationBaseGlowIntensity: Float {
         get { withLock { _animationBaseGlowIntensity } }
         set { withLock { _animationBaseGlowIntensity = newValue } }
@@ -2386,6 +2422,21 @@ final class RenderSettings: @unchecked Sendable {
     var manualOffsetPosition: SIMD3<Float> {
         get { withLock { _manualOffsetPosition } }
         set { withLock { _manualOffsetPosition = newValue } }
+    }
+
+    /// Gesture override of rotation during animation, as a delta quaternion composed
+    /// onto the scene's animated base: effective = manualRotationOffset * animationBaseWorldRotation.
+    /// identity == no override.
+    var manualRotationOffset: simd_quatf {
+        get { withLock { _manualRotationOffset } }
+        set { withLock { _manualRotationOffset = newValue.normalized } }
+    }
+
+    /// Gesture override of zoom during animation, added to the scene's animated base:
+    /// effective = animationBaseDetailScale + manualOffsetDetailScale. 0 == no override.
+    var manualOffsetDetailScale: Float {
+        get { withLock { _manualOffsetDetailScale } }
+        set { withLock { _manualOffsetDetailScale = newValue } }
     }
 
     var manualOffsetGlowIntensity: Float {
@@ -2742,6 +2793,9 @@ final class RenderSettings: @unchecked Sendable {
                 _manualOffsetBloomStrength *= (1.0 - decayRate)
                 _manualOffsetFogIntensity  *= (1.0 - decayRate)
                 _manualOffsetSaturation    *= (1.0 - decayRate)
+                _manualOffsetDetailScale   *= (1.0 - decayRate)
+                // Rotation override is a quaternion: ease it back toward identity via slerp.
+                _manualRotationOffset = simd_slerp(_manualRotationOffset, simd_quatf(ix: 0, iy: 0, iz: 0, r: 1), decayRate)
                 for index in 0..<16 {
                     _manualOffsetFormulaParams[index] *= (1.0 - decayRate)
                     if abs(_manualOffsetFormulaParams[index]) < 1e-5 {
@@ -2758,6 +2812,9 @@ final class RenderSettings: @unchecked Sendable {
                 if abs(_manualOffsetBloomStrength) < 1e-5 { _manualOffsetBloomStrength = 0 }
                 if abs(_manualOffsetFogIntensity) < 1e-5 { _manualOffsetFogIntensity = 0 }
                 if abs(_manualOffsetSaturation) < 1e-5 { _manualOffsetSaturation = 0 }
+                if abs(_manualOffsetDetailScale) < 1e-5 { _manualOffsetDetailScale = 0 }
+                // Snap the rotation override to identity once its angle is negligible.
+                if abs(_manualRotationOffset.real) > 0.999999 { _manualRotationOffset = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1) }
                 _rebuildFormulaParamsFromAnimationState_locked()
             }
 
@@ -3027,6 +3084,14 @@ final class RenderSettings: @unchecked Sendable {
             _targetSphereRadius = _sphereRadius
             _targetFractalScale = _fractalScale
             _targetPosition = _position
+            // Bake the live (already overridden) rotation/zoom into the targets so the
+            // grab override survives when playback stops, then clear the overrides.
+            _targetWorldRotation = _worldRotation
+            _targetDetailScale = _detailScale
+            _animationBaseWorldRotation = _worldRotation
+            _animationBaseDetailScale = _detailScale
+            _manualRotationOffset = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            _manualOffsetDetailScale = 0.0
             _manualOffsetMinDistance = 0.0
             _manualOffsetFoldingLimit = 0.0
             _manualOffsetSphereRadius = 0.0
@@ -3060,6 +3125,8 @@ final class RenderSettings: @unchecked Sendable {
             _manualOffsetBloomStrength = 0.0
             _manualOffsetFogIntensity = 0.0
             _manualOffsetSaturation = 0.0
+            _manualRotationOffset = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            _manualOffsetDetailScale = 0.0
             _manualOffsetFormulaParams = Array(repeating: 0.0, count: 16)
             _rebuildFormulaParamsFromAnimationState_locked()
             _velocityMinDistance = 0.0
@@ -3069,7 +3136,7 @@ final class RenderSettings: @unchecked Sendable {
             _velocityPosition = .zero
         }
     }
-    
+
     /// Set all targets at once (for preset loading)
     func setTargets(minDistance: Float, foldingLimit: Float, sphereRadius: Float, position: SIMD3<Float>) {
         withLock {
@@ -3131,6 +3198,13 @@ final class RenderSettings: @unchecked Sendable {
             _targetWorldRotation = identity
             _detailScale = 1.0
             _targetDetailScale = 1.0
+            // Also clear the animation override so a stale grab rotation/zoom can't
+            // re-apply on the next applyKeyframe during playback (the "Detail" reset
+            // button calls this directly without going through clearAnimationManualOffsets).
+            _animationBaseWorldRotation = identity
+            _manualRotationOffset = identity
+            _animationBaseDetailScale = 1.0
+            _manualOffsetDetailScale = 0.0
         }
     }
 
@@ -3142,8 +3216,18 @@ final class RenderSettings: @unchecked Sendable {
     func applyRotationSnap() {
         withLock {
             guard _rotationAutoSnap else { return }
-            let snapped = Self.snapQuaternion(_targetWorldRotation, windowDegrees: _rotationSnapWindowDegrees)
-            _targetWorldRotation = snapped
+            if _isAnimationPlaying {
+                // Snap the EFFECTIVE orientation (base ∘ offset) and fold the snapped
+                // result back into the override; writing _targetWorldRotation directly
+                // would be stomped by the next applyKeyframe. snapQuaternion may return
+                // −q of the same rotation — harmless, every consumer is double-cover safe.
+                let effective = (_manualRotationOffset * _animationBaseWorldRotation).normalized
+                let snapped = Self.snapQuaternion(effective, windowDegrees: _rotationSnapWindowDegrees)
+                _manualRotationOffset = (snapped * _animationBaseWorldRotation.inverse).normalized
+            } else {
+                let snapped = Self.snapQuaternion(_targetWorldRotation, windowDegrees: _rotationSnapWindowDegrees)
+                _targetWorldRotation = snapped
+            }
         }
     }
 
@@ -3314,6 +3398,7 @@ final class RenderSettings: @unchecked Sendable {
                 c.debugHierarchical = _debugHierarchical
                 c.coherentPacketEnabled = _coherentPacketEnabled
                 c.foveationStrength = _foveationStrength
+                c.smartAdvanceEnabled = _smartAdvanceEnabled
                 return c
             }
         }
@@ -3329,6 +3414,7 @@ final class RenderSettings: @unchecked Sendable {
                 _debugHierarchical = newValue.debugHierarchical
                 _coherentPacketEnabled = newValue.coherentPacketEnabled
                 _foveationStrength = newValue.foveationStrength
+                _smartAdvanceEnabled = newValue.smartAdvanceEnabled
             }
         }
     }
@@ -3581,7 +3667,7 @@ final class RenderSettings: @unchecked Sendable {
                 _sphereProjectionEnabled = newValue.sphereProjectionEnabled
                 _sphereProjectionBlend = max(0.0, min(1.0, newValue.sphereProjectionBlend))
                 _sphereProjectionRadius = max(0.2, min(12.0, newValue.sphereProjectionRadius))
-                _platformRadius = max(0.5, min(3.0, newValue.platformRadius))
+                _platformRadius = max(0.5, min(2.5, newValue.platformRadius))
                 _platformEnabled = newValue.platformEnabled
             }
         }

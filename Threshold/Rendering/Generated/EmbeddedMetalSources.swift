@@ -267,7 +267,8 @@ typedef struct
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
-    
+    int smartAdvanceEnabled; // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
+
     // === SPRING BLOB NAVIGATION WIDGET ===
     float springDisplacementX;        // Spring displacement X (NDC-ish space)
     float springDisplacementY;        // Spring displacement Y
@@ -335,6 +336,7 @@ typedef struct
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
+    int smartAdvanceEnabled;     // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
     float blendFactor;           // Temporal reuse factor: 1.0 = moving, lower = stable enough to trust depth history
     // === SPRING BLOB NAVIGATION WIDGET ===
     // Packed as scalars to avoid float3 alignment issues between Swift and Metal
@@ -3132,8 +3134,73 @@ FORCE_INLINE float relaxedOmegaCap(int type) {
     }
 }
 
+// === SMART ADVANCE (grazing-aware lead-ahead sphere tracing) ===
+// Smart advance reads the gradient of the march itself — the change in the DE
+// per unit advance, (h - prevH)/stepLen — to decide when to step further than
+// plain sphere tracing would. That ratio is the directional derivative of the
+// SDF along the ray: ~ -1 when the ray heads straight at the surface (the DE
+// shrinks as fast as we move, so plain tracing is already optimal), ~0 when the
+// ray skims almost parallel to the surface (the DE barely changes, so plain
+// tracing creeps forward in many tiny steps), and >0 when the surface is
+// receding. We "lead ahead" by raising the over-relaxation factor as the ray
+// flattens out, escaping the slow grazing creep, while leaving head-on
+// convergence untouched.
+//
+// Grazing ceiling for smart advance. It can push past the conservative head-on
+// relaxedOmegaCap because it only over-relaxes where the surface is grazing or
+// receding — but it scales WITH the per-type cap so log-DE / Kleinian / custom
+// estimators (which can locally overestimate and defeat the overstep test) stay
+// proportionally restrained. box→2.2, bulb→1.3, default→1.6.
+FORCE_INLINE float smartOmegaCap(int type) {
+    return 1.0f + (relaxedOmegaCap(type) - 1.0f) * 3.0f;
+}
+
+// One step of smart-advance sphere tracing. Like relaxedStepUpdate (Keinert),
+// but the over-relaxation factor is derived per step from the along-ray DE
+// gradient instead of a fixed omega: it ramps from 1 (no boost, while clearly
+// converging) up to maxOmega (full lead-ahead, while grazing or receding). The
+// same overstep-failure test guards it — when the two unbounding spheres of
+// radii prevH and h no longer overlap across the step we just took, geometry
+// may hide in the gap, so we retreat to the far edge of the last provably-safe
+// sphere and set the sticky `gaveUp` flag, dropping the ray to plain tracing for
+// the rest of its life (prevents retreat/boost thrash). The caller must skip hit
+// registration on a failed step. Returns true on an overstep failure.
+FORCE_INLINE bool smartStepUpdate(float h,
+                                  float maxOmega,
+                                  thread bool& gaveUp,
+                                  thread float& prevH,
+                                  thread float& stepLen)
+{
+    // Unlike relaxedStepUpdate (which only tests when omega>1), smart advance
+    // tests every step: the boost is adaptive per step and can exceed 1 from the
+    // first grazing sample onward, so the overshoot guard must always be armed.
+    bool sorFail = (!gaveUp) && (h + prevH) < stepLen;
+    if (UNLIKELY(sorFail)) {
+        // Retreat. stepLen here still holds the (overshooting) step we just took,
+        // from t_prev to the current t. We reassign it to the SIGNED delta
+        // (prevH - stepLen), which is negative, so the caller's `t += stepLen`
+        // moves the ray back from t to t_prev + prevH — the far edge of the last
+        // provably-safe sphere. Never advances forward on a fail.
+        stepLen = prevH - stepLen;
+        gaveUp = true;
+    } else if (gaveUp || stepLen <= 1e-5f) {
+        // Plain sphere tracing: after a retreat, and on the cold-start step
+        // where prevH/stepLen aren't yet seeded (no valid gradient).
+        stepLen = h;
+    } else {
+        // Along-ray DE gradient: ~ -1 head-on, ~0 grazing, >0 receding.
+        float grad = (h - prevH) / stepLen;
+        // Ramp 0→1 across grad ∈ [-0.5, 0]: no boost while clearly converging,
+        // full lead-ahead once the surface stops rushing toward us.
+        float graze = saturate((grad + 0.5f) * 2.0f);
+        stepLen = h * mix(1.0f, maxOmega, graze);
+    }
+    prevH = h;
+    return sorFail;
+}
+
 // Raymarch that caches orbit state on hit for reuse in normals/colors
-FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault)
+FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float boundingSphereRadius = 0.0, float stepMultiplier = 1.0, float maxRayDistance = kMaxRayDistanceDefault, bool smartAdvance = false)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -3172,7 +3239,15 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
     // last safe sphere when consecutive unbounding spheres stop overlapping.
     // The ceiling is per fractal type — see relaxedOmegaCap() for why log-DE
     // and Kleinian/custom estimators must stay closer to 1.
+    //
+    // When smartAdvance is set (a frame-uniform toggle) the march instead reads
+    // the along-ray DE gradient each step and leads ahead through grazing/
+    // receding regions — see smartStepUpdate(). The branch is uniform across the
+    // dispatch so it stays coherent and near-free.
     float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
+    // Only meaningful (and only computed) on the smart-advance path.
+    float smartCap = smartAdvance ? smartOmegaCap(type) : 1.0f;
+    bool gaveUp = false;
     float prevH = 0.0;
     float stepLen = 0.0;
 
@@ -3187,7 +3262,9 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
 
-        bool sorFail = relaxedStepUpdate(h, omega, prevH, stepLen);
+        bool sorFail = smartAdvance
+            ? smartStepUpdate(h, smartCap, gaveUp, prevH, stepLen)
+            : relaxedStepUpdate(h, omega, prevH, stepLen);
 
         if(UNLIKELY(h < threshold) && !sorFail)
         {
@@ -3210,7 +3287,7 @@ FORCE_INLINE SceneResult SceneWithCache(float3 rO, float3 rD, float2 fragCoord, 
 }
 
 // Raymarch with cache that starts from a known distance (for hierarchical acceleration)
-FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float stepMultiplier = 1.0)
+FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float startT, float2 fragCoord, float quality, int maxStepsParam, float glowIntensity, float foldingLimit, FractalParams params, int iterations, float time, int fractalType = 0, FormulaParams fp = {}, int colorIterations = 0, float stepMultiplier = 1.0, bool smartAdvance = false)
 {
     SceneResult result;
     result.cache = makeEmptyOrbitCache();
@@ -3236,7 +3313,11 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
 
     // Relaxed sphere tracing with overstep-failure detection; per-type ceiling
     // (see relaxedOmegaCap for why log-DE/Kleinian/custom stay closer to 1).
+    // smartAdvance swaps in the grazing-aware lead-ahead variant (smartStepUpdate).
     float omega = clamp(stepMultiplier, 1.0f, relaxedOmegaCap(type));
+    // Only meaningful (and only computed) on the smart-advance path.
+    float smartCap = smartAdvance ? smartOmegaCap(type) : 1.0f;
+    bool gaveUp = false;
     float prevH = 0.0;
     float stepLen = 0.0;
 
@@ -3249,7 +3330,9 @@ FORCE_INLINE SceneResult SceneWithCacheFromStart(float3 rO, float3 rD, float sta
         // Use unified dispatch for the march loop (no Jacobian overhead)
         float h = MapUnified(p, params, foldingLimit, iterations, type, fp);
 
-        bool sorFail = relaxedStepUpdate(h, omega, prevH, stepLen);
+        bool sorFail = smartAdvance
+            ? smartStepUpdate(h, smartCap, gaveUp, prevH, stepLen)
+            : relaxedStepUpdate(h, omega, prevH, stepLen);
 
         if(UNLIKELY(h < threshold) && !sorFail)
         {
@@ -4010,10 +4093,10 @@ kernel void adaptiveHierarchical8x8(
     SceneResult sceneResult;
     if (fineStartT > 0.06f) {
         sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, fineStartT, pixelCenter, 1.0, maxSteps,
-                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
+                                              uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0);
     } else {
         sceneResult = SceneWithCache(marchOrigin, marchDir, pixelCenter, 1.0, maxSteps,
-                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
+                         uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, uniforms.time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0);
     }
     
     float adjustedDist = sceneResult.distGlow.x;
@@ -4314,11 +4397,11 @@ inline FragmentOutput fragmentMain(ColorInOut in,
     SceneResult sceneResult;
     bool needFullMarch = true;
     if (FC_WARM_START_ON && warmStartT > 0.0f) {
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, warmStartT, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0);
         needFullMarch = sceneResult.distGlow.x >= kRayMissThreshold;
     }
     if (needFullMarch) {
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, quality, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0);
     }
     ret = sceneResult.distGlow;
     hitCache = sceneResult.cache;
@@ -4555,10 +4638,10 @@ fragment FragmentOutput fragmentShaderQuadShared(ColorInOut in [[stage_in]],
     SceneResult sceneResult;
     if (coarseStartT < kRayMissThreshold) {
         // Coarse pass found something — start fine march from nearby
-        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier);
+        sceneResult = SceneWithCacheFromStart(marchOrigin, marchDir, coarseStartT, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.stepMultiplier, uniforms.smartAdvanceEnabled != 0);
     } else {
         // Coarse pass missed — full march needed
-        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance);
+        sceneResult = SceneWithCache(marchOrigin, marchDir, fragCoord, 1.0, maxSteps, uniforms.glowIntensity, uniforms.foldingLimit, fractalParams, lodIterations, time, fractalType, uniforms.formulaParams, int(uniforms.colorIterations), uniforms.boundingSphereRadius, uniforms.stepMultiplier, uniforms.maxViewDistance, uniforms.smartAdvanceEnabled != 0);
     }
     float2 ret = sceneResult.distGlow;
     OrbitCache hitCache = sceneResult.cache;

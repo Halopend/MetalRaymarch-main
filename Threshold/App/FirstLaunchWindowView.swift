@@ -251,8 +251,8 @@ struct FirstLaunchWindowView: View {
                     .font(.title3)
                     .foregroundStyle(leftHanded ? .indigo : .blue)
                 Picker("Dominant hand", selection: $leftHanded) {
-                    Label("Right", systemImage: AppIcons.handRaisedFingersSpreadFill).tag(false)
                     Label("Left",  systemImage: AppIcons.handRaisedFingersSpread).tag(true)
+                    Label("Right", systemImage: AppIcons.handRaisedFingersSpreadFill).tag(false)
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 320)

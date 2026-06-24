@@ -23,7 +23,11 @@ struct ResetAndSaveControls: View {
     let onAdd: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        // Reset and Save are distinct actions, so keep them visually separated:
+        // a wider gap plus a neutral *outlined* Reset against a *solid* green "+"
+        // so they don't read as one control on the visionOS glass material (where
+        // two similarly-tinted adjacent buttons blended together).
+        HStack(spacing: 16) {
             Button(action: onReset) {
                 HStack(spacing: 6) {
                     Image(systemName: AppIcons.arrowCounterclockwise)
@@ -37,20 +41,20 @@ struct ResetAndSaveControls: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.primary)
-            .background(Capsule().fill(Color.green.opacity(0.12)))
-            .overlay(Capsule().stroke(Color.green.opacity(0.45), lineWidth: 1))
+            .background(Capsule().fill(Color.secondary.opacity(0.10)))
+            .overlay(Capsule().stroke(Color.secondary.opacity(0.35), lineWidth: 1))
             .help("Reset the current fractal to its saved settings.")
 
             Button(action: onAdd) {
                 Image(systemName: AppIcons.plus)
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .frame(width: 34, height: 34)
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Color.green)
-            .background(Circle().fill(Color.green.opacity(0.12)))
-            .overlay(Circle().stroke(Color.green.opacity(0.45), lineWidth: 1))
+            .foregroundStyle(.white)
+            .background(Circle().fill(Color.green))
+            .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 1))
             .help("Save the current settings as a new scene.")
         }
     }

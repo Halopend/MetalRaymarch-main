@@ -1140,10 +1140,23 @@ final class AnimationManager {
             settings.baseMaxRaySteps = keyframe.baseMaxRaySteps
         }
         settings.position = keyframe.position
-        settings.detailScale = keyframe.detailScale
-        settings.targetDetailScale = keyframe.detailScale
-        settings.worldRotation = keyframe.worldRotation
-        settings.targetWorldRotation = keyframe.worldRotation
+        // Rotation (quaternion) and zoom (detailScale) use the same animationBase +
+        // manual-override model as position/shape so a grab gesture overrides them even
+        // when the scene animates these channels. Store the scene value as the base, then
+        // compose the gesture override on top (quaternion compose for rotation, additive
+        // for zoom) and write the composed result. Without this, applyKeyframe's per-frame
+        // write stomped the grab every frame in any scene that animates rotation/zoom
+        // (e.g. Ambient Blur), while scenes that don't (e.g. Kaleidoscope) appeared to work.
+        settings.animationBaseDetailScale = keyframe.detailScale
+        settings.animationBaseWorldRotation = keyframe.worldRotation
+        // Floor keeps zoom positive if a wide-range scene drives the base small while a
+        // grab holds a large negative additive offset (the smoothing logs would otherwise clamp).
+        let composedDetailScale = max(0.01, keyframe.detailScale + settings.manualOffsetDetailScale)
+        let composedRotation = (settings.manualRotationOffset * keyframe.worldRotation).normalized
+        settings.detailScale = composedDetailScale
+        settings.targetDetailScale = composedDetailScale
+        settings.worldRotation = composedRotation
+        settings.targetWorldRotation = composedRotation
         
         // Apply formula params for all types (unified path)
         if let vals = keyframe.formulaParamValues {

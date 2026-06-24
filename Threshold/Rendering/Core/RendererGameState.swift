@@ -256,6 +256,7 @@ extension Renderer {
                             sphereProjectionRadius: settingsSnapshot.sphereProjectionRadius,
                             stepMultiplier: settingsSnapshot.stepMultiplier,
                             boundingSphereRadius: boundingSphereRadius,
+                            smartAdvanceEnabled: settingsSnapshot.smartAdvanceEnabled ? 1 : 0,
                             springDisplacementX: settingsSnapshot.springDisplacement.x,
                             springDisplacementY: settingsSnapshot.springDisplacement.y,
                             springDisplacementZ: settingsSnapshot.springDisplacement.z,

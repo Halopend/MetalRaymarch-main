@@ -251,7 +251,8 @@ typedef struct
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;    // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius; // Bounding sphere for early ray rejection (0 = disabled)
-    
+    int smartAdvanceEnabled; // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
+
     // === SPRING BLOB NAVIGATION WIDGET ===
     float springDisplacementX;        // Spring displacement X (NDC-ish space)
     float springDisplacementY;        // Spring displacement Y
@@ -319,6 +320,7 @@ typedef struct
     // === GMT-FRACTALS INSPIRED OPTIMIZATIONS ===
     float stepMultiplier;        // Ray step over-relaxation factor (0.5-1.5, default 1.0)
     float boundingSphereRadius;  // Bounding sphere for early ray rejection (0 = disabled)
+    int smartAdvanceEnabled;     // 1 = grazing-aware lead-ahead sphere tracing (reads the along-ray DE gradient to step further through grazing/receding regions)
     float blendFactor;           // Temporal reuse factor: 1.0 = moving, lower = stable enough to trust depth history
     // === SPRING BLOB NAVIGATION WIDGET ===
     // Packed as scalars to avoid float3 alignment issues between Swift and Metal

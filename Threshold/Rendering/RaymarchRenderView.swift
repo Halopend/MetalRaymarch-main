@@ -366,13 +366,18 @@ private final class ThresholdMacRenderer {
     func draw(appModel: AppModel) {
         guard appModel.isAppActive,
               drawableSize.width > 1,
-              drawableSize.height > 1,
-              let drawable = metalLayer.nextDrawable() else {
+              drawableSize.height > 1 else {
             return
         }
 
-        let drawableWidth = drawable.texture.width
-        let drawableHeight = drawable.texture.height
+        // The drawable is acquired later (after the in-flight gate) so a busy
+        // drawable pool can't block the render thread during CPU prep. The
+        // resolution math uses the view's known drawable size instead; this
+        // equals the drawable's texture dimensions except for a brief window
+        // during a live resize, which the post-acquisition size guard below
+        // catches (that frame is skipped rather than blit at the wrong scale).
+        let drawableWidth = Int(drawableSize.width)
+        let drawableHeight = Int(drawableSize.height)
 
         // Decide whether to render at reduced resolution and MetalFX-upscale to
         // the drawable. The offscreen target stays in the drawable's sRGB color
@@ -433,20 +438,40 @@ private final class ThresholdMacRenderer {
             currentJitterNDC = .zero
         }
 
+        guard inFlightSemaphore.wait(timeout: .now()) == .success else { return }
+
+        // Acquire the drawable as late as possible — only after the in-flight
+        // gate has admitted this frame — so a busy drawable pool stalls nothing
+        // but this already-committed frame.
+        guard let drawable = metalLayer.nextDrawable() else {
+            inFlightSemaphore.signal()
+            return
+        }
+        // This frame's upscaler targets and output size were computed from
+        // `drawableSize`. During a live resize the layer can briefly hand back a
+        // drawable whose texture lags that size; skip the rare mismatched frame
+        // rather than blit at the wrong scale — the next frame re-syncs.
+        guard drawable.texture.width == drawableWidth,
+              drawable.texture.height == drawableHeight else {
+            inFlightSemaphore.signal()
+            return
+        }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            inFlightSemaphore.signal()
+            return
+        }
+
         // The direct (native-resolution) path renders straight into the drawable
         // and needs the drawable-sized depth target.
         let directPassDescriptor: MTLRenderPassDescriptor?
         if temporalPass == nil, spatialPass == nil {
-            guard let descriptor = makeRenderPassDescriptor(drawable: drawable) else { return }
+            guard let descriptor = makeRenderPassDescriptor(drawable: drawable) else {
+                inFlightSemaphore.signal()
+                return
+            }
             directPassDescriptor = descriptor
         } else {
             directPassDescriptor = nil
-        }
-
-        guard inFlightSemaphore.wait(timeout: .now()) == .success else { return }
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-            inFlightSemaphore.signal()
-            return
         }
 
         // Feed measured GPU frame time to the dynamic-resolution controller, but
@@ -845,6 +870,8 @@ private final class ThresholdMacRenderer {
         var targetRotation = settings.targetWorldRotation
         var targetDetailScale = settings.targetDetailScale
         var positionDelta = SIMD3<Float>.zero
+        var orbited = false
+        var zoomed = false
 
         let gestureSensitivity = max(settings.gestureSensitivity / 10.0, 0.1)
         let translationSensitivity = settings.translationSensitivity
@@ -856,11 +883,13 @@ private final class ThresholdMacRenderer {
             let pitchRotation = simd_quatf(angle: pitchAngle, axis: SIMD3<Float>(1, 0, 0))
             let rotated = yawRotation * targetRotation * pitchRotation
             targetRotation = abs(simd_length_squared(rotated.vector) - 1.0) > 1e-4 ? rotated.normalized : rotated
+            orbited = true
         }
 
         if input.zoomDelta != 0 {
             let zoomFactor = exp(-input.zoomDelta * Self.scrollZoomSpeed * gestureSensitivity)
             targetDetailScale = min(Self.maxDetailScale, max(Self.minDetailScale, targetDetailScale * zoomFactor))
+            zoomed = true
         }
 
         let zoomCompensation = simd_clamp(1.0 / pow(max(targetDetailScale, 0.01), 0.3), 0.5, 2.0)
@@ -901,8 +930,26 @@ private final class ThresholdMacRenderer {
             }
         }
 
-        settings.targetWorldRotation = targetRotation
-        settings.targetDetailScale = targetDetailScale
+        // During animation, route orbit/zoom through the same override model as the
+        // grab gesture (offset relative to the scene's animated base) so applyKeyframe
+        // doesn't stomp desktop input every frame. Gate on actual input so an idle frame
+        // leaves the offset untouched and the decay-back to the animation can run —
+        // mirrors the positionDelta gate above. Invariant must match GestureController:772.
+        if settings.isAnimationPlaying {
+            if orbited {
+                settings.manualRotationOffset = targetRotation * settings.animationBaseWorldRotation.inverse
+                settings.worldRotation = targetRotation
+                settings.targetWorldRotation = targetRotation
+            }
+            if zoomed {
+                settings.manualOffsetDetailScale = targetDetailScale - settings.animationBaseDetailScale
+                settings.detailScale = targetDetailScale
+                settings.targetDetailScale = targetDetailScale
+            }
+        } else {
+            settings.targetWorldRotation = targetRotation
+            settings.targetDetailScale = targetDetailScale
+        }
     }
 
     private func updateAudioLevels(appModel: AppModel,
@@ -1175,6 +1222,7 @@ private final class ThresholdMacRenderer {
                         sphereProjectionRadius: settings.sphereProjectionRadius,
                         stepMultiplier: settings.stepMultiplier,
                         boundingSphereRadius: settings.estimatedBoundingSphereRadius,
+                        smartAdvanceEnabled: settings.smartAdvanceEnabled ? 1 : 0,
                         springDisplacementX: settings.springDisplacement.x,
                         springDisplacementY: settings.springDisplacement.y,
                         springDisplacementZ: settings.springDisplacement.z,

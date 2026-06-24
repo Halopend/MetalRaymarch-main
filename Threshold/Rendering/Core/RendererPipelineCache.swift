@@ -546,6 +546,60 @@ extension Renderer {
                         isSpecialized: false
                     )
                 }
+                // A pipeline already cached for THIS formula (same hash + same
+                // useQuadShared variant, possibly different FI/RS) is a near-perfect
+                // visual match — same fractal, just a slightly different
+                // iteration/step count. When one exists, build the exact
+                // specialization OFF the render thread and serve the near-match this
+                // frame: no 50–500 ms render-thread stall, and — unlike the
+                // default-library fallback chain below, which renders sky-only for
+                // custom because it lacks the FractalTypeCustom arm — the fractal
+                // stays correct on screen. `insertBuiltRenderPipeline` clears the
+                // fast-path when the async build lands, so the exact pipeline is
+                // picked up within a frame of completion.
+                //
+                // The `_QS` suffix filter is required: the suffix encodes
+                // useQuadShared (key build site ~line 34), and serving the wrong
+                // variant would bind a mismatched vertex function / mesh layout.
+                // Hashes are fixed-length, so the "CX<hash>_" prefix can't
+                // cross-match a different formula.
+                let nearMatchCustomPipeline: MTLRenderPipelineState? = customShaderHash.flatMap { hash in
+                    let prefix = "CX\(hash)_"
+                    guard let key = pipelineCache.keys.first(where: {
+                        $0.hasPrefix(prefix) && $0.hasSuffix("_QS") == useQuadShared
+                    }) else {
+                        return nil
+                    }
+                    return pipelineCache[key]
+                }
+
+                if let nearMatch = nearMatchCustomPipeline {
+                    enqueueBackgroundPipelineBuild(
+                        cacheKey: cacheKey,
+                        config: exactConfig,
+                        useQuadShared: useQuadShared
+                    )
+                    recordPipelineTelemetry(renderSource: "custom-async-near-match")
+                    lastLoggedPipelineKey = cacheKey
+                    customSceneDiagnostic("🔬 [CSDiag] selectPipeline FT=custom ASYNC enqueued, serving same-formula near-match — key=\(cacheKey)")
+                    return cacheSelectedRenderPipeline(
+                        nearMatch,
+                        iterations: iterations,
+                        raySteps: raySteps,
+                        useQuadShared: useQuadShared,
+                        neonMode: neonMode,
+                        colorIterations: colorIterations,
+                        fractalTypeRawValue: fractalType.rawValue,
+                        mandelbulbPower: mandelbulbPower,
+                        activeCustomHash: activeCustomHash,
+                        bubbleEnabled: bubbleEnabled,
+                        isSpecialized: true
+                    )
+                }
+
+                // No pipeline cached for this formula yet — build the FIRST one
+                // synchronously so the first frame after activation is correct (a
+                // one-time cost per formula switch, not per slider tick).
                 do {
                     let pipeline = try Renderer.buildSpecializedPipeline(
                         device: device,
@@ -559,8 +613,8 @@ extension Renderer {
                     pipelineCache[cacheKey] = pipeline
                     lastLoggedPipelineKey = cacheKey
                     result = pipeline
-                    recordPipelineTelemetry(renderSource: "custom-exact-build")
-                    customSceneDiagnostic("🔬 [CSDiag] ✅ selectPipeline FT=custom built specialized pipeline — key=\(cacheKey)")
+                    recordPipelineTelemetry(renderSource: "custom-exact-build-sync-first")
+                    customSceneDiagnostic("🔬 [CSDiag] ✅ selectPipeline FT=custom built specialized pipeline (sync, first build) — key=\(cacheKey)")
                     return cacheSelectedRenderPipeline(
                         result,
                         iterations: iterations,

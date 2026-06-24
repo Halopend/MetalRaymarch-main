@@ -23,6 +23,22 @@ final class MacTemporalUpscaler {
     /// `output / maxScaleFactor` are rejected (caller falls back to spatial).
     static let maxScaleFactor = 3.0
 
+    /// Cached scaler + textures for one size configuration. The adaptive-
+    /// resolution controller oscillates between a handful of discrete render
+    /// scales under fluctuating load; pooling lets `prepare()` reuse a prior
+    /// build instead of reallocating textures and reconstructing the MetalFX
+    /// scaler (tens of ms, on the render thread) every time it revisits a size.
+    private struct PoolEntry {
+        let inputSize: Size
+        let outputSize: Size
+        let colorTexture: MTLTexture
+        let depthTexture: MTLTexture
+        let motionTexture: MTLTexture
+        let outputTexture: MTLTexture
+        let scaler: MTLFXTemporalScaler
+        var lastUsedFrame: Int
+    }
+
     private let device: MTLDevice
     private let colorFormat: MTLPixelFormat
     private let depthFormat: MTLPixelFormat
@@ -49,6 +65,17 @@ final class MacTemporalUpscaler {
     /// Set true the first frame after a (re)build so the scaler discards stale
     /// history; the caller can also force it on camera cuts / view resets.
     private var needsReset = true
+
+    /// LRU pool of pre-built scaler configurations, keyed by (input, output)
+    /// size. Bounded so revisited render scales reuse a build instead of
+    /// reallocating. Accessed on the render thread only — no lock required.
+    private var scalerPool: [PoolEntry] = []
+    /// Capped low: each entry pins full-resolution output + MetalFX history
+    /// textures, so VRAM scales with this count. The adaptive controller hovers
+    /// in a narrow band of scales, so a few slots capture typical oscillation;
+    /// rarer excursions just rebuild (one hitch) and re-pool.
+    private let maxPoolSize = 4
+    private var poolFrameCounter = 0
 
     init(device: MTLDevice, colorFormat: MTLPixelFormat, depthFormat: MTLPixelFormat) {
         self.device = device
@@ -92,9 +119,63 @@ final class MacTemporalUpscaler {
             return true
         }
 
+        let previousOutput = outputSize
         inputSize = newInput
         outputSize = newOutput
-        return rebuild()
+
+        // A changed output size (e.g. a window resize) invalidates every pooled
+        // entry — each holds full-resolution textures sized for the old output.
+        // Drop them so VRAM isn't pinned at the stale resolution.
+        if newOutput != previousOutput {
+            scalerPool.removeAll()
+        }
+
+        // Pool hit: reuse a previously-built scaler + textures for this size
+        // instead of reallocating and reconstructing the MetalFX scaler.
+        if let idx = scalerPool.firstIndex(where: { $0.inputSize == newInput && $0.outputSize == newOutput }) {
+            let entry = scalerPool[idx]
+            colorTexture = entry.colorTexture
+            depthTexture = entry.depthTexture
+            motionTexture = entry.motionTexture
+            outputTexture = entry.outputTexture
+            scaler = entry.scaler
+            // Force a history reset: this scaler's accumulated history is from the
+            // last time this size was active (frames ago, different camera pose),
+            // so reusing it without a reset risks ghosting. A reset costs a frame
+            // or two of reduced detail — far cheaper than a rebuild's stall.
+            needsReset = true
+            poolFrameCounter += 1
+            scalerPool[idx].lastUsedFrame = poolFrameCounter
+            return true
+        }
+
+        // Pool miss: rebuild, then cache the result for future reuse.
+        let success = rebuild()
+        if success,
+           let colorTexture,
+           let depthTexture,
+           let motionTexture,
+           let outputTexture,
+           let scaler {
+            poolFrameCounter += 1
+            scalerPool.append(PoolEntry(
+                inputSize: newInput,
+                outputSize: newOutput,
+                colorTexture: colorTexture,
+                depthTexture: depthTexture,
+                motionTexture: motionTexture,
+                outputTexture: outputTexture,
+                scaler: scaler,
+                lastUsedFrame: poolFrameCounter
+            ))
+            if scalerPool.count > maxPoolSize {
+                // Evict the least-recently-used entry. The just-appended entry has
+                // the highest `lastUsedFrame`, so it is never the one evicted.
+                scalerPool.sort { $0.lastUsedFrame < $1.lastUsedFrame }
+                scalerPool.removeFirst()
+            }
+        }
+        return success
     }
 
     /// Forces the next encode to reset accumulated history (e.g. view reset).

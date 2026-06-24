@@ -36,6 +36,7 @@ struct RenderSettingsSnapshot {
     let debugHierarchical: Bool
     let coherentPacketEnabled: Bool
     let foveationStrength: Float
+    let smartAdvanceEnabled: Bool
     let limitFlash: Float
     let activeGestureIndex: Int
     let safetyBubbleEnabled: Bool

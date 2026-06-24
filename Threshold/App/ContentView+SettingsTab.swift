@@ -139,7 +139,7 @@ extension ContentView {
                     value: Binding(
                         get: { cache.display.platformRadius },
                         set: { cache.display.platformRadius = $0 }
-                    ), range: 0.5...3.0,
+                    ), range: 0.5...2.5,
                     enabled: .constant(true),
                     onChanged: { cache.commitPlatformRadius() },
                     showToggle: false)
@@ -729,6 +729,88 @@ extension ContentView {
         }
     }
     
+    /// Reusable "EXPERIMENTAL" pill. Single source of truth for the badge that
+    /// previously appeared copy-pasted on each Advanced raymarcher card.
+    private var experimentalBadge: some View {
+        Text("EXPERIMENTAL")
+            .font(.caption2.bold())
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    /// Grouped raymarcher acceleration controls (Advanced tab). Collects the
+    /// distance-field march knobs — Smart Advance, Coherent Packet, and
+    /// Foveation — into a single card with subtle dividers, replacing the three
+    /// loose, badge-duplicating blocks that used to float in the Advanced list.
+    private var raymarcherSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: AppIcons.boltFill).foregroundStyle(themeColor)
+                Text("Raymarcher").font(.headline)
+                Spacer()
+                experimentalBadge
+            }
+            Text("Acceleration controls for the distance-field raymarcher. Each trades a little detail for speed in a different way — safe to flip while the scene is running.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider().opacity(0.4)
+
+            // ── Smart Advance — every render path ────────────────────────
+            Toggle(isOn: Binding(
+                get: { appModel.renderSettings.smartAdvanceEnabled },
+                set: { appModel.renderSettings.smartAdvanceEnabled = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Smart Advance")
+                    Text("Reads the gradient of the march to spot rays skimming nearly parallel to a surface, then leads ahead with larger steps where plain tracing would creep. Faster through open and grazing regions; can soften fine silhouette detail. Works on every render path.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }.tint(themeColor)
+
+            Divider().opacity(0.4)
+
+            // ── Coherent Packet — 8×8 compute path only ──────────────────
+            Toggle(isOn: Binding(
+                get: { appModel.renderSettings.coherentPacketEnabled },
+                set: { appModel.renderSettings.coherentPacketEnabled = $0 }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Coherent Packet")
+                    Text("Predict-validate warm-start: a single DE-eval safety probe with a normal-coherence shadow gate. Shows a layer-of-acceptance debug overlay while on (magenta = hit, green = tight, red = rejected, cyan = shadow fallback). 8×8 compute path only.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }.tint(themeColor)
+
+            Divider().opacity(0.4)
+
+            // ── Foveation — 8×8 compute path only ────────────────────────
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Foveation")
+                Slider(
+                    value: Binding(
+                        get: { appModel.renderSettings.foveationStrength },
+                        set: { appModel.renderSettings.foveationStrength = $0 }
+                    ),
+                    in: 0...1
+                ).tint(themeColor)
+                Text("Peripheral 8×8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8×8 compute path only.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding()
+        .background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var settingsAdvancedContent: some View {
         @Bindable var appModel = appModel
         return VStack(spacing: 16) {
@@ -770,62 +852,9 @@ extension ContentView {
                 }.buttonStyle(.borderedProminent).tint(isTestAnimationPlaying ? .red : themeColor)
             }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
-            // === EXPERIMENTAL: COHERENT PACKET RAYMARCH (Stages 0-3 prototype) ===
-            // Replaces prevDepth*0.9 warm-start with single-DE-eval safety probe per
-            // pixel; gates shared shadows on local normal coherence. Only takes effect
-            // on the 8x8 adaptive compute path (Renderer Mode = Adaptive Compute).
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: AppIcons.atom).foregroundStyle(themeColor)
-                    Text("Coherent Packet Raymarch")
-                        .font(.headline)
-                    Spacer()
-                    Text("EXPERIMENTAL")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
-                }
-                Toggle(isOn: Binding(
-                    get: { appModel.renderSettings.coherentPacketEnabled },
-                    set: { appModel.renderSettings.coherentPacketEnabled = $0 }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Predict-validate warm-start")
-                        Text("Single DE-eval safety probe + normal-coherence shadow gate. 8x8 compute path only.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }.tint(themeColor)
-                Text("Layer-of-acceptance overlay shows immediately when this toggle is on (no other debug flag needed): magenta = warm-start hit, green = warm-start tight, red = warm-start rejected, cyan = shadow fallback. Untinted = legacy coarse path. 8x8 compute path only.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Foveated raymarch")
-                        .font(.headline)
-                    Spacer()
-                    Text("EXPERIMENTAL")
-                        .font(.caption2.bold())
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
-                }
-                Slider(
-                    value: Binding(
-                        get: { appModel.renderSettings.foveationStrength },
-                        set: { appModel.renderSettings.foveationStrength = $0 }
-                    ),
-                    in: 0...1
-                ).tint(themeColor)
-                Text("Peripheral 8x8 tiles march fewer ray steps, ramping from the center outward. 0 = off. Cuts GPU cost where peripheral vision can't resolve detail. 8x8 compute path only.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }.padding().background(themeColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            // Raymarcher acceleration toggles — Smart Advance, Coherent Packet,
+            // and Foveation grouped into one card (see `raymarcherSection`).
+            raymarcherSection
 
             VStack(alignment: .leading, spacing: 8) {
                 RenderDiagnosticsView()

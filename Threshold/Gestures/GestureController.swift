@@ -766,6 +766,11 @@ final class GestureController {
             // and grab requires 1:1 tracking, not scalar lerp.
             if settings.isAnimationPlaying {
                 settings.manualOffsetPosition = result.position - settings.animationBasePosition
+                // Store rotation/zoom as overrides relative to the scene's animated base so
+                // they ride along and survive the next applyKeyframe; also write the absolute
+                // result for this frame's 1:1 responsiveness.
+                settings.manualRotationOffset = result.rotation * settings.animationBaseWorldRotation.inverse
+                settings.manualOffsetDetailScale = result.detailScale - settings.animationBaseDetailScale
                 settings.worldRotation = result.rotation
                 settings.targetWorldRotation = result.rotation
                 settings.detailScale = result.detailScale

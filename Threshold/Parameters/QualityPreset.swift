@@ -20,10 +20,10 @@ enum QualityPreset: String, CaseIterable {
 
     var raySteps: Int {
         switch self {
-        case .low: return 32
-        case .medium: return 56
-        case .high: return 64
-        case .ultra: return 100
+        case .low: return 68
+        case .medium: return 97
+        case .high: return 107
+        case .ultra: return 150
         }
     }
 
@@ -52,13 +52,13 @@ enum QualityPreset: String, CaseIterable {
         case .mandelbulb, .mandelbulbJulia:
             switch self {
             case .low:
-                return (4, 32)
+                return (4, 68)
             case .medium:
-                return (6, 48)
+                return (6, 88)
             case .high:
-                return (8, 56)
+                return (8, 97)
             case .ultra:
-                return (10, 60)
+                return (10, 102)
             }
         default:
             return (fractalIterations, raySteps)

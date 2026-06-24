@@ -35,6 +35,10 @@ struct QualityConfig: Codable, Equatable, Sendable {
     // Foveated raymarching strength (0...1); peripheral 8x8 tiles march fewer steps.
     var foveationStrength: Float = 0.0
 
+    // Smart advance: grazing-aware lead-ahead sphere tracing. Reads the along-ray
+    // DE gradient to step further through grazing/receding regions. Off by default.
+    var smartAdvanceEnabled: Bool = false
+
     // MARK: - Validation
 
     mutating func clamp() {
@@ -56,6 +60,7 @@ struct QualityConfig: Codable, Equatable, Sendable {
         case baseFractalIterations, baseMaxRaySteps
         case resolutionScale, renderQuality, tileSize
         case debugHierarchical, coherentPacketEnabled, foveationStrength
+        case smartAdvanceEnabled
     }
 
     init() {}
@@ -70,5 +75,6 @@ struct QualityConfig: Codable, Equatable, Sendable {
         debugHierarchical     = try c.decodeIfPresent(Bool.self,  forKey: .debugHierarchical)     ?? false
         coherentPacketEnabled = try c.decodeIfPresent(Bool.self,  forKey: .coherentPacketEnabled) ?? false
         foveationStrength     = try c.decodeIfPresent(Float.self, forKey: .foveationStrength)     ?? 0.0
+        smartAdvanceEnabled   = try c.decodeIfPresent(Bool.self,  forKey: .smartAdvanceEnabled)   ?? false
     }
 }

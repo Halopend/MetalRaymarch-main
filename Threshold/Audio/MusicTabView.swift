@@ -1614,7 +1614,10 @@ struct MusicTabContent: View {
     // MARK: - Level Meters
 
     private var levelMeters: some View {
-        TimelineView(.animation) { _ in
+        // 20 Hz rather than display-rate (~90 Hz): audio level bars read perfectly
+        // smooth at 20 Hz, and a full-rate redraw of these meters while the window is
+        // open spends GPU/CPU that the immersive raymarch needs on this device.
+        TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { _ in
             let rs = renderSettings
             VStack(alignment: .leading, spacing: 8) {
                 Text("Audio Levels")

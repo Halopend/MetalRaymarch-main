@@ -280,7 +280,7 @@ extension ContentView {
                         value: Binding(
                             get: { cache.display.platformRadius },
                             set: { cache.display.platformRadius = $0 }
-                        ), range: 0.5...3.0,
+                        ), range: 0.5...2.5,
                         enabled: .constant(true),
                         onChanged: { cache.commitPlatformRadius() },
                         showToggle: false)
@@ -698,17 +698,31 @@ extension ContentView {
                         .monospacedDigit()
                 }
 
-                Slider(value: Binding(
-                    get: { cache.quality.renderQuality },
-                    set: { newValue in
-                        let snapped = (newValue * 20).rounded() / 20   // 5% steps
-                        cache.quality.renderQuality = snapped
-                        cache.push(\.renderQuality, value: snapped)
-                    }
-                ), in: 0.1...QualityConfig.visionMaxRenderQuality, step: 0.05,
-                minimumValueLabel: Text("Smooth").font(.caption2).foregroundStyle(.secondary),
-                maximumValueLabel: Text("Sharp").font(.caption2).foregroundStyle(.secondary)) {
-                    Text("Priority")
+                // Custom layout instead of Slider's built-in min/max value labels:
+                // `.lineLimit(1).fixedSize()` guarantees the end labels render at their
+                // full intrinsic width with no wrap or truncation — so longer localized
+                // words ("Lisse"/"Net", "なめらか"/"くっきり", …) always show in full — and the
+                // slider bar takes whatever space is left between them.
+                HStack(spacing: 10) {
+                    Text("Smooth")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                    Slider(value: Binding(
+                        get: { cache.quality.renderQuality },
+                        set: { newValue in
+                            let snapped = (newValue * 20).rounded() / 20   // 5% steps
+                            cache.quality.renderQuality = snapped
+                            cache.push(\.renderQuality, value: snapped)
+                        }
+                    ), in: 0.1...QualityConfig.visionMaxRenderQuality, step: 0.05)
+                    .accessibilityLabel(Text("Priority"))
+                    Text("Sharp")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
 
                 Text("Vision Pro: the compositor's native, gaze-foveated resolution. The top of the range is the configured ceiling (a memory/quality balance) and the sharpest; lower trades crispness for GPU headroom with a smoothed transition. Very low values (10–20%) probe max framerate.")

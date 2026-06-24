@@ -89,7 +89,11 @@ struct DerivedValueGhost: View {
     var body: some View {
         if provider.musicActive {
             GeometryReader { geo in
-                TimelineView(.animation) { _ in
+                // 20 Hz, not display-rate: this ghost overlays EVERY music-targeted
+                // effect slider, so a full-rate (~90 Hz) TimelineView per slider piles
+                // up SwiftUI redraws that compete with the immersive raymarch while the
+                // window is open. The marker tracks a damped value — 20 Hz reads smooth.
+                TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { _ in
                     let live = provider.resolve(targetID)
                     if let live, live.isModulated {
                         let span = max(0.0001, range.upperBound - range.lowerBound)

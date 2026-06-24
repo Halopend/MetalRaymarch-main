@@ -161,8 +161,64 @@ final class ThresholdMacInteractiveView: MTKView {
     weak var inputDelegate: (any ThresholdMacViewportInputDelegate)?
     private var dragMode: DragMode?
 
+    // When the window is dragged fully off-screen (or hidden/minimized) on a
+    // single-display setup, AppKit clears `.visible` from the window's
+    // occlusion state. We pause the display link in that case so animation and
+    // GPU work stop entirely. The single-screen gate avoids pausing when the
+    // window may still be visible on another display.
+
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshOcclusionObserver()
+        updatePauseForVisibility()
+    }
+
+    private func refreshOcclusionObserver() {
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        guard let window else { return }
+        center.addObserver(
+            self,
+            selector: #selector(visibilityDidChange),
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: window
+        )
+
+        // Plugging in / removing a display flips the single-screen gate, so
+        // re-evaluate whenever the screen configuration changes.
+        center.removeObserver(self, name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        center.addObserver(
+            self,
+            selector: #selector(visibilityDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    @objc private func visibilityDidChange() {
+        updatePauseForVisibility()
+    }
+
+    private func updatePauseForVisibility() {
+        guard let window else {
+            // Not in a window hierarchy; the system isn't driving the display
+            // link, so leave the flag untouched.
+            return
+        }
+        let isSingleScreen = NSScreen.screens.count <= 1
+        let isVisible = window.occlusionState.contains(.visible)
+        let shouldPause = isSingleScreen && !isVisible
+        if isPaused != shouldPause {
+            isPaused = shouldPause
+        }
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
