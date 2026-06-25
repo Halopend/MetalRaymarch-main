@@ -268,39 +268,41 @@ struct NowPlayingIntent: AppIntent {
 /// Siri-fillable fractal type. Cases mirror `FractalModelType`'s selectable set;
 /// `modelType` maps back to the engine enum by raw value.
 enum FractalTypeAppEnum: String, AppEnum {
+    // Each case's rawValue == the matching FractalModelType.codableString, so
+    // `modelType` resolves by lookup (no converter switch). Covers every
+    // selectable static type (previously missing 3 → unreachable via Siri).
     case mandelbox
+    case mandelboxSphereProjection
     case mandelbulb
-    case menger
     case mandelbulbJulia
+    case menger
     case quaternionJulia
     case octahedron
     case mengerSphere
+    case theliPseudoKleinian
     case kleinian
+    case boxSphereFolder
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Fractal Type"
 
     static let caseDisplayRepresentations: [FractalTypeAppEnum: DisplayRepresentation] = [
         .mandelbox: "Mandelbox",
+        .mandelboxSphereProjection: "Mandelbox Sphere Projection",
         .mandelbulb: "Mandelbulb",
-        .menger: "Menger Sponge",
         .mandelbulbJulia: "Mandelbulb Julia",
+        .menger: "Menger Sponge",
         .quaternionJulia: "Quaternion Julia",
         .octahedron: "Octahedron",
         .mengerSphere: "Menger Sphere",
+        .theliPseudoKleinian: "Theli Pseudo Kleinian",
         .kleinian: "Kleinian",
+        .boxSphereFolder: "Box Sphere Folder",
     ]
 
+    /// Maps back to the engine enum by matching the shared codableString
+    /// (AppEnum case name == FractalModelType.codableString).
     var modelType: FractalModelType {
-        switch self {
-        case .mandelbox:       return .mandelbox
-        case .mandelbulb:      return .mandelbulb
-        case .menger:          return .menger
-        case .mandelbulbJulia: return .mandelbulbJulia
-        case .quaternionJulia: return .quaternionJulia
-        case .octahedron:      return .octahedron
-        case .mengerSphere:    return .mengerSphere
-        case .kleinian:        return .kleinian
-        }
+        FractalModelType.allCases.first { $0.descriptor.codableString == rawValue } ?? .mandelbox
     }
 }
 
