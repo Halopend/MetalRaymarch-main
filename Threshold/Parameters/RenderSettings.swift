@@ -3434,6 +3434,10 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
         set {
+            // Activate the (previously dead) clamp() so a decoded/iCloud-restored
+            // config can't bypass the property setters' clamps with out-of-band values.
+            var newValue = newValue
+            newValue.clamp()
             withLock {
                 _baseFractalIterations = newValue.baseFractalIterations
                 _fractalIterations = newValue.baseFractalIterations
@@ -3475,6 +3479,9 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
         set {
+            // Activate the (previously dead) clamp() before restore (see qualityConfig).
+            var newValue = newValue
+            newValue.clamp()
             withLock {
                 if _targetColorScheme != newValue.colorScheme {
                     _colorScheme = _targetColorScheme
@@ -3556,6 +3563,9 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
         set {
+            // Activate the (previously dead) clamp() before restore (see qualityConfig).
+            var newValue = newValue
+            newValue.clamp()
             withLock {
                 _fractalAudioReactiveEnabled = newValue.fractalAudioReactiveEnabled
                 _fractalAudioAmount = newValue.fractalAudioAmount
@@ -3610,6 +3620,9 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
         set {
+            // Activate the (previously dead) clamp() before restore (see qualityConfig).
+            var newValue = newValue
+            newValue.clamp()
             withLock {
                 _gestureBindings = newValue.gestureBindings
                 _gestureSensitivity = newValue.gestureSensitivity
@@ -3660,6 +3673,9 @@ final class RenderSettings: @unchecked Sendable {
             }
         }
         set {
+            // Activate the (previously dead) clamp() before restore (see qualityConfig).
+            var newValue = newValue
+            newValue.clamp()
             withLock {
                 _safetyBubbleEnabled = newValue.enabled
                 _safetyBubbleRadius = ControlCatalog.safetyBubbleRadius.clamp(newValue.radius)
